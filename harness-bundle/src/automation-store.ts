@@ -185,11 +185,12 @@ export class AutomationStore {
   }
 
   runNow(automationId: string): AutomationRun {
-    this.#required(automationId);
+    const definition = this.#required(automationId);
     const now = this.#clock.now().toISOString();
     const run = automationRunSchema.parse({
       id: `automation-run-${randomUUID()}`,
       automationId,
+      definitionSnapshot: definition,
       trigger: "manual",
       scheduledFor: now,
       status: "pending",
@@ -224,6 +225,7 @@ export class AutomationStore {
           automationRunSchema.parse({
             id,
             automationId: definition.id,
+            definitionSnapshot: definition,
             trigger: "scheduled",
             scheduledFor,
             status: "pending",
@@ -289,8 +291,10 @@ export class AutomationStore {
     return next;
   }
 
-  cancel(runId: string): AutomationRun {
+  cancel(automationId: string, runId: string): AutomationRun {
     const run = this.#requiredRun(runId);
+    if (run.automationId !== automationId)
+      throw new Error("automation_run_not_found");
     if (run.status !== "pending" && run.status !== "running")
       throw new Error("automation_run_not_cancellable");
     const next = automationRunSchema.parse({
@@ -348,11 +352,25 @@ export interface AutomationRunnerPort {
 
 export class AutomationScheduler {
   #ticking = false;
+  #timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     readonly store: AutomationStore,
     readonly runner: AutomationRunnerPort,
   ) {}
+
+  start(intervalMs = 30_000): void {
+    if (this.#timer !== undefined) return;
+    void this.tick();
+    this.#timer = setInterval(() => void this.tick(), intervalMs);
+    this.#timer.unref();
+  }
+
+  stop(): void {
+    if (this.#timer === undefined) return;
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+  }
 
   async tick(): Promise<void> {
     if (this.#ticking) return;
@@ -365,12 +383,10 @@ export class AutomationScheduler {
         } catch {
           continue;
         }
-        const definition = this.store.get(run.automationId);
-        if (definition === undefined) continue;
         try {
           const result = await this.runner.execute({
             automationRunId: run.id,
-            definition,
+            definition: run.definitionSnapshot,
           });
           this.store.finish(run.id, { status: "succeeded", ...result });
         } catch (error) {

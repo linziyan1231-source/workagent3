@@ -89,6 +89,20 @@ describe("AutomationStore", () => {
     expect(updated.nextRunAt).toBe("2026-08-31T00:05:00.000Z");
   });
 
+  it("keeps an immutable definition snapshot for an already queued run", () => {
+    const data = root();
+    const store = new AutomationStore(data, {
+      now: () => new Date("2026-08-31T00:00:00.000Z"),
+    });
+    const definition = store.create(mutation);
+    const run = store.runNow(definition.id);
+    store.update(definition.id, 1, { input: "Changed later" });
+    expect(run.definitionSnapshot.input).toBe("Prepare the brief");
+    expect(store.claimRunnable()[0]?.definitionSnapshot.input).toBe(
+      "Prepare the brief",
+    );
+  });
+
   it("fails closed when the persisted document is invalid", () => {
     const data = root();
     const directory = join(data, "workagent");

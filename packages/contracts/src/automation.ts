@@ -52,6 +52,7 @@ export type AutomationMutation = z.infer<typeof automationMutationSchema>;
 export const automationRunSchema = z.object({
   id: z.string().min(1),
   automationId: z.string().min(1),
+  definitionSnapshot: automationDefinitionSchema,
   trigger: z.enum(["scheduled", "manual"]),
   scheduledFor: z.iso.datetime({ offset: true }),
   status: z.enum(["pending", "running", "succeeded", "failed", "cancelled"]),
