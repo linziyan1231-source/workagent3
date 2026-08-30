@@ -285,6 +285,8 @@ class CodexSession implements BridgeSession {
           code: text(error, "codexErrorInfo") ?? "codex_failed",
           message: text(error, "message") ?? "Codex turn failed",
         });
+      } else {
+        this.#emit({ type: "turn.completed", turnId });
       }
     }
   }

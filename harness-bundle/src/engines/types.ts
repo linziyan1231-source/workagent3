@@ -2,6 +2,7 @@ export type BridgeEvent =
   | { type: "turn.started"; turnId: string }
   | { type: "assistant.delta"; turnId: string; delta: string }
   | { type: "assistant.completed"; turnId: string; content: string }
+  | { type: "turn.completed"; turnId: string }
   | {
       type: "tool.started";
       turnId: string;

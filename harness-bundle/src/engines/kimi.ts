@@ -226,6 +226,7 @@ class KimiSession implements BridgeSession {
             turnId,
             content: this.#assistantText,
           });
+          this.#emit({ type: "turn.completed", turnId });
         } else {
           this.#emit({
             type: "turn.failed",

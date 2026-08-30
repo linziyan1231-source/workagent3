@@ -97,9 +97,9 @@ export class AutomationStore {
           value.status === "running"
             ? {
                 ...value,
-                status: "pending" as const,
-                startedAt: null,
+                status: "failed" as const,
                 error: "runtime_restarted",
+                finishedAt: this.#clock.now().toISOString(),
               }
             : value;
         if (run !== value) recovered = true;

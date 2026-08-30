@@ -36,6 +36,9 @@ export const automationDefinitionSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 });
 export type AutomationDefinition = z.infer<typeof automationDefinitionSchema>;
+export const automationDefinitionListSchema = z.array(
+  automationDefinitionSchema,
+);
 
 export const automationMutationSchema = automationDefinitionSchema.pick({
   name: true,
@@ -65,6 +68,7 @@ export const automationRunSchema = z.object({
   finishedAt: z.iso.datetime({ offset: true }).nullable(),
 });
 export type AutomationRun = z.infer<typeof automationRunSchema>;
+export const automationRunListSchema = z.array(automationRunSchema);
 
 export const automationDocumentSchema = z.object({
   version: z.literal(1),

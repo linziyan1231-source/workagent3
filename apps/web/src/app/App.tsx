@@ -7,6 +7,7 @@ import { workspacePort } from "../features/workspace/workspacePort.js";
 import { presetPort } from "../features/presets/presetPort.js";
 import { mcpPort } from "../features/mcp/mcpPort.js";
 import { skillPort } from "../features/skills/skillPort.js";
+import { automationPort } from "../features/automation/automationPort.js";
 
 const workspaceAssets = {
   list: workspacePort.assets,
@@ -50,6 +51,7 @@ export function App() {
       assetPort={workspaceAssets}
       presetPort={presetPort}
       capabilityPort={capabilities}
+      automationPort={automationPort}
       workspacePanel={
         <WorkspacePanel selectedId={workspaceId} onSelect={setWorkspaceId} />
       }

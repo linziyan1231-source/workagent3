@@ -8,6 +8,7 @@ import SiderItem from "@renderer/components/layout/Sider/SiderItem";
 import SiderToolbar from "@renderer/components/layout/Sider/SiderNav/SiderToolbar";
 import SiderFooter from "@renderer/components/layout/Sider/SiderFooter";
 import SiderAssistantEntry from "@renderer/components/layout/Sider/SiderNav/SiderAssistantEntry";
+import SiderScheduledEntry from "@renderer/components/layout/Sider/SiderNav/SiderScheduledEntry";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { useState } from "react";
@@ -26,6 +27,8 @@ type Props = {
   onSettings: () => void;
   onAssistants: () => void;
   assistantsActive: boolean;
+  onScheduled: () => void;
+  scheduledActive: boolean;
   onLogout: () => void;
   onClose: () => void;
 };
@@ -58,6 +61,14 @@ export function AionSider(props: Props) {
           siderTooltipProps={tooltipProps}
           onClick={props.onAssistants}
         />
+        <SiderScheduledEntry
+          isMobile={isMobile}
+          isActive={props.scheduledActive}
+          collapsed={false}
+          siderTooltipProps={tooltipProps}
+          onClick={props.onScheduled}
+        />
+        <div className="shrink-0 mt-6px mb-2px mx-10px h-1px bg-[var(--color-border-2)]" />
         <div className="sider-section-label sider-section-title px-10px pt-12px pb-4px text-12px text-t-tertiary">
           Recent
         </div>

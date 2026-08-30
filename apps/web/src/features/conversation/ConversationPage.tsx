@@ -26,6 +26,7 @@ import { conversationPort, type ConversationPort } from "./conversationPort.js";
 import { AionSendBox } from "../../shared/ui/aionui/AionSendBox.js";
 import { AionSettingsModal } from "../../shared/ui/aionui/AionSettingsModal.js";
 import { AionSider } from "../../shared/ui/aionui/AionSider.js";
+import type { AutomationUiPort } from "../../shared/ui/aionui/AionAutomationPage.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
 import { AionMessage } from "../../shared/ui/aionui/AionMessage.js";
 import RendererLayout from "@renderer/components/layout/Layout";
@@ -38,6 +39,12 @@ import {
 const AionPresetPage = lazy(() =>
   import("../../shared/ui/aionui/AionPresetPage.js").then((module) => ({
     default: module.AionPresetPage,
+  })),
+);
+
+const AionAutomationPage = lazy(() =>
+  import("../../shared/ui/aionui/AionAutomationPage.js").then((module) => ({
+    default: module.AionAutomationPage,
   })),
 );
 
@@ -106,6 +113,7 @@ type Props = {
     skills(): Promise<SkillCatalogEntry[]>;
     mcpServers(): Promise<RuntimeMcpServer[]>;
   };
+  automationPort?: AutomationUiPort;
 };
 
 export function ConversationPage({
@@ -118,6 +126,7 @@ export function ConversationPage({
   assetPort,
   presetPort,
   capabilityPort,
+  automationPort,
 }: Props) {
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -146,6 +155,7 @@ export function ConversationPage({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [assistantsOpen, setAssistantsOpen] = useState(false);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const active = sessions.find((session) => session.id === activeId);
   const activeMessages = useMemo(
@@ -252,6 +262,7 @@ export function ConversationPage({
     }
     if (
       event.type === "assistant.completed" ||
+      event.type === "turn.completed" ||
       event.type === "turn.failed" ||
       event.type === "turn.cancelled"
     ) {
@@ -466,10 +477,16 @@ export function ConversationPage({
       username={user.username}
       busy={busy || engineBlocked}
       onQuery={setQuery}
-      onNew={newSession}
+      onNew={() => {
+        setAssistantsOpen(false);
+        setScheduledOpen(false);
+        void newSession();
+      }}
       onSelect={(session) => {
         setActiveId(session.id);
         onWorkspaceSelect?.(session.workspaceId);
+        setAssistantsOpen(false);
+        setScheduledOpen(false);
         setSidebarOpen(false);
       }}
       onRename={renameSession}
@@ -480,9 +497,16 @@ export function ConversationPage({
       }}
       onAssistants={() => {
         setSidebarOpen(false);
+        setScheduledOpen(false);
         setAssistantsOpen((open) => !open);
       }}
       assistantsActive={assistantsOpen}
+      onScheduled={() => {
+        setSidebarOpen(false);
+        setAssistantsOpen(false);
+        setScheduledOpen((open) => !open);
+      }}
+      scheduledActive={scheduledOpen}
       onLogout={onLogout}
       onClose={() => setSidebarOpen(false)}
     />
@@ -496,9 +520,17 @@ export function ConversationPage({
             path="*"
             element={
               <main
-                className={`workagent-route-shell${!assistantsOpen && workspacePanel ? " has-workspace" : ""}${!assistantsOpen && workspaceOpen ? " workspace-open" : ""}`}
+                className={`workagent-route-shell${!assistantsOpen && !scheduledOpen && workspacePanel ? " has-workspace" : ""}${!assistantsOpen && !scheduledOpen && workspaceOpen ? " workspace-open" : ""}`}
               >
-                {assistantsOpen && presetPort ? (
+                {scheduledOpen && automationPort ? (
+                  <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                    <AionAutomationPage
+                      port={automationPort}
+                      presets={presets}
+                      workspaceId={workspaceId}
+                    />
+                  </Suspense>
+                ) : assistantsOpen && presetPort ? (
                   <Suspense fallback={<div className="size-full bg-bg-0" />}>
                     <AionPresetPage
                       engines={engineStatuses}
@@ -652,7 +684,7 @@ export function ConversationPage({
                     </div>
                   </section>
                 )}
-                {!assistantsOpen && workspaceOpen && (
+                {!assistantsOpen && !scheduledOpen && workspaceOpen && (
                   <button
                     className="workspace-scrim"
                     type="button"
@@ -660,7 +692,7 @@ export function ConversationPage({
                     onClick={() => setWorkspaceOpen(false)}
                   />
                 )}
-                {!assistantsOpen && workspacePanel}
+                {!assistantsOpen && !scheduledOpen && workspacePanel}
                 <AionSettingsModal
                   visible={settingsOpen}
                   onClose={() => setSettingsOpen(false)}

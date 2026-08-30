@@ -50,7 +50,7 @@ describe("AutomationStore", () => {
     expect(reopened.claimRunnable()[0]?.id).toBe(first[0]?.id);
   });
 
-  it("recovers an interrupted run as the same pending run", () => {
+  it("fails an interrupted run on restart without executing it twice", () => {
     const data = root();
     let now = new Date("2026-08-31T00:00:00.000Z");
     const clock = { now: () => now };
@@ -60,10 +60,15 @@ describe("AutomationStore", () => {
     const run = store.begin(store.claimRunnable()[0]!.id);
 
     const reopened = new AutomationStore(data, clock);
-    const recovered = reopened.claimRunnable()[0];
-    expect(recovered?.id).toBe(run.id);
-    expect(recovered?.status).toBe("pending");
-    expect(recovered?.attempt).toBe(1);
+    expect(reopened.claimRunnable()).toEqual([]);
+    const recovered = reopened.history(run.automationId)[0];
+    expect(recovered).toMatchObject({
+      id: run.id,
+      status: "failed",
+      attempt: 1,
+      error: "runtime_restarted",
+    });
+    expect(recovered?.finishedAt).not.toBeNull();
   });
 
   it("coalesces missed intervals into one run instead of replaying each miss", () => {

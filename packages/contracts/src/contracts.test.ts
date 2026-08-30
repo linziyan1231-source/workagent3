@@ -25,6 +25,18 @@ describe("engine events", () => {
     expect(event.type).toBe("assistant.delta");
   });
 
+  it("represents a successful turn as an explicit terminal event", () => {
+    expect(
+      engineEventSchema.parse({
+        type: "turn.completed",
+        eventId: "evt-2",
+        occurredAt: "2026-08-30T10:00:00+08:00",
+        sessionId: "session-1",
+        turnId: "turn-1",
+      }),
+    ).toMatchObject({ type: "turn.completed" });
+  });
+
   it("rejects an event outside the public runtime contract", () => {
     expect(() => engineEventSchema.parse({ type: "internal.trace" })).toThrow();
   });

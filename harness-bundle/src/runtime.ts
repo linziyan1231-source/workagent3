@@ -24,6 +24,10 @@ import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { MessageStore } from "./message-store.js";
+import type {
+  AutomationExecution,
+  AutomationRunnerPort,
+} from "./automation-store.js";
 import type { PresetBinding, RuntimeMcpServer } from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
 import type { McpCatalogStore } from "./capability-store.js";
@@ -156,17 +160,37 @@ export const normalizeEvent = (
           message: event.data.reason.error.message,
         };
       }
-      return undefined;
+      if (event.data.reason.kind === "completed")
+        return {
+          ...base,
+          type: "turn.completed",
+          turnId: `turn-${event.data.turn}`,
+        };
+      return {
+        ...base,
+        type: "turn.failed",
+        turnId: `turn-${event.data.turn}`,
+        code: `turn_${event.data.reason.kind.replace("-", "_")}`,
+        message: `Turn ended with ${event.data.reason.kind}`,
+      };
     default:
       return undefined;
   }
 };
 
-export class RuntimeController {
+export class RuntimeController implements AutomationRunnerPort {
   readonly #ctx: Context;
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
+  readonly #eventListeners = new Map<
+    string,
+    Set<(event: PublicEvent) => void>
+  >();
+  readonly #automationExecutions = new Map<
+    string,
+    Promise<{ sessionId: string; result?: string }>
+  >();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
@@ -214,6 +238,30 @@ export class RuntimeController {
 
   workspaceForSession(sessionId: string): string | undefined {
     return this.#sessions.get(sessionId)?.workspaceId;
+  }
+
+  execute(
+    request: AutomationExecution,
+  ): Promise<{ sessionId: string; result?: string }> {
+    const active = this.#automationExecutions.get(request.automationRunId);
+    if (active !== undefined) return active;
+    const execution = this.#executeAutomation(request).finally(() => {
+      this.#automationExecutions.delete(request.automationRunId);
+    });
+    this.#automationExecutions.set(request.automationRunId, execution);
+    return execution;
+  }
+
+  async cancel(automationRunId: string): Promise<void> {
+    const sessionId = this.#automationSessionId(automationRunId);
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined) return;
+    await this.#activate(sessionId, record);
+    if (record.handle !== undefined) {
+      record.handle.agent.cancel({ kind: "user" });
+      return;
+    }
+    await record.native!.cancel();
   }
 
   mount(): void {
@@ -629,6 +677,149 @@ export class RuntimeController {
     });
   }
 
+  async #executeAutomation(
+    request: AutomationExecution,
+  ): Promise<{ sessionId: string; result?: string }> {
+    const definition = request.definition;
+    const sessionId = this.#automationSessionId(request.automationRunId);
+    const record = await this.#startAutomationSession(sessionId, request);
+    const terminal = this.#waitForTerminal(sessionId);
+    record.updatedAt = new Date().toISOString();
+    try {
+      if (record.handle !== undefined) {
+        record.handle.agent.followup(
+          createUserMessage({
+            content: [{ type: "text", text: definition.input }],
+            source: { kind: "user" },
+          }),
+        );
+      } else {
+        await record.native!.send(definition.input);
+      }
+    } catch (error) {
+      this.#publish(record, {
+        eventId: `${sessionId}-${record.nextEventSequence++}`,
+        occurredAt: new Date().toISOString(),
+        sessionId,
+        type: "turn.failed",
+        turnId: `turn-${request.automationRunId}`,
+        code: "engine_turn_rejected",
+        message:
+          error instanceof Error ? error.message : "engine_turn_rejected",
+      });
+    }
+    this.#messages.append({
+      id: `message-${request.automationRunId}`,
+      sessionId,
+      role: "user",
+      text: definition.input,
+      createdAt: new Date().toISOString(),
+    });
+    this.#persist(sessionId, record);
+    return terminal;
+  }
+
+  async #startAutomationSession(
+    publicId: string,
+    request: AutomationExecution,
+  ): Promise<SessionRecord> {
+    const existing = this.#sessions.get(publicId);
+    if (existing !== undefined) return existing;
+    const definition = request.definition;
+    const workspace = this.#workspaces.get(definition.workspaceId);
+    if (workspace === undefined) throw new Error("workspace_not_found");
+    const preset = this.#presets.resolve(definition.presetId);
+    if (preset.resolvedSnapshot.engine !== definition.engine)
+      throw new Error("preset_engine_mismatch");
+    if (preset.resolvedSnapshot.skillIds.length !== 0)
+      throw new Error("unsupported_skill_binding");
+    const mcpServers = this.#resolvedMcpServers(preset);
+    this.#validateMcpCompatibility(definition.engine, mcpServers);
+    const now = new Date().toISOString();
+    const record: SessionRecord = {
+      activating: undefined,
+      engine: definition.engine,
+      events: [],
+      handle: undefined,
+      native: undefined,
+      nativeId: publicId,
+      nextEventSequence: 1,
+      title: definition.name,
+      createdAt: now,
+      updatedAt: now,
+      workspaceId: workspace.id,
+      preset,
+    };
+    if (definition.engine === "harness") {
+      record.handle = await this.#createHarness(
+        publicId,
+        this.#workspaces.engineRoot(record.workspaceId),
+      );
+    } else {
+      const bridge = this.#bridges.get(definition.engine);
+      if (bridge === undefined) throw new Error("engine_unavailable");
+      record.native = await bridge.create(
+        this.#workspaces.engineRoot(record.workspaceId),
+        (event) =>
+          this.#publish(record, this.#nativeEvent(publicId, record, event)),
+        { mcpServers },
+      );
+      record.nativeId = record.native.nativeId;
+    }
+    this.#sessions.set(publicId, record);
+    this.#persist(publicId, record);
+    return record;
+  }
+
+  #automationSessionId(automationRunId: string): string {
+    return `session-${automationRunId}`;
+  }
+
+  #waitForTerminal(
+    sessionId: string,
+  ): Promise<{ sessionId: string; result?: string }> {
+    return new Promise((resolve, reject) => {
+      let result: string | undefined;
+      const cleanup = () => {
+        const listeners = this.#eventListeners.get(sessionId);
+        listeners?.delete(listener);
+        if (listeners?.size === 0) this.#eventListeners.delete(sessionId);
+      };
+      const listener = (event: PublicEvent) => {
+        if (
+          event.type === "assistant.completed" &&
+          typeof event.content === "string"
+        ) {
+          result = event.content;
+          return;
+        }
+        if (event.type === "turn.completed") {
+          cleanup();
+          resolve(result === undefined ? { sessionId } : { sessionId, result });
+          return;
+        }
+        if (event.type === "turn.failed") {
+          cleanup();
+          reject(
+            new Error(
+              typeof event.message === "string"
+                ? event.message
+                : "automation_turn_failed",
+            ),
+          );
+          return;
+        }
+        if (event.type === "turn.cancelled") {
+          cleanup();
+          reject(new Error("automation_turn_cancelled"));
+        }
+      };
+      const listeners = this.#eventListeners.get(sessionId) ?? new Set();
+      listeners.add(listener);
+      this.#eventListeners.set(sessionId, listeners);
+    });
+  }
+
   #connectEvents(
     id: string,
     record: SessionRecord,
@@ -696,6 +887,8 @@ export class RuntimeController {
         createdAt: event.occurredAt,
       });
     }
+    for (const listener of this.#eventListeners.get(event.sessionId) ?? [])
+      listener(event);
     for (const response of this.#subscribers.get(event.sessionId) ?? []) {
       response.write(
         `id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`,

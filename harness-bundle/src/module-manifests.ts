@@ -125,6 +125,26 @@ export const RUNTIME_MODULES = [
     healthCheck: "/v1/interactions",
   },
   {
+    id: "automation",
+    version: "1.0.0",
+    layer: "runtime",
+    required: true,
+    capabilities: [
+      "automation.crud",
+      "automation.schedule",
+      "automation.run",
+      "automation.history",
+    ],
+    dependencies: [
+      { id: "personal-work", contract: "AutomationRunnerPort/v1" },
+      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+      { id: "workspace-runtime", contract: "WorkspaceBinding/v1" },
+    ],
+    configSchema: "workagent://schemas/automation/v1",
+    dataOwner: "employee SID private automation definitions and run history",
+    healthCheck: "/v1/automations",
+  },
+  {
     id: "runtime-api",
     version: "1.0.0",
     layer: "runtime",
@@ -133,6 +153,7 @@ export const RUNTIME_MODULES = [
     dependencies: [
       { id: "personal-work", contract: "PersonalWorkPort/v1" },
       { id: "approval-bridge", contract: "ApprovalPort/v1" },
+      { id: "automation", contract: "AutomationPort/v1" },
     ],
     configSchema: "workagent://schemas/runtime-api/v1",
     dataOwner: "none; routing and DTO projection only",

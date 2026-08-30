@@ -17,6 +17,8 @@ import {
 import { PresetStore } from "./preset-store.js";
 import { RuntimeServicesController } from "./runtime-services-api.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
+import { AutomationController } from "./automation-api.js";
+import { AutomationScheduler, AutomationStore } from "./automation-store.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -125,6 +127,13 @@ export function apply(ctx: Context): void {
   );
   const runtime = new RuntimeController(ctx, token, workspaces, presets, mcp);
   runtime.mount();
+  const automations = new AutomationStore(dshHome);
+  new AutomationController(
+    ctx,
+    token,
+    automations,
+    new AutomationScheduler(automations, runtime),
+  );
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),
   );

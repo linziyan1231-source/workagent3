@@ -77,6 +77,10 @@ export const engineEventSchema = z.discriminatedUnion("type", [
     content: z.string(),
   }),
   eventBaseSchema.extend({
+    type: z.literal("turn.completed"),
+    turnId: z.string().min(1),
+  }),
+  eventBaseSchema.extend({
     type: z.literal("tool.started"),
     turnId: z.string().min(1),
     toolCallId: z.string().min(1),
