@@ -131,6 +131,29 @@ describe("AutomationScheduler", () => {
       expect.objectContaining({ automationRunId: run?.id }),
     );
   });
+
+  it("preserves cancellation when an in-flight runner returns later", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create({ ...mutation, enabled: false });
+    const pending = store.runNow(definition.id);
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const scheduler = new AutomationScheduler(store, {
+      execute: async () => {
+        await waiting;
+        return { sessionId: "session-late" };
+      },
+    });
+    const ticking = scheduler.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await scheduler.cancel(definition.id, pending.id);
+    release();
+    await ticking;
+    expect(store.getRun(pending.id)?.status).toBe("cancelled");
+  });
 });
 
 it("calculates a weekly schedule in its declared timezone", () => {

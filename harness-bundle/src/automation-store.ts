@@ -171,6 +171,14 @@ export class AutomationStore {
 
   delete(id: string): void {
     this.#required(id);
+    if (
+      [...this.#runs.values()].some(
+        (run) =>
+          run.automationId === id &&
+          (run.status === "pending" || run.status === "running"),
+      )
+    )
+      throw new Error("automation_has_active_run");
     this.#definitions.delete(id);
     for (const [runId, run] of this.#runs)
       if (run.automationId === id) this.#runs.delete(runId);
@@ -182,6 +190,10 @@ export class AutomationStore {
     return [...this.#runs.values()]
       .filter((run) => run.automationId === automationId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  getRun(runId: string): AutomationRun | undefined {
+    return this.#runs.get(runId);
   }
 
   runNow(automationId: string): AutomationRun {
@@ -277,6 +289,7 @@ export class AutomationStore {
       | { status: "failed"; error: string; sessionId?: string },
   ): AutomationRun {
     const run = this.#requiredRun(runId);
+    if (run.status === "cancelled") return run;
     if (run.status !== "running") throw new Error("automation_run_not_running");
     const next = automationRunSchema.parse({
       ...run,
@@ -348,6 +361,7 @@ export interface AutomationRunnerPort {
   execute(
     request: AutomationExecution,
   ): Promise<{ sessionId: string; result?: string }>;
+  cancel?(automationRunId: string): Promise<void>;
 }
 
 export class AutomationScheduler {
@@ -370,6 +384,12 @@ export class AutomationScheduler {
     if (this.#timer === undefined) return;
     clearInterval(this.#timer);
     this.#timer = undefined;
+  }
+
+  async cancel(automationId: string, runId: string): Promise<AutomationRun> {
+    const run = this.store.cancel(automationId, runId);
+    await this.runner.cancel?.(runId);
+    return run;
   }
 
   async tick(): Promise<void> {

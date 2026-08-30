@@ -31,6 +31,8 @@ const errorResponse = (response: ServerResponse, error: unknown): void => {
     return json(response, 404, { error: code });
   if (code === "automation_version_conflict")
     return json(response, 409, { error: code });
+  if (code === "automation_has_active_run")
+    return json(response, 409, { error: code });
   if (code === "request_too_large") return json(response, 413, { error: code });
   if (
     code === "automation_run_not_cancellable" ||
@@ -88,7 +90,7 @@ export const createAutomationHandler =
         return json(
           response,
           200,
-          store.cancel(id, decodeURIComponent(match[3])),
+          await scheduler.cancel(id, decodeURIComponent(match[3])),
         );
       if (action !== undefined)
         return json(response, 405, { error: "method_not_allowed" });
