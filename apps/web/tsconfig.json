@@ -49,6 +49,12 @@
       "@/renderer/hooks/agent/useModelProviderList": [
         "src/shared/aion-adapter/assistantHooks.ts"
       ],
+      "@/renderer/hooks/system/useExtI18n": [
+        "src/shared/aion-adapter/extensionSettings.ts"
+      ],
+      "@/renderer/hooks/system/useExtensionSettingsTabs": [
+        "src/shared/aion-adapter/extensionSettings.ts"
+      ],
       "@renderer/hooks/chat/useInputFocusRing": [
         "src/shared/aion-adapter/guidComponents.d.ts"
       ],

@@ -5,7 +5,12 @@ type LoginResult =
   | { success: false; code: "invalidCredentials" | "networkError" | "unknown"; message?: string };
 
 type AuthAdapter = {
-  status: "unauthenticated";
+  status: "unauthenticated" | "authenticated";
+  user?: {
+    username: string;
+    collaboration_capable: boolean;
+    admin: boolean;
+  };
   login(input: { username: string; password: string; remember: boolean }): Promise<LoginResult>;
 };
 

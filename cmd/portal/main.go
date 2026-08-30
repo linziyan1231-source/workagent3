@@ -22,6 +22,7 @@ import (
 	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/settings"
+	"workagent3/internal/skillmarket"
 	"workagent3/internal/speech"
 	"workagent3/internal/store"
 )
@@ -38,6 +39,7 @@ func run() error {
 	modelAccessPath := flag.String("model-access-db", "", "Model Access SQLite path (defaults beside Portal database)")
 	quotaPath := flag.String("quota-db", "", "Quota SQLite path (defaults beside Portal database)")
 	settingsPath := flag.String("settings-db", "", "Settings SQLite path (defaults beside Portal database)")
+	skillMarketPath := flag.String("skill-market-db", "", "Skill Market SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
@@ -62,7 +64,10 @@ func run() error {
 	if *settingsPath == "" {
 		*settingsPath = filepath.Join(filepath.Dir(*databasePath), "settings.db")
 	}
-	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath} {
+	if *skillMarketPath == "" {
+		*skillMarketPath = filepath.Join(filepath.Dir(*databasePath), "skill-market.db")
+	}
+	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath, *skillMarketPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return fmt.Errorf("create module data directory: %w", err)
 		}
@@ -85,6 +90,11 @@ func run() error {
 		return err
 	}
 	defer clientSettings.Close()
+	market, err := skillmarket.Open(*skillMarketPath)
+	if err != nil {
+		return err
+	}
+	defer market.Close()
 	speechProxy, err := speech.NewProxy(
 		os.Getenv("WORKAGENT_SPEECH_URL"),
 		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
@@ -99,7 +109,7 @@ func run() error {
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market})
 	if err != nil {
 		return err
 	}

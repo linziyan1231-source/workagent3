@@ -1,4 +1,25 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
+import { skillPort } from "../../features/skills/skillPort.js";
+import { requestJson } from "../api/http.js";
+import type {
+  PortalSkillMarketEntry,
+  PortalUsageSummary,
+} from "./ipcBridge.js";
+
+const toRendererSkill = (skill: Awaited<ReturnType<typeof skillPort.list>>[number]) => ({
+  name: skill.name,
+  description: skill.description,
+  location: skill.relativePath,
+  relative_location: skill.relativePath,
+  is_auto_inject: false,
+  is_custom: skill.source === "user" || skill.source === "market",
+  source:
+    skill.source === "builtin"
+      ? ("builtin" as const)
+      : skill.source === "managed"
+        ? ("extension" as const)
+        : ("custom" as const),
+});
 
 export const ipcBridge = {
   theme: {
@@ -7,12 +28,40 @@ export const ipcBridge = {
     changed: { on: () => () => undefined },
   },
   fs: {
-    listAvailableSkills: { invoke: async () => [] },
+    listAvailableSkills: {
+      invoke: async () => (await skillPort.list()).map(toRendererSkill),
+    },
+    listSkillImportHistory: { invoke: async () => [] },
+    getSkillImportLimits: {
+      invoke: async () => ({
+        max_file_bytes: 50 * 1024 * 1024,
+        max_total_bytes: 200 * 1024 * 1024,
+      }),
+    },
+    importSkills: {
+      invoke: async (_input: { skill_path: string }) => {
+        throw new Error("browser_skill_import_requires_file_upload");
+      },
+    },
+    deleteSkill: {
+      invoke: async ({ skill_name }: { skill_name: string }) => {
+        const skill = (await skillPort.list()).find(
+          (entry) => entry.name === skill_name,
+        );
+        if (!skill) throw new Error("skill_not_found");
+        await skillPort.remove(skill.id);
+      },
+    },
     listWorkspaceFiles: { invoke: async () => [] },
     getImageBase64: { invoke: async () => "" },
   },
   dialog: {
-    showOpen: { invoke: async () => [] },
+    showOpen: {
+      invoke: async (_input?: {
+        properties?: string[];
+        filters?: Array<{ name: string; extensions: string[] }>;
+      }) => [] as string[],
+    },
   },
   extensions: {
     getMcpServers: { invoke: async () => [] },
@@ -58,6 +107,33 @@ export const ipcBridge = {
     setCloseToTray: { invoke: async () => undefined },
   },
   portal: {
+    getMyUsage: {
+      invoke: async (): Promise<PortalUsageSummary> => ({
+        as_of: new Date().toISOString(),
+        providers: [],
+      }),
+    },
+    listSkillMarket: {
+      invoke: async () =>
+        requestJson<{ success: boolean; skills: PortalSkillMarketEntry[] }>(
+          "/api/portal/skill-market",
+        ),
+    },
+    publishSkill: {
+      invoke: async (_input: { skill_name: string }) => {
+        throw new Error("skill_market_publish_not_available");
+      },
+    },
+    installMarketSkill: {
+      invoke: async (_input: { id: string }) => {
+        throw new Error("skill_market_install_not_available");
+      },
+    },
+    deleteMarketSkill: {
+      invoke: async (_input: { id: string }) => {
+        throw new Error("skill_market_delete_not_available");
+      },
+    },
     listAllSharedProjects: { invoke: async () => ({ projects: [] }) },
     listAllSharedConversations: { invoke: async () => ({ conversations: [] }) },
     setSharedProjectHidden: { invoke: async () => undefined },
@@ -67,6 +143,12 @@ export const ipcBridge = {
     listSharedInvites: { invoke: async () => ({ invites: [] }) },
     acceptSharedInvite: { invoke: async () => ({ success: false }) },
     declineSharedInvite: { invoke: async () => ({ success: false }) },
+  },
+  assistants: {
+    list: { invoke: async () => [] },
+    setState: {
+      invoke: async (_input: { id: string; enabled: boolean }) => undefined,
+    },
   },
   conversation: {
     get: {

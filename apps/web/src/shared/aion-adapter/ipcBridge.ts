@@ -5,15 +5,58 @@ import type {
 } from "@workagent/contracts";
 import { mcpPort } from "../../features/mcp/mcpPort.js";
 
-export type IExtensionSettingsTab = { id: string; title?: string } & Record<
-  string,
-  unknown
->;
+export type IExtensionSettingsTab = {
+  id: string;
+  title?: string;
+  label: string;
+  url: string;
+  order: number;
+  extensionName: string;
+  icon?: string;
+  position?: {
+    relativeTo: string;
+    placement: "before" | "after";
+  };
+};
 export type IWebUIStatus = Record<string, unknown>;
 export type IGpuStatus = Record<string, unknown>;
 export type IStartOnBootStatus = Record<string, unknown>;
 export type PortalSharedConversation = Record<string, unknown>;
 export type PortalSharedProject = Record<string, unknown>;
+export type PortalSkillMarketEntry = {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  publisher: { username: string; display_name: string };
+  updated_at: string;
+  archive_bytes?: number;
+  can_delete: boolean;
+};
+export type PortalUsageWindow = {
+  limit_usd: number;
+  used_usd: number;
+  remaining_usd: number;
+  reset_at: string;
+};
+export type PortalUsageCountWindow = {
+  limit: number;
+  used: number;
+  reset_at: string;
+};
+export type PortalUsageSummary = {
+  as_of: string;
+  providers: Array<{
+    kind: "chatgpt" | "kimi";
+    daily: PortalUsageWindow;
+    weekly: PortalUsageWindow;
+    pro?: PortalUsageCountWindow;
+  }>;
+  storage?: {
+    personal: { remaining_bytes: number; limit_bytes: number };
+    shared: { remaining_bytes: number; limit_bytes: number };
+  };
+};
 
 const unavailableCommand = {
   provider: () => {},

@@ -20,4 +20,9 @@ export const skillPort = {
       }),
     );
   },
+  async remove(id: string): Promise<void> {
+    await requestJson<void>(`${base}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
 };

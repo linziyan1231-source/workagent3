@@ -48,11 +48,16 @@ type SettingsPort interface {
 	Put(context.Context, string, map[string]json.RawMessage) error
 }
 
+type SkillMarketPort interface {
+	ListApproved(context.Context, string) ([]contracts.SkillMarketEntry, error)
+}
+
 type Modules struct {
 	ModelAccess ModelAccessPort
 	Quota       QuotaUsagePort
 	Speech      SpeechPort
 	Settings    SettingsPort
+	SkillMarket SkillMarketPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -84,11 +89,26 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))
 	mux.HandleFunc("GET /api/settings/client", s.requireUser(s.clientSettings))
 	mux.HandleFunc("PUT /api/settings/client", s.requireUser(s.updateClientSettings))
+	mux.HandleFunc("GET /api/skill-market", s.requireUser(s.skillMarket))
+	mux.HandleFunc("GET /api/portal/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
+}
+
+func (s *Server) skillMarket(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.SkillMarket == nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill_market_unavailable")
+		return
+	}
+	entries, err := s.modules.SkillMarket.ListApproved(request.Context(), user.Username)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "skill_market_failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"success": true, "skills": entries})
 }
 
 func (s *Server) clientSettings(writer http.ResponseWriter, request *http.Request, user store.User) {
