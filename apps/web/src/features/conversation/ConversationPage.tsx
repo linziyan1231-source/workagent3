@@ -1,11 +1,6 @@
-import {
-  type FormEvent,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Button, Select, Tooltip } from "@arco-design/web-react";
+import { EditOne, FolderOpen, HamburgerButton } from "@icon-park/react";
 import type {
   EngineEvent,
   EngineId,
@@ -17,6 +12,10 @@ import type {
 } from "@workagent/contracts";
 import type { AuthUser } from "../../shared/types/auth.js";
 import { conversationPort, type ConversationPort } from "./conversationPort.js";
+import { AionSendBox } from "../../shared/ui/aionui/AionSendBox.js";
+import { AionSettingsModal } from "../../shared/ui/aionui/AionSettingsModal.js";
+import { AionSider } from "../../shared/ui/aionui/AionSider.js";
+import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
 
 export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;
 
@@ -101,7 +100,7 @@ export function ConversationPage({
     () => typeof window !== "undefined" && window.innerWidth > 1080,
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const active = sessions.find((session) => session.id === activeId);
   const activeMessages = useMemo(
@@ -115,6 +114,11 @@ export function ConversationPage({
   const engineBlocked =
     selectedEngine?.state === "needs_auth" ||
     selectedEngine?.state === "unavailable";
+  const isGuid =
+    active !== undefined &&
+    activeMessages.length === 0 &&
+    activeInteractions.length === 0 &&
+    !running.includes(active.id);
 
   useEffect(() => {
     void port
@@ -246,7 +250,6 @@ export function ConversationPage({
       setActiveId(session.id);
       onWorkspaceSelect?.(session.workspaceId);
       setSidebarOpen(false);
-      inputRef.current?.focus();
     } catch {
       setNotice(
         engine === "harness"
@@ -258,13 +261,8 @@ export function ConversationPage({
     }
   }
 
-  async function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function send(content: string) {
     if (!activeId) return;
-    const form = new FormData(event.currentTarget);
-    const content = String(form.get("message") ?? "").trim();
-    if (!content) return;
-    event.currentTarget.reset();
     setMessages((current) => ({
       ...current,
       [activeId]: [
@@ -314,12 +312,12 @@ export function ConversationPage({
     }
   }
 
-  async function renameSession() {
-    if (active === undefined) return;
-    const title = window.prompt("Conversation name", active.title)?.trim();
-    if (!title || title === active.title) return;
+  async function renameSession(session: RuntimeSession = active!) {
+    if (session === undefined) return;
+    const title = window.prompt("Conversation name", session.title)?.trim();
+    if (!title || title === session.title) return;
     try {
-      const updated = await port.rename(active.id, title);
+      const updated = await port.rename(session.id, title);
       setSessions((current) =>
         current.map((session) =>
           session.id === updated.id ? updated : session,
@@ -330,14 +328,14 @@ export function ConversationPage({
     }
   }
 
-  async function deleteSession() {
-    if (active === undefined) return;
-    if (!window.confirm(`Delete “${active.title}”?`)) return;
+  async function deleteSession(session: RuntimeSession = active!) {
+    if (session === undefined) return;
+    if (!window.confirm(`Delete “${session.title}”?`)) return;
     try {
-      await port.remove(active.id);
-      const remaining = sessions.filter((session) => session.id !== active.id);
+      await port.remove(session.id);
+      const remaining = sessions.filter((item) => item.id !== session.id);
       setSessions(remaining);
-      setActiveId(remaining[0]?.id);
+      if (session.id === activeId) setActiveId(remaining[0]?.id);
       if (remaining[0] !== undefined)
         onWorkspaceSelect?.(remaining[0].workspaceId);
     } catch {
@@ -370,7 +368,7 @@ export function ConversationPage({
 
   return (
     <main
-      className={`workbench${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}${sidebarOpen ? " sidebar-open" : ""}`}
+      className={`aion-layout${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}${sidebarOpen ? " sidebar-open" : ""}`}
     >
       {sidebarOpen && (
         <button
@@ -380,98 +378,69 @@ export function ConversationPage({
           onClick={() => setSidebarOpen(false)}
         />
       )}
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <span className="brand-mark small">WA</span>
-          <div>
-            <strong>WorkAgent</strong>
-            <span>Personal workspace</span>
-          </div>
-        </div>
-        <button
-          className="new-button"
-          onClick={newSession}
-          disabled={busy || engineBlocked}
-        >
-          <span>＋</span> New conversation
-        </button>
-        <label className="session-search">
-          <span aria-hidden="true">⌕</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search conversations"
-            aria-label="Search conversations"
-          />
-        </label>
-        <div className="session-heading">Recent</div>
-        <nav className="session-list" aria-label="Conversations">
-          {sessions
-            .filter((session) =>
-              session.title
-                .toLocaleLowerCase()
-                .includes(query.toLocaleLowerCase()),
-            )
-            .map((session) => (
-              <button
-                className={session.id === activeId ? "active" : ""}
-                key={session.id}
-                onClick={() => {
-                  setActiveId(session.id);
-                  onWorkspaceSelect?.(session.workspaceId);
-                  setSidebarOpen(false);
-                }}
-              >
-                <span>{session.title}</span>
-                <small>{session.engine}</small>
-              </button>
-            ))}
-          {sessions.length === 0 && (
-            <p className="empty-sidebar">No conversations yet.</p>
-          )}
-        </nav>
-        <div className="sidebar-footer">
-          <span className="avatar">
-            {user.username.slice(0, 1).toUpperCase()}
-          </span>
-          <div>
-            <strong>{user.username}</strong>
-            <span>Employee workspace</span>
-          </div>
-          <button onClick={onLogout} aria-label="Sign out" title="Sign out">
-            ↗
-          </button>
-        </div>
-      </aside>
-      <section className="conversation">
-        <header className="conversation-header">
-          <button
+      <AionSider
+        sessions={sessions}
+        activeId={activeId}
+        query={query}
+        username={user.username}
+        busy={busy || engineBlocked}
+        onQuery={setQuery}
+        onNew={newSession}
+        onSelect={(session) => {
+          setActiveId(session.id);
+          onWorkspaceSelect?.(session.workspaceId);
+          setSidebarOpen(false);
+        }}
+        onRename={renameSession}
+        onDelete={deleteSession}
+        onSettings={() => {
+          setSidebarOpen(false);
+          setSettingsOpen(true);
+        }}
+        onLogout={onLogout}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <section className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}>
+        <header className="chat-layout-header chat-layout-header--glass min-h-44px flex items-center justify-between px-16px pt-8px pb-10px gap-16px !bg-1">
+          <Button
             className="mobile-menu"
-            type="button"
+            type="text"
+            shape="circle"
+            icon={<HamburgerButton />}
             aria-label="Open conversations"
             onClick={() => {
               setWorkspaceOpen(false);
               setSidebarOpen(true);
             }}
+          />
+          <div
+            className={`aion-chat-title flex-1 min-w-0 flex items-center gap-8px${isGuid ? " guid-title" : ""}`}
           >
-            ☰
-          </button>
-          <div>
-            <h1>{active?.title ?? "Start something useful"}</h1>
-            <p className="conversation-subtitle">Personal workspace</p>
+            <span className="aion-agent-dot" />
+            <button
+              type="button"
+              onClick={() => active && !isGuid && renameSession(active)}
+              disabled={!active}
+            >
+              {isGuid ? "WorkAgent" : (active?.title ?? "New conversation")}
+            </button>
+            {active && !isGuid && (
+              <EditOne className="aion-title-edit" size="13" />
+            )}
           </div>
-          <div className="header-actions">
-            <label className="engine-picker">
-              <select
+          {!isGuid && (
+            <div className="flex items-center gap-12px shrink-0">
+              <Select
                 value={engine}
-                onChange={(event) => setEngine(event.target.value as EngineId)}
+                onChange={(value) => setEngine(value as EngineId)}
                 aria-label="Engine"
+                className="header-model-btn"
+                style={{ width: 118 }}
               >
                 {(["harness", "codex", "kimi"] as const).map((id) => {
                   const status = engineStatuses.find((item) => item.id === id);
                   return (
-                    <option
+                    <Select.Option
                       value={id}
                       key={id}
                       disabled={
@@ -490,117 +459,98 @@ export function ConversationPage({
                         : status?.state === "unavailable"
                           ? " · unavailable"
                           : ""}
-                    </option>
+                    </Select.Option>
                   );
                 })}
-              </select>
-              {selectedEngine?.detail &&
-                (selectedEngine.state === "needs_auth" ||
-                  selectedEngine.state === "unavailable") && (
-                  <small className={`engine-state ${selectedEngine.state}`}>
-                    {selectedEngine.detail}
-                  </small>
-                )}
-            </label>
-            {workspacePanel && (
-              <button
-                className="workspace-toggle"
-                type="button"
-                aria-label={
-                  workspaceOpen
-                    ? "Close workspace files"
-                    : "Open workspace files"
-                }
-                aria-expanded={workspaceOpen}
-                onClick={() => {
-                  setSidebarOpen(false);
-                  setWorkspaceOpen((open) => !open);
-                }}
-              >
-                ▣ <span>Workspace</span>
-              </button>
-            )}
-            {active && (
-              <div className="session-actions">
-                {running.includes(active.id) && (
-                  <button
-                    className="cancel-button"
-                    type="button"
-                    onClick={cancelSession}
-                  >
-                    Stop
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={renameSession}
-                  aria-label="Rename conversation"
-                  title="Rename conversation"
-                >
-                  ✎
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteSession}
-                  aria-label="Delete conversation"
-                  title="Delete conversation"
-                >
-                  ⋯
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
-        <div className="message-scroll" aria-live="polite">
-          {notice && <div className="notice">{notice}</div>}
-          {!active && (
-            <div className="empty-state">
-              <span className="spark">✦</span>
-              <h2>What would you like to move forward?</h2>
-              <p>
-                Choose an engine, open a conversation, and give WorkAgent the
-                outcome you want.
-              </p>
-              <button
-                className="primary-button compact"
-                onClick={newSession}
-                disabled={engineBlocked}
-              >
-                Start a conversation
-              </button>
+              </Select>
+              {workspacePanel && (
+                <Tooltip content="Workspace">
+                  <Button
+                    type="text"
+                    shape="circle"
+                    icon={<FolderOpen />}
+                    aria-label="Workspace"
+                    onClick={() => {
+                      setSidebarOpen(false);
+                      setWorkspaceOpen((open) => !open);
+                    }}
+                  />
+                </Tooltip>
+              )}
             </div>
           )}
-          {activeInteractions.map((interaction) => (
-            <article className="approval-card" key={interaction.id}>
-              <div>
-                <span className="approval-label">Approval required</span>
-                <strong>{interaction.tool}</strong>
-                <p>{interaction.summary}</p>
-              </div>
-              <div className="approval-actions">
-                <button
-                  className="approval-reject"
-                  disabled={resolving === interaction.id}
-                  onClick={() => resolveInteraction(interaction, "reject")}
+        </header>
+        <div
+          className="aion-message-scroll chat-surface-container"
+          aria-live="polite"
+        >
+          {isGuid && (
+            <AionGuidEmptyState
+              engine={engine}
+              engines={engineStatuses}
+              disabled={engineBlocked}
+              onEngineChange={setEngine}
+              onSend={send}
+              onAttach={() => attachmentInputRef.current?.click()}
+            />
+          )}
+          <div className="chat-surface-fluid">
+            {notice && <div className="notice">{notice}</div>}
+            {!active && (
+              <div className="aion-empty-state">
+                <span className="aion-empty-logo">✦</span>
+                <h2>How can I help you today?</h2>
+                <p>Start a new conversation or choose one from your history.</p>
+                <Button
+                  type="primary"
+                  onClick={newSession}
+                  disabled={engineBlocked}
                 >
-                  Reject
-                </button>
-                <button
-                  className="approval-allow"
-                  disabled={resolving === interaction.id}
-                  onClick={() => resolveInteraction(interaction, "allow")}
-                >
-                  Allow once
-                </button>
+                  New conversation
+                </Button>
               </div>
-            </article>
-          ))}
-          {activeMessages.map((message) => (
-            <article className={`message ${message.role}`} key={message.id}>
-              <span>{message.role === "user" ? "You" : "WA"}</span>
-              <p>{message.text}</p>
-            </article>
-          ))}
+            )}
+            {!isGuid &&
+              activeInteractions.map((interaction) => (
+                <article
+                  className="approval-card message-item"
+                  key={interaction.id}
+                >
+                  <div>
+                    <span className="approval-label">Approval required</span>
+                    <strong>{interaction.tool}</strong>
+                    <p>{interaction.summary}</p>
+                  </div>
+                  <div className="approval-actions">
+                    <button
+                      className="approval-reject"
+                      disabled={resolving === interaction.id}
+                      onClick={() => resolveInteraction(interaction, "reject")}
+                    >
+                      Reject
+                    </button>
+                    <button
+                      className="approval-allow"
+                      disabled={resolving === interaction.id}
+                      onClick={() => resolveInteraction(interaction, "allow")}
+                    >
+                      Allow once
+                    </button>
+                  </div>
+                </article>
+              ))}
+            {!isGuid &&
+              activeMessages.map((message) => (
+                <article
+                  className={`aion-message message-item ${message.role}`}
+                  key={message.id}
+                >
+                  <div className="aion-message-body">
+                    <p>{message.text}</p>
+                  </div>
+                </article>
+              ))}
+          </div>
         </div>
         {active && activeAssets.length > 0 && assetPort && (
           <div className="conversation-assets" aria-label="Session files">
@@ -630,47 +580,24 @@ export function ConversationPage({
             )}
           </div>
         )}
-        <form className="composer" onSubmit={send}>
-          <textarea
-            ref={inputRef}
-            name="message"
-            placeholder={
-              active
-                ? "Describe the outcome you want…"
-                : "Create a conversation first"
-            }
-            disabled={!active}
-            rows={2}
+        <div
+          className={`aion-composer chat-surface-container${isGuid ? " guid-hidden-composer" : ""}`}
+        >
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => attach(event.target.files)}
           />
-          <div className="composer-footer">
-            <div>
-              <input
-                ref={attachmentInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(event) => attach(event.target.files)}
-              />
-              <button
-                className="attach-button"
-                type="button"
-                disabled={!active || assetPort === undefined}
-                aria-label="Attach files"
-                onClick={() => attachmentInputRef.current?.click()}
-              >
-                ＋
-              </button>
-              <span>Workspace · Personal</span>
-            </div>
-            <button
-              className="send-button"
-              disabled={!active}
-              aria-label="Send message"
-            >
-              ↑
-            </button>
-          </div>
-        </form>
+          <AionSendBox
+            disabled={!active}
+            loading={active ? running.includes(active.id) : false}
+            onSend={send}
+            onStop={cancelSession}
+            onAttach={() => attachmentInputRef.current?.click()}
+          />
+        </div>
       </section>
       {workspaceOpen && (
         <button
@@ -681,6 +608,10 @@ export function ConversationPage({
         />
       )}
       {workspacePanel}
+      <AionSettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </main>
   );
 }
