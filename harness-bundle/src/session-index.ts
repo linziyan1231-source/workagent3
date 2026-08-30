@@ -14,6 +14,7 @@ export type StoredSession = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  workspaceId?: string;
 };
 
 const valid = (value: unknown): value is StoredSession => {
@@ -28,7 +29,8 @@ const valid = (value: unknown): value is StoredSession => {
       item.engine === "kimi") &&
     typeof item.title === "string" &&
     typeof item.createdAt === "string" &&
-    typeof item.updatedAt === "string"
+    typeof item.updatedAt === "string" &&
+    (item.workspaceId === undefined || typeof item.workspaceId === "string")
   );
 };
 

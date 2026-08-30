@@ -8,6 +8,7 @@ import type {} from "@deepseek-ai/dsh-session";
 import { RuntimeController } from "./runtime.js";
 import { WorkspaceController } from "./workspace-api.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
+import { WorkspaceStore } from "./workspace-store.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -94,7 +95,13 @@ export function apply(ctx: Context): void {
       }),
     "workagent-runtime-api: capability route",
   );
-  const runtime = new RuntimeController(ctx, token);
+  const dshHome = process.env.DSH_HOME;
+  const workspaceRoot = process.env.WORKAGENT_WORKSPACE_ROOT;
+  if (dshHome === undefined || workspaceRoot === undefined) {
+    throw new Error("workagent-runtime-api: private roots are required");
+  }
+  const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
+  const runtime = new RuntimeController(ctx, token, workspaces);
   runtime.mount();
-  new WorkspaceController(ctx, token);
+  new WorkspaceController(ctx, token, workspaces);
 }

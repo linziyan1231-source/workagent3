@@ -13,6 +13,7 @@ export const runtimeSessionSchema = z.object({
   title: z.string().min(1),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
+  workspaceId: z.string().min(1),
 });
 export type RuntimeSession = z.infer<typeof runtimeSessionSchema>;
 

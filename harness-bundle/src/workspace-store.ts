@@ -99,6 +99,14 @@ export class WorkspaceStore {
     return workspace;
   }
 
+  ensureDefault(): Workspace {
+    return this.list()[0] ?? this.create("Personal workspace");
+  }
+
+  engineRoot(id: string): string {
+    return this.#workspaceRoot(id);
+  }
+
   listFiles(id: string, path = ""): WorkspaceEntry[] {
     const directory = this.#resolve(id, path, true);
     if (!statSync(directory).isDirectory()) throw new Error("not_a_directory");

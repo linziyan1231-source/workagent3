@@ -1,4 +1,11 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   EngineEvent,
   EngineId,
@@ -52,12 +59,16 @@ type Props = {
   user: AuthUser;
   onLogout: () => Promise<void>;
   port?: ConversationPort;
+  workspaceId?: string;
+  workspacePanel?: ReactNode;
 };
 
 export function ConversationPage({
   user,
   onLogout,
   port = conversationPort,
+  workspaceId,
+  workspacePanel,
 }: Props) {
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -70,6 +81,10 @@ export function ConversationPage({
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [workspaceOpen, setWorkspaceOpen] = useState(
+    () => typeof window !== "undefined" && window.innerWidth > 1080,
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const active = sessions.find((session) => session.id === activeId);
   const activeMessages = useMemo(
@@ -169,10 +184,11 @@ export function ConversationPage({
       const session = await port.create({
         engine,
         title: "New conversation",
-        workspace: ".",
+        workspace: workspaceId ?? "default",
       });
       setSessions((current) => [session, ...current]);
       setActiveId(session.id);
+      setSidebarOpen(false);
       inputRef.current?.focus();
     } catch {
       setNotice(
@@ -207,7 +223,17 @@ export function ConversationPage({
   }
 
   return (
-    <main className="workbench">
+    <main
+      className={`workbench${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}${sidebarOpen ? " sidebar-open" : ""}`}
+    >
+      {sidebarOpen && (
+        <button
+          className="sidebar-scrim"
+          type="button"
+          aria-label="Close conversations"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="brand-mark small">WA</span>
@@ -229,7 +255,10 @@ export function ConversationPage({
             <button
               className={session.id === activeId ? "active" : ""}
               key={session.id}
-              onClick={() => setActiveId(session.id)}
+              onClick={() => {
+                setActiveId(session.id);
+                setSidebarOpen(false);
+              }}
             >
               <span>{session.title}</span>
               <small>{session.engine}</small>
@@ -254,48 +283,79 @@ export function ConversationPage({
       </aside>
       <section className="conversation">
         <header className="conversation-header">
+          <button
+            className="mobile-menu"
+            type="button"
+            aria-label="Open conversations"
+            onClick={() => {
+              setWorkspaceOpen(false);
+              setSidebarOpen(true);
+            }}
+          >
+            ☰
+          </button>
           <div>
-            <p className="eyebrow">Personal work</p>
             <h1>{active?.title ?? "Start something useful"}</h1>
+            <p className="conversation-subtitle">Personal workspace</p>
           </div>
-          <label className="engine-picker">
-            <span>Engine</span>
-            <select
-              value={engine}
-              onChange={(event) => setEngine(event.target.value as EngineId)}
-            >
-              {(["harness", "codex", "kimi"] as const).map((id) => {
-                const status = engineStatuses.find((item) => item.id === id);
-                return (
-                  <option
-                    value={id}
-                    key={id}
-                    disabled={
-                      status?.state === "needs_auth" ||
-                      status?.state === "unavailable"
-                    }
-                  >
-                    {status?.label ??
-                      (id === "harness"
-                        ? "Harness"
-                        : id === "codex"
-                          ? "Codex"
-                          : "Kimi")}
-                    {status?.state === "needs_auth"
-                      ? " · sign in required"
-                      : status?.state === "unavailable"
-                        ? " · unavailable"
-                        : ""}
-                  </option>
-                );
-              })}
-            </select>
-            {selectedEngine?.detail && (
-              <small className={`engine-state ${selectedEngine.state}`}>
-                {selectedEngine.detail}
-              </small>
+          <div className="header-actions">
+            <label className="engine-picker">
+              <select
+                value={engine}
+                onChange={(event) => setEngine(event.target.value as EngineId)}
+                aria-label="Engine"
+              >
+                {(["harness", "codex", "kimi"] as const).map((id) => {
+                  const status = engineStatuses.find((item) => item.id === id);
+                  return (
+                    <option
+                      value={id}
+                      key={id}
+                      disabled={
+                        status?.state === "needs_auth" ||
+                        status?.state === "unavailable"
+                      }
+                    >
+                      {status?.label ??
+                        (id === "harness"
+                          ? "Harness"
+                          : id === "codex"
+                            ? "Codex"
+                            : "Kimi")}
+                      {status?.state === "needs_auth"
+                        ? " · sign in required"
+                        : status?.state === "unavailable"
+                          ? " · unavailable"
+                          : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedEngine?.detail && selectedEngine.state !== "ready" && (
+                <small className={`engine-state ${selectedEngine.state}`}>
+                  {selectedEngine.detail}
+                </small>
+              )}
+            </label>
+            {workspacePanel && (
+              <button
+                className="workspace-toggle"
+                type="button"
+                aria-label={
+                  workspaceOpen
+                    ? "Close workspace files"
+                    : "Open workspace files"
+                }
+                aria-expanded={workspaceOpen}
+                onClick={() => {
+                  setSidebarOpen(false);
+                  setWorkspaceOpen((open) => !open);
+                }}
+              >
+                ▣ <span>Workspace</span>
+              </button>
             )}
-          </label>
+          </div>
         </header>
         <div className="message-scroll" aria-live="polite">
           {notice && <div className="notice">{notice}</div>}
@@ -368,6 +428,15 @@ export function ConversationPage({
           </div>
         </form>
       </section>
+      {workspaceOpen && (
+        <button
+          className="workspace-scrim"
+          type="button"
+          aria-label="Close workspace files"
+          onClick={() => setWorkspaceOpen(false)}
+        />
+      )}
+      {workspacePanel}
     </main>
   );
 }

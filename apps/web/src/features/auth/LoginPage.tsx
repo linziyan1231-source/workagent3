@@ -29,47 +29,54 @@ export function LoginPage({ onLogin }: Props) {
 
   return (
     <main className="login-page">
-      <section className="login-story" aria-label="WorkAgent introduction">
-        <div className="brand-mark">WA</div>
-        <p className="eyebrow">Your work, in motion</p>
-        <h1>A focused place for people and agents to get things done.</h1>
-        <p className="login-copy">
-          Continue projects, review decisions, and move work forward from one
-          secure workspace.
-        </p>
-        <div className="orbit" aria-hidden="true">
-          <span />
-          <span />
-          <span />
+      <form className="login-card" onSubmit={submit}>
+        <select
+          className="language-select"
+          aria-label="Language"
+          defaultValue="en"
+        >
+          <option value="en">English</option>
+          <option value="zh-CN">简体中文</option>
+        </select>
+        <div className="login-brand-mark" aria-hidden="true">
+          WA
         </div>
-      </section>
-      <section className="login-panel">
-        <form className="login-card" onSubmit={submit}>
-          <p className="eyebrow">Welcome back</p>
-          <h2>Sign in to WorkAgent</h2>
-          <label>
-            Username
-            <input name="username" autoComplete="username" required autoFocus />
-          </label>
-          <label>
-            Password
+        <h1>WorkAgent</h1>
+        <p className="login-welcome">Welcome back. Sign in to your account.</p>
+        <label>
+          Username
+          <span className="login-input">
+            <span aria-hidden="true">♙</span>
+            <input
+              name="username"
+              autoComplete="username"
+              placeholder="Enter your username"
+              required
+              autoFocus
+            />
+          </span>
+        </label>
+        <label>
+          Password
+          <span className="login-input">
+            <span aria-hidden="true">▢</span>
             <input
               name="password"
               type="password"
               autoComplete="current-password"
+              placeholder="Enter your password"
               required
             />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary-button" disabled={busy}>
-            {busy ? "Signing in…" : "Continue"}
-          </button>
-          <p className="privacy-note">
-            Your password is sent only to this WorkAgent server and is never
-            stored in the browser.
-          </p>
-        </form>
-      </section>
+          </span>
+        </label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
+        <p className="privacy-note">
+          Secure personal workspace · Ready in your browser
+        </p>
+      </form>
     </main>
   );
 }

@@ -11,6 +11,7 @@ describe("ConversationPort", () => {
           id: "session-1",
           engine: "harness",
           title: "Quarterly plan",
+          workspaceId: "workspace-1",
           createdAt: "2026-08-30T10:00:00.000Z",
           updatedAt: "2026-08-30T10:00:00.000Z",
         }),
@@ -22,7 +23,7 @@ describe("ConversationPort", () => {
     await conversationPort.create({
       engine: "harness",
       title: "Quarterly plan",
-      workspace: ".",
+      workspace: "default",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -46,7 +47,7 @@ describe("ConversationPort", () => {
       conversationPort.create({
         engine: "harness",
         title: "Invalid response",
-        workspace: ".",
+        workspace: "default",
       }),
     ).rejects.toThrow();
   });

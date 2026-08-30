@@ -159,7 +159,7 @@ try {
             body: JSON.stringify({
               engine,
               title: `${engine} profile smoke test`,
-              workspace: ".",
+              workspace: "default",
             }),
           });
           if (created.status !== 201) {

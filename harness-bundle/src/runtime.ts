@@ -22,6 +22,7 @@ import { authorized } from "./index.js";
 import { ApprovalBridge } from "./approval-bridge.js";
 import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
+import { WorkspaceStore } from "./workspace-store.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -34,6 +35,7 @@ type SessionRecord = {
   activating: Promise<void> | undefined;
   title: string;
   updatedAt: string;
+  workspaceId: string;
 };
 
 type PublicEvent = Record<string, unknown> & {
@@ -162,18 +164,23 @@ export class RuntimeController {
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
+  readonly #workspaces: WorkspaceStore;
 
-  constructor(ctx: Context, token: string) {
+  constructor(ctx: Context, token: string, workspaces: WorkspaceStore) {
     this.#ctx = ctx;
     this.#token = token;
     const dshHome = process.env.DSH_HOME;
     if (dshHome === undefined)
       throw new Error("workagent-runtime-api: DSH_HOME is required");
     this.#index = new SessionIndex(dshHome);
+    this.#workspaces = workspaces;
+    const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
     for (const session of this.#index.list()) {
-      this.#sessions.set(session.id, this.#record(session));
+      const record = this.#record(session, defaultWorkspace.id);
+      this.#sessions.set(session.id, record);
+      if (session.workspaceId === undefined) this.#persist(session.id, record);
     }
     new ApprovalBridge(ctx, token, dshHome, (sessionId, event) => {
       const record = this.#sessions.get(sessionId);
@@ -307,6 +314,7 @@ export class RuntimeController {
           title: value.title,
           createdAt: value.createdAt,
           updatedAt: value.updatedAt,
+          workspaceId: value.workspaceId,
         })),
       );
       return;
@@ -342,6 +350,7 @@ export class RuntimeController {
           title: record.title,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
+          workspaceId: record.workspaceId,
         });
         return;
       }
@@ -352,6 +361,7 @@ export class RuntimeController {
           title: record.title,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
+          workspaceId: record.workspaceId,
         });
         return;
       }
@@ -432,6 +442,7 @@ export class RuntimeController {
         title: record.title,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
+        workspaceId: record.workspaceId,
       });
       return;
     }
@@ -468,9 +479,18 @@ export class RuntimeController {
         input.engine !== "kimi") ||
       typeof input.title !== "string" ||
       input.title.trim() === "" ||
-      input.title.length > 200
+      input.title.length > 200 ||
+      typeof input.workspace !== "string"
     ) {
       writeJson(response, 400, { error: "invalid_session" });
+      return;
+    }
+    const workspace =
+      input.workspace === "default"
+        ? this.#workspaces.ensureDefault()
+        : this.#workspaces.get(input.workspace);
+    if (workspace === undefined) {
+      writeJson(response, 400, { error: "workspace_not_found" });
       return;
     }
     const publicId = `session-${randomUUID()}`;
@@ -486,19 +506,26 @@ export class RuntimeController {
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
+      workspaceId: workspace.id,
     };
     try {
       if (input.engine === "harness") {
-        record.handle = await this.#createHarness(publicId);
+        record.handle = await this.#createHarness(
+          publicId,
+          this.#workspaces.engineRoot(record.workspaceId),
+        );
       } else {
         const bridge = this.#bridges.get(input.engine);
         if (bridge === undefined) {
           writeJson(response, 503, { error: "engine_unavailable" });
           return;
         }
-        record.native = await bridge.create(process.cwd(), (event) => {
-          this.#publish(record, this.#nativeEvent(publicId, record, event));
-        });
+        record.native = await bridge.create(
+          this.#workspaces.engineRoot(record.workspaceId),
+          (event) => {
+            this.#publish(record, this.#nativeEvent(publicId, record, event));
+          },
+        );
         record.nativeId = record.native.nativeId;
       }
     } catch {
@@ -513,6 +540,7 @@ export class RuntimeController {
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
+      workspaceId: workspace.id,
     });
   }
 
@@ -600,7 +628,10 @@ export class RuntimeController {
           error.message !== `session "${record.nativeId}" not found`
         )
           throw error;
-        record.handle = await this.#createHarness(record.nativeId);
+        record.handle = await this.#createHarness(
+          record.nativeId,
+          this.#workspaces.engineRoot(record.workspaceId),
+        );
       }
       return;
     }
@@ -608,12 +639,12 @@ export class RuntimeController {
     if (bridge === undefined) throw new Error("engine unavailable");
     record.native = await bridge.resume(
       record.nativeId,
-      process.cwd(),
+      this.#workspaces.engineRoot(record.workspaceId),
       (event) => this.#publish(record, this.#nativeEvent(id, record, event)),
     );
   }
 
-  #record(session: StoredSession): SessionRecord {
+  #record(session: StoredSession, defaultWorkspaceId: string): SessionRecord {
     return {
       ...session,
       activating: undefined,
@@ -621,6 +652,7 @@ export class RuntimeController {
       handle: undefined,
       native: undefined,
       nextEventSequence: 1,
+      workspaceId: session.workspaceId ?? defaultWorkspaceId,
     };
   }
 
@@ -632,14 +664,15 @@ export class RuntimeController {
       title: record.title,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
+      workspaceId: record.workspaceId,
     });
   }
 
-  #createHarness(id: string): Promise<AgentHandle> {
+  #createHarness(id: string, workspace: string): Promise<AgentHandle> {
     const selection = this.#ctx.agentDefaultModel.currentSelection();
     return this.#ctx.agents.create({
       sessionId: SessionId(id),
-      meta: { cwd: process.cwd() },
+      meta: { cwd: workspace },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup: (agentContext) => {
         installModelSelection(agentContext, {

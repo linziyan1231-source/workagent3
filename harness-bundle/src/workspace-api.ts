@@ -65,13 +65,16 @@ export class WorkspaceController {
   readonly #token: string;
   readonly #store: WorkspaceStore;
 
-  constructor(ctx: Context, token: string) {
+  constructor(ctx: Context, token: string, store?: WorkspaceStore) {
     this.#token = token;
-    const root = process.env.WORKAGENT_WORKSPACE_ROOT;
-    const dshHome = process.env.DSH_HOME;
-    if (root === undefined || dshHome === undefined)
-      throw new Error("workagent-workspace-api: private roots are required");
-    this.#store = new WorkspaceStore(root, dshHome);
+    if (store === undefined) {
+      const root = process.env.WORKAGENT_WORKSPACE_ROOT;
+      const dshHome = process.env.DSH_HOME;
+      if (root === undefined || dshHome === undefined)
+        throw new Error("workagent-workspace-api: private roots are required");
+      store = new WorkspaceStore(root, dshHome);
+    }
+    this.#store = store;
     ctx.effect(
       () =>
         ctx.webServer.register({
