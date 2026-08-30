@@ -21,6 +21,15 @@
       "requiredMcpServerIds": ["professional-database"]
     },
     {
+      "id": "pdf",
+      "name": "pdf",
+      "description": "Read, create, edit, render, fill, merge, split, and validate PDF files.",
+      "version": "0.1.0",
+      "relativePath": "pdf",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
       "id": "wiki-dream",
       "name": "wiki-dream",
       "description": "Run an incremental or weekly deep maintenance cycle for an OKF project wiki.",
