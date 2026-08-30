@@ -1,0 +1,23 @@
+{
+  "promptExamplesHint": "Спробуйте ці інструкції",
+  "defaultPrompts": {
+    "capabilities": "Що ти можеш зробити для мене?",
+    "skills": "Які в тебе є навички?",
+    "tools": "Які в тебе є інструменти?"
+  },
+  "selectAssistantHint": "Виберіть асистента, щоб розпочати завдання",
+  "workspace": {
+    "workInProject": "Працювати в проєкті",
+    "optional": "Необов'язково",
+    "clearWorkspace": "Очистити",
+    "specifyWorkspace": "Вибрати папку проєкту",
+    "searchPlaceholder": "Пошук проєктів…",
+    "createProject": "Створити новий проєкт",
+    "projectNamePlaceholder": "Введіть назву папки проєкту",
+    "createProjectSuccess": "Проєкт «{{name}}» створено",
+    "projectExists": "Проєкт із такою назвою вже існує",
+    "projectNameInvalid": "Недійсна назва проєкту",
+    "createProjectFailed": "Не вдалося створити проєкт",
+    "noProject": "Без проєкту"
+  }
+}

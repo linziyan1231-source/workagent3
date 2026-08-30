@@ -1,0 +1,23 @@
+{
+  "promptExamplesHint": "Experimente estas instruções",
+  "defaultPrompts": {
+    "capabilities": "O que você pode fazer por mim?",
+    "skills": "Quais habilidades você tem?",
+    "tools": "Quais ferramentas você tem?"
+  },
+  "selectAssistantHint": "Selecione um assistente para iniciar uma tarefa",
+  "workspace": {
+    "workInProject": "Trabalhar em um projeto",
+    "optional": "Opcional",
+    "clearWorkspace": "Limpar",
+    "specifyWorkspace": "Selecionar pasta do projeto",
+    "searchPlaceholder": "Procurar projetos…",
+    "createProject": "Criar novo projeto",
+    "projectNamePlaceholder": "Digite o nome da pasta do projeto",
+    "createProjectSuccess": "Projeto “{{name}}” criado",
+    "projectExists": "Já existe um projeto com este nome",
+    "projectNameInvalid": "O nome do projeto é inválido",
+    "createProjectFailed": "Não foi possível criar o projeto",
+    "noProject": "Nenhum Projeto"
+  }
+}

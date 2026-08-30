@@ -1,0 +1,23 @@
+{
+  "promptExamplesHint": "これらの指示を試す",
+  "defaultPrompts": {
+    "capabilities": "私のために何ができますか？",
+    "skills": "どのようなスキルがありますか？",
+    "tools": "どのようなツールがありますか？"
+  },
+  "selectAssistantHint": "アシスタントを選択してタスクを開始",
+  "workspace": {
+    "workInProject": "プロジェクトで作業",
+    "optional": "任意",
+    "clearWorkspace": "クリア",
+    "specifyWorkspace": "プロジェクトフォルダを選択",
+    "searchPlaceholder": "プロジェクトを検索…",
+    "createProject": "新しいプロジェクトを作成",
+    "projectNamePlaceholder": "プロジェクトフォルダ名を入力",
+    "createProjectSuccess": "プロジェクト「{{name}}」を作成しました",
+    "projectExists": "同じ名前のプロジェクトが既に存在します",
+    "projectNameInvalid": "プロジェクト名が無効です",
+    "createProjectFailed": "プロジェクトを作成できませんでした",
+    "noProject": "プロジェクトなし"
+  }
+}

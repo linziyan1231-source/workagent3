@@ -1,0 +1,23 @@
+{
+  "promptExamplesHint": "نمونه پرامپت‌ها را امتحان کنید:",
+  "defaultPrompts": {
+    "capabilities": "چه کارهایی می‌توانید برای من انجام دهید؟",
+    "skills": "چه مهارت‌هایی دارید؟",
+    "tools": "چه ابزارهایی دارید؟"
+  },
+  "selectAssistantHint": "یک دستیار برای شروع کار انتخاب کنید",
+  "workspace": {
+    "workInProject": "کار در پروژه",
+    "optional": "اختیاری",
+    "clearWorkspace": "پاک کردن",
+    "specifyWorkspace": "انتخاب پوشه پروژه",
+    "searchPlaceholder": "جستجوی پروژه‌ها…",
+    "createProject": "ایجاد پروژه جدید",
+    "projectNamePlaceholder": "نام پوشه پروژه را وارد کنید",
+    "createProjectSuccess": "پروژه «{{name}}» ایجاد شد",
+    "projectExists": "پروژه‌ای با این نام از قبل وجود دارد",
+    "projectNameInvalid": "نام پروژه نامعتبر است",
+    "createProjectFailed": "ایجاد پروژه ناموفق بود",
+    "noProject": "بدون پروژه"
+  }
+}

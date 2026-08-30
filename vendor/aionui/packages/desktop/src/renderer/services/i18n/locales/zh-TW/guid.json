@@ -1,0 +1,23 @@
+{
+  "promptExamplesHint": "試試這些指令",
+  "defaultPrompts": {
+    "capabilities": "你能為我做哪些事情？",
+    "skills": "你有哪些技能？",
+    "tools": "你有哪些工具？"
+  },
+  "selectAssistantHint": "選擇一位助手開始任務",
+  "workspace": {
+    "workInProject": "在專案中工作",
+    "optional": "可選",
+    "clearWorkspace": "清除",
+    "specifyWorkspace": "選擇專案資料夾",
+    "searchPlaceholder": "搜尋專案…",
+    "createProject": "建立新專案",
+    "projectNamePlaceholder": "輸入專案資料夾名稱",
+    "createProjectSuccess": "專案「{{name}}」已建立",
+    "projectExists": "已存在同名專案",
+    "projectNameInvalid": "專案名稱無效",
+    "createProjectFailed": "建立專案失敗",
+    "noProject": "不使用專案"
+  }
+}
