@@ -76,4 +76,47 @@ describe("production Renderer MCP adapter", () => {
     });
     expect(result).toMatchObject({ success: false, needsAuth: true });
   });
+
+  it("stores Renderer MCP headers in the credential broker first", async () => {
+    const fetch = vi.fn(async (path: string, request?: RequestInit) => {
+      if (path === "/api/runtime/v1/credentials")
+        return new Response(
+          JSON.stringify({
+            id: "credential-1",
+            kind: "mcp_header",
+            state: "ready",
+            label: "Search: Authorization",
+            updatedAt: "2026-08-30T10:00:00Z",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      const mutation = JSON.parse(String(request?.body));
+      expect(mutation.transport.headerCredentialIds).toEqual({
+        Authorization: "credential-1",
+      });
+      expect(String(request?.body)).not.toContain("Bearer private");
+      return new Response(
+        JSON.stringify({
+          id: "mcp-1",
+          ...mutation,
+          health: "unknown",
+          createdAt: "2026-08-30T10:00:00Z",
+          updatedAt: "2026-08-30T10:00:00Z",
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    await mcpService.createServer.invoke({
+      name: "Search",
+      transport: {
+        type: "http",
+        url: "https://example.com/mcp",
+        headers: { Authorization: "Bearer private" },
+      },
+      original_json: "{}",
+      builtin: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
 });

@@ -4,6 +4,7 @@ import type {
   RuntimeMcpServer,
 } from "@workagent/contracts";
 import { mcpPort } from "../../features/mcp/mcpPort.js";
+import { credentialPort } from "../../features/credentials/credentialPort.js";
 
 export type IExtensionSettingsTab = {
   id: string;
@@ -109,39 +110,69 @@ const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
   invoke,
 });
 
-const noPlaintext = (values?: Record<string, string>) => {
-  if (values !== undefined && Object.keys(values).length !== 0)
-    throw new Error("mcp_plaintext_credentials_unsupported");
-  return {};
-};
-
-const toRuntimeTransport = (
+const toRuntimeTransport = async (
   transport: IMcpServerTransport,
-): RuntimeMcpMutation["transport"] => {
+  serverName: string,
+  createdCredentialIds: string[],
+): Promise<RuntimeMcpMutation["transport"]> => {
+  const references: Record<string, string> = {};
+  const values = transport.type === "stdio" ? transport.env : transport.headers;
+  for (const [name, secret] of Object.entries(values ?? {})) {
+    const metadata = await credentialPort.create({
+      kind: transport.type === "stdio" ? "mcp_env" : "mcp_header",
+      label: `${serverName}: ${name}`,
+      secret,
+    });
+    references[name] = metadata.id;
+    createdCredentialIds.push(metadata.id);
+  }
   if (transport.type === "stdio")
     return {
       kind: "stdio",
       command: transport.command,
       args: transport.args ?? [],
-      environmentCredentialIds: noPlaintext(transport.env),
+      environmentCredentialIds: references,
     };
   return {
     kind: transport.type === "streamable_http" ? "http" : transport.type,
     url: transport.url,
-    headerCredentialIds: noPlaintext(transport.headers),
+    headerCredentialIds: references,
   };
 };
 
-const toMutation = (server: LegacyPayload): RuntimeMcpMutation => ({
-  name: server.name,
-  description: server.description,
-  source: "user",
-  enabled: true,
-  transport: toRuntimeTransport(server.transport),
-  toolPolicy: "all",
-  allowedTools: [],
-  oauthState: "none",
-});
+const prepareMutation = async (server: LegacyPayload) => {
+  const credentialIds: string[] = [];
+  try {
+    const mutation: RuntimeMcpMutation = {
+      name: server.name,
+      description: server.description,
+      source: "user",
+      enabled: true,
+      transport: await toRuntimeTransport(
+        server.transport,
+        server.name,
+        credentialIds,
+      ),
+      toolPolicy: "all",
+      allowedTools: [],
+      oauthState: "none",
+    };
+    return { mutation, credentialIds };
+  } catch (error) {
+    await Promise.allSettled(credentialIds.map(credentialPort.revoke));
+    throw error;
+  }
+};
+
+const createLegacyServer = async (server: LegacyPayload) => {
+  const prepared = await prepareMutation(server);
+  try {
+    return toLegacyMcpServer(await mcpPort.create(prepared.mutation));
+  } catch (error) {
+    await Promise.allSettled(prepared.credentialIds.map(credentialPort.revoke));
+    throw error;
+  }
+};
 
 const toLegacyTransport = (
   transport: RuntimeMcpServer["transport"],
@@ -184,16 +215,9 @@ export const mcpService = {
   listServers: command<void, IMcpServer[]>(async () =>
     (await mcpPort.list()).map(toLegacyMcpServer),
   ),
-  createServer: command<LegacyPayload, IMcpServer>(async (input) =>
-    toLegacyMcpServer(await mcpPort.create(toMutation(input))),
-  ),
+  createServer: command<LegacyPayload, IMcpServer>(createLegacyServer),
   importServers: command<{ servers: LegacyPayload[] }, IMcpServer[]>(
-    async ({ servers }) =>
-      Promise.all(
-        servers.map(async (server) =>
-          toLegacyMcpServer(await mcpPort.create(toMutation(server))),
-        ),
-      ),
+    async ({ servers }) => Promise.all(servers.map(createLegacyServer)),
   ),
   batchImportServers: command<
     {
@@ -204,18 +228,14 @@ export const mcpService = {
     IMcpServer[]
   >(async ({ servers }) =>
     Promise.all(
-      servers.map(async (server) =>
-        toLegacyMcpServer(
-          await mcpPort.create(
-            toMutation({
-              name: server.name,
-              description: server.description,
-              transport: server.transport,
-              original_json: server.original_json ?? "{}",
-              builtin: server.builtin,
-            }),
-          ),
-        ),
+      servers.map((server) =>
+        createLegacyServer({
+          name: server.name,
+          description: server.description,
+          transport: server.transport,
+          original_json: server.original_json ?? "{}",
+          builtin: server.builtin,
+        }),
       ),
     ),
   ),
@@ -226,9 +246,19 @@ export const mcpService = {
     const mutation: Partial<RuntimeMcpMutation> = {};
     if (data.name !== undefined) mutation.name = data.name;
     if (data.description !== undefined) mutation.description = data.description;
-    if (data.transport !== undefined)
-      mutation.transport = toRuntimeTransport(data.transport);
-    return toLegacyMcpServer(await mcpPort.update(id, mutation));
+    const credentialIds: string[] = [];
+    try {
+      if (data.transport !== undefined)
+        mutation.transport = await toRuntimeTransport(
+          data.transport,
+          data.name ?? id,
+          credentialIds,
+        );
+      return toLegacyMcpServer(await mcpPort.update(id, mutation));
+    } catch (error) {
+      await Promise.allSettled(credentialIds.map(credentialPort.revoke));
+      throw error;
+    }
   }),
   deleteServer: command<{ id: string }, void>(async ({ id }) =>
     mcpPort.remove(id),

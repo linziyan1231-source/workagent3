@@ -56,6 +56,18 @@ export const credentialStatusSchema = z.object({
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 export const credentialStatusListSchema = z.array(credentialStatusSchema);
 
+export const credentialCreateSchema = z
+  .object({
+    kind: z.enum(["mcp_header", "mcp_env"]),
+    label: z.string().trim().min(1).max(160),
+    secret: z
+      .string()
+      .min(1)
+      .max(32 * 1024),
+  })
+  .strict();
+export type CredentialCreate = z.infer<typeof credentialCreateSchema>;
+
 export interface ModelCatalogPort {
   listModels(): Promise<readonly ModelCatalogEntry[]>;
   getModel(modelId: string): Promise<ModelCatalogEntry | undefined>;

@@ -2,6 +2,8 @@ package userhost
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -148,5 +150,44 @@ func TestRuntimeGatewayListsMetadataAndAcceptsCredentialReferences(t *testing.T)
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("credential reference response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRuntimeGatewayCreatesAndRevokesMCPSecrets(t *testing.T) {
+	catalog, err := mcpruntime.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	credentials := openGatewayCredentials(t)
+	target, _ := url.Parse("http://127.0.0.1:1")
+	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, target, "token")
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/credentials", strings.NewReader(`{"kind":"mcp_header","label":"Authorization","secret":"Bearer private"}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || strings.Contains(response.Body.String(), "Bearer private") {
+		t.Fatalf("create credential response %d: %s", response.Code, response.Body.String())
+	}
+	var metadata credentialbroker.Metadata
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := credentials.Resolve(context.Background(), metadata.ID)
+	if err != nil || string(secret) != "Bearer private" {
+		t.Fatalf("credential was not protected: %q, %v", secret, err)
+	}
+	clearBytes(secret)
+
+	revoke := httptest.NewRequest(http.MethodDelete, "/v1/credentials/"+metadata.ID, nil)
+	revoke.Header.Set("Authorization", "Bearer token")
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, revoke)
+	if revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke credential response %d: %s", revoked.Code, revoked.Body.String())
+	}
+	if _, err := credentials.Resolve(context.Background(), metadata.ID); !errors.Is(err, credentialbroker.ErrCredentialExpired) {
+		t.Fatalf("revoked credential remains resolvable: %v", err)
 	}
 }

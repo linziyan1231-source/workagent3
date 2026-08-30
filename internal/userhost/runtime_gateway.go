@@ -85,12 +85,16 @@ type credentialCatalog interface {
 type runtimeCredentialCatalog interface {
 	credentialCatalog
 	projectionCredentialResolver
+	Put(context.Context, credentialbroker.Input) (credentialbroker.Metadata, error)
+	Revoke(context.Context, string) error
 }
 
 func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
+	mux.HandleFunc("POST /v1/credentials", createCredential(credentials))
+	mux.HandleFunc("DELETE /v1/credentials/{id}", revokeCredential(credentials, publisher))
 	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog, credentials))
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
@@ -112,6 +116,66 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func createCredential(credentials runtimeCredentialCatalog) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		var input struct {
+			Kind   credentialbroker.Kind `json:"kind"`
+			Label  string                `json:"label"`
+			Secret string                `json:"secret"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil || (input.Kind != credentialbroker.KindMCPHeader && input.Kind != credentialbroker.KindMCPEnv) ||
+			strings.TrimSpace(input.Label) == "" || input.Secret == "" || len(input.Secret) > 32*1024 || strings.IndexByte(input.Secret, 0) >= 0 {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_credential")
+			return
+		}
+		id, err := auth.RandomToken(18)
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		secret := []byte(input.Secret)
+		metadata, err := credentials.Put(request.Context(), credentialbroker.Input{
+			ID: id, Kind: input.Kind, Label: input.Label, Secret: secret, State: credentialbroker.StateReady,
+		})
+		clearBytes(secret)
+		input.Secret = ""
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_credential")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusCreated, metadata)
+	}
+}
+
+func revokeCredential(credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		metadata, err := credentials.Metadata(request.Context(), request.PathValue("id"))
+		if errors.Is(err, credentialbroker.ErrNotFound) {
+			writeRuntimeError(writer, http.StatusNotFound, "credential_not_found")
+			return
+		}
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		if metadata.Kind != credentialbroker.KindMCPHeader && metadata.Kind != credentialbroker.KindMCPEnv && metadata.Kind != credentialbroker.KindMCPOAuth {
+			writeRuntimeError(writer, http.StatusForbidden, "native_credential_read_only")
+			return
+		}
+		if err := credentials.Revoke(request.Context(), metadata.ID); err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func listSkills(skills *skillruntime.Store) http.HandlerFunc {
