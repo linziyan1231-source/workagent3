@@ -5,5 +5,6 @@ export * from "./migration.js";
 export * from "./model-access.js";
 export * from "./module.js";
 export * from "./preset.js";
+export * from "./quota.js";
 export * from "./runtime.js";
 export * from "./workspace.js";

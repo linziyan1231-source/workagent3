@@ -338,6 +338,10 @@ export default defineConfig({
         replacement: adapter("extensionSettings.ts"),
       },
       {
+        find: "./contents/ExtensionSettingsTabContent",
+        replacement: adapter("ExtensionSettingsTabContent.tsx"),
+      },
+      {
         find: "../../hooks/context/AuthContext",
         replacement: adapter("authContext.tsx"),
       },

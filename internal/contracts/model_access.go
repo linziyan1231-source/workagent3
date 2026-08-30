@@ -36,7 +36,9 @@ type AuthorizedModel struct {
 }
 
 type QuotaUsage struct {
-	LimitUnits    int64 `json:"limitUnits"`
-	ConsumedUnits int64 `json:"consumedUnits"`
-	ReservedUnits int64 `json:"reservedUnits"`
+	LimitUnits    int64  `json:"limitUnits"`
+	ConsumedUnits int64  `json:"consumedUnits"`
+	ReservedUnits int64  `json:"reservedUnits"`
+	Period        string `json:"period"`
+	PeriodKey     string `json:"periodKey"`
 }

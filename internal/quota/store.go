@@ -271,7 +271,7 @@ ORDER BY CASE period WHEN 'daily' THEN 0 ELSE 1 END LIMIT 1`, sid, modelID).Scan
 }
 
 func usageFor(ctx context.Context, q queryer, sid, modelID string, period Period, key string, limit int64) (Usage, error) {
-	usage := Usage{LimitUnits: limit}
+	usage := Usage{LimitUnits: limit, Period: string(period), PeriodKey: key}
 	err := q.QueryRowContext(ctx, `
 SELECT COALESCE(SUM(CASE WHEN status = 'settled' THEN actual_units ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN status = 'reserved' THEN reserved_units ELSE 0 END), 0)
