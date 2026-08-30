@@ -76,6 +76,14 @@ export type RuntimeMcpConnectionResult = z.infer<
   typeof runtimeMcpConnectionResultSchema
 >;
 
+export const runtimeMcpOAuthStartSchema = z.object({
+  authorizationUrl: z.url(),
+  flowId: z.string().min(1),
+  state: z.string().min(1),
+  expiresAt: z.iso.datetime({ offset: true }),
+});
+export type RuntimeMcpOAuthStart = z.infer<typeof runtimeMcpOAuthStartSchema>;
+
 export const runtimeMcpMutationSchema = runtimeMcpServerSchema
   .omit({ id: true, createdAt: true, updatedAt: true, health: true })
   .safeExtend({ health: runtimeMcpServerSchema.shape.health.optional() })

@@ -26,6 +26,7 @@ type runtimeGateway struct {
 	credentials *credentialbroker.Store
 	skills      *skillruntime.Store
 	migration   *skillmigration.Store
+	oauth       *mcpOAuthManager
 }
 
 func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (*runtimeGateway, error) {
@@ -67,8 +68,9 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, migration, target, token)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration}, nil
+	oauth := newMCPOAuthManager(catalog, credentials, publisher)
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token)
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth}, nil
 }
 
 func (g *runtimeGateway) Close() error {
@@ -104,7 +106,7 @@ type runtimeCredentialCatalog interface {
 	Revoke(context.Context, string) error
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, target *url.URL, token string) http.Handler {
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
@@ -122,6 +124,11 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 	if migration != nil {
 		mux.HandleFunc("GET /v1/migrations/skills-mcp", listSkillMCPMigration(migration))
 	}
+	if oauth != nil {
+		mux.HandleFunc("POST /v1/mcp-servers/{id}/oauth/start", startMCPOAuth(oauth))
+		mux.HandleFunc("POST /v1/mcp-servers/{id}/oauth/complete", completeMCPOAuth(oauth))
+		mux.HandleFunc("DELETE /v1/mcp-servers/{id}/oauth", logoutMCPOAuth(oauth))
+	}
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")
 	})
@@ -134,6 +141,81 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func startMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		var input struct {
+			RedirectURI string `json:"redirectUri"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 16*1024))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil || !redirectMatchesRequest(input.RedirectURI, request) {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_oauth_redirect_uri")
+			return
+		}
+		result, err := manager.start(request.Context(), request.PathValue("id"), input.RedirectURI)
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, result)
+	}
+}
+
+func completeMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		var input struct {
+			FlowID string `json:"flowId"`
+			State  string `json:"state"`
+			Code   string `json:"code"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 32*1024))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_oauth_callback")
+			return
+		}
+		if err := manager.complete(request.Context(), request.PathValue("id"), input.FlowID, input.State, input.Code); err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+		server, err := manager.catalog.Get(request.Context(), request.PathValue("id"))
+		if err != nil {
+			writeRuntimeError(writer, http.StatusNotFound, "mcp_server_not_found")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, server)
+	}
+}
+
+func logoutMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if err := manager.logout(request.Context(), request.PathValue("id")); err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func redirectMatchesRequest(raw string, request *http.Request) bool {
+	redirect, err := url.Parse(raw)
+	if err != nil || redirect.Host == "" || redirect.Path != "/oauth/mcp/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
+		return false
+	}
+	expectedHost := request.Header.Get("X-Forwarded-Host")
+	if expectedHost == "" {
+		expectedHost = request.Host
+	}
+	expectedScheme := request.Header.Get("X-Forwarded-Proto")
+	if expectedScheme == "" {
+		expectedScheme = request.URL.Scheme
+	}
+	if expectedScheme == "" {
+		expectedScheme = "http"
+	}
+	return strings.EqualFold(redirect.Host, expectedHost) && strings.EqualFold(redirect.Scheme, expectedScheme)
 }
 
 func listSkillMCPMigration(migration *skillmigration.Store) http.HandlerFunc {

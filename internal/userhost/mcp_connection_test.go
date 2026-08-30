@@ -41,7 +41,7 @@ func TestRuntimeGatewayTestsStreamableHTTPMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "token")
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp-servers/"+created.ID+"/test", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestRuntimeGatewayReportsUnsupportedMCPTest(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "token")
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp-servers/"+created.ID+"/test", nil)
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()

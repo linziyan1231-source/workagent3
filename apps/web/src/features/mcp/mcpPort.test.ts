@@ -77,4 +77,57 @@ describe("MCP HTTP port", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("routes OAuth start, completion, and logout through the runtime", async () => {
+    const fetch = vi.fn(async (path: string, request?: RequestInit) => {
+      if (String(path).endsWith("/oauth/start")) {
+        expect(JSON.parse(String(request?.body))).toEqual({
+          redirectUri: "http://127.0.0.1:8088/oauth/mcp/callback",
+        });
+        return new Response(
+          JSON.stringify({
+            authorizationUrl: "https://auth.example/authorize",
+            flowId: "flow-1",
+            state: "state-1",
+            expiresAt: "2026-08-30T10:10:00Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (String(path).endsWith("/oauth/complete")) {
+        expect(JSON.parse(String(request?.body))).toEqual({
+          flowId: "flow-1",
+          state: "state-1",
+          code: "code-1",
+        });
+        return new Response(
+          JSON.stringify({ ...server, oauthState: "ready" }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      mcpPort.startOAuth("mcp/one", "http://127.0.0.1:8088/oauth/mcp/callback"),
+    ).resolves.toMatchObject({ flowId: "flow-1" });
+    await expect(
+      mcpPort.completeOAuth("mcp/one", {
+        flowId: "flow-1",
+        state: "state-1",
+        code: "code-1",
+      }),
+    ).resolves.toMatchObject({ oauthState: "ready" });
+    await mcpPort.logoutOAuth("mcp/one");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "/api/runtime/v1/mcp-servers/mcp%2Fone/oauth",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });

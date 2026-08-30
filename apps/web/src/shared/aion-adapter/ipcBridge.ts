@@ -78,6 +78,56 @@ export const acpConversation = unavailableService;
 export const dialog = unavailableService;
 export const fs = unavailableService;
 
+const oauthCallbackType = "workagent:mcp-oauth";
+
+type OAuthPopupResult = {
+  code: string | null;
+  state: string | null;
+  error: string | null;
+};
+
+async function findMcpServerByURL(serverURL: string) {
+  return (await mcpPort.list()).find(
+    (server) =>
+      server.transport.kind !== "stdio" && server.transport.url === serverURL,
+  );
+}
+
+export function waitForMcpOAuthPopup(
+  popup: Window,
+  expectedState: string,
+  timeoutMs = 10 * 60 * 1000,
+): Promise<OAuthPopupResult> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => finish(new Error("mcp_oauth_timeout")),
+      timeoutMs,
+    );
+    const closed = window.setInterval(() => {
+      if (popup.closed) finish(new Error("mcp_oauth_window_closed"));
+    }, 250);
+    const onMessage = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== popup ||
+        event.data?.type !== oauthCallbackType ||
+        event.data?.state !== expectedState
+      ) {
+        return;
+      }
+      finish(undefined, event.data as OAuthPopupResult);
+    };
+    function finish(error?: Error, result?: OAuthPopupResult) {
+      window.clearTimeout(timeout);
+      window.clearInterval(closed);
+      window.removeEventListener("message", onMessage);
+      if (error) reject(error);
+      else resolve(result!);
+    }
+    window.addEventListener("message", onMessage);
+  });
+}
+
 export type SessionMentionTarget = {
   id: string;
   name: string;
@@ -291,12 +341,58 @@ export const mcpService = {
     };
   }),
   checkOAuthStatus: command<{ server_url: string }, { authenticated: boolean }>(
-    async () => ({ authenticated: false }),
+    async ({ server_url }) => ({
+      authenticated:
+        (await findMcpServerByURL(server_url))?.oauthState === "ready",
+    }),
   ),
   loginMcpOAuth: command<
     { server_url: string },
     { success: boolean; error: string }
-  >(async () => ({ success: false, error: "mcp_oauth_unavailable" })),
-  logoutMcpOAuth: command<{ server_url: string }, void>(async () => undefined),
-  getAuthenticatedServers: command<void, string[]>(async () => []),
+  >(async ({ server_url }) => {
+    try {
+      const server = await findMcpServerByURL(server_url);
+      if (!server) throw new Error("mcp_server_not_found");
+      const redirectUri = new URL(
+        "/oauth/mcp/callback",
+        window.location.origin,
+      ).toString();
+      const flow = await mcpPort.startOAuth(server.id, redirectUri);
+      const popup = window.open(
+        flow.authorizationUrl,
+        "workagent-mcp-oauth",
+        "popup,width=560,height=720",
+      );
+      if (!popup) throw new Error("mcp_oauth_popup_blocked");
+      const result = await waitForMcpOAuthPopup(popup, flow.state);
+      if (result.error) throw new Error(`mcp_oauth_denied:${result.error}`);
+      if (!result.code || !result.state)
+        throw new Error("invalid_oauth_callback");
+      await mcpPort.completeOAuth(server.id, {
+        flowId: flow.flowId,
+        state: result.state,
+        code: result.code,
+      });
+      return { success: true, error: "" };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "mcp_oauth_failed",
+      };
+    }
+  }),
+  logoutMcpOAuth: command<{ server_url: string }, void>(
+    async ({ server_url }) => {
+      const server = await findMcpServerByURL(server_url);
+      if (!server) throw new Error("mcp_server_not_found");
+      await mcpPort.logoutOAuth(server.id);
+    },
+  ),
+  getAuthenticatedServers: command<void, string[]>(async () =>
+    (await mcpPort.list()).flatMap((server) =>
+      server.oauthState === "ready" && server.transport.kind !== "stdio"
+        ? [server.transport.url]
+        : [],
+    ),
+  ),
 };

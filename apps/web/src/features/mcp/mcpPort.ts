@@ -1,10 +1,12 @@
 import {
   runtimeMcpMutationSchema,
   runtimeMcpConnectionResultSchema,
+  runtimeMcpOAuthStartSchema,
   runtimeMcpServerListSchema,
   runtimeMcpServerSchema,
   type RuntimeMcpMutation,
   type RuntimeMcpConnectionResult,
+  type RuntimeMcpOAuthStart,
   type RuntimeMcpServer,
 } from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
@@ -47,5 +49,40 @@ export const mcpPort = {
         method: "POST",
       }),
     );
+  },
+  async startOAuth(
+    id: string,
+    redirectUri: string,
+  ): Promise<RuntimeMcpOAuthStart> {
+    return runtimeMcpOAuthStartSchema.parse(
+      await requestJson<unknown>(
+        `${base}/${encodeURIComponent(id)}/oauth/start`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ redirectUri }),
+        },
+      ),
+    );
+  },
+  async completeOAuth(
+    id: string,
+    input: { flowId: string; state: string; code: string },
+  ): Promise<RuntimeMcpServer> {
+    return runtimeMcpServerSchema.parse(
+      await requestJson<unknown>(
+        `${base}/${encodeURIComponent(id)}/oauth/complete`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  },
+  async logoutOAuth(id: string): Promise<void> {
+    await requestJson<void>(`${base}/${encodeURIComponent(id)}/oauth`, {
+      method: "DELETE",
+    });
   },
 };

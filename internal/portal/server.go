@@ -314,6 +314,12 @@ func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request,
 		outgoing.URL.Path = "/" + strings.TrimPrefix(request.URL.Path, "/api/runtime/")
 		outgoing.Header.Del("Cookie")
 		outgoing.Header.Set("Authorization", "Bearer "+endpoint.Token)
+		outgoing.Header.Set("X-Forwarded-Host", request.Host)
+		if s.secure {
+			outgoing.Header.Set("X-Forwarded-Proto", "https")
+		} else {
+			outgoing.Header.Set("X-Forwarded-Proto", "http")
+		}
 	}
 	proxy.ErrorHandler = func(response http.ResponseWriter, _ *http.Request, _ error) {
 		writeError(response, http.StatusBadGateway, "runtime_proxy_failed")

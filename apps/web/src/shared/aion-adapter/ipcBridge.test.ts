@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { afterEach, vi } from "vitest";
-import { mcpService, toLegacyMcpServer } from "./ipcBridge.js";
+import {
+  mcpService,
+  toLegacyMcpServer,
+  waitForMcpOAuthPopup,
+} from "./ipcBridge.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -118,5 +122,35 @@ describe("production Renderer MCP adapter", () => {
       builtin: false,
     });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts only the matching OAuth popup callback", async () => {
+    const popup = { closed: false } as Window;
+    const waiting = waitForMcpOAuthPopup(popup, "expected-state", 1000);
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: window.location.origin,
+        source: popup,
+        data: {
+          type: "workagent:mcp-oauth",
+          state: "wrong-state",
+          code: "wrong-code",
+        },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: window.location.origin,
+        source: popup,
+        data: {
+          type: "workagent:mcp-oauth",
+          state: "expected-state",
+          code: "code-1",
+          error: null,
+        },
+      }),
+    );
+
+    await expect(waiting).resolves.toMatchObject({ code: "code-1" });
   });
 });

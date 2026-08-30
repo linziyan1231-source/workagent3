@@ -8,6 +8,7 @@ import { presetPort } from "../features/presets/presetPort.js";
 import { mcpPort } from "../features/mcp/mcpPort.js";
 import { skillPort } from "../features/skills/skillPort.js";
 import { automationPort } from "../features/automation/automationPort.js";
+import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
 
 const workspaceAssets = {
   list: workspacePort.assets,
@@ -21,6 +22,13 @@ const capabilities = {
 };
 
 export function App() {
+  if (window.location.pathname === "/oauth/mcp/callback") {
+    return <OAuthCallbackPage />;
+  }
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
   const [workspaceId, setWorkspaceId] = useState<string>();
 
