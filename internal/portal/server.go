@@ -38,11 +38,16 @@ func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bo
 }
 
 func (s *Server) Handler() http.Handler {
+	return s.HandlerWithWeb(http.NotFoundHandler())
+}
+
+func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
+	mux.Handle("/", web)
 	return s.securityHeaders(mux)
 }
 

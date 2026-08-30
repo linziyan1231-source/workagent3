@@ -17,6 +17,21 @@ pnpm check
 pnpm profile:dump
 ```
 
+Build the browser client and Portal:
+
+```powershell
+pnpm build
+& scripts/go.ps1 @('build', '-o', 'bin/portal.exe', './cmd/portal')
+```
+
+The Portal serves `apps/web/dist` and defaults to secure cookies. For a local
+HTTP-only development run, pass `-secure-cookie=false`. A first local user can
+be created once with `WORKAGENT_BOOTSTRAP_USERNAME`,
+`WORKAGENT_BOOTSTRAP_PASSWORD`, and `WORKAGENT_BOOTSTRAP_SID`; do not place
+those values in source control. `WORKAGENT_RUNTIME_URL`,
+`WORKAGENT_RUNTIME_TOKEN`, and `WORKAGENT_RUNTIME_SID` register a loopback
+development runtime. Production runtime registration is owned by UserHost.
+
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.

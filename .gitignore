@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
 .cache/
 .env
 .env.*
@@ -11,4 +12,3 @@ bin/
 data/
 runtime/
 dsh-home/
-
