@@ -16,6 +16,7 @@ import { AionSendBox } from "../../shared/ui/aionui/AionSendBox.js";
 import { AionSettingsModal } from "../../shared/ui/aionui/AionSettingsModal.js";
 import { AionSider } from "../../shared/ui/aionui/AionSider.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
+import { AionMessage } from "../../shared/ui/aionui/AionMessage.js";
 
 export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;
 
@@ -541,14 +542,13 @@ export function ConversationPage({
               ))}
             {!isGuid &&
               activeMessages.map((message) => (
-                <article
-                  className={`aion-message message-item ${message.role}`}
+                <AionMessage
                   key={message.id}
-                >
-                  <div className="aion-message-body">
-                    <p>{message.text}</p>
-                  </div>
-                </article>
+                  conversationId={activeId!}
+                  id={message.id}
+                  role={message.role}
+                  text={message.text}
+                />
               ))}
           </div>
         </div>
