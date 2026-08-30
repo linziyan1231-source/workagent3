@@ -47,6 +47,25 @@ export class CodexBridge implements EngineBridge {
     return session;
   }
 
+  async resume(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+  ): Promise<BridgeSession> {
+    const rpc = await this.#connection();
+    await rpc.request("thread/resume", {
+      threadId: nativeId,
+      cwd: workspace,
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+    });
+    const session = new CodexSession(rpc, nativeId, onEvent, () => {
+      this.#sessions.delete(nativeId);
+    });
+    this.#sessions.set(nativeId, session);
+    return session;
+  }
+
   async probe(): Promise<void> {
     await this.#connection();
   }

@@ -30,5 +30,10 @@ export type EngineBridge = {
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
   ): Promise<BridgeSession>;
+  resume(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+  ): Promise<BridgeSession>;
   close(): Promise<void>;
 };

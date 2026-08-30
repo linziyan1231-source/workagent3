@@ -64,6 +64,30 @@ try {
         const body = await response.json();
         if (body.status !== "healthy")
           throw new Error("unexpected health response");
+        if (process.env.WORKAGENT_SMOKE_RESUME_ONLY === "1") {
+          const listed = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+            headers: { authorization: `Bearer ${token}` },
+          });
+          const sessions = await listed.json();
+          const harness = sessions.find((item) => item.engine === "harness");
+          if (!harness) throw new Error("no persisted Harness session found");
+          const resumed = await fetch(
+            `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(harness.id)}/resume`,
+            {
+              method: "POST",
+              headers: { authorization: `Bearer ${token}` },
+            },
+          );
+          if (!resumed.ok)
+            throw new Error(
+              `Harness resume failed with ${resumed.status}: ${await resumed.text()}`,
+            );
+          process.stdout.write(
+            `workagent resumed persisted Harness session ${harness.id}\n`,
+          );
+          succeeded = true;
+          break;
+        }
         const engines = [
           "harness",
           ...(process.env.WORKAGENT_NATIVE_SMOKE_ENGINES ?? "")

@@ -19,6 +19,7 @@ import type {
   EngineBridge,
 } from "./engines/types.js";
 import { authorized } from "./index.js";
+import { SessionIndex, type StoredSession } from "./session-index.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -26,7 +27,9 @@ type SessionRecord = {
   events: PublicEvent[];
   handle: AgentHandle | undefined;
   native: BridgeSession | undefined;
+  nativeId: string;
   nextEventSequence: number;
+  activating: Promise<void> | undefined;
   title: string;
   updatedAt: string;
 };
@@ -156,12 +159,20 @@ export class RuntimeController {
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
+  readonly #index: SessionIndex;
 
   constructor(ctx: Context, token: string) {
     this.#ctx = ctx;
     this.#token = token;
+    const dshHome = process.env.DSH_HOME;
+    if (dshHome === undefined)
+      throw new Error("workagent-runtime-api: DSH_HOME is required");
+    this.#index = new SessionIndex(dshHome);
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
+    for (const session of this.#index.list()) {
+      this.#sessions.set(session.id, this.#record(session));
+    }
   }
 
   mount(): void {
@@ -213,7 +224,45 @@ export class RuntimeController {
       await this.#create(request, response);
       return;
     }
-    const match = /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events)$/.exec(path);
+    const sessionMatch = /^\/v1\/sessions\/([^/]+)$/.exec(path);
+    if (sessionMatch !== null) {
+      const id = decodeURIComponent(sessionMatch[1] ?? "");
+      const record = this.#sessions.get(id);
+      if (record === undefined) {
+        writeJson(response, 404, { error: "session_not_found" });
+        return;
+      }
+      if (request.method === "PATCH") {
+        const input = await readJson(request);
+        if (
+          typeof input.title !== "string" ||
+          input.title.trim() === "" ||
+          input.title.length > 200
+        ) {
+          writeJson(response, 400, { error: "invalid_title" });
+          return;
+        }
+        record.title = input.title.trim();
+        record.updatedAt = new Date().toISOString();
+        this.#persist(id, record);
+        writeJson(response, 200, {
+          id,
+          engine: record.engine,
+          title: record.title,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        });
+        return;
+      }
+      if (request.method === "DELETE") {
+        writeJson(response, 501, { error: "session_delete_unsupported" });
+        return;
+      }
+      writeJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+    const match =
+      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume)$/.exec(path);
     if (match === null) {
       writeJson(response, 404, { error: "not_found" });
       return;
@@ -223,6 +272,15 @@ export class RuntimeController {
     if (record === undefined) {
       writeJson(response, 404, { error: "session_not_found" });
       return;
+    }
+    if (match[2] !== "events") {
+      try {
+        await this.#activate(id, record);
+      } catch (error) {
+        console.error("workagent-runtime-api: session resume failed", error);
+        writeJson(response, 503, { error: "session_resume_failed" });
+        return;
+      }
     }
     if (match[2] === "turns" && request.method === "POST") {
       const input = await readJson(request);
@@ -246,7 +304,18 @@ export class RuntimeController {
           return;
         }
       }
+      this.#persist(id, record);
       writeJson(response, 202, { accepted: true });
+      return;
+    }
+    if (match[2] === "resume" && request.method === "POST") {
+      writeJson(response, 200, {
+        id,
+        engine: record.engine,
+        title: record.title,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      });
       return;
     }
     if (match[2] === "cancel" && request.method === "POST") {
@@ -290,10 +359,12 @@ export class RuntimeController {
     const publicId = `session-${randomUUID()}`;
     const now = new Date().toISOString();
     const record: SessionRecord = {
+      activating: undefined,
       engine: input.engine,
       events: [],
       handle: undefined,
       native: undefined,
+      nativeId: publicId,
       nextEventSequence: 1,
       title: input.title.trim(),
       createdAt: now,
@@ -301,22 +372,7 @@ export class RuntimeController {
     };
     try {
       if (input.engine === "harness") {
-        const sessionId = SessionId(publicId);
-        const selection = this.#ctx.agentDefaultModel.currentSelection();
-        record.handle = await this.#ctx.agents.create({
-          sessionId,
-          meta: { cwd: process.cwd() },
-          agentOptions: {
-            provider: selection.provider,
-            model: selection.model,
-          },
-          setup: (agentContext) => {
-            installModelSelection(agentContext, {
-              current: selection,
-              assembled: undefined,
-            });
-          },
-        });
+        record.handle = await this.#createHarness(publicId);
       } else {
         const bridge = this.#bridges.get(input.engine);
         if (bridge === undefined) {
@@ -326,12 +382,14 @@ export class RuntimeController {
         record.native = await bridge.create(process.cwd(), (event) => {
           this.#publish(record, this.#nativeEvent(publicId, record, event));
         });
+        record.nativeId = record.native.nativeId;
       }
     } catch {
       writeJson(response, 503, { error: "engine_start_failed" });
       return;
     }
     this.#sessions.set(publicId, record);
+    this.#persist(publicId, record);
     writeJson(response, 201, {
       id: publicId,
       engine: input.engine,
@@ -392,5 +450,86 @@ export class RuntimeController {
         `id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`,
       );
     }
+  }
+
+  async #activate(id: string, record: SessionRecord): Promise<void> {
+    if (record.handle !== undefined || record.native !== undefined) return;
+    record.activating ??= this.#resume(id, record).finally(() => {
+      record.activating = undefined;
+    });
+    await record.activating;
+  }
+
+  async #resume(id: string, record: SessionRecord): Promise<void> {
+    if (record.engine === "harness") {
+      const selection = this.#ctx.agentDefaultModel.currentSelection();
+      try {
+        record.handle = await this.#ctx.agents.resume({
+          resumeSessionId: SessionId(record.nativeId),
+          agentOptions: {
+            provider: selection.provider,
+            model: selection.model,
+          },
+          setup: (agentContext) => {
+            installModelSelection(agentContext, {
+              current: selection,
+              assembled: undefined,
+            });
+          },
+        });
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          error.message !== `session "${record.nativeId}" not found`
+        )
+          throw error;
+        record.handle = await this.#createHarness(record.nativeId);
+      }
+      return;
+    }
+    const bridge = this.#bridges.get(record.engine);
+    if (bridge === undefined) throw new Error("engine unavailable");
+    record.native = await bridge.resume(
+      record.nativeId,
+      process.cwd(),
+      (event) => this.#publish(record, this.#nativeEvent(id, record, event)),
+    );
+  }
+
+  #record(session: StoredSession): SessionRecord {
+    return {
+      ...session,
+      activating: undefined,
+      events: [],
+      handle: undefined,
+      native: undefined,
+      nextEventSequence: 1,
+    };
+  }
+
+  #persist(id: string, record: SessionRecord): void {
+    this.#index.set({
+      id,
+      nativeId: record.nativeId,
+      engine: record.engine,
+      title: record.title,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    });
+  }
+
+  #createHarness(id: string): Promise<AgentHandle> {
+    const selection = this.#ctx.agentDefaultModel.currentSelection();
+    return this.#ctx.agents.create({
+      sessionId: SessionId(id),
+      meta: { cwd: process.cwd() },
+      agentOptions: { provider: selection.provider, model: selection.model },
+      setup: (agentContext) => {
+        installModelSelection(agentContext, {
+          current: selection,
+          assembled: undefined,
+        });
+      },
+    });
   }
 }

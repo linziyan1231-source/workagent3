@@ -41,6 +41,24 @@ export class KimiBridge implements EngineBridge {
     return session;
   }
 
+  async resume(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+  ): Promise<BridgeSession> {
+    const connection = await this.#connect();
+    await connection.unstable_resumeSession({
+      sessionId: nativeId,
+      cwd: workspace,
+      mcpServers: [],
+    });
+    const session = new KimiSession(connection, nativeId, onEvent, () => {
+      this.#sessions.delete(nativeId);
+    });
+    this.#sessions.set(nativeId, session);
+    return session;
+  }
+
   async probe(): Promise<void> {
     await this.#connect();
   }
