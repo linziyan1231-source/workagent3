@@ -534,50 +534,6 @@ select:focus-visible {
   font-size: 13px;
   background: #fff9e8;
 }
-.approval-card {
-  width: min(700px, 100%);
-  margin: 0 auto 16px;
-  padding: 16px;
-  border: 1px solid #e8c77d;
-  border-radius: 12px;
-  background: #fffaf0;
-}
-.approval-card strong,
-.approval-card p {
-  display: block;
-  margin-top: 6px;
-}
-.approval-card p {
-  margin-bottom: 0;
-  color: #5f5541;
-}
-.approval-label {
-  color: #9a6500;
-  font-size: 11px;
-  font-weight: 700;
-}
-.approval-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
-}
-.approval-actions button {
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 8px;
-  font-weight: 600;
-}
-.approval-reject {
-  border: 1px solid #d7c9aa;
-  color: #6d5b39;
-  background: white;
-}
-.approval-allow {
-  border: 1px solid #8b5a00;
-  color: white;
-  background: #8b5a00;
-}
 .message {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);

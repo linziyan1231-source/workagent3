@@ -1,6 +1,6 @@
 import { createContext, useContext, type PropsWithChildren } from "react";
 
-export type RendererMessage = {
+type RendererTextMessage = {
   id: string;
   conversation_id: string;
   type: "text";
@@ -8,6 +8,35 @@ export type RendererMessage = {
   position: "left" | "right";
   created_at: number;
 };
+
+type RendererPermissionMessage = {
+  id: string;
+  conversation_id: string;
+  type: "acp_permission";
+  content: {
+    session_id: string;
+    options: Array<{
+      option_id: string;
+      name: string;
+      kind: "allow_once" | "reject_once";
+    }>;
+    tool_call: {
+      tool_call_id: string;
+      title: string;
+      kind: "execute";
+      raw_input: {
+        description: string;
+        command: string;
+      };
+    };
+  };
+  position: "left";
+  created_at: number;
+};
+
+export type RendererMessage =
+  | RendererTextMessage
+  | RendererPermissionMessage;
 
 type MessageAdapterState = {
   messages: RendererMessage[];

@@ -180,7 +180,6 @@ export function ConversationPage({
   const [interactions, setInteractions] = useState<
     Record<string, PendingInteraction[]>
   >({});
-  const [resolving, setResolving] = useState<string>();
   const [query, setQuery] = useState("");
   const [running, setRunning] = useState<string[]>([]);
   const [engine, setEngine] = useState<EngineId>("harness");
@@ -343,29 +342,6 @@ export function ConversationPage({
         [sessionId]: reduceMessages(current[sessionId] ?? [], event),
       };
     });
-  }
-
-  async function resolveInteraction(
-    interaction: PendingInteraction,
-    decision: "allow" | "reject",
-  ) {
-    setResolving(interaction.id);
-    setNotice("");
-    try {
-      await port.respond(interaction.id, decision);
-      setInteractions((current) => ({
-        ...current,
-        [interaction.sessionId]: (current[interaction.sessionId] ?? []).filter(
-          (item) => item.id !== interaction.id,
-        ),
-      }));
-    } catch {
-      setNotice(
-        "That approval is no longer pending. The action stayed blocked.",
-      );
-    } finally {
-      setResolving(undefined);
-    }
   }
 
   async function newSession() {
@@ -712,40 +688,6 @@ export function ConversationPage({
                       >
                         <div className="chat-surface-fluid">
                           {notice && <div className="notice">{notice}</div>}
-                          {activeInteractions.map((interaction) => (
-                            <article
-                              className="approval-card message-item"
-                              key={interaction.id}
-                            >
-                              <div>
-                                <span className="approval-label">
-                                  Approval required
-                                </span>
-                                <strong>{interaction.tool}</strong>
-                                <p>{interaction.summary}</p>
-                              </div>
-                              <div className="approval-actions">
-                                <button
-                                  className="approval-reject"
-                                  disabled={resolving === interaction.id}
-                                  onClick={() =>
-                                    resolveInteraction(interaction, "reject")
-                                  }
-                                >
-                                  Reject
-                                </button>
-                                <button
-                                  className="approval-allow"
-                                  disabled={resolving === interaction.id}
-                                  onClick={() =>
-                                    resolveInteraction(interaction, "allow")
-                                  }
-                                >
-                                  Allow once
-                                </button>
-                              </div>
-                            </article>
-                          ))}
                         </div>
                         {active && (
                           <AionMessageList
@@ -753,6 +695,7 @@ export function ConversationPage({
                             engine={active.engine}
                             workspace={active.workspaceId}
                             messages={activeMessages}
+                            interactions={activeInteractions}
                             processing={running.includes(active.id)}
                           />
                         )}
