@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,5 +100,30 @@ func TestSkillMarketInstallStreamsVerifiedPackageToSIDRuntime(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":"market-install"`) {
 		t.Fatalf("install response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSkillMarketPublisherCanDeleteOwnEntry(t *testing.T) {
+	users, _ := store.Open(":memory:")
+	defer users.Close()
+	user, _ := users.CreateUser(t.Context(), "alice", "S-1-5-21-5002", "unused")
+	_ = users.CreateSession(t.Context(), "delete-session", user.ID, time.Now().Add(time.Hour))
+	market, _ := skillmarket.Open(":memory:")
+	defer market.Close()
+	entry, err := market.Publish(t.Context(), skillmarket.Entry{ID: "market-delete", Name: "Delete Me", Description: "Delete", Version: "1.0.0", PublisherUsername: "alice", ObjectKey: "objects/delete.zip", ArchiveDigest: "digest", ArchiveBytes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, _ := NewWithModules(users, StaticRouter{}, false, Modules{SkillMarket: market})
+	request := httptest.NewRequest(http.MethodDelete, "http://portal.test/api/portal/skill-market?id="+entry.ID, nil)
+	request.Header.Set("Origin", "http://portal.test")
+	request.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "delete-session"})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("delete response %d: %s", response.Code, response.Body.String())
+	}
+	if _, err := market.ByID(t.Context(), entry.ID); !errors.Is(err, skillmarket.ErrNotFound) {
+		t.Fatalf("market entry remains after delete: %v", err)
 	}
 }

@@ -21,7 +21,7 @@ import (
 
 var (
 	ErrNotFound    = contracts.ErrSkillMarketEntryNotFound
-	ErrForbidden   = errors.New("skill market operation forbidden")
+	ErrForbidden   = contracts.ErrSkillMarketForbidden
 	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 )
 

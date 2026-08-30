@@ -6,6 +6,7 @@ import (
 )
 
 var ErrSkillMarketEntryNotFound = errors.New("skill market entry not found")
+var ErrSkillMarketForbidden = errors.New("skill market operation forbidden")
 
 type SkillMarketEntry struct {
 	ID           string    `json:"id"`

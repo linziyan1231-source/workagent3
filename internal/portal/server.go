@@ -54,6 +54,7 @@ type SettingsPort interface {
 type SkillMarketPort interface {
 	ListApproved(context.Context, string) ([]contracts.SkillMarketEntry, error)
 	ApprovedPackage(context.Context, string) (contracts.SkillMarketPackage, error)
+	Delete(context.Context, string, string, bool) error
 }
 
 type Modules struct {
@@ -96,6 +97,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("GET /api/portal/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
+	mux.HandleFunc("DELETE /api/portal/skill-market", s.requireUser(s.deleteMarketSkill))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
@@ -165,6 +167,32 @@ func (s *Server) installMarketSkill(writer http.ResponseWriter, request *http.Re
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(response.StatusCode)
 	_, _ = writer.Write(body)
+}
+
+func (s *Server) deleteMarketSkill(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.SkillMarket == nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill_market_unavailable")
+		return
+	}
+	id := request.URL.Query().Get("id")
+	if id == "" || len(id) > 128 {
+		writeError(writer, http.StatusBadRequest, "invalid_skill_market_entry")
+		return
+	}
+	err := s.modules.SkillMarket.Delete(request.Context(), id, user.Username, false)
+	if errors.Is(err, contracts.ErrSkillMarketEntryNotFound) {
+		writeError(writer, http.StatusNotFound, "skill_market_entry_not_found")
+		return
+	}
+	if errors.Is(err, contracts.ErrSkillMarketForbidden) {
+		writeError(writer, http.StatusForbidden, "skill_market_forbidden")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "skill_market_failed")
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) clientSettings(writer http.ResponseWriter, request *http.Request, user store.User) {

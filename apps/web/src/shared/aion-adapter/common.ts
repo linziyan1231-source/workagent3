@@ -135,9 +135,11 @@ export const ipcBridge = {
         }),
     },
     deleteMarketSkill: {
-      invoke: async (_input: { id: string }) => {
-        throw new Error("skill_market_delete_not_available");
-      },
+      invoke: async (input: { id: string }) =>
+        requestJson(
+          `/api/portal/skill-market?id=${encodeURIComponent(input.id)}`,
+          { method: "DELETE" },
+        ),
     },
     listAllSharedProjects: { invoke: async () => ({ projects: [] }) },
     listAllSharedConversations: { invoke: async () => ({ conversations: [] }) },

@@ -25,4 +25,16 @@ describe("production Renderer Skill Market adapter", () => {
       }),
     );
   });
+
+  it("routes market deletion without changing the old Skills Hub action", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.portal.deleteMarketSkill.invoke({ id: "market/unsafe" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/skill-market?id=market%2Funsafe",
+      expect.objectContaining({ method: "DELETE", credentials: "same-origin" }),
+    );
+  });
 });
