@@ -11,6 +11,7 @@ import (
 
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/skillruntime"
 )
 
 type gatewayTestProtector struct{}
@@ -36,6 +37,17 @@ func openGatewayCredentials(t *testing.T) *credentialbroker.Store {
 	return store
 }
 
+func openGatewaySkills(t *testing.T) *skillruntime.Store {
+	t.Helper()
+	root := t.TempDir()
+	store, err := skillruntime.Open(filepath.Join(root, "skills.db"), filepath.Join(root, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
 func TestRuntimeGatewayOwnsMCPRoutesAndAuthenticates(t *testing.T) {
 	catalog, err := mcpruntime.Open(":memory:")
 	if err != nil {
@@ -47,7 +59,7 @@ func TestRuntimeGatewayOwnsMCPRoutesAndAuthenticates(t *testing.T) {
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, target, "runtime-token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, target, "runtime-token")
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/mcp-servers", nil))
@@ -85,7 +97,7 @@ func TestRuntimeGatewayRejectsPlaintextMCPHeaders(t *testing.T) {
 	catalog, _ := mcpruntime.Open(":memory:")
 	defer catalog.Close()
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, target, "token")
 	body := `{"name":"unsafe","source":"user","enabled":true,"transport":{"kind":"http","url":"https://example.com/mcp","headers":{"Authorization":"secret"}},"toolPolicy":"all","allowedTools":[],"oauthState":"none"}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp-servers", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer token")
@@ -119,7 +131,7 @@ func TestRuntimeGatewayListsMetadataAndAcceptsCredentialReferences(t *testing.T)
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
-	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, target, "token")
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	statusRequest.Header.Set("Authorization", "Bearer token")

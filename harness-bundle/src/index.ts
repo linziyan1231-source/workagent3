@@ -113,7 +113,7 @@ export function apply(ctx: Context): void {
   }
   const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
   const models = new ModelAccessStore(dshHome);
-  const skills = new SkillCatalogStore(dshHome);
+  const skills = new SkillCatalogStore();
   const mcp = new McpCatalogStore();
   const presets = new PresetStore(dshHome, models, skills, mcp);
   new RuntimeServicesController(
@@ -125,7 +125,14 @@ export function apply(ctx: Context): void {
     skills,
     mcp,
   );
-  const runtime = new RuntimeController(ctx, token, workspaces, presets, mcp);
+  const runtime = new RuntimeController(
+    ctx,
+    token,
+    workspaces,
+    presets,
+    mcp,
+    skills,
+  );
   runtime.mount();
   const automations = new AutomationStore(dshHome);
   new AutomationController(

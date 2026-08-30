@@ -59,7 +59,7 @@ describe("SID-private preset store", () => {
     const store = new PresetStore(
       home,
       new ModelAccessStore(home),
-      new SkillCatalogStore(home),
+      new SkillCatalogStore(),
       new McpCatalogStore(),
     );
     expect(() =>
@@ -97,7 +97,7 @@ describe("SID-private preset store", () => {
     const store = new PresetStore(
       home,
       new ModelAccessStore(home),
-      new SkillCatalogStore(home),
+      new SkillCatalogStore(),
       mcp,
     );
     const preset = store.create({

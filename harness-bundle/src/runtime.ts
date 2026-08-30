@@ -7,6 +7,7 @@ import {
 } from "@deepseek-ai/dsh-agent";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { apply as installMcp } from "@deepseek-ai/dsh-mcp-client";
+import { apply as installSkillProvider } from "@deepseek-ai/dsh-skill-filesystem";
 import {
   SessionId,
   type Session,
@@ -31,8 +32,12 @@ import type {
 } from "./automation-store.js";
 import type { PresetBinding } from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
-import type { McpCatalogStore } from "./capability-store.js";
+import type {
+  McpCatalogStore,
+  SkillCatalogStore,
+} from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
+import type { ResolvedSkill } from "./skill-projection.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
 
 type SessionRecord = {
@@ -200,6 +205,7 @@ export class RuntimeController implements AutomationRunnerPort {
   readonly #messages: MessageStore;
   readonly #presets: PresetStore;
   readonly #mcp: McpCatalogStore;
+  readonly #skills: SkillCatalogStore;
 
   constructor(
     ctx: Context,
@@ -207,6 +213,7 @@ export class RuntimeController implements AutomationRunnerPort {
     workspaces: WorkspaceStore,
     presets: PresetStore,
     mcp: McpCatalogStore,
+    skills: SkillCatalogStore,
   ) {
     this.#ctx = ctx;
     this.#token = token;
@@ -218,6 +225,7 @@ export class RuntimeController implements AutomationRunnerPort {
     this.#workspaces = workspaces;
     this.#presets = presets;
     this.#mcp = mcp;
+    this.#skills = skills;
     const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
@@ -614,8 +622,14 @@ export class RuntimeController implements AutomationRunnerPort {
       writeJson(response, 400, { error: "preset_engine_mismatch" });
       return;
     }
-    if (preset.resolvedSnapshot.skillIds.length !== 0) {
-      writeJson(response, 400, { error: "unsupported_skill_binding" });
+    let resolvedSkills: readonly ResolvedSkill[];
+    try {
+      resolvedSkills = this.#resolvedSkills(preset);
+      this.#validateSkillCompatibility(input.engine, resolvedSkills);
+    } catch (error) {
+      writeJson(response, 400, {
+        error: error instanceof Error ? error.message : "invalid_skill_binding",
+      });
       return;
     }
     let mcpServers: readonly ResolvedMcpServer[];
@@ -648,6 +662,7 @@ export class RuntimeController implements AutomationRunnerPort {
           publicId,
           this.#workspaces.engineRoot(record.workspaceId),
           mcpServers,
+          resolvedSkills,
         );
       } else {
         const bridge = this.#bridges.get(input.engine);
@@ -735,8 +750,8 @@ export class RuntimeController implements AutomationRunnerPort {
     const preset = this.#presets.resolve(definition.presetId);
     if (preset.resolvedSnapshot.engine !== definition.engine)
       throw new Error("preset_engine_mismatch");
-    if (preset.resolvedSnapshot.skillIds.length !== 0)
-      throw new Error("unsupported_skill_binding");
+    const resolvedSkills = this.#resolvedSkills(preset);
+    this.#validateSkillCompatibility(definition.engine, resolvedSkills);
     const mcpServers = this.#resolvedMcpServers(preset);
     this.#validateMcpCompatibility(definition.engine, mcpServers);
     const now = new Date().toISOString();
@@ -759,6 +774,7 @@ export class RuntimeController implements AutomationRunnerPort {
         publicId,
         this.#workspaces.engineRoot(record.workspaceId),
         mcpServers,
+        resolvedSkills,
       );
     } else {
       const bridge = this.#bridges.get(definition.engine);
@@ -912,6 +928,8 @@ export class RuntimeController implements AutomationRunnerPort {
   async #resume(id: string, record: SessionRecord): Promise<void> {
     const mcpServers = this.#resolvedMcpServers(record.preset);
     this.#validateMcpCompatibility(record.engine, mcpServers);
+    const resolvedSkills = this.#resolvedSkills(record.preset);
+    this.#validateSkillCompatibility(record.engine, resolvedSkills);
     if (record.engine === "harness") {
       const selection = this.#ctx.agentDefaultModel.currentSelection();
       try {
@@ -931,6 +949,7 @@ export class RuntimeController implements AutomationRunnerPort {
               this.#workspaces.engineRoot(record.workspaceId),
             ))
               await installMcp(agentContext, config);
+            this.#installHarnessSkills(agentContext, resolvedSkills);
           },
         });
       } catch (error) {
@@ -943,6 +962,7 @@ export class RuntimeController implements AutomationRunnerPort {
           record.nativeId,
           this.#workspaces.engineRoot(record.workspaceId),
           mcpServers,
+          resolvedSkills,
         );
       }
       return;
@@ -968,6 +988,40 @@ export class RuntimeController implements AutomationRunnerPort {
         throw new Error(`invalid_mcp_binding:${id}:not_found`);
       return server;
     });
+  }
+
+  #resolvedSkills(binding: PresetBinding): readonly ResolvedSkill[] {
+    return binding.resolvedSnapshot.skillIds.map((id) => {
+      const skill = this.#skills.resolveSkill(id);
+      if (skill === undefined)
+        throw new Error(`invalid_skill_binding:${id}:not_found`);
+      if (!skill.entry.enabled)
+        throw new Error(`invalid_skill_binding:${id}:disabled`);
+      return skill;
+    });
+  }
+
+  #validateSkillCompatibility(
+    engine: SessionRecord["engine"],
+    skills: readonly ResolvedSkill[],
+  ): void {
+    if (skills.length !== 0 && engine !== "harness")
+      throw new Error(`unsupported_skill_binding:${engine}`);
+  }
+
+  #installHarnessSkills(
+    agentContext: Context,
+    skills: readonly ResolvedSkill[],
+  ): void {
+    for (const skill of skills)
+      installSkillProvider(agentContext, {
+        providerName: `workagent-${skill.entry.id}`,
+        includeDefaultRoots: false,
+        customSkillDirs: [],
+        bundledSkillDir: skill.root,
+        watch: false,
+        watchFollowSymlinks: false,
+      });
   }
 
   #validateMcpCompatibility(
@@ -1021,6 +1075,7 @@ export class RuntimeController implements AutomationRunnerPort {
     id: string,
     workspace: string,
     mcpServers: readonly ResolvedMcpServer[],
+    skills: readonly ResolvedSkill[],
   ): Promise<AgentHandle> {
     const selection = this.#ctx.agentDefaultModel.currentSelection();
     return this.#ctx.agents.create({
@@ -1034,6 +1089,7 @@ export class RuntimeController implements AutomationRunnerPort {
         });
         for (const config of projectHarnessMcpServers(mcpServers, workspace))
           await installMcp(agentContext, config);
+        this.#installHarnessSkills(agentContext, skills);
       },
     });
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { McpCatalogStore } from "./capability-store.js";
+import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 const server = {
   id: "mcp-1",
@@ -46,5 +46,36 @@ describe("UserHost-owned MCP projection", () => {
       }),
     ).toThrow("resolved MCP headers do not match credential references");
     expect(store.listServers()).toEqual([]);
+  });
+});
+
+describe("UserHost-owned skill projection", () => {
+  const entry = {
+    id: "drawing-review",
+    name: "Drawing Review",
+    description: "Reviews drawings",
+    version: "1.0.0",
+    source: "user" as const,
+    enabled: true,
+    relativePath: "drawing-review/drawing-review",
+    requiredMcpServerIds: [],
+  };
+
+  it("keeps private roots out of the public catalog", () => {
+    const store = new SkillCatalogStore();
+    const root = process.platform === "win32" ? "C:\\private\\skills" : "/private/skills";
+    store.replace({ skills: [{ entry, root }] });
+    expect(store.getSkill(entry.id)).toEqual(entry);
+    expect(JSON.stringify(store.listSkills())).not.toContain("private/skills");
+    expect(store.resolveSkill(entry.id)?.root).toBe(root);
+  });
+
+  it("replaces atomically and rejects relative roots", () => {
+    const store = new SkillCatalogStore();
+    store.replace({ skills: [] });
+    expect(() =>
+      store.replace({ skills: [{ entry, root: "relative/skills" }] }),
+    ).toThrow("invalid_skill_projection_root");
+    expect(store.listSkills()).toEqual([]);
   });
 });

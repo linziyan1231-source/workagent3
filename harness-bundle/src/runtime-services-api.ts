@@ -95,6 +95,19 @@ export class RuntimeServicesController {
         });
       }
     });
+    route("/internal/skill-projection", async (request, response) => {
+      if (request.method !== "PUT") return this.#method(response, "PUT");
+      try {
+        skills.replace(await body(request));
+        response.writeHead(204, { "cache-control": "no-store" });
+        response.end();
+      } catch (error) {
+        json(response, 400, {
+          error:
+            error instanceof Error ? error.message : "invalid_skill_projection",
+        });
+      }
+    });
     route("/v1/presets", (request, response) =>
       this.#presets(request, response, presets),
     );
@@ -116,35 +129,11 @@ export class RuntimeServicesController {
       return json(response, 200, skills.listSkills());
     const match = /^\/v1\/skills\/([^/]+)$/.exec(path);
     if (match === null) return json(response, 404, { error: "not_found" });
-    if (request.method !== "PATCH") return this.#method(response, "PATCH");
-    try {
-      const input = await body(request);
-      if (
-        input === null ||
-        typeof input !== "object" ||
-        Array.isArray(input) ||
-        typeof (input as Record<string, unknown>).enabled !== "boolean"
-      )
-        return json(response, 400, { error: "invalid_enabled_state" });
-      json(
-        response,
-        200,
-        skills.setEnabled(
-          decodeURIComponent(match[1] ?? ""),
-          (input as { enabled: boolean }).enabled,
-        ),
-      );
-    } catch (error) {
-      json(
-        response,
-        error instanceof Error && error.message === "skill_not_found"
-          ? 404
-          : 400,
-        {
-          error: error instanceof Error ? error.message : "invalid_request",
-        },
-      );
-    }
+    if (request.method !== "GET") return this.#method(response, "GET");
+    const skill = skills.getSkill(decodeURIComponent(match[1] ?? ""));
+    return skill === undefined
+      ? json(response, 404, { error: "skill_not_found" })
+      : json(response, 200, skill);
   }
 
   async #mcp(

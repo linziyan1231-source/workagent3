@@ -16,12 +16,14 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/skillruntime"
 )
 
 type runtimeGateway struct {
 	server      *http.Server
 	catalog     *mcpruntime.Catalog
 	credentials *credentialbroker.Store
+	skills      *skillruntime.Store
 }
 
 func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (*runtimeGateway, error) {
@@ -34,27 +36,45 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 		catalog.Close()
 		return nil, err
 	}
-	publisher := &harnessProjectionPublisher{catalog: catalog, credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
-	if err := publisher.Publish(context.Background()); err != nil {
+	skills, err := skillruntime.Open(filepath.Join(runtimeDirectory, "skill-catalog.db"), filepath.Join(runtimeDirectory, "skills"))
+	if err != nil {
 		credentials.Close()
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, target, token)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials}, nil
+	publisher := &harnessProjectionPublisher{catalog: catalog, credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
+	if err := publisher.Publish(context.Background()); err != nil {
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
+	if err := skillPublisher.Publish(context.Background()); err != nil {
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, target, token)
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills}, nil
 }
 
 func (g *runtimeGateway) Close() error {
 	serverErr := g.server.Close()
 	catalogErr := g.catalog.Close()
 	credentialErr := g.credentials.Close()
+	skillErr := g.skills.Close()
 	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
 		return serverErr
 	}
 	if catalogErr != nil {
 		return catalogErr
 	}
-	return credentialErr
+	if credentialErr != nil {
+		return credentialErr
+	}
+	return skillErr
 }
 
 type credentialCatalog interface {
@@ -62,7 +82,7 @@ type credentialCatalog interface {
 	Metadata(context.Context, string) (credentialbroker.Metadata, error)
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, target *url.URL, token string) http.Handler {
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
@@ -70,6 +90,10 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentia
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
+	mux.HandleFunc("GET /v1/skills", listSkills(skills))
+	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
+	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))
+	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher))
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")
 	})
@@ -82,6 +106,87 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentia
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func listSkills(skills *skillruntime.Store) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		entries, err := skills.List(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, entries)
+	}
+}
+
+func getSkill(skills *skillruntime.Store) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		entry, err := skills.Get(request.Context(), request.PathValue("id"))
+		if errors.Is(err, skillruntime.ErrNotFound) {
+			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
+			return
+		}
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, entry)
+	}
+}
+
+func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		var input struct {
+			Enabled *bool `json:"enabled"`
+		}
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil || input.Enabled == nil {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_enabled_state")
+			return
+		}
+		entry, err := skills.SetEnabled(request.Context(), request.PathValue("id"), *input.Enabled)
+		if errors.Is(err, skillruntime.ErrNotFound) {
+			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
+			return
+		}
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, entry)
+	}
+}
+
+func deleteSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		entry, err := skills.Get(request.Context(), request.PathValue("id"))
+		if errors.Is(err, skillruntime.ErrNotFound) {
+			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
+			return
+		}
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+			return
+		}
+		if entry.Source != "user" && entry.Source != "market" {
+			writeRuntimeError(writer, http.StatusForbidden, "managed_skill_read_only")
+			return
+		}
+		if err := skills.Remove(request.Context(), entry.ID); err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func listCredentialStatuses(credentials credentialCatalog, target *url.URL, token string) http.HandlerFunc {

@@ -222,6 +222,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(a4e4bb24a1f3580ac25e11cfa3c6b8cc)
+      '@deepseek-ai/dsh-skill-filesystem':
+        specifier: 0.1.1-rc.2
+        version: 0.1.1-rc.2(48868494a4b9bcea1966f12a762e8376)
       '@deepseek-ai/dsh-user-approval':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(09871eaf880be2109e9d668352ef8c05)
