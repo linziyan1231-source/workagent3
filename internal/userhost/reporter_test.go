@@ -16,7 +16,7 @@ func TestHTTPLeaseReporterRoundTrip(t *testing.T) {
 	if err := registry.Authorize(sid, credential); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(runtimeapi.LeaseHandler(registry))
+	server := httptest.NewServer(runtimeapi.LeaseHandler(registry, registry))
 	defer server.Close()
 	reporter, err := NewHTTPLeaseReporter(server.URL, credential)
 	if err != nil {

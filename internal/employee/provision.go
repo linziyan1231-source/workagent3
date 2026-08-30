@@ -37,7 +37,7 @@ type UserStore interface {
 }
 
 type RuntimeAuthorizer interface {
-	Authorize(string, string) error
+	AuthorizeRuntime(context.Context, string, string) error
 }
 
 type SecretSource interface {
@@ -107,7 +107,7 @@ func (p *Provisioner) Add(ctx context.Context, username string, portalPassword [
 	if err != nil {
 		return store.User{}, err
 	}
-	if err := p.Runtimes.Authorize(account.SID, credential); err != nil {
+	if err := p.Runtimes.AuthorizeRuntime(ctx, account.SID, credential); err != nil {
 		return store.User{}, err
 	}
 	spec := RuntimeSpec{SID: account.SID, CanonicalUsername: account.Canonical, DataRoot: dataRoot, RegistrationCredential: credential}

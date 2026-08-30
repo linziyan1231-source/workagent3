@@ -21,7 +21,7 @@ func TestLeaseHandlerScopesCredentialToSID(t *testing.T) {
 	request.RemoteAddr = "127.0.0.1:55000"
 	request.Header.Set("Authorization", "Bearer alice-registration-secret")
 	response := httptest.NewRecorder()
-	LeaseHandler(registry).ServeHTTP(response, request)
+	LeaseHandler(registry, registry).ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("cross-SID lease returned %d: %s", response.Code, response.Body.String())
 	}
@@ -45,7 +45,7 @@ func TestLeaseHandlerPublishesRenewsAndRemovesRuntime(t *testing.T) {
 		request.RemoteAddr = "[::1]:55000"
 		request.Header.Set("Authorization", "Bearer "+credential)
 		response := httptest.NewRecorder()
-		LeaseHandler(registry).ServeHTTP(response, request)
+		LeaseHandler(registry, registry).ServeHTTP(response, request)
 		return response.Code
 	}
 	if status := invoke(http.MethodPut); status != http.StatusNoContent {
@@ -72,7 +72,7 @@ func TestLeaseHandlerRejectsNonLoopbackCaller(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPut, "/internal/runtime/lease", strings.NewReader(`{}`))
 	request.RemoteAddr = "192.0.2.20:55000"
 	response := httptest.NewRecorder()
-	LeaseHandler(registry).ServeHTTP(response, request)
+	LeaseHandler(registry, registry).ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("non-loopback request returned %d", response.Code)
 	}

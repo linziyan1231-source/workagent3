@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -56,11 +58,37 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+CREATE TABLE IF NOT EXISTS runtime_credentials (
+  sid TEXT PRIMARY KEY,
+  credential_digest BLOB NOT NULL CHECK (length(credential_digest) = 32)
+);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate portal database: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) AuthorizeRuntime(ctx context.Context, sid, credential string) error {
+	if sid == "" || credential == "" {
+		return errors.New("runtime SID and registration credential are required")
+	}
+	digest := sha256.Sum256([]byte(credential))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO runtime_credentials(sid, credential_digest) VALUES(?, ?)
+ON CONFLICT(sid) DO UPDATE SET credential_digest = excluded.credential_digest`, sid, digest[:])
+	if err != nil {
+		return fmt.Errorf("persist runtime credential: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) RuntimeRegistrationAuthorized(ctx context.Context, sid, credential string) bool {
+	var expected []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT credential_digest FROM runtime_credentials WHERE sid = ?`, sid).Scan(&expected); err != nil {
+		return false
+	}
+	actual := sha256.Sum256([]byte(credential))
+	return len(expected) == sha256.Size && subtle.ConstantTimeCompare(actual[:], expected) == 1
 }
 
 func (s *Store) CreateUser(ctx context.Context, username, sid, passwordHash string) (User, error) {

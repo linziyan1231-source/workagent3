@@ -44,6 +44,14 @@ func (r *Registry) Authorize(sid, credential string) error {
 	return nil
 }
 
+func (r *Registry) AuthorizeRuntime(_ context.Context, sid, credential string) error {
+	return r.Authorize(sid, credential)
+}
+
+func (r *Registry) RuntimeRegistrationAuthorized(_ context.Context, sid, credential string) bool {
+	return r.authorize(sid, credential) == nil
+}
+
 func (r *Registry) RegisterAuthorized(credential string, registration Registration) error {
 	digest := sha256.Sum256([]byte(credential))
 	r.mu.RLock()

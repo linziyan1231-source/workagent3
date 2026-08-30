@@ -1,6 +1,7 @@
 package runtimeapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -20,10 +21,14 @@ type LeaseRequest struct {
 	Token   string `json:"token"`
 }
 
+type LeaseAuthorizer interface {
+	RuntimeRegistrationAuthorized(context.Context, string, string) bool
+}
+
 // LeaseHandler is deliberately separate from the browser API. It accepts
 // requests only from the local machine and authenticates each employee SID
 // with its own provisioning credential.
-func LeaseHandler(registry *Registry) http.Handler {
+func LeaseHandler(registry *Registry, authorizer LeaseAuthorizer) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if !isLoopbackRequest(request) {
 			http.Error(writer, "loopback_required", http.StatusForbidden)
@@ -44,13 +49,17 @@ func LeaseHandler(registry *Registry) http.Handler {
 		switch request.Method {
 		case http.MethodPut:
 			registration := Registration{SID: input.SID, BaseURL: input.BaseURL, Token: input.Token, ExpiresAt: registry.now().Add(DefaultLeaseDuration)}
-			if err := registry.RegisterAuthorized(credential, registration); err != nil {
+			if !authorizer.RuntimeRegistrationAuthorized(request.Context(), input.SID, credential) {
 				http.Error(writer, "registration_rejected", http.StatusUnauthorized)
+				return
+			}
+			if err := registry.Register(registration); err != nil {
+				http.Error(writer, "registration_rejected", http.StatusBadRequest)
 				return
 			}
 			writer.WriteHeader(http.StatusNoContent)
 		case http.MethodDelete:
-			if err := registry.authorize(input.SID, credential); err != nil {
+			if !authorizer.RuntimeRegistrationAuthorized(request.Context(), input.SID, credential) {
 				http.Error(writer, "registration_rejected", http.StatusUnauthorized)
 				return
 			}

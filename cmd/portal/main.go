@@ -47,7 +47,7 @@ func run() error {
 	}
 
 	registry := runtimeapi.NewRegistry()
-	if err := registerDevelopmentRuntime(registry); err != nil {
+	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
 	server, err := portal.New(data, registry, *secureCookie)
@@ -63,7 +63,7 @@ func run() error {
 	}
 
 	root := http.NewServeMux()
-	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry))
+	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
 	root.Handle("/", server.HandlerWithWeb(portal.SPAHandler(web)))
 	httpServer := &http.Server{
 		Addr:              *address,
@@ -113,9 +113,9 @@ func bootstrapUser(data *store.Store) error {
 	return nil
 }
 
-func registerDevelopmentRuntime(registry *runtimeapi.Registry) error {
+func registerDevelopmentRuntime(data *store.Store, registry *runtimeapi.Registry) error {
 	if credential := os.Getenv("WORKAGENT_RUNTIME_REGISTRATION_TOKEN"); credential != "" {
-		if err := registry.Authorize(os.Getenv("WORKAGENT_RUNTIME_SID"), credential); err != nil {
+		if err := data.AuthorizeRuntime(context.Background(), os.Getenv("WORKAGENT_RUNTIME_SID"), credential); err != nil {
 			return err
 		}
 	}
