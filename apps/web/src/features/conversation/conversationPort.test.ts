@@ -152,4 +152,46 @@ describe("ConversationPort", () => {
       }),
     );
   });
+
+  it("routes rename, cancel, and delete through the session resource", async () => {
+    const session = {
+      id: "session-1",
+      engine: "harness",
+      title: "Renamed",
+      workspaceId: "workspace-1",
+      createdAt: "2026-08-30T10:00:00.000Z",
+      updatedAt: "2026-08-30T10:01:00.000Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversationPort.rename("session-1", "Renamed");
+    await conversationPort.cancel("session-1");
+    await conversationPort.remove("session-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runtime/v1/sessions/session-1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runtime/v1/sessions/session-1/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/runtime/v1/sessions/session-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });

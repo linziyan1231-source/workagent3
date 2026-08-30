@@ -87,6 +87,8 @@ export function ConversationPage({
     Record<string, PendingInteraction[]>
   >({});
   const [resolving, setResolving] = useState<string>();
+  const [query, setQuery] = useState("");
+  const [running, setRunning] = useState<string[]>([]);
   const [engine, setEngine] = useState<EngineId>("harness");
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
   const [busy, setBusy] = useState(false);
@@ -165,6 +167,18 @@ export function ConversationPage({
   }, [activeId, port]);
 
   function applyEvent(sessionId: string, event: EngineEvent) {
+    if (event.type === "turn.started") {
+      setRunning((current) =>
+        current.includes(sessionId) ? current : [...current, sessionId],
+      );
+    }
+    if (
+      event.type === "assistant.completed" ||
+      event.type === "turn.failed" ||
+      event.type === "turn.cancelled"
+    ) {
+      setRunning((current) => current.filter((id) => id !== sessionId));
+    }
     if (event.type === "approval.requested") {
       void port
         .pending(sessionId)
@@ -300,6 +314,47 @@ export function ConversationPage({
     }
   }
 
+  async function renameSession() {
+    if (active === undefined) return;
+    const title = window.prompt("Conversation name", active.title)?.trim();
+    if (!title || title === active.title) return;
+    try {
+      const updated = await port.rename(active.id, title);
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      );
+    } catch {
+      setNotice("The conversation could not be renamed.");
+    }
+  }
+
+  async function deleteSession() {
+    if (active === undefined) return;
+    if (!window.confirm(`Delete “${active.title}”?`)) return;
+    try {
+      await port.remove(active.id);
+      const remaining = sessions.filter((session) => session.id !== active.id);
+      setSessions(remaining);
+      setActiveId(remaining[0]?.id);
+      if (remaining[0] !== undefined)
+        onWorkspaceSelect?.(remaining[0].workspaceId);
+    } catch {
+      setNotice("The conversation could not be deleted.");
+    }
+  }
+
+  async function cancelSession() {
+    if (active === undefined) return;
+    try {
+      await port.cancel(active.id);
+      setRunning((current) => current.filter((id) => id !== active.id));
+    } catch {
+      setNotice("The running turn could not be stopped.");
+    }
+  }
+
   function toggleAsset(assetId: string) {
     if (activeId === undefined) return;
     setStagedAssets((current) => {
@@ -340,22 +395,38 @@ export function ConversationPage({
         >
           <span>＋</span> New conversation
         </button>
+        <label className="session-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search conversations"
+            aria-label="Search conversations"
+          />
+        </label>
         <div className="session-heading">Recent</div>
         <nav className="session-list" aria-label="Conversations">
-          {sessions.map((session) => (
-            <button
-              className={session.id === activeId ? "active" : ""}
-              key={session.id}
-              onClick={() => {
-                setActiveId(session.id);
-                onWorkspaceSelect?.(session.workspaceId);
-                setSidebarOpen(false);
-              }}
-            >
-              <span>{session.title}</span>
-              <small>{session.engine}</small>
-            </button>
-          ))}
+          {sessions
+            .filter((session) =>
+              session.title
+                .toLocaleLowerCase()
+                .includes(query.toLocaleLowerCase()),
+            )
+            .map((session) => (
+              <button
+                className={session.id === activeId ? "active" : ""}
+                key={session.id}
+                onClick={() => {
+                  setActiveId(session.id);
+                  onWorkspaceSelect?.(session.workspaceId);
+                  setSidebarOpen(false);
+                }}
+              >
+                <span>{session.title}</span>
+                <small>{session.engine}</small>
+              </button>
+            ))}
           {sessions.length === 0 && (
             <p className="empty-sidebar">No conversations yet.</p>
           )}
@@ -448,6 +519,35 @@ export function ConversationPage({
               >
                 ▣ <span>Workspace</span>
               </button>
+            )}
+            {active && (
+              <div className="session-actions">
+                {running.includes(active.id) && (
+                  <button
+                    className="cancel-button"
+                    type="button"
+                    onClick={cancelSession}
+                  >
+                    Stop
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={renameSession}
+                  aria-label="Rename conversation"
+                  title="Rename conversation"
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteSession}
+                  aria-label="Delete conversation"
+                  title="Delete conversation"
+                >
+                  ⋯
+                </button>
+              </div>
             )}
           </div>
         </header>

@@ -18,10 +18,14 @@ const enginePath = "/api/runtime/v1/engines";
 export type ConversationPort = {
   create(input: CreateEngineSession): Promise<RuntimeSession>;
   engines(): Promise<EngineStatus[]>;
+  get(sessionId: string): Promise<RuntimeSession>;
   list(): Promise<RuntimeSession[]>;
   messages(sessionId: string): Promise<RuntimeMessage[]>;
   pending(sessionId: string): Promise<PendingInteraction[]>;
   respond(interactionId: string, decision: "allow" | "reject"): Promise<void>;
+  rename(sessionId: string, title: string): Promise<RuntimeSession>;
+  remove(sessionId: string): Promise<void>;
+  cancel(sessionId: string): Promise<void>;
   send(
     sessionId: string,
     content: string,
@@ -52,6 +56,13 @@ export const conversationPort: ConversationPort = {
       await requestJson<unknown>(runtimePath),
     );
   },
+  async get(sessionId) {
+    return runtimeApiSchemas.session.parse(
+      await requestJson<unknown>(
+        `${runtimePath}/${encodeURIComponent(sessionId)}`,
+      ),
+    );
+  },
   async messages(sessionId) {
     return runtimeApiSchemas.messageList.parse(
       await requestJson<unknown>(
@@ -76,6 +87,29 @@ export const conversationPort: ConversationPort = {
           body: JSON.stringify({ decision }),
         },
       ),
+    );
+  },
+  async rename(sessionId, title) {
+    return runtimeApiSchemas.session.parse(
+      await requestJson<unknown>(
+        `${runtimePath}/${encodeURIComponent(sessionId)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title }),
+        },
+      ),
+    );
+  },
+  async remove(sessionId) {
+    await requestJson(`${runtimePath}/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
+  },
+  async cancel(sessionId) {
+    await requestJson(
+      `${runtimePath}/${encodeURIComponent(sessionId)}/cancel`,
+      { method: "POST" },
     );
   },
   async send(sessionId, content, displayContent) {
