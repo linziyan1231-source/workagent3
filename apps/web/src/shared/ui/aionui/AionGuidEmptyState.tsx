@@ -5,15 +5,22 @@ import GuidActionRow from "@renderer/pages/guid/components/GuidActionRow";
 import GuidInputCard from "@renderer/pages/guid/components/GuidInputCard";
 import { useInputFocusRing } from "@renderer/hooks/chat/useInputFocusRing";
 import guidStyles from "@renderer/pages/guid/index.module.css";
-import type { EngineId, EngineStatus } from "@workagent/contracts";
+import type {
+  EngineId,
+  EngineStatus,
+  PresetDefinition,
+} from "@workagent/contracts";
 import { type KeyboardEvent, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   engine: EngineId;
   engines: EngineStatus[];
+  presets: PresetDefinition[];
+  presetId: string;
   disabled?: boolean;
   onEngineChange: (engine: EngineId) => void;
+  onPresetChange: (preset: PresetDefinition) => void;
   onSend: (value: string) => void;
   onAttach: () => void;
 };
@@ -31,17 +38,17 @@ const fallbackEngines: Array<{ id: EngineId; label: string }> = [
 export function AionGuidEmptyState({
   engine,
   engines,
+  presets,
+  presetId,
   disabled,
   onEngineChange,
+  onPresetChange,
   onSend,
 }: Props) {
   const { t, i18n } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
   const [focused, setFocused] = useState(false);
-  const [selectedAssistantId, setSelectedAssistantId] = useState<string | null>(
-    engine,
-  );
   const [files, setFiles] = useState<string[]>([]);
   const { activeBorderColor, inactiveBorderColor, activeShadow } =
     useInputFocusRing();
@@ -54,30 +61,35 @@ export function AionGuidEmptyState({
       })),
     [engines],
   );
-  const assistants: Assistant[] = available.map(
-    ({ id, label, status }, index) => ({
-      id,
-      source: "generated",
-      name: status?.label ?? label,
-      name_i18n: {},
-      description_i18n: {},
-      avatar: "🤖",
-      enabled: status?.state !== "unavailable",
-      sort_order: index,
-      agent_id: id,
-      agent: { type: id, source: "internal" },
-      enabled_skills: [],
-      custom_skill_names: [],
-      disabled_builtin_skills: [],
-      context_i18n: {},
-      prompts: [],
-      prompts_i18n: {},
-      models: [],
-      agent_status: status?.state === "ready" ? "online" : "offline",
-      team_selectable: false,
-      deletable: false,
-    }),
-  );
+  const assistants: Assistant[] = presets
+    .filter((preset) => preset.enabled)
+    .map((preset, index) => {
+      const status = engines.find((item) => item.id === preset.engine);
+      return {
+        id: preset.id,
+        source: preset.source,
+        name: preset.name,
+        name_i18n: {},
+        description_i18n: {},
+        description: preset.description,
+        avatar: preset.avatar ?? "🤖",
+        enabled:
+          status?.state !== "needs_auth" && status?.state !== "unavailable",
+        sort_order: index,
+        agent_id: preset.engine,
+        agent: { type: preset.engine, source: "internal" },
+        enabled_skills: preset.skillIds,
+        custom_skill_names: [],
+        disabled_builtin_skills: [],
+        context_i18n: {},
+        prompts: [],
+        prompts_i18n: {},
+        models: [],
+        agent_status: status?.state === "ready" ? "online" : "offline",
+        team_selectable: false,
+        deletable: false,
+      };
+    });
 
   const submit = () => {
     const value = input.trim();
@@ -91,7 +103,6 @@ export function AionGuidEmptyState({
       value={engine}
       onChange={(value) => {
         const next = value as EngineId;
-        setSelectedAssistantId(next);
         onEngineChange(next);
       }}
       aria-label="Engine"
@@ -136,7 +147,9 @@ export function AionGuidEmptyState({
   );
 
   return (
-    <ConfigProvider getPopupContainer={() => containerRef.current ?? document.body}>
+    <ConfigProvider
+      getPopupContainer={() => containerRef.current ?? document.body}
+    >
       <div ref={containerRef} className={guidStyles.guidContainer}>
         <div className={guidStyles.guidLayout}>
           <div className={guidStyles.heroHeader}>
@@ -145,13 +158,12 @@ export function AionGuidEmptyState({
             </p>
           </div>
           <AssistantSelectionArea
-            selectedAssistantId={selectedAssistantId}
+            selectedAssistantId={presetId}
             assistants={assistants}
             localeKey={i18n.language}
             onSelectAssistant={(id) => {
-              const next = id as EngineId;
-              setSelectedAssistantId(id);
-              onEngineChange(next);
+              const next = presets.find((preset) => preset.id === id);
+              if (next !== undefined) onPresetChange(next);
             }}
           />
           <GuidInputCard

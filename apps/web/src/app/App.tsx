@@ -4,6 +4,7 @@ import { LoginPage } from "../features/auth/LoginPage.js";
 import { ConversationPage } from "../features/conversation/ConversationPage.js";
 import { WorkspacePanel } from "../features/workspace/WorkspacePanel.js";
 import { workspacePort } from "../features/workspace/workspacePort.js";
+import { presetPort } from "../features/presets/presetPort.js";
 
 const workspaceAssets = {
   list: workspacePort.assets,
@@ -40,6 +41,7 @@ export function App() {
       workspaceId={workspaceId}
       onWorkspaceSelect={setWorkspaceId}
       assetPort={workspaceAssets}
+      presetPort={presetPort}
       workspacePanel={
         <WorkspacePanel selectedId={workspaceId} onSelect={setWorkspaceId} />
       }

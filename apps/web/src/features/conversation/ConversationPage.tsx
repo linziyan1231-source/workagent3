@@ -5,6 +5,7 @@ import type {
   EngineId,
   EngineStatus,
   PendingInteraction,
+  PresetDefinition,
   RuntimeSession,
   RuntimeMessage,
   WorkspaceAsset,
@@ -74,6 +75,7 @@ type Props = {
     ): Promise<WorkspaceAsset>;
     downloadUrl(workspaceId: string, path: string): string;
   };
+  presetPort?: { list(): Promise<PresetDefinition[]> };
 };
 
 export function ConversationPage({
@@ -84,6 +86,7 @@ export function ConversationPage({
   workspacePanel,
   onWorkspaceSelect,
   assetPort,
+  presetPort,
 }: Props) {
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -96,6 +99,8 @@ export function ConversationPage({
   const [running, setRunning] = useState<string[]>([]);
   const [engine, setEngine] = useState<EngineId>("harness");
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
+  const [presets, setPresets] = useState<PresetDefinition[]>([]);
+  const [presetId, setPresetId] = useState("builtin-general");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [assets, setAssets] = useState<Record<string, WorkspaceAsset[]>>({});
@@ -139,7 +144,17 @@ export function ConversationPage({
         if (items[0] !== undefined) onWorkspaceSelect?.(items[0].workspaceId);
       })
       .catch(() => setNotice("Your runtime is starting. Try again shortly."));
-  }, [onWorkspaceSelect, port]);
+    void presetPort
+      ?.list()
+      .then(setPresets)
+      .catch(() => setNotice("Assistant presets could not be loaded."));
+  }, [onWorkspaceSelect, port, presetPort]);
+
+  useEffect(() => {
+    if (active === undefined) return;
+    setEngine(active.engine);
+    setPresetId(active.preset.presetId);
+  }, [active]);
 
   useEffect(() => {
     if (active === undefined || assetPort === undefined) return;
@@ -179,7 +194,8 @@ export function ConversationPage({
   useEffect(() => {
     const toggleWorkspace = () => setWorkspaceOpen((open) => !open);
     window.addEventListener(WORKSPACE_TOGGLE_EVENT, toggleWorkspace);
-    return () => window.removeEventListener(WORKSPACE_TOGGLE_EVENT, toggleWorkspace);
+    return () =>
+      window.removeEventListener(WORKSPACE_TOGGLE_EVENT, toggleWorkspace);
   }, []);
 
   useEffect(() => {
@@ -261,6 +277,7 @@ export function ConversationPage({
         engine,
         title: "New conversation",
         workspace: workspaceId ?? "default",
+        presetId,
       });
       setSessions((current) => [session, ...current]);
       setActiveId(session.id);
@@ -285,6 +302,7 @@ export function ConversationPage({
           engine,
           title: content.slice(0, 48) || "New conversation",
           workspace: workspaceId ?? "default",
+          presetId,
         });
         sessionId = session.id;
         setSessions((current) => [session, ...current]);
@@ -400,27 +418,27 @@ export function ConversationPage({
 
   const sider = (
     <AionSider
-        sessions={sessions}
-        activeId={activeId}
-        query={query}
-        username={user.username}
-        busy={busy || engineBlocked}
-        onQuery={setQuery}
-        onNew={newSession}
-        onSelect={(session) => {
-          setActiveId(session.id);
-          onWorkspaceSelect?.(session.workspaceId);
-          setSidebarOpen(false);
-        }}
-        onRename={renameSession}
-        onDelete={deleteSession}
-        onSettings={() => {
-          setSidebarOpen(false);
-          setSettingsOpen(true);
-        }}
-        onLogout={onLogout}
-        onClose={() => setSidebarOpen(false)}
-      />
+      sessions={sessions}
+      activeId={activeId}
+      query={query}
+      username={user.username}
+      busy={busy || engineBlocked}
+      onQuery={setQuery}
+      onNew={newSession}
+      onSelect={(session) => {
+        setActiveId(session.id);
+        onWorkspaceSelect?.(session.workspaceId);
+        setSidebarOpen(false);
+      }}
+      onRename={renameSession}
+      onDelete={deleteSession}
+      onSettings={() => {
+        setSidebarOpen(false);
+        setSettingsOpen(true);
+      }}
+      onLogout={onLogout}
+      onClose={() => setSidebarOpen(false)}
+    />
   );
 
   return (
@@ -433,124 +451,153 @@ export function ConversationPage({
               <main
                 className={`workagent-route-shell${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}`}
               >
-      <section className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}>
-        <div
-          className="aion-message-scroll chat-surface-container"
-          aria-live="polite"
-        >
-          {isGuid && (
-            <AionGuidEmptyState
-              engine={engine}
-              engines={engineStatuses}
-              disabled={engineBlocked}
-              onEngineChange={setEngine}
-              onSend={send}
-              onAttach={() => attachmentInputRef.current?.click()}
-            />
-          )}
-          <div className="chat-surface-fluid">
-            {notice && <div className="notice">{notice}</div>}
-            {!isGuid &&
-              activeInteractions.map((interaction) => (
-                <article
-                  className="approval-card message-item"
-                  key={interaction.id}
+                <section
+                  className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}
                 >
-                  <div>
-                    <span className="approval-label">Approval required</span>
-                    <strong>{interaction.tool}</strong>
-                    <p>{interaction.summary}</p>
+                  <div
+                    className="aion-message-scroll chat-surface-container"
+                    aria-live="polite"
+                  >
+                    {isGuid && (
+                      <AionGuidEmptyState
+                        engine={engine}
+                        engines={engineStatuses}
+                        presets={presets}
+                        presetId={presetId}
+                        disabled={engineBlocked}
+                        onEngineChange={(next) => {
+                          setEngine(next);
+                          const matching = presets.find(
+                            (preset) =>
+                              preset.engine === next && preset.enabled,
+                          );
+                          if (matching !== undefined) setPresetId(matching.id);
+                        }}
+                        onPresetChange={(next) => {
+                          setPresetId(next.id);
+                          setEngine(next.engine);
+                        }}
+                        onSend={send}
+                        onAttach={() => attachmentInputRef.current?.click()}
+                      />
+                    )}
+                    <div className="chat-surface-fluid">
+                      {notice && <div className="notice">{notice}</div>}
+                      {!isGuid &&
+                        activeInteractions.map((interaction) => (
+                          <article
+                            className="approval-card message-item"
+                            key={interaction.id}
+                          >
+                            <div>
+                              <span className="approval-label">
+                                Approval required
+                              </span>
+                              <strong>{interaction.tool}</strong>
+                              <p>{interaction.summary}</p>
+                            </div>
+                            <div className="approval-actions">
+                              <button
+                                className="approval-reject"
+                                disabled={resolving === interaction.id}
+                                onClick={() =>
+                                  resolveInteraction(interaction, "reject")
+                                }
+                              >
+                                Reject
+                              </button>
+                              <button
+                                className="approval-allow"
+                                disabled={resolving === interaction.id}
+                                onClick={() =>
+                                  resolveInteraction(interaction, "allow")
+                                }
+                              >
+                                Allow once
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      {!isGuid &&
+                        activeMessages.map((message) => (
+                          <AionMessage
+                            key={message.id}
+                            conversationId={activeId!}
+                            id={message.id}
+                            role={message.role}
+                            text={message.text}
+                          />
+                        ))}
+                    </div>
                   </div>
-                  <div className="approval-actions">
-                    <button
-                      className="approval-reject"
-                      disabled={resolving === interaction.id}
-                      onClick={() => resolveInteraction(interaction, "reject")}
+                  {active && activeAssets.length > 0 && assetPort && (
+                    <div
+                      className="conversation-assets"
+                      aria-label="Session files"
                     >
-                      Reject
-                    </button>
-                    <button
-                      className="approval-allow"
-                      disabled={resolving === interaction.id}
-                      onClick={() => resolveInteraction(interaction, "allow")}
-                    >
-                      Allow once
-                    </button>
+                      {activeAssets.map((asset) =>
+                        asset.kind === "attachment" ? (
+                          <button
+                            type="button"
+                            key={asset.id}
+                            className={
+                              activeStaged.includes(asset.id) ? "staged" : ""
+                            }
+                            onClick={() => toggleAsset(asset.id)}
+                            title={
+                              activeStaged.includes(asset.id)
+                                ? "Remove from next message"
+                                : "Attach to next message"
+                            }
+                          >
+                            ＋ {asset.name}
+                          </button>
+                        ) : (
+                          <a
+                            key={asset.id}
+                            href={assetPort.downloadUrl(
+                              active.workspaceId,
+                              asset.path,
+                            )}
+                          >
+                            ↧ {asset.name}
+                          </a>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  <div
+                    className={`aion-composer chat-surface-container${isGuid ? " guid-hidden-composer" : ""}`}
+                  >
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(event) => attach(event.target.files)}
+                    />
+                    <AionSendBox
+                      disabled={!active}
+                      loading={active ? running.includes(active.id) : false}
+                      onSend={send}
+                      onStop={cancelSession}
+                      onAttach={() => attachmentInputRef.current?.click()}
+                    />
                   </div>
-                </article>
-              ))}
-            {!isGuid &&
-              activeMessages.map((message) => (
-                <AionMessage
-                  key={message.id}
-                  conversationId={activeId!}
-                  id={message.id}
-                  role={message.role}
-                  text={message.text}
+                </section>
+                {workspaceOpen && (
+                  <button
+                    className="workspace-scrim"
+                    type="button"
+                    aria-label="Close workspace files"
+                    onClick={() => setWorkspaceOpen(false)}
+                  />
+                )}
+                {workspacePanel}
+                <AionSettingsModal
+                  visible={settingsOpen}
+                  onClose={() => setSettingsOpen(false)}
                 />
-              ))}
-          </div>
-        </div>
-        {active && activeAssets.length > 0 && assetPort && (
-          <div className="conversation-assets" aria-label="Session files">
-            {activeAssets.map((asset) =>
-              asset.kind === "attachment" ? (
-                <button
-                  type="button"
-                  key={asset.id}
-                  className={activeStaged.includes(asset.id) ? "staged" : ""}
-                  onClick={() => toggleAsset(asset.id)}
-                  title={
-                    activeStaged.includes(asset.id)
-                      ? "Remove from next message"
-                      : "Attach to next message"
-                  }
-                >
-                  ＋ {asset.name}
-                </button>
-              ) : (
-                <a
-                  key={asset.id}
-                  href={assetPort.downloadUrl(active.workspaceId, asset.path)}
-                >
-                  ↧ {asset.name}
-                </a>
-              ),
-            )}
-          </div>
-        )}
-        <div
-          className={`aion-composer chat-surface-container${isGuid ? " guid-hidden-composer" : ""}`}
-        >
-          <input
-            ref={attachmentInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(event) => attach(event.target.files)}
-          />
-          <AionSendBox
-            disabled={!active}
-            loading={active ? running.includes(active.id) : false}
-            onSend={send}
-            onStop={cancelSession}
-            onAttach={() => attachmentInputRef.current?.click()}
-          />
-        </div>
-      </section>
-      {workspaceOpen && (
-        <button
-          className="workspace-scrim"
-          type="button"
-          aria-label="Close workspace files"
-          onClick={() => setWorkspaceOpen(false)}
-        />
-      )}
-      {workspacePanel}
-      <AionSettingsModal
-        visible={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
               </main>
             }
           />

@@ -28,6 +28,7 @@ export const presetDefinitionSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 });
 export type PresetDefinition = z.infer<typeof presetDefinitionSchema>;
+export const presetDefinitionListSchema = z.array(presetDefinitionSchema);
 
 export const presetMutationSchema = presetDefinitionSchema
   .omit({
