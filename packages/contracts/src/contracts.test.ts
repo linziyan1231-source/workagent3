@@ -158,8 +158,75 @@ describe("migration inventory", () => {
         capturedAt: "2026-08-30T10:00:00+08:00",
         skills: [],
         mcpServers: [],
-        bindings: [],
+        skillBindings: [],
+        mcpBindings: [],
         results: [],
+      }),
+    ).toThrow();
+  });
+
+  it("carries bindings and credential references without credential plaintext", () => {
+    const inventory = {
+      schemaVersion: 1 as const,
+      sid: "S-1-5-21-1",
+      capturedAt: "2026-08-30T10:00:00+08:00",
+      skills: [
+        {
+          oldId: "old-skill",
+          name: "Skill",
+          description: "Migrated skill",
+          version: "1",
+          legacySource: "user" as const,
+          contentPath: "C:\\legacy\\skills\\one",
+          enabled: true,
+          deleted: false,
+          bindingObjectIds: ["assistant-1"],
+          requiredMcpServerIds: ["mcp-1"],
+        },
+      ],
+      mcpServers: [
+        {
+          id: "mcp-1",
+          name: "MCP",
+          source: "user" as const,
+          enabled: true,
+          transport: {
+            kind: "http" as const,
+            url: "https://example.com/mcp",
+            headerCredentialIds: { Authorization: "credential-1" },
+          },
+          toolPolicy: "all" as const,
+          allowedTools: [],
+          oauthState: "needs_auth" as const,
+        },
+      ],
+      skillBindings: [
+        {
+          id: "sb-1",
+          skillId: "old-skill",
+          engine: "harness" as const,
+          subjectId: "assistant-1",
+          subjectType: "assistant" as const,
+        },
+      ],
+      mcpBindings: [],
+      results: [],
+    };
+    expect(skillMcpInventorySchema.parse(inventory).skills[0]?.oldId).toBe(
+      "old-skill",
+    );
+    expect(() =>
+      skillMcpInventorySchema.parse({
+        ...inventory,
+        mcpServers: [
+          {
+            ...inventory.mcpServers[0],
+            transport: {
+              ...inventory.mcpServers[0]!.transport,
+              headers: { Authorization: "plaintext" },
+            },
+          },
+        ],
       }),
     ).toThrow();
   });

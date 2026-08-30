@@ -101,6 +101,9 @@ func (s *Store) Install(ctx context.Context, input InstallInput) (Entry, error) 
 	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil {
 		return Entry{}, errors.New("skill package is missing SKILL.md")
 	}
+	if err := validateSkillDocument(filepath.Join(source, "SKILL.md")); err != nil {
+		return Entry{}, err
+	}
 	stagingParent := filepath.Join(s.skillsRoot, ".staging")
 	staging, err := os.MkdirTemp(stagingParent, safeSegment(input.ID)+"-")
 	if err != nil {
@@ -283,6 +286,48 @@ func validateSkillTree(root string) error {
 		}
 		return nil
 	})
+}
+
+func validateSkillDocument(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return errors.New("skill package is missing SKILL.md")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	if err != nil || len(content) > 1<<20 {
+		return errors.New("SKILL.md is unreadable or too large")
+	}
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	if !strings.HasPrefix(normalized, "---\n") {
+		return errors.New("SKILL.md is missing YAML frontmatter")
+	}
+	rest := normalized[4:]
+	closing := strings.Index(rest, "\n---\n")
+	if closing < 0 && strings.HasSuffix(rest, "\n---") {
+		closing = len(rest) - len("\n---")
+	}
+	if closing < 0 {
+		return errors.New("SKILL.md has unterminated YAML frontmatter")
+	}
+	header := rest[:closing]
+	name, description := "", ""
+	for _, line := range strings.Split(header, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "name":
+			name = strings.Trim(strings.TrimSpace(value), `"'`)
+		case "description":
+			description = strings.TrimSpace(value)
+		}
+	}
+	if name == "" || description == "" {
+		return errors.New("SKILL.md frontmatter requires name and description")
+	}
+	return nil
 }
 
 func copySkillTree(source, destination string) error {

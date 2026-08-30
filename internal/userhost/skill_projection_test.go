@@ -58,7 +58,7 @@ func TestRuntimeGatewayOwnsSkillMutations(t *testing.T) {
 	if err := os.MkdirAll(source, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: user-skill\ndescription: User skill\n---\nskill"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := store.Install(context.Background(), skillruntime.InstallInput{

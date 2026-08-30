@@ -131,7 +131,7 @@ func writeSkillPackage(t *testing.T, directory string) {
 	if err := os.MkdirAll(filepath.Join(directory, "references"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "SKILL.md"), []byte("# Drawing Review\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "SKILL.md"), []byte("---\nname: drawing-review\ndescription: Reviews drawings\n---\n# Drawing Review\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, "references", "guide.md"), []byte("guide"), 0o600); err != nil {
