@@ -9,7 +9,10 @@ function applyWorkAgentBrand<T>(resource: T): T {
   ) as T;
 }
 
-const savedLanguage = localStorage.getItem("i18nextLng");
+const savedLanguage =
+  typeof localStorage?.getItem === "function"
+    ? localStorage.getItem("i18nextLng")
+    : null;
 const language =
   savedLanguage ??
   (navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US");

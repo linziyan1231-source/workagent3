@@ -1,4 +1,5 @@
 import SettingsModal from "@renderer/components/settings/SettingsModal";
+import { MemoryRouter } from "react-router-dom";
 
 /** WorkAgent3 close-state adapter around the original Renderer SettingsModal. */
 export function AionSettingsModal({
@@ -8,5 +9,9 @@ export function AionSettingsModal({
   visible: boolean;
   onClose: () => void;
 }) {
-  return <SettingsModal visible={visible} onCancel={onClose} />;
+  return (
+    <MemoryRouter>
+      <SettingsModal visible={visible} onCancel={onClose} />
+    </MemoryRouter>
+  );
 }

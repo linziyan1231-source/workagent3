@@ -23,3 +23,7 @@ export function useAuth() {
   if (!value) throw new Error("WorkAgentAuthProvider is missing");
   return value;
 }
+
+export function useOptionalAuth() {
+  return useContext(AuthContext);
+}
