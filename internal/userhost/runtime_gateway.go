@@ -16,6 +16,7 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
 )
 
@@ -24,6 +25,7 @@ type runtimeGateway struct {
 	catalog     *mcpruntime.Catalog
 	credentials *credentialbroker.Store
 	skills      *skillruntime.Store
+	migration   *skillmigration.Store
 }
 
 func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (*runtimeGateway, error) {
@@ -42,8 +44,16 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 		catalog.Close()
 		return nil, err
 	}
+	migration, err := skillmigration.Open(filepath.Join(runtimeDirectory, "skill-migration.db"), skills, nil)
+	if err != nil {
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
 	publisher := &harnessProjectionPublisher{catalog: catalog, credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	if err := publisher.Publish(context.Background()); err != nil {
+		migration.Close()
 		skills.Close()
 		credentials.Close()
 		catalog.Close()
@@ -51,13 +61,14 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 	}
 	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	if err := skillPublisher.Publish(context.Background()); err != nil {
+		migration.Close()
 		skills.Close()
 		credentials.Close()
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, target, token)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills}, nil
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, migration, target, token)
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration}, nil
 }
 
 func (g *runtimeGateway) Close() error {
@@ -65,6 +76,7 @@ func (g *runtimeGateway) Close() error {
 	catalogErr := g.catalog.Close()
 	credentialErr := g.credentials.Close()
 	skillErr := g.skills.Close()
+	migrationErr := g.migration.Close()
 	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
 		return serverErr
 	}
@@ -74,7 +86,10 @@ func (g *runtimeGateway) Close() error {
 	if credentialErr != nil {
 		return credentialErr
 	}
-	return skillErr
+	if skillErr != nil {
+		return skillErr
+	}
+	return migrationErr
 }
 
 type credentialCatalog interface {
@@ -89,7 +104,7 @@ type runtimeCredentialCatalog interface {
 	Revoke(context.Context, string) error
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, target *url.URL, token string) http.Handler {
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
@@ -104,6 +119,9 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
 	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))
 	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher))
+	if migration != nil {
+		mux.HandleFunc("GET /v1/migrations/skills-mcp", listSkillMCPMigration(migration))
+	}
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")
 	})
@@ -116,6 +134,22 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func listSkillMCPMigration(migration *skillmigration.Store) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		skills, err := migration.Results(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "migration_journal_failed")
+			return
+		}
+		mcp, err := migration.MCPResults(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "migration_journal_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, map[string]any{"results": append(mcp, skills...)})
+	}
 }
 
 func createCredential(credentials runtimeCredentialCatalog) http.HandlerFunc {

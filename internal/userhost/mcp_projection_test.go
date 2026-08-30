@@ -65,7 +65,7 @@ func TestHarnessProjectionResolvesCredentialsOnlyAcrossPrivateRoute(t *testing.T
 		t.Fatalf("revoked projection did not fail only its server: %s", received)
 	}
 
-	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, openGatewaySkills(t), gatewayTestPublisher{}, target, "runtime-token")
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, openGatewaySkills(t), gatewayTestPublisher{}, nil, target, "runtime-token")
 	request := httptest.NewRequest(http.MethodPut, "/internal/mcp-projection", strings.NewReader(`{"servers":[]}`))
 	request.Header.Set("Authorization", "Bearer runtime-token")
 	response := httptest.NewRecorder()

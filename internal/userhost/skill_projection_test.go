@@ -72,7 +72,7 @@ func TestRuntimeGatewayOwnsSkillMutations(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, store, gatewayTestPublisher{}, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, store, gatewayTestPublisher{}, nil, target, "token")
 
 	patch := httptest.NewRequest(http.MethodPatch, "/v1/skills/user-skill", strings.NewReader(`{"enabled":false}`))
 	patch.Header.Set("Authorization", "Bearer token")

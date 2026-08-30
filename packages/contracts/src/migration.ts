@@ -101,6 +101,13 @@ export type SkillMcpMigrationResult = z.infer<
   typeof skillMcpMigrationResultSchema
 >;
 
+export const skillMcpMigrationReportSchema = z
+  .object({ results: z.array(skillMcpMigrationResultSchema) })
+  .strict();
+export type SkillMcpMigrationReport = z.infer<
+  typeof skillMcpMigrationReportSchema
+>;
+
 export const skillMcpInventorySchema = z
   .object({
     schemaVersion: z.literal(1),
