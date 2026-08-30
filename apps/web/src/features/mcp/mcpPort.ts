@@ -1,8 +1,10 @@
 import {
   runtimeMcpMutationSchema,
+  runtimeMcpConnectionResultSchema,
   runtimeMcpServerListSchema,
   runtimeMcpServerSchema,
   type RuntimeMcpMutation,
+  type RuntimeMcpConnectionResult,
   type RuntimeMcpServer,
 } from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
@@ -38,5 +40,12 @@ export const mcpPort = {
     await requestJson<void>(`${base}/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  },
+  async test(id: string): Promise<RuntimeMcpConnectionResult> {
+    return runtimeMcpConnectionResultSchema.parse(
+      await requestJson<unknown>(`${base}/${encodeURIComponent(id)}/test`, {
+        method: "POST",
+      }),
+    );
   },
 };

@@ -82,7 +82,12 @@ type credentialCatalog interface {
 	Metadata(context.Context, string) (credentialbroker.Metadata, error)
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, target *url.URL, token string) http.Handler {
+type runtimeCredentialCatalog interface {
+	credentialCatalog
+	projectionCredentialResolver
+}
+
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
@@ -90,6 +95,7 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentia
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
+	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher))
 	mux.HandleFunc("GET /v1/skills", listSkills(skills))
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
 	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))

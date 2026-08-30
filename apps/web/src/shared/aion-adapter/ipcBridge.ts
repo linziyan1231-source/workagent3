@@ -241,9 +241,25 @@ export const mcpService = {
     );
   }),
   getAgentMcpConfigs: command<void, []>(async () => []),
-  testMcpConnection: command<IMcpServer, { success: boolean; error: string }>(
-    async () => ({ success: false, error: "mcp_connection_test_unavailable" }),
-  ),
+  testMcpConnection: command<
+    IMcpServer,
+    {
+      success: boolean;
+      error: string;
+      needsAuth?: boolean;
+      needs_auth?: boolean;
+      tools?: Array<{ name: string; description?: string }>;
+    }
+  >(async (server) => {
+    const result = await mcpPort.test(server.id);
+    const needsAuth = result.error === "mcp_needs_auth";
+    return {
+      success: result.success,
+      error: result.error ?? "",
+      needsAuth,
+      needs_auth: needsAuth,
+    };
+  }),
   checkOAuthStatus: command<{ server_url: string }, { authenticated: boolean }>(
     async () => ({ authenticated: false }),
   ),

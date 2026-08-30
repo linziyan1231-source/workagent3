@@ -67,6 +67,15 @@ export const runtimeMcpServerSchema = z
 export type RuntimeMcpServer = z.infer<typeof runtimeMcpServerSchema>;
 export const runtimeMcpServerListSchema = z.array(runtimeMcpServerSchema);
 
+export const runtimeMcpConnectionResultSchema = z.object({
+  success: z.boolean(),
+  server: runtimeMcpServerSchema,
+  error: z.string().min(1).optional(),
+});
+export type RuntimeMcpConnectionResult = z.infer<
+  typeof runtimeMcpConnectionResultSchema
+>;
+
 export const runtimeMcpMutationSchema = runtimeMcpServerSchema
   .omit({ id: true, createdAt: true, updatedAt: true, health: true })
   .safeExtend({ health: runtimeMcpServerSchema.shape.health.optional() })

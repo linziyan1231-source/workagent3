@@ -55,4 +55,26 @@ describe("MCP HTTP port", () => {
       expect.objectContaining({ method: "PATCH" }),
     );
   });
+
+  it("runs the runtime-owned connection test", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            server: { ...server, health: "healthy" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(mcpPort.test("mcp/one")).resolves.toMatchObject({
+      success: true,
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/mcp-servers/mcp%2Fone/test",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });
