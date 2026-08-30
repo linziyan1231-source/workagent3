@@ -5,11 +5,18 @@ import { ConversationPage } from "../features/conversation/ConversationPage.js";
 import { WorkspacePanel } from "../features/workspace/WorkspacePanel.js";
 import { workspacePort } from "../features/workspace/workspacePort.js";
 import { presetPort } from "../features/presets/presetPort.js";
+import { mcpPort } from "../features/mcp/mcpPort.js";
+import { skillPort } from "../features/skills/skillPort.js";
 
 const workspaceAssets = {
   list: workspacePort.assets,
   attach: workspacePort.attach,
   downloadUrl: workspacePort.downloadUrl,
+};
+
+const capabilities = {
+  skills: skillPort.list,
+  mcpServers: mcpPort.list,
 };
 
 export function App() {
@@ -42,6 +49,7 @@ export function App() {
       onWorkspaceSelect={setWorkspaceId}
       assetPort={workspaceAssets}
       presetPort={presetPort}
+      capabilityPort={capabilities}
       workspacePanel={
         <WorkspacePanel selectedId={workspaceId} onSelect={setWorkspaceId} />
       }

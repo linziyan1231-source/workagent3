@@ -4,12 +4,15 @@ import type {
   EngineStatus,
   PresetDefinition,
   PresetMutation,
+  RuntimeMcpServer,
+  SkillCatalogEntry,
 } from "@workagent/contracts";
 import type { Assistant } from "@/common/types/agent/assistantTypes";
 import AssistantEditorPage from "@renderer/pages/settings/AssistantSettings/AssistantEditorPage";
 import DeleteAssistantModal from "@renderer/pages/settings/AssistantSettings/DeleteAssistantModal";
 import AssistantHomeTabs from "@renderer/pages/settings/AssistantSettings/home/AssistantHomeTabs";
 import type { AssistantEditorViewModel } from "@renderer/pages/settings/AssistantSettings/types";
+import { toLegacyMcpServer } from "../../aion-adapter/ipcBridge.js";
 import { useMemo, useState } from "react";
 
 type Port = {
@@ -23,6 +26,8 @@ type Props = {
   engines: EngineStatus[];
   port: Port;
   presets: PresetDefinition[];
+  skills: SkillCatalogEntry[];
+  mcpServers: RuntimeMcpServer[];
   onChange: (presets: PresetDefinition[]) => void;
   onStartChat: (preset: PresetDefinition) => void;
 };
@@ -62,6 +67,8 @@ export function AionPresetPage({
   engines,
   port,
   presets,
+  skills,
+  mcpServers,
   onChange,
   onStartChat,
 }: Props) {
@@ -84,6 +91,34 @@ export function AionPresetPage({
   const assistants = useMemo(
     () => presets.map((preset) => toAssistant(preset, engines)),
     [engines, presets],
+  );
+  const availableSkills = useMemo(
+    () =>
+      skills
+        .filter((skill) => skill.enabled)
+        .map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          location: skill.relativePath,
+          relative_location: skill.relativePath,
+          is_auto_inject: false,
+          is_custom: skill.source !== "builtin",
+          source:
+            skill.source === "builtin"
+              ? "builtin"
+              : skill.source === "market"
+                ? "extension"
+                : "custom",
+        })),
+    [skills],
+  );
+  const skillIdByName = useMemo(
+    () => new Map(skills.map((skill) => [skill.name, skill.id])),
+    [skills],
+  );
+  const skillNameById = useMemo(
+    () => new Map(skills.map((skill) => [skill.id, skill.name])),
+    [skills],
   );
 
   const begin = (preset?: PresetDefinition) => {
@@ -177,7 +212,7 @@ export function AionPresetPage({
       mcps: {
         mode: "fixed",
         setMode: () => undefined,
-        availableServers: [],
+        availableServers: mcpServers.map(toLegacyMcpServer),
         selectedIds: mcpServerIds,
         setSelectedIds: setMcpServerIds,
       },
@@ -189,9 +224,10 @@ export function AionPresetPage({
       setViewMode: setPromptViewMode,
     },
     skills: {
-      availableSkills: [],
-      selectedSkills: skillIds,
-      setSelectedSkills: setSkillIds,
+      availableSkills,
+      selectedSkills: skillIds.map((id) => skillNameById.get(id) ?? id),
+      setSelectedSkills: (names: string[]) =>
+        setSkillIds(names.map((name) => skillIdByName.get(name) ?? name)),
       pendingSkills: [],
       setDeletePendingSkillName: () => undefined,
       setDeleteCustomSkillName: () => undefined,

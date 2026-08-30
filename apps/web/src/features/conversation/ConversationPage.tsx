@@ -17,6 +17,8 @@ import type {
   PresetMutation,
   RuntimeSession,
   RuntimeMessage,
+  RuntimeMcpServer,
+  SkillCatalogEntry,
   WorkspaceAsset,
 } from "@workagent/contracts";
 import type { AuthUser } from "../../shared/types/auth.js";
@@ -100,6 +102,10 @@ type Props = {
     copy(id: string, name: string): Promise<PresetDefinition>;
     remove(id: string): Promise<void>;
   };
+  capabilityPort?: {
+    skills(): Promise<SkillCatalogEntry[]>;
+    mcpServers(): Promise<RuntimeMcpServer[]>;
+  };
 };
 
 export function ConversationPage({
@@ -111,6 +117,7 @@ export function ConversationPage({
   onWorkspaceSelect,
   assetPort,
   presetPort,
+  capabilityPort,
 }: Props) {
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -124,6 +131,8 @@ export function ConversationPage({
   const [engine, setEngine] = useState<EngineId>("harness");
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
   const [presets, setPresets] = useState<PresetDefinition[]>([]);
+  const [skills, setSkills] = useState<SkillCatalogEntry[]>([]);
+  const [mcpServers, setMcpServers] = useState<RuntimeMcpServer[]>([]);
   const [presetId, setPresetId] = useState("builtin-general");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -173,7 +182,15 @@ export function ConversationPage({
       ?.list()
       .then(setPresets)
       .catch(() => setNotice("Assistant presets could not be loaded."));
-  }, [onWorkspaceSelect, port, presetPort]);
+    void capabilityPort
+      ?.skills()
+      .then(setSkills)
+      .catch(() => setSkills([]));
+    void capabilityPort
+      ?.mcpServers()
+      .then(setMcpServers)
+      .catch(() => setMcpServers([]));
+  }, [capabilityPort, onWorkspaceSelect, port, presetPort]);
 
   useEffect(() => {
     if (active === undefined) return;
@@ -487,6 +504,8 @@ export function ConversationPage({
                       engines={engineStatuses}
                       port={presetPort}
                       presets={presets}
+                      skills={skills}
+                      mcpServers={mcpServers}
                       onChange={setPresets}
                       onStartChat={(preset) => {
                         setPresetId(preset.id);
