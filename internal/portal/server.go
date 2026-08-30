@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/contracts"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/store"
 )
@@ -25,9 +26,27 @@ type Server struct {
 	secure      bool
 	dummyHash   string
 	sessionLife time.Duration
+	modules     Modules
+}
+
+type ModelAccessPort interface {
+	ListAuthorized(context.Context, string) ([]contracts.AuthorizedModel, error)
+}
+
+type QuotaUsagePort interface {
+	Usage(context.Context, string, string, time.Time) (contracts.QuotaUsage, error)
+}
+
+type Modules struct {
+	ModelAccess ModelAccessPort
+	Quota       QuotaUsagePort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
+	return NewWithModules(data, runtimes, secure, Modules{})
+}
+
+func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool, modules Modules) (*Server, error) {
 	if data == nil || runtimes == nil {
 		return nil, errors.New("store and runtime router are required")
 	}
@@ -35,7 +54,7 @@ func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bo
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour}, nil
+	return &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour, modules: modules}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -47,6 +66,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
+	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
+	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
@@ -143,6 +164,41 @@ func (s *Server) cookieName() string {
 
 func (s *Server) me(writer http.ResponseWriter, _ *http.Request, user store.User) {
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user})
+}
+
+func (s *Server) models(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.ModelAccess == nil {
+		writeError(writer, http.StatusServiceUnavailable, "model_access_unavailable")
+		return
+	}
+	models, err := s.modules.ModelAccess.ListAuthorized(request.Context(), user.SID)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "model_access_failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, models)
+}
+
+func (s *Server) quotaUsage(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Quota == nil {
+		writeError(writer, http.StatusServiceUnavailable, "quota_unavailable")
+		return
+	}
+	modelID := strings.TrimSpace(request.URL.Query().Get("model_id"))
+	if modelID == "" {
+		writeError(writer, http.StatusBadRequest, "model_id_required")
+		return
+	}
+	usage, err := s.modules.Quota.Usage(request.Context(), user.SID, modelID, s.now())
+	if errors.Is(err, contracts.ErrQuotaNotConfigured) {
+		writeError(writer, http.StatusNotFound, "quota_not_configured")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "quota_failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, usage)
 }
 
 func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request, user store.User) {

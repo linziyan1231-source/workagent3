@@ -54,5 +54,6 @@ describe("Model Access HTTP port", () => {
     expect(snapshot.models).toHaveLength(1);
     expect(snapshot.credentials[0]?.state).toBe("ready");
     expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledWith("/api/models", expect.any(Object));
   });
 });

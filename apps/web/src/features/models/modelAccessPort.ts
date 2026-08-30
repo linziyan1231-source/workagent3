@@ -72,7 +72,7 @@ export const toRendererProviders = (
 export const modelAccessPort = {
   async snapshot(): Promise<ModelAccessSnapshot> {
     const [models, credentials] = await Promise.all([
-      requestJson<unknown>("/api/runtime/v1/models"),
+      requestJson<unknown>("/api/models"),
       requestJson<unknown>("/api/runtime/v1/credentials"),
     ]);
     return {

@@ -9,10 +9,12 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"workagent3/internal/contracts"
 )
 
 var (
-	ErrBudgetNotConfigured = errors.New("quota budget is not configured")
+	ErrBudgetNotConfigured = contracts.ErrQuotaNotConfigured
 	ErrExceeded            = errors.New("quota exceeded")
 	ErrIdempotencyConflict = errors.New("quota idempotency conflict")
 	ErrReservationNotFound = errors.New("quota reservation not found")
@@ -61,11 +63,7 @@ type SettleRequest struct {
 	ActualUnits int64
 }
 
-type Usage struct {
-	LimitUnits    int64
-	ConsumedUnits int64
-	ReservedUnits int64
-}
+type Usage = contracts.QuotaUsage
 
 type Store struct {
 	db         *sql.DB

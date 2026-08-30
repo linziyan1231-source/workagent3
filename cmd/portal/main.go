@@ -12,11 +12,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/modelaccess"
 	"workagent3/internal/portal"
+	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/store"
 )
@@ -30,6 +33,8 @@ func main() {
 func run() error {
 	address := flag.String("addr", "127.0.0.1:8080", "Portal listen address")
 	databasePath := flag.String("db", filepath.Join("data", "portal.db"), "Portal SQLite path")
+	modelAccessPath := flag.String("model-access-db", "", "Model Access SQLite path (defaults beside Portal database)")
+	quotaPath := flag.String("quota-db", "", "Quota SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
@@ -45,12 +50,36 @@ func run() error {
 	if err := bootstrapUser(data); err != nil {
 		return err
 	}
+	if *modelAccessPath == "" {
+		*modelAccessPath = filepath.Join(filepath.Dir(*databasePath), "model-access.db")
+	}
+	if *quotaPath == "" {
+		*quotaPath = filepath.Join(filepath.Dir(*databasePath), "quota.db")
+	}
+	for _, path := range []string{*modelAccessPath, *quotaPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return fmt.Errorf("create module data directory: %w", err)
+		}
+	}
+	models, err := modelaccess.Open(*modelAccessPath)
+	if err != nil {
+		return err
+	}
+	defer models.Close()
+	if err := bootstrapModels(models); err != nil {
+		return err
+	}
+	quotas, err := quota.Open(*quotaPath, models)
+	if err != nil {
+		return err
+	}
+	defer quotas.Close()
 
 	registry := runtimeapi.NewRegistry()
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.New(data, registry, *secureCookie)
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas})
 	if err != nil {
 		return err
 	}
@@ -84,6 +113,33 @@ func run() error {
 	log.Printf("WorkAgent Portal listening on %s", *address)
 	if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+func bootstrapModels(models *modelaccess.Store) error {
+	ctx := context.Background()
+	for _, model := range []modelaccess.Model{
+		{ID: "harness-default", ProviderID: "harness", DisplayName: "DeepSeek Harness", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
+		{ID: "codex-native", ProviderID: "codex", DisplayName: "Codex", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
+		{ID: "kimi-native", ProviderID: "kimi", DisplayName: "Kimi", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
+	} {
+		if err := models.UpsertModel(ctx, model); err != nil {
+			return fmt.Errorf("seed model %s: %w", model.ID, err)
+		}
+	}
+	sid := strings.TrimSpace(os.Getenv("WORKAGENT_BOOTSTRAP_SID"))
+	for _, modelID := range strings.Split(os.Getenv("WORKAGENT_BOOTSTRAP_MODEL_IDS"), ",") {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			continue
+		}
+		if sid == "" {
+			return errors.New("bootstrap SID is required with bootstrap model IDs")
+		}
+		if err := models.SetAuthorization(ctx, sid, modelID, true, ""); err != nil {
+			return fmt.Errorf("grant bootstrap model %s: %w", modelID, err)
+		}
 	}
 	return nil
 }
