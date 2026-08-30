@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,12 +33,14 @@ type Config struct {
 }
 
 type Supervisor struct {
-	config Config
-	job    *winutil.Job
-	lock   *winutil.InstanceLock
-	cmd    *exec.Cmd
-	exited chan error
-	once   sync.Once
+	config        Config
+	job           *winutil.Job
+	lock          *winutil.InstanceLock
+	cmd           *exec.Cmd
+	exited        chan error
+	gateway       *runtimeGateway
+	gatewayExited chan error
+	once          sync.Once
 }
 
 func New(config Config) (*Supervisor, error) {
@@ -113,7 +116,22 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		s.Close()
 		return runtimeapi.Registration{}, err
 	}
-	return runtimeapi.Registration{SID: s.config.SID, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", port), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
+	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	gateway, err := newRuntimeGateway(directories.runtime, target, token)
+	if err != nil {
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		gateway.Close()
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
+	s.gateway = gateway
+	s.gatewayExited = make(chan error, 1)
+	go func() { s.gatewayExited <- gateway.server.Serve(listener) }()
+	return runtimeapi.Registration{SID: s.config.SID, BaseURL: "http://" + listener.Addr().String(), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
 }
 
 // Serve owns the complete runtime lease. A healthy Harness is published
@@ -147,6 +165,11 @@ func (s *Supervisor) Serve(ctx context.Context, reporter LeaseReporter) error {
 				return errors.New("Harness exited")
 			}
 			return fmt.Errorf("Harness exited: %w", processErr)
+		case gatewayErr := <-s.gatewayExited:
+			if errors.Is(gatewayErr, http.ErrServerClosed) {
+				return errors.New("Runtime gateway stopped")
+			}
+			return fmt.Errorf("Runtime gateway stopped: %w", gatewayErr)
 		case <-ticker.C:
 			if err := reporter.Publish(ctx, registration); err != nil {
 				return err
@@ -158,8 +181,14 @@ func (s *Supervisor) Serve(ctx context.Context, reporter LeaseReporter) error {
 func (s *Supervisor) Close() error {
 	var err error
 	s.once.Do(func() {
+		if s.gateway != nil {
+			err = s.gateway.Close()
+		}
 		if s.job != nil {
-			err = s.job.Close()
+			jobErr := s.job.Close()
+			if err == nil {
+				err = jobErr
+			}
 		}
 		if s.lock != nil {
 			lockErr := s.lock.Close()
