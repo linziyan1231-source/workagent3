@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   EngineEvent,
   EngineId,
+  PendingInteraction,
   RuntimeSession,
 } from "@workagent/contracts";
 import type { AuthUser } from "../auth/authPort.js";
@@ -60,6 +61,10 @@ export function ConversationPage({
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
+  const [interactions, setInteractions] = useState<
+    Record<string, PendingInteraction[]>
+  >({});
+  const [resolving, setResolving] = useState<string>();
   const [engine, setEngine] = useState<EngineId>("harness");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -69,6 +74,7 @@ export function ConversationPage({
     () => (activeId ? (messages[activeId] ?? []) : []),
     [activeId, messages],
   );
+  const activeInteractions = activeId ? (interactions[activeId] ?? []) : [];
 
   useEffect(() => {
     void port
@@ -82,10 +88,33 @@ export function ConversationPage({
 
   useEffect(() => {
     if (!activeId) return;
+    void port
+      .pending(activeId)
+      .then((items) =>
+        setInteractions((current) => ({ ...current, [activeId]: items })),
+      )
+      .catch(() => setNotice("Pending approvals could not be refreshed."));
     return port.subscribe(activeId, (event) => applyEvent(activeId, event));
   }, [activeId, port]);
 
   function applyEvent(sessionId: string, event: EngineEvent) {
+    if (event.type === "approval.requested") {
+      void port
+        .pending(sessionId)
+        .then((items) =>
+          setInteractions((current) => ({ ...current, [sessionId]: items })),
+        );
+      return;
+    }
+    if (event.type === "approval.resolved") {
+      setInteractions((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] ?? []).filter(
+          (item) => item.id !== event.approvalId,
+        ),
+      }));
+      return;
+    }
     if (
       event.type !== "assistant.delta" &&
       event.type !== "assistant.completed" &&
@@ -98,6 +127,29 @@ export function ConversationPage({
         [sessionId]: reduceMessages(current[sessionId] ?? [], event),
       };
     });
+  }
+
+  async function resolveInteraction(
+    interaction: PendingInteraction,
+    decision: "allow" | "reject",
+  ) {
+    setResolving(interaction.id);
+    setNotice("");
+    try {
+      await port.respond(interaction.id, decision);
+      setInteractions((current) => ({
+        ...current,
+        [interaction.sessionId]: (current[interaction.sessionId] ?? []).filter(
+          (item) => item.id !== interaction.id,
+        ),
+      }));
+    } catch {
+      setNotice(
+        "That approval is no longer pending. The action stayed blocked.",
+      );
+    } finally {
+      setResolving(undefined);
+    }
   }
 
   async function newSession() {
@@ -219,6 +271,31 @@ export function ConversationPage({
               </button>
             </div>
           )}
+          {activeInteractions.map((interaction) => (
+            <article className="approval-card" key={interaction.id}>
+              <div>
+                <span className="approval-label">Approval required</span>
+                <strong>{interaction.tool}</strong>
+                <p>{interaction.summary}</p>
+              </div>
+              <div className="approval-actions">
+                <button
+                  className="approval-reject"
+                  disabled={resolving === interaction.id}
+                  onClick={() => resolveInteraction(interaction, "reject")}
+                >
+                  Reject
+                </button>
+                <button
+                  className="approval-allow"
+                  disabled={resolving === interaction.id}
+                  onClick={() => resolveInteraction(interaction, "allow")}
+                >
+                  Allow once
+                </button>
+              </div>
+            </article>
+          ))}
           {activeMessages.map((message) => (
             <article className={`message ${message.role}`} key={message.id}>
               <span>{message.role === "user" ? "You" : "WA"}</span>

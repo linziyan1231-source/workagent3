@@ -83,6 +83,12 @@ export const engineEventSchema = z.discriminatedUnion("type", [
     summary: z.string(),
   }),
   eventBaseSchema.extend({
+    type: z.literal("approval.resolved"),
+    turnId: z.string().min(1),
+    approvalId: z.string().min(1),
+    outcome: z.enum(["allowed", "rejected", "cancelled", "unavailable"]),
+  }),
+  eventBaseSchema.extend({
     type: z.literal("turn.failed"),
     turnId: z.string().min(1),
     code: z.string().min(1),

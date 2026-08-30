@@ -381,6 +381,61 @@ button {
   color: #755c1d;
   font-size: 0.85rem;
 }
+
+.approval-card {
+  width: min(720px, 100%);
+  margin: 0 auto 18px;
+  padding: 18px;
+  border: 1px solid #e7c77c;
+  border-radius: 16px;
+  background: #fffaf0;
+  box-shadow: 0 8px 24px rgb(118 78 9 / 8%);
+}
+
+.approval-card strong,
+.approval-card p {
+  display: block;
+  margin-top: 6px;
+}
+
+.approval-card p {
+  margin-bottom: 0;
+  color: #5f5541;
+}
+
+.approval-label {
+  color: #9a6500;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.approval-actions button {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.approval-reject {
+  border: 1px solid #d7c9aa;
+  background: white;
+  color: #6d5b39;
+}
+
+.approval-allow {
+  border: 1px solid #8b5a00;
+  background: #8b5a00;
+  color: white;
+}
 .message {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);

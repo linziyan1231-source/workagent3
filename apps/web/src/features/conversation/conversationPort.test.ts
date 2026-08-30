@@ -50,4 +50,24 @@ describe("ConversationPort", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("answers approvals through the same-origin interaction endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ accepted: true, status: "allowed" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversationPort.respond("interaction-1", "allow");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runtime/v1/interactions/interaction-1/respond",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ decision: "allow" }),
+      }),
+    );
+  });
 });

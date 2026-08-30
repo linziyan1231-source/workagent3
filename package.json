@@ -16,7 +16,7 @@
     "profile:smoke": "pnpm profile:dump && node scripts/smoke-harness.mjs",
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
     "test": "pnpm -r --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm --filter @workagent/contracts build && pnpm -r --if-present typecheck"
   },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",

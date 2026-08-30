@@ -3,15 +3,20 @@ import {
   runtimeApiSchemas,
   type CreateEngineSession,
   type EngineEvent,
+  interactionApiSchemas,
+  type PendingInteraction,
   type RuntimeSession,
 } from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
 
 const runtimePath = "/api/runtime/v1/sessions";
+const interactionPath = "/api/runtime/v1/interactions";
 
 export type ConversationPort = {
   create(input: CreateEngineSession): Promise<RuntimeSession>;
   list(): Promise<RuntimeSession[]>;
+  pending(sessionId: string): Promise<PendingInteraction[]>;
+  respond(interactionId: string, decision: "allow" | "reject"): Promise<void>;
   send(sessionId: string, content: string): Promise<void>;
   subscribe(
     sessionId: string,
@@ -31,6 +36,25 @@ export const conversationPort: ConversationPort = {
   async list() {
     return runtimeApiSchemas.sessionList.parse(
       await requestJson<unknown>(runtimePath),
+    );
+  },
+  async pending(sessionId) {
+    return interactionApiSchemas.pendingList.parse(
+      await requestJson<unknown>(
+        `${interactionPath}?sessionId=${encodeURIComponent(sessionId)}`,
+      ),
+    );
+  },
+  async respond(interactionId, decision) {
+    interactionApiSchemas.response.parse(
+      await requestJson<unknown>(
+        `${interactionPath}/${encodeURIComponent(interactionId)}/respond`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ decision }),
+        },
+      ),
     );
   },
   async send(sessionId, content) {

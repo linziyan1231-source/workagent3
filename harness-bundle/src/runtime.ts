@@ -19,6 +19,7 @@ import type {
   EngineBridge,
 } from "./engines/types.js";
 import { authorized } from "./index.js";
+import { ApprovalBridge } from "./approval-bridge.js";
 import { SessionIndex, type StoredSession } from "./session-index.js";
 
 type SessionRecord = {
@@ -173,6 +174,16 @@ export class RuntimeController {
     for (const session of this.#index.list()) {
       this.#sessions.set(session.id, this.#record(session));
     }
+    new ApprovalBridge(ctx, token, dshHome, (sessionId, event) => {
+      const record = this.#sessions.get(sessionId);
+      if (record === undefined) return;
+      this.#publish(record, {
+        ...event,
+        eventId: `${sessionId}-interaction-${record.nextEventSequence++}`,
+        occurredAt: new Date().toISOString(),
+        sessionId,
+      });
+    });
   }
 
   mount(): void {

@@ -9,7 +9,13 @@ import { RuntimeController } from "./runtime.js";
 import { WorkspaceController } from "./workspace-api.js";
 
 export const name = "workagent-runtime-api";
-export const inject = ["agentDefaultModel", "agents", "sessions", "webServer"];
+export const inject = [
+  "agentDefaultModel",
+  "agents",
+  "approval",
+  "sessions",
+  "webServer",
+];
 
 const json = (
   response: ServerResponse,
