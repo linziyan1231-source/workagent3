@@ -39,6 +39,7 @@ export const runtimeMcpServerSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().trim().min(1).max(120),
+    description: z.string().max(1000).optional(),
     source: z.enum(["managed", "user"]),
     enabled: z.boolean(),
     transport: runtimeMcpTransportSchema,

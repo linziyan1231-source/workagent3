@@ -8,6 +8,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
+      "@/common/adapter/ipcBridge": ["src/shared/aion-adapter/ipcBridge.ts"],
       "@renderer/components/chat/SendBox": [
         "src/shared/aion-adapter/sendBox.d.ts"
       ],

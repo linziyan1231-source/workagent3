@@ -84,4 +84,14 @@ export const ipcBridge = {
       },
     },
   },
+  acpConversation: new Proxy(
+    {},
+    {
+      get: () => ({
+        invoke: async () => undefined,
+        on: () => () => undefined,
+        emit: () => undefined,
+      }),
+    },
+  ),
 };

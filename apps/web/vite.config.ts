@@ -42,6 +42,10 @@ export default defineConfig({
         find: "@dnd-kit/utilities",
         replacement: `${webModules}/@dnd-kit/utilities`,
       },
+      {
+        find: "@/common/adapter/ipcBridge",
+        replacement: adapter("ipcBridge.ts"),
+      },
       { find: "classnames", replacement: `${webModules}/classnames` },
       { find: "i18next", replacement: `${webModules}/i18next` },
       { find: "react-i18next", replacement: `${webModules}/react-i18next` },
