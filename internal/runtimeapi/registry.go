@@ -2,6 +2,8 @@ package runtimeapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"net"
 	"net/url"
@@ -19,13 +21,38 @@ type Registration struct {
 }
 
 type Registry struct {
-	mu      sync.RWMutex
-	now     func() time.Time
-	entries map[string]Registration
+	mu          sync.RWMutex
+	now         func() time.Time
+	entries     map[string]Registration
+	credentials map[string][sha256.Size]byte
 }
 
 func NewRegistry() *Registry {
-	return &Registry{now: time.Now, entries: make(map[string]Registration)}
+	return &Registry{now: time.Now, entries: make(map[string]Registration), credentials: make(map[string][sha256.Size]byte)}
+}
+
+// Authorize installs the per-employee credential used by UserHost to publish
+// its loopback endpoint. The raw credential is never retained by Portal.
+func (r *Registry) Authorize(sid, credential string) error {
+	if sid == "" || credential == "" {
+		return errors.New("runtime SID and registration credential are required")
+	}
+	digest := sha256.Sum256([]byte(credential))
+	r.mu.Lock()
+	r.credentials[sid] = digest
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Registry) RegisterAuthorized(credential string, registration Registration) error {
+	digest := sha256.Sum256([]byte(credential))
+	r.mu.RLock()
+	expected, ok := r.credentials[registration.SID]
+	r.mu.RUnlock()
+	if !ok || subtle.ConstantTimeCompare(digest[:], expected[:]) != 1 {
+		return errors.New("runtime registration is not authorized")
+	}
+	return r.Register(registration)
 }
 
 func (r *Registry) Register(registration Registration) error {

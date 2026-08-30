@@ -62,9 +62,12 @@ func run() error {
 		return fmt.Errorf("Web distribution is not built: %w", err)
 	}
 
+	root := http.NewServeMux()
+	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry))
+	root.Handle("/", server.HandlerWithWeb(portal.SPAHandler(web)))
 	httpServer := &http.Server{
 		Addr:              *address,
-		Handler:           server.HandlerWithWeb(portal.SPAHandler(web)),
+		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
@@ -111,6 +114,11 @@ func bootstrapUser(data *store.Store) error {
 }
 
 func registerDevelopmentRuntime(registry *runtimeapi.Registry) error {
+	if credential := os.Getenv("WORKAGENT_RUNTIME_REGISTRATION_TOKEN"); credential != "" {
+		if err := registry.Authorize(os.Getenv("WORKAGENT_RUNTIME_SID"), credential); err != nil {
+			return err
+		}
+	}
 	baseURL := os.Getenv("WORKAGENT_RUNTIME_URL")
 	if baseURL == "" {
 		return nil

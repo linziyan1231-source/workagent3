@@ -36,6 +36,7 @@ type Supervisor struct {
 	job    *winutil.Job
 	lock   *winutil.InstanceLock
 	cmd    *exec.Cmd
+	exited chan error
 	once   sync.Once
 }
 
@@ -105,6 +106,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	s.job, s.cmd = job, command
 	done := make(chan error, 1)
+	s.exited = done
 	go func() { done <- command.Wait() }()
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	if err := waitForHealth(ctx, healthURL, token, done, s.config.StartupTimeout); err != nil {
@@ -112,6 +114,45 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	return runtimeapi.Registration{SID: s.config.SID, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", port), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
+}
+
+// Serve owns the complete runtime lease. A healthy Harness is published
+// immediately, renewed before expiry, and removed when the process or context
+// ends.
+func (s *Supervisor) Serve(ctx context.Context, reporter LeaseReporter) error {
+	if reporter == nil {
+		return errors.New("runtime lease reporter is required")
+	}
+	registration, err := s.Start(ctx)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if err := reporter.Publish(ctx, registration); err != nil {
+		return err
+	}
+	defer func() {
+		removeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = reporter.Remove(removeContext, registration)
+	}()
+	ticker := time.NewTicker(runtimeapi.DefaultLeaseDuration / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case processErr := <-s.exited:
+			if processErr == nil {
+				return errors.New("Harness exited")
+			}
+			return fmt.Errorf("Harness exited: %w", processErr)
+		case <-ticker.C:
+			if err := reporter.Publish(ctx, registration); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (s *Supervisor) Close() error {
