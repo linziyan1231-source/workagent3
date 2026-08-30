@@ -32,3 +32,33 @@ func RequireSID(expected string) error {
 	}
 	return nil
 }
+
+func LookupAccount(account string) (sid, canonical string, err error) {
+	requested := account
+	if strings.HasPrefix(account, `.\`) {
+		computer, err := windows.ComputerName()
+		if err != nil {
+			return "", "", err
+		}
+		account = computer + account[1:]
+	}
+	parsed, domain, accountType, err := windows.LookupSID("", account)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve Windows account %q: %w", requested, err)
+	}
+	if accountType != windows.SidTypeUser {
+		return "", "", fmt.Errorf("Windows account %q is not a user", requested)
+	}
+	name, resolvedDomain, _, err := parsed.LookupAccount("")
+	if err != nil {
+		return "", "", err
+	}
+	if resolvedDomain == "" {
+		resolvedDomain = domain
+	}
+	canonical = name
+	if resolvedDomain != "" {
+		canonical = resolvedDomain + `\` + name
+	}
+	return parsed.String(), canonical, nil
+}

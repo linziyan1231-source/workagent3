@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -16,22 +14,7 @@ import (
 	"time"
 
 	"workagent3/internal/userhost"
-	"workagent3/internal/winutil"
 )
-
-type fileConfig struct {
-	SID                        string            `json:"sid"`
-	DataRoot                   string            `json:"dataRoot"`
-	HarnessCommand             string            `json:"harnessCommand"`
-	CodexCommand               string            `json:"codexCommand,omitempty"`
-	KimiCommand                string            `json:"kimiCommand,omitempty"`
-	HarnessArguments           []string          `json:"harnessArguments,omitempty"`
-	Profile                    string            `json:"profile"`
-	PortalURL                  string            `json:"portalUrl"`
-	RegistrationCredentialFile string            `json:"registrationCredentialFile"`
-	Limits                     winutil.JobLimits `json:"limits"`
-	StartupTimeoutSeconds      int               `json:"startupTimeoutSeconds,omitempty"`
-}
 
 func main() {
 	if err := run(); err != nil {
@@ -45,7 +28,7 @@ func run() error {
 	if !filepath.IsAbs(*configPath) {
 		return errors.New("an absolute --config path is required")
 	}
-	config, err := loadConfig(*configPath)
+	config, err := userhost.LoadFileConfig(*configPath)
 	if err != nil {
 		return err
 	}
@@ -75,24 +58,6 @@ func run() error {
 		return nil
 	}
 	return err
-}
-
-func loadConfig(path string) (fileConfig, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return fileConfig{}, fmt.Errorf("open UserHost configuration: %w", err)
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(io.LimitReader(file, 64*1024))
-	decoder.DisallowUnknownFields()
-	var config fileConfig
-	if err := decoder.Decode(&config); err != nil {
-		return fileConfig{}, fmt.Errorf("decode UserHost configuration: %w", err)
-	}
-	if !filepath.IsAbs(config.DataRoot) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.RegistrationCredentialFile) {
-		return fileConfig{}, errors.New("data root, Harness command, and registration credential file must be absolute")
-	}
-	return config, nil
 }
 
 func zero(value []byte) {

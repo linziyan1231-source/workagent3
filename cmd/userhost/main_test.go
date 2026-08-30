@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workagent3/internal/userhost"
 )
 
 func TestLoadConfigRejectsRelativePrivatePathsAndUnknownFields(t *testing.T) {
@@ -11,7 +13,7 @@ func TestLoadConfigRejectsRelativePrivatePathsAndUnknownFields(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"sid":"S-1-5-21-1000","dataRoot":"relative","harnessCommand":"relative","profile":"workagent","portalUrl":"http://127.0.0.1:8080","registrationCredentialFile":"relative","limits":{},"extra":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadConfig(path); err == nil {
+	if _, err := userhost.LoadFileConfig(path); err == nil {
 		t.Fatal("invalid configuration was accepted")
 	}
 }
@@ -23,7 +25,7 @@ func TestLoadConfigAcceptsProvisionedShape(t *testing.T) {
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	config, err := loadConfig(path)
+	config, err := userhost.LoadFileConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}

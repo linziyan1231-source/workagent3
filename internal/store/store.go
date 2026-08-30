@@ -64,7 +64,15 @@ CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
 }
 
 func (s *Store) CreateUser(ctx context.Context, username, sid, passwordHash string) (User, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, sid, password_hash) VALUES(?, ?, ?)`, username, sid, passwordHash)
+	return s.createUser(ctx, username, sid, passwordHash, false)
+}
+
+func (s *Store) CreateDisabledUser(ctx context.Context, username, sid, passwordHash string) (User, error) {
+	return s.createUser(ctx, username, sid, passwordHash, true)
+}
+
+func (s *Store) createUser(ctx context.Context, username, sid, passwordHash string, disabled bool) (User, error) {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, sid, password_hash, disabled) VALUES(?, ?, ?, ?)`, username, sid, passwordHash, disabled)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
@@ -72,7 +80,7 @@ func (s *Store) CreateUser(ctx context.Context, username, sid, passwordHash stri
 	if err != nil {
 		return User{}, fmt.Errorf("read created user id: %w", err)
 	}
-	return User{ID: id, Username: username, SID: sid, PasswordHash: passwordHash}, nil
+	return User{ID: id, Username: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled}, nil
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
@@ -85,6 +93,17 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (User, erro
 	}
 	user.Disabled = disabled != 0
 	return user, nil
+}
+
+func (s *Store) SetUserCredentials(ctx context.Context, id int64, passwordHash string, disabled bool) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ?, disabled = ? WHERE id = ?`, passwordHash, disabled, id)
+	if err != nil {
+		return fmt.Errorf("update user credentials: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("Portal user does not exist")
+	}
+	return nil
 }
 
 func (s *Store) CreateSession(ctx context.Context, token string, userID int64, expiresAt time.Time) error {
