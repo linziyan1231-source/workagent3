@@ -41,7 +41,7 @@ func TestSyncInstallsAndUpgradesWhilePreservingEmployeeState(t *testing.T) {
 	}
 }
 
-func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
+func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 	release, err := filepath.Abs(filepath.Join("..", "..", "release", "managed-skills"))
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := skills.List(t.Context())
-	if err != nil || len(entries) != 10 {
+	if err != nil || len(entries) != 17 {
 		t.Fatalf("release entries = %#v, %v", entries, err)
 	}
 	for _, entry := range entries {
@@ -68,6 +68,12 @@ func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
 		}
 		if entry.ID == "professional-database" && (entry.Enabled || len(entry.RequiredMCPServerIDs) != 1 || entry.RequiredMCPServerIDs[0] != "professional-database") {
 			t.Fatalf("professional database release = %#v", entry)
+		}
+		if strings.HasPrefix(entry.ID, "officecli-") && entry.Enabled {
+			t.Fatalf("OfficeCLI skill must remain disabled until its command dependency is ready: %#v", entry)
+		}
+		if entry.ID == "weixin-file-send" && entry.Enabled {
+			t.Fatalf("Weixin delivery must remain disabled until its connector protocol is ready: %#v", entry)
 		}
 	}
 	err = filepath.Walk(release, func(path string, info os.FileInfo, walkErr error) error {
