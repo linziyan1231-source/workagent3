@@ -32,6 +32,11 @@ those values in source control. `WORKAGENT_RUNTIME_URL`,
 `WORKAGENT_RUNTIME_TOKEN`, and `WORKAGENT_RUNTIME_SID` register a loopback
 development runtime. Production runtime registration is owned by UserHost.
 
+Speech input is disabled unless the Portal administrator sets both
+`WORKAGENT_SPEECH_URL` and `WORKAGENT_SPEECH_TOKEN`. The URL points to the
+private batch/WebSocket transcription adapter; the token is injected only by
+the Portal proxy and is never returned to the browser.
+
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.

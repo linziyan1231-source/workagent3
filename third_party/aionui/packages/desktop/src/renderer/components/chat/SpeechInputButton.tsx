@@ -16,12 +16,11 @@ import {
 } from '@/renderer/hooks/system/useSpeechInput';
 
 type SpeechInputButtonProps = {
+  disabled?: boolean;
   /** Live transcript of the active streaming session; `null` clears it. */
   onLiveTranscript?: (text: string | null) => void;
   onTranscript: (transcript: string) => void;
 };
-
-let activeSpeechInputOwner: symbol | null = null;
 
 const SpeechMicIcon = () => (
   <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' aria-hidden='true'>
@@ -71,14 +70,9 @@ const getTooltipKey = (availability: SpeechInputAvailability, isListening: boole
   return getAvailabilityMessageKey(availability);
 };
 
-const isSpeechShortcut = (event: KeyboardEvent) =>
-  event.code === 'KeyM' && !event.shiftKey && (event.metaKey || event.ctrlKey);
-
-const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript, onTranscript }) => {
+const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ disabled, onLiveTranscript, onTranscript }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const controlRef = useRef<HTMLDivElement | null>(null);
-  const ownerIdRef = useRef(Symbol('speech-input'));
   const [isSpeechToTextEnabled, setIsSpeechToTextEnabled] = useState(false);
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
   const {
@@ -99,9 +93,7 @@ const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript,
 
   const isRecording = status === 'recording';
   const isProcessing = status === 'transcribing';
-  const speechStatusRef = useRef(status);
-  speechStatusRef.current = status;
-  const showSpeechFeedback = isRecording;
+  const showSpeechFeedback = isRecording || isProcessing;
   const displayedWaveformLevels = useMemo(() => {
     if (recordingLevels.length > 0) {
       return recordingLevels;
@@ -160,40 +152,11 @@ const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript,
     clearError();
   }, [clearError, errorCode, errorMessage, t]);
 
-  useEffect(() => {
-    if (!isConfigLoaded || !isSpeechToTextEnabled || availability !== 'record') {
+  const handleClick = () => {
+    if (disabled) {
       return;
     }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isSpeechShortcut(event) || event.repeat || speechStatusRef.current === 'transcribing') {
-        return;
-      }
-      const sendBox = controlRef.current?.closest('.sendbox-panel');
-      const focusedSendBox =
-        document.activeElement instanceof Element ? document.activeElement.closest('.sendbox-panel') : null;
-      if (focusedSendBox ? focusedSendBox !== sendBox : activeSpeechInputOwner !== ownerIdRef.current) {
-        return;
-      }
-      activeSpeechInputOwner = ownerIdRef.current;
-      event.preventDefault();
-      if (speechStatusRef.current === 'recording') {
-        stopRecording();
-        return;
-      }
-      void startRecording();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      if (activeSpeechInputOwner === ownerIdRef.current) {
-        activeSpeechInputOwner = null;
-      }
-    };
-  }, [availability, isConfigLoaded, isSpeechToTextEnabled, startRecording, stopRecording]);
-
-  const handleClick = () => {
     if (availability === 'unsupported') {
       Message.warning(t(getAvailabilityMessageKey(availability)));
       return;
@@ -226,10 +189,7 @@ const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript,
   }
 
   const tooltipKey = getTooltipKey(availability, isRecording, isProcessing);
-  const ariaLabel =
-    availability === 'record' && !isRecording && !isProcessing
-      ? t('conversation.chat.speech.recordTooltipWithShortcut')
-      : t(tooltipKey);
+  const ariaLabel = t(tooltipKey);
   const icon = isRecording ? <SpeechStopIcon /> : isProcessing ? <SpeechLoaderIcon /> : <SpeechMicIcon />;
 
   return (
@@ -242,18 +202,13 @@ const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript,
         className='hidden'
         onChange={handleFileChange}
       />
-      <div
-        ref={controlRef}
-        className={`speech-input-control ${showSpeechFeedback ? 'speech-input-control--active' : ''}`}
-        onMouseEnter={() => {
-          activeSpeechInputOwner = ownerIdRef.current;
-        }}
-        onFocusCapture={() => {
-          activeSpeechInputOwner = ownerIdRef.current;
-        }}
-      >
+      <div className={`speech-input-control ${showSpeechFeedback ? 'speech-input-control--active' : ''}`}>
         {showSpeechFeedback && (
-          <div className='speech-input-feedback' role='status' aria-live='polite'>
+          <div
+            className={`speech-input-feedback ${isProcessing ? 'speech-input-feedback--processing' : ''}`}
+            role='status'
+            aria-live='polite'
+          >
             <div className='speech-input-feedback__waveform' aria-hidden='true'>
               {displayedWaveformLevels.map((level, index) => (
                 <span
@@ -266,36 +221,25 @@ const SpeechInputButton: React.FC<SpeechInputButtonProps> = ({ onLiveTranscript,
                 />
               ))}
             </div>
-            <span className='speech-input-feedback__label'>{formatSpeechDuration(recordingDurationMs)}</span>
+            <span className='speech-input-feedback__label'>
+              {isProcessing
+                ? t('conversation.chat.speech.transcribingShort')
+                : formatSpeechDuration(recordingDurationMs)}
+            </span>
           </div>
         )}
-        {isProcessing ? (
+        <Tooltip content={ariaLabel} mini>
           <Button
             type='text'
             size='small'
             shape='circle'
-            className='speech-input-button speech-input-button--processing'
-            disabled
+            className={`speech-input-button ${isRecording ? 'speech-input-button--listening' : ''} ${isProcessing ? 'speech-input-button--processing' : ''}`}
+            disabled={disabled || isProcessing}
+            onClick={handleClick}
             aria-label={ariaLabel}
             icon={icon}
           />
-        ) : (
-          <Tooltip content={ariaLabel} position='top'>
-            <Button
-              type='text'
-              size='small'
-              shape='circle'
-              className={`speech-input-button ${isRecording ? 'speech-input-button--listening' : ''}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                activeSpeechInputOwner = ownerIdRef.current;
-                handleClick();
-              }}
-              aria-label={ariaLabel}
-              icon={icon}
-            />
-          </Tooltip>
-        )}
+        </Tooltip>
       </div>
     </>
   );

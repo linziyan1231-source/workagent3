@@ -286,12 +286,16 @@ export default defineConfig({
         replacement: adapter("UploadProgressBar.tsx"),
       },
       {
-        find: "@/renderer/components/chat/SpeechInputButton",
-        replacement: adapter("SpeechInputButton.tsx"),
+        find: "@/renderer/services/clientBusinessSettings",
+        replacement: adapter("clientBusinessSettings.ts"),
       },
       {
-        find: "@/renderer/hooks/system/useSpeechInput",
-        replacement: adapter("speechInput.ts"),
+        find: "@/renderer/components/settings/SettingsModal/contents/SystemModalContent/VoiceInputSection",
+        replacement: adapter("ManagedVoiceInputSection.tsx"),
+      },
+      {
+        find: "./VoiceInputSection",
+        replacement: adapter("ManagedVoiceInputSection.tsx"),
       },
       {
         find: "@/renderer/hooks/system/useLiveTranscriptInsertion",

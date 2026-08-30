@@ -21,6 +21,7 @@ import (
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
+	"workagent3/internal/speech"
 	"workagent3/internal/store"
 )
 
@@ -74,12 +75,21 @@ func run() error {
 		return err
 	}
 	defer quotas.Close()
+	speechProxy, err := speech.NewProxy(
+		os.Getenv("WORKAGENT_SPEECH_URL"),
+		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
+		speech.DefaultMaxAudioBytes,
+		speech.DefaultMaxStreamSeconds*time.Second,
+	)
+	if err != nil {
+		return err
+	}
 
 	registry := runtimeapi.NewRegistry()
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy})
 	if err != nil {
 		return err
 	}

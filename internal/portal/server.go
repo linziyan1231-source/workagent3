@@ -37,9 +37,15 @@ type QuotaUsagePort interface {
 	Usage(context.Context, string, string, time.Time) (contracts.QuotaUsage, error)
 }
 
+type SpeechPort interface {
+	Capability() contracts.SpeechCapability
+	ServeSpeech(http.ResponseWriter, *http.Request, string)
+}
+
 type Modules struct {
 	ModelAccess ModelAccessPort
 	Quota       QuotaUsagePort
+	Speech      SpeechPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -68,6 +74,9 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
+	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))
+	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
+	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
@@ -75,7 +84,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 
 func (s *Server) sameOriginWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
+		if (request.Method == http.MethodGet && !strings.EqualFold(request.Header.Get("Upgrade"), "websocket")) || request.Method == http.MethodHead || request.Method == http.MethodOptions {
 			next.ServeHTTP(writer, request)
 			return
 		}
@@ -199,6 +208,22 @@ func (s *Server) quotaUsage(writer http.ResponseWriter, request *http.Request, u
 		return
 	}
 	writeJSON(writer, http.StatusOK, usage)
+}
+
+func (s *Server) speechCapability(writer http.ResponseWriter, _ *http.Request, _ store.User) {
+	if s.modules.Speech == nil {
+		writeJSON(writer, http.StatusOK, contracts.SpeechCapability{})
+		return
+	}
+	writeJSON(writer, http.StatusOK, s.modules.Speech.Capability())
+}
+
+func (s *Server) speech(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Speech == nil {
+		writeError(writer, http.StatusServiceUnavailable, "speech_disabled")
+		return
+	}
+	s.modules.Speech.ServeSpeech(writer, request, user.SID)
 }
 
 func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request, user store.User) {
