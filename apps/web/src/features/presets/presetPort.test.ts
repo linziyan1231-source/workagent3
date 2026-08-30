@@ -18,4 +18,16 @@ describe("PresetPort", () => {
       expect.objectContaining({ credentials: "same-origin" }),
     );
   });
+
+  it("writes assistant changes only through the preset runtime resource", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await presetPort.remove("preset/unsafe");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runtime/v1/presets/preset%2Funsafe",
+      expect.objectContaining({ method: "DELETE", credentials: "same-origin" }),
+    );
+  });
 });

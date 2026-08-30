@@ -7,6 +7,10 @@ export const ipcBridge = {
   fs: {
     listAvailableSkills: { invoke: async () => [] },
     listWorkspaceFiles: { invoke: async () => [] },
+    getImageBase64: { invoke: async () => "" },
+  },
+  dialog: {
+    showOpen: { invoke: async () => [] },
   },
   extensions: {
     getMcpServers: { invoke: async () => [] },

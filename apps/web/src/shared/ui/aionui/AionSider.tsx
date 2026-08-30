@@ -2,15 +2,12 @@
  * Adapted from AionUi Renderer SiderToolbar, ConversationRow, SiderItem and
  * SiderFooter. Electron/router state is replaced by callback props only.
  */
-import {
-  DeleteOne,
-  EditOne,
-  MessageOne,
-} from "@icon-park/react";
+import { DeleteOne, EditOne, MessageOne } from "@icon-park/react";
 import type { RuntimeSession } from "@workagent/contracts";
 import SiderItem from "@renderer/components/layout/Sider/SiderItem";
 import SiderToolbar from "@renderer/components/layout/Sider/SiderNav/SiderToolbar";
 import SiderFooter from "@renderer/components/layout/Sider/SiderFooter";
+import SiderAssistantEntry from "@renderer/components/layout/Sider/SiderNav/SiderAssistantEntry";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { useState } from "react";
@@ -27,6 +24,8 @@ type Props = {
   onRename: (session: RuntimeSession) => void;
   onDelete: (session: RuntimeSession) => void;
   onSettings: () => void;
+  onAssistants: () => void;
+  assistantsActive: boolean;
   onLogout: () => void;
   onClose: () => void;
 };
@@ -51,6 +50,13 @@ export function AionSider(props: Props) {
             if (!props.busy) props.onNew();
           }}
           onToggleBatchMode={() => setBatchMode((active) => !active)}
+        />
+        <SiderAssistantEntry
+          isMobile={isMobile}
+          isActive={props.assistantsActive}
+          collapsed={false}
+          siderTooltipProps={tooltipProps}
+          onClick={props.onAssistants}
         />
         <div className="sider-section-label sider-section-title px-10px pt-12px pb-4px text-12px text-t-tertiary">
           Recent

@@ -8,40 +8,117 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@renderer/components/chat/SendBox": ["src/shared/aion-adapter/sendBox.d.ts"],
-      "@renderer/pages/conversation/Messages/components/MessageText": ["src/shared/aion-adapter/messageText.d.ts"],
-      "@renderer/components/settings/SettingsModal": ["src/shared/aion-adapter/settingsModal.d.ts"],
+      "@renderer/components/chat/SendBox": [
+        "src/shared/aion-adapter/sendBox.d.ts"
+      ],
+      "@renderer/pages/conversation/Messages/components/MessageText": [
+        "src/shared/aion-adapter/messageText.d.ts"
+      ],
+      "@renderer/components/settings/SettingsModal": [
+        "src/shared/aion-adapter/settingsModal.d.ts"
+      ],
       "@renderer/pages/login": ["src/shared/aion-adapter/loginPage.d.ts"],
-      "@renderer/components/layout/Layout": ["src/shared/aion-adapter/layout.d.ts"],
-      "@renderer/pages/guid/components/GuidActionRow": ["src/shared/aion-adapter/guidComponents.d.ts"],
-      "@renderer/pages/guid/components/GuidInputCard": ["src/shared/aion-adapter/guidComponents.d.ts"],
-      "@renderer/hooks/chat/useInputFocusRing": ["src/shared/aion-adapter/guidComponents.d.ts"],
+      "@renderer/components/layout/Layout": [
+        "src/shared/aion-adapter/layout.d.ts"
+      ],
+      "@renderer/pages/guid/components/GuidActionRow": [
+        "src/shared/aion-adapter/guidComponents.d.ts"
+      ],
+      "@renderer/pages/guid/components/GuidInputCard": [
+        "src/shared/aion-adapter/guidComponents.d.ts"
+      ],
+      "@renderer/pages/settings/AssistantSettings/AssistantEditorPage": [
+        "src/shared/aion-adapter/assistantPage.d.ts"
+      ],
+      "@renderer/pages/settings/AssistantSettings/DeleteAssistantModal": [
+        "src/shared/aion-adapter/assistantPage.d.ts"
+      ],
+      "@renderer/pages/settings/AssistantSettings/home/AssistantHomeTabs": [
+        "src/shared/aion-adapter/assistantPage.d.ts"
+      ],
+      "@renderer/pages/settings/AssistantSettings/types": [
+        "src/shared/aion-adapter/assistantPage.d.ts"
+      ],
+      "@renderer/components/layout/Sider/SiderNav/SiderAssistantEntry": [
+        "src/shared/aion-adapter/siderAssistantEntry.d.ts"
+      ],
+      "@/renderer/hooks/agent/useManagedAgents": [
+        "src/shared/aion-adapter/assistantHooks.ts"
+      ],
+      "@/renderer/hooks/agent/useModelProviderList": [
+        "src/shared/aion-adapter/assistantHooks.ts"
+      ],
+      "@renderer/hooks/chat/useInputFocusRing": [
+        "src/shared/aion-adapter/guidComponents.d.ts"
+      ],
       "@/common": ["src/shared/aion-adapter/common.ts"],
       "@office-ai/platform": ["src/shared/aion-adapter/officePlatform.ts"],
-      "@/renderer/hooks/context/ThemeContext": ["src/shared/aion-adapter/themeContext.ts"],
-      "@/renderer/hooks/context/ConversationContext": ["src/shared/aion-adapter/conversationContext.ts"],
-      "@/renderer/hooks/context/AuthContext": ["src/shared/aion-adapter/authContext.tsx"],
-      "@renderer/hooks/context/AuthContext": ["src/shared/aion-adapter/authContext.tsx"],
-      "@/renderer/pages/conversation/Preview": ["src/shared/aion-adapter/previewContext.ts"],
+      "@/renderer/hooks/context/ThemeContext": [
+        "src/shared/aion-adapter/themeContext.ts"
+      ],
+      "@/renderer/hooks/context/ConversationContext": [
+        "src/shared/aion-adapter/conversationContext.ts"
+      ],
+      "@/renderer/hooks/context/AuthContext": [
+        "src/shared/aion-adapter/authContext.tsx"
+      ],
+      "@renderer/hooks/context/AuthContext": [
+        "src/shared/aion-adapter/authContext.tsx"
+      ],
+      "@/renderer/pages/conversation/Preview": [
+        "src/shared/aion-adapter/previewContext.ts"
+      ],
       "@/renderer/utils/emitter": ["src/shared/aion-adapter/emitter.ts"],
-      "@/renderer/components/chat/BtwOverlay/useBtwCommand": ["src/shared/aion-adapter/btwCommand.ts"],
-      "@/renderer/components/chat/BtwOverlay": ["src/shared/aion-adapter/BtwOverlay.tsx"],
-      "@renderer/hooks/file/useConversationExport": ["src/shared/aion-adapter/conversationExport.ts"],
-      "@renderer/hooks/file/useDragUpload": ["src/shared/aion-adapter/dragUpload.ts"],
-      "@renderer/hooks/file/usePasteService": ["src/shared/aion-adapter/pasteService.ts"],
-      "@renderer/pages/conversation/Messages/hooks": ["src/shared/aion-adapter/messageList.ts"],
-      "@renderer/services/FileService": ["src/shared/aion-adapter/fileService.ts"],
-      "@/renderer/services/FileService": ["src/shared/aion-adapter/fileService.ts"],
-      "@renderer/hooks/file/useUploadState": ["src/shared/aion-adapter/uploadState.ts"],
-      "@renderer/hooks/file/useAbortUploadsOnConversationChange": ["src/shared/aion-adapter/abortUploads.ts"],
-      "@renderer/components/media/UploadProgressBar": ["src/shared/aion-adapter/UploadProgressBar.tsx"],
-      "@/renderer/components/media/UploadProgressBar": ["src/shared/aion-adapter/UploadProgressBar.tsx"],
-      "@/renderer/components/chat/SpeechInputButton": ["src/shared/aion-adapter/SpeechInputButton.tsx"],
-      "@/renderer/hooks/system/useSpeechInput": ["src/shared/aion-adapter/speechInput.ts"],
-      "@/renderer/hooks/system/useLiveTranscriptInsertion": ["src/shared/aion-adapter/liveTranscript.ts"],
+      "@/renderer/components/chat/BtwOverlay/useBtwCommand": [
+        "src/shared/aion-adapter/btwCommand.ts"
+      ],
+      "@/renderer/components/chat/BtwOverlay": [
+        "src/shared/aion-adapter/BtwOverlay.tsx"
+      ],
+      "@renderer/hooks/file/useConversationExport": [
+        "src/shared/aion-adapter/conversationExport.ts"
+      ],
+      "@renderer/hooks/file/useDragUpload": [
+        "src/shared/aion-adapter/dragUpload.ts"
+      ],
+      "@renderer/hooks/file/usePasteService": [
+        "src/shared/aion-adapter/pasteService.ts"
+      ],
+      "@renderer/pages/conversation/Messages/hooks": [
+        "src/shared/aion-adapter/messageList.ts"
+      ],
+      "@renderer/services/FileService": [
+        "src/shared/aion-adapter/fileService.ts"
+      ],
+      "@/renderer/services/FileService": [
+        "src/shared/aion-adapter/fileService.ts"
+      ],
+      "@renderer/hooks/file/useUploadState": [
+        "src/shared/aion-adapter/uploadState.ts"
+      ],
+      "@renderer/hooks/file/useAbortUploadsOnConversationChange": [
+        "src/shared/aion-adapter/abortUploads.ts"
+      ],
+      "@renderer/components/media/UploadProgressBar": [
+        "src/shared/aion-adapter/UploadProgressBar.tsx"
+      ],
+      "@/renderer/components/media/UploadProgressBar": [
+        "src/shared/aion-adapter/UploadProgressBar.tsx"
+      ],
+      "@/renderer/components/chat/SpeechInputButton": [
+        "src/shared/aion-adapter/SpeechInputButton.tsx"
+      ],
+      "@/renderer/hooks/system/useSpeechInput": [
+        "src/shared/aion-adapter/speechInput.ts"
+      ],
+      "@/renderer/hooks/system/useLiveTranscriptInsertion": [
+        "src/shared/aion-adapter/liveTranscript.ts"
+      ],
       "@renderer/utils/platform": ["src/shared/aion-adapter/platform.ts"],
       "@/renderer/utils/platform": ["src/shared/aion-adapter/platform.ts"],
-      "@renderer/*": ["../../third_party/aionui/packages/desktop/src/renderer/*"],
+      "@renderer/*": [
+        "../../third_party/aionui/packages/desktop/src/renderer/*"
+      ],
       "@/*": ["../../third_party/aionui/packages/desktop/src/*"],
       "react": ["node_modules/@types/react/index.d.ts"],
       "react/*": ["node_modules/@types/react/*"],
