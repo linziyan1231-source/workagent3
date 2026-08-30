@@ -1,1 +1,8 @@
-[]
+- insert:
+    - id: workagent-runtime-host
+      name: "@deepseek-ai/dsh-host-webserver"
+      config:
+        host: 127.0.0.1
+        port: !!js Number(process.env.WORKAGENT_RUNTIME_PORT)
+    - id: workagent-runtime-api
+      name: "@workagent/harness-bundle"

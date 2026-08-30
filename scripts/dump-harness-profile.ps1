@@ -10,6 +10,7 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'profiles\workagent\package.js
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'profiles\workagent\cordis.patch.yml') -Destination $profileDirectory -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'harness-bundle\package.json') -Destination $bundleDirectory -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'harness-bundle\cordis.patch.yml') -Destination $bundleDirectory -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'harness-bundle\dist') -Destination $bundleDirectory -Recurse -Force
 
 & pnpm --dir $profileDirectory install --ignore-workspace
 if ($LASTEXITCODE -ne 0) {

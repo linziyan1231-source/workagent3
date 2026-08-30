@@ -3,9 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "dist"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.1-rc.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

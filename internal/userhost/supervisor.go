@@ -1,0 +1,209 @@
+package userhost
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"workagent3/internal/auth"
+	"workagent3/internal/runtimeapi"
+	"workagent3/internal/winutil"
+)
+
+type Config struct {
+	SID            string
+	DataRoot       string
+	Command        string
+	Arguments      []string
+	Profile        string
+	Limits         winutil.JobLimits
+	StartupTimeout time.Duration
+}
+
+type Supervisor struct {
+	config Config
+	job    *winutil.Job
+	lock   *winutil.InstanceLock
+	cmd    *exec.Cmd
+	once   sync.Once
+}
+
+func New(config Config) (*Supervisor, error) {
+	if config.SID == "" || config.DataRoot == "" || config.Command == "" || config.Profile == "" {
+		return nil, errors.New("SID, data root, command, and profile are required")
+	}
+	if !filepath.IsAbs(config.DataRoot) {
+		return nil, errors.New("data root must be absolute")
+	}
+	if config.StartupTimeout <= 0 {
+		config.StartupTimeout = 45 * time.Second
+	}
+	return &Supervisor{config: config}, nil
+}
+
+func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error) {
+	if err := winutil.RequireSID(s.config.SID); err != nil {
+		return runtimeapi.Registration{}, err
+	}
+	lock, err := winutil.AcquireInstanceLock("WorkAgent3-Harness-" + strings.ReplaceAll(s.config.SID, "-", "_"))
+	if err != nil {
+		return runtimeapi.Registration{}, err
+	}
+	s.lock = lock
+	directories, err := ensureDirectories(s.config.DataRoot)
+	if err != nil {
+		lock.Close()
+		return runtimeapi.Registration{}, err
+	}
+	port, err := reserveLoopbackPort()
+	if err != nil {
+		lock.Close()
+		return runtimeapi.Registration{}, err
+	}
+	token, err := auth.RandomToken(32)
+	if err != nil {
+		lock.Close()
+		return runtimeapi.Registration{}, err
+	}
+	job, err := winutil.NewJob("WorkAgent3-"+strings.ReplaceAll(s.config.SID, "-", "_"), s.config.Limits)
+	if err != nil {
+		lock.Close()
+		return runtimeapi.Registration{}, err
+	}
+	arguments := append([]string{}, s.config.Arguments...)
+	arguments = append(arguments, "--profile", s.config.Profile)
+	command := exec.Command(s.config.Command, arguments...)
+	command.Dir = directories.workspace
+	command.Env = runtimeEnvironment(directories, token, port)
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		job.Close()
+		lock.Close()
+		return runtimeapi.Registration{}, fmt.Errorf("start Harness: %w", err)
+	}
+	if err := job.AssignPID(uint32(command.Process.Pid)); err != nil {
+		command.Process.Kill()
+		job.Close()
+		lock.Close()
+		return runtimeapi.Registration{}, err
+	}
+	s.job, s.cmd = job, command
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	if err := waitForHealth(ctx, healthURL, token, done, s.config.StartupTimeout); err != nil {
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
+	return runtimeapi.Registration{SID: s.config.SID, BaseURL: fmt.Sprintf("http://127.0.0.1:%d", port), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
+}
+
+func (s *Supervisor) Close() error {
+	var err error
+	s.once.Do(func() {
+		if s.job != nil {
+			err = s.job.Close()
+		}
+		if s.lock != nil {
+			lockErr := s.lock.Close()
+			if err == nil {
+				err = lockErr
+			}
+		}
+	})
+	return err
+}
+
+type privateDirectories struct {
+	dshHome   string
+	workspace string
+	native    string
+	runtime   string
+	logs      string
+}
+
+func ensureDirectories(root string) (privateDirectories, error) {
+	directories := privateDirectories{
+		dshHome: filepath.Join(root, "dsh-home"), workspace: filepath.Join(root, "workspace"), native: filepath.Join(root, "native"),
+		runtime: filepath.Join(root, "runtime"), logs: filepath.Join(root, "logs"),
+	}
+	for _, path := range []string{directories.dshHome, directories.workspace, filepath.Join(directories.native, "codex"), filepath.Join(directories.native, "kimi"), directories.runtime, directories.logs} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return privateDirectories{}, fmt.Errorf("create private runtime directory: %w", err)
+		}
+	}
+	return directories, nil
+}
+
+func reserveLoopbackPort() (int, error) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("reserve loopback port: %w", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		return 0, err
+	}
+	return port, nil
+}
+
+func runtimeEnvironment(directories privateDirectories, token string, port int) []string {
+	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
+	environment := make([]string, 0, len(allowed)+5)
+	for _, value := range os.Environ() {
+		key, _, _ := strings.Cut(value, "=")
+		for allowedKey := range allowed {
+			if strings.EqualFold(key, allowedKey) {
+				environment = append(environment, value)
+				break
+			}
+		}
+	}
+	return append(environment,
+		"DSH_HOME="+directories.dshHome,
+		"CODEX_HOME="+filepath.Join(directories.native, "codex"),
+		"KIMI_HOME="+filepath.Join(directories.native, "kimi"),
+		"WORKAGENT_RUNTIME_TOKEN="+token,
+		"WORKAGENT_RUNTIME_PORT="+strconv.Itoa(port),
+	)
+}
+
+func waitForHealth(ctx context.Context, endpoint, token string, done <-chan error, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: time.Second}
+	for {
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		if response, err := client.Do(request); err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-done:
+			if err == nil {
+				return errors.New("Harness exited during startup")
+			}
+			return fmt.Errorf("Harness exited during startup: %w", err)
+		case <-deadline.C:
+			return errors.New("Harness did not become healthy before startup timeout")
+		case <-ticker.C:
+		}
+	}
+}
