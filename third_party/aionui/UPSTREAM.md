@@ -1,9 +1,9 @@
 # Vendored AionUi Renderer
 
-This directory is a source snapshot from the CLIENTNAME AionUi Renderer chosen
+This directory is the Puxin/WorkAgent2 managed Web 78 Renderer snapshot chosen
 as the WorkAgent3 frontend baseline.
 
-- Source: `C:\projects\AionUi`
+- Source: `C:\projects\WorkAgent2\.tools\worktrees\runtime-auth-deploy-ui`
 - Upstream repository: <https://github.com/iOfficeAI/AionUi>
 - Upstream ref: `codex/dwg-managed-mcp-web77`
 - Commit: `0a5e806e9e495323368fb3b5b5f359c5ff8a9f4b`

@@ -446,6 +446,20 @@ export function ConversationPage({
     }
   }
 
+  async function deleteSessions(items: RuntimeSession[]) {
+    if (items.length === 0) return;
+    if (!window.confirm(`Delete ${items.length} conversations?`)) return;
+    try {
+      await Promise.all(items.map((session) => port.remove(session.id)));
+      const deleted = new Set(items.map((session) => session.id));
+      const remaining = sessions.filter((session) => !deleted.has(session.id));
+      setSessions(remaining);
+      if (activeId && deleted.has(activeId)) setActiveId(remaining[0]?.id);
+    } catch {
+      setNotice("Some conversations could not be deleted.");
+    }
+  }
+
   async function cancelSession() {
     if (active === undefined) return;
     try {
@@ -491,6 +505,7 @@ export function ConversationPage({
       }}
       onRename={renameSession}
       onDelete={deleteSession}
+      onBatchDelete={(items) => void deleteSessions(items)}
       onSettings={() => {
         setSidebarOpen(false);
         setSettingsOpen(true);

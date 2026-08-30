@@ -58,6 +58,11 @@
       "@renderer/hooks/chat/useInputFocusRing": [
         "src/shared/aion-adapter/guidComponents.d.ts"
       ],
+      "@/renderer/pages/cron": ["src/shared/aion-adapter/cronSummary.tsx"],
+      "@renderer/pages/cron": ["src/shared/aion-adapter/cronSummary.tsx"],
+      "@/renderer/hooks/agent/usePresetAssistantInfo": [
+        "src/shared/aion-adapter/presetAssistantInfo.ts"
+      ],
       "@/common": ["src/shared/aion-adapter/common.ts"],
       "@office-ai/platform": ["src/shared/aion-adapter/officePlatform.ts"],
       "@/renderer/hooks/context/ThemeContext": [

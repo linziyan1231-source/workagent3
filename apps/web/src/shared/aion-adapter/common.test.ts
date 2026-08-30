@@ -60,3 +60,61 @@ describe("production Renderer Skill Market adapter", () => {
     );
   });
 });
+
+describe("production Renderer conversation adapter", () => {
+  it("maps WorkAgent3 sessions into the original Renderer list contract", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const preset = {
+      id: "builtin-general",
+      version: 1,
+      source: "builtin",
+      name: "Puxin AI",
+      description: "",
+      avatar: null,
+      enabled: true,
+      engine: "harness",
+      modelId: null,
+      systemPrompt: "",
+      workspacePolicy: "default",
+      skillIds: [],
+      mcpServerIds: [],
+      toolAllowlist: [],
+      approvalPolicy: "on_risk",
+      createdAt: now,
+      updatedAt: now,
+    };
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: "session-1",
+              engine: "harness",
+              title: "Project review",
+              createdAt: now,
+              updatedAt: now,
+              workspaceId: "default",
+              preset: {
+                presetId: preset.id,
+                presetVersion: 1,
+                resolvedSnapshot: { ...preset, resolvedAt: now },
+              },
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await ipcBridge.database.getUserConversations.invoke({
+      limit: 10000,
+    });
+
+    expect(result.items[0]).toMatchObject({
+      id: "session-1",
+      name: "Project review",
+      type: "acp",
+      extra: { backend: "harness", workspace: "default" },
+    });
+  });
+});

@@ -298,6 +298,14 @@ export default defineConfig({
         replacement: adapter("assistantHooks.ts"),
       },
       {
+        find: /^@\/?renderer\/pages\/cron$/,
+        replacement: adapter("cronSummary.tsx"),
+      },
+      {
+        find: "@/renderer/hooks/agent/usePresetAssistantInfo",
+        replacement: adapter("presetAssistantInfo.ts"),
+      },
+      {
         find: "@/renderer/hooks/system/useExtI18n",
         replacement: adapter("extensionSettings.ts"),
       },

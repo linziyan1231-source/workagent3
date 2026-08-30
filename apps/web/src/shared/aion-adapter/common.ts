@@ -1,6 +1,8 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
+import { conversationPort } from "../../features/conversation/conversationPort.js";
 import { requestJson } from "../api/http.js";
+import type { TChatConversation } from "@/common/config/storage";
 import type {
   PortalSkillMarketEntry,
   PortalUsageSummary,
@@ -22,6 +24,37 @@ const toRendererSkill = (
         ? ("extension" as const)
         : ("custom" as const),
 });
+
+type ConversationListEvent = {
+  conversation_id: string;
+  action: "created" | "updated" | "deleted";
+  source?: string;
+};
+
+const conversationListListeners = new Set<
+  (event: ConversationListEvent) => void
+>();
+const conversationExtras = new Map<string, Record<string, unknown>>();
+
+const toRendererConversation = (
+  session: Awaited<ReturnType<typeof conversationPort.list>>[number],
+): TChatConversation =>
+  ({
+    id: session.id,
+    name: session.title,
+    type: session.engine === "codex" ? "codex" : "acp",
+    created_at: Date.parse(session.createdAt),
+    modified_at: Date.parse(session.updatedAt),
+    source: "workagent",
+    status: "finished",
+    extra: {
+      backend: session.engine,
+      workspace: session.workspaceId,
+      is_project_workspace: false,
+      preset_assistant_id: session.preset.presetId,
+      ...(conversationExtras.get(session.id) ?? {}),
+    },
+  }) as TChatConversation;
 
 export const ipcBridge = {
   theme: {
@@ -162,13 +195,52 @@ export const ipcBridge = {
   },
   conversation: {
     get: {
-      invoke: async () => ({
-        id: "workagent",
-        name: "WorkAgent",
-        title: "WorkAgent",
-      }),
+      invoke: async ({ id }: { id: string }) =>
+        toRendererConversation(await conversationPort.get(id)),
     },
-    listChanged: { emit: () => undefined, on: () => () => undefined },
+    update: {
+      invoke: async ({
+        id,
+        updates,
+        merge_extra,
+      }: {
+        id: string;
+        updates: { name?: string; extra?: Record<string, unknown> };
+        merge_extra?: boolean;
+      }) => {
+        if (updates.name !== undefined)
+          await conversationPort.rename(id, updates.name);
+        if (updates.extra !== undefined) {
+          conversationExtras.set(
+            id,
+            merge_extra
+              ? { ...(conversationExtras.get(id) ?? {}), ...updates.extra }
+              : updates.extra,
+          );
+        }
+        for (const listener of conversationListListeners)
+          listener({ conversation_id: id, action: "updated" });
+        return true;
+      },
+    },
+    remove: {
+      invoke: async ({ id }: { id: string }) => {
+        await conversationPort.remove(id);
+        conversationExtras.delete(id);
+        for (const listener of conversationListListeners)
+          listener({ conversation_id: id, action: "deleted" });
+        return true;
+      },
+    },
+    listChanged: {
+      emit: (event: ConversationListEvent) => {
+        for (const listener of conversationListListeners) listener(event);
+      },
+      on: (listener: (event: ConversationListEvent) => void) => {
+        conversationListListeners.add(listener);
+        return () => conversationListListeners.delete(listener);
+      },
+    },
     responseStream: { on: () => () => undefined },
     turnCompleted: { on: () => () => undefined },
   },
@@ -180,6 +252,14 @@ export const ipcBridge = {
   },
   database: {
     conversations: { invoke: async () => [] },
+    getUserConversations: {
+      invoke: async (_input: { limit: number }) => ({
+        items: (await conversationPort.list()).map(toRendererConversation),
+      }),
+    },
+    searchConversationMessages: {
+      invoke: async () => ({ items: [], next_cursor: null }),
+    },
   },
   windowControls: {
     getState: { invoke: async () => ({ is_maximized: false }) },
