@@ -4,6 +4,8 @@ import {
   moduleManifestListSchema,
   credentialStatusSchema,
   presetBindingSchema,
+  runtimeMcpMutationSchema,
+  skillCatalogEntrySchema,
   skillMcpInventorySchema,
   validateModuleGraph,
   workspaceEntrySchema,
@@ -32,6 +34,60 @@ describe("credential contract", () => {
   it("cannot represent credential plaintext", () => {
     expect(credentialStatusSchema.keyof().options).not.toContain("secret");
     expect(credentialStatusSchema.keyof().options).not.toContain("token");
+  });
+});
+
+describe("runtime capability contracts", () => {
+  it("keeps skill locations tenant-relative", () => {
+    const skill = {
+      id: "skill-1",
+      name: "Skill",
+      description: "",
+      version: "1.0.0",
+      source: "managed" as const,
+      enabled: true,
+      requiredMcpServerIds: [],
+    };
+    expect(() =>
+      skillCatalogEntrySchema.parse({
+        ...skill,
+        relativePath: "C:\\skills\\one",
+      }),
+    ).toThrow();
+    expect(() =>
+      skillCatalogEntrySchema.parse({ ...skill, relativePath: "/skills/one" }),
+    ).toThrow();
+    expect(
+      skillCatalogEntrySchema.parse({ ...skill, relativePath: "skills/one" }),
+    ).toMatchObject({ relativePath: "skills/one" });
+  });
+
+  it("requires explicit and internally consistent MCP tool policy", () => {
+    const server = {
+      name: "Tools",
+      source: "user" as const,
+      enabled: true,
+      transport: {
+        kind: "http" as const,
+        url: "https://example.com/mcp",
+        headerCredentialIds: {},
+      },
+      oauthState: "none" as const,
+    };
+    expect(() =>
+      runtimeMcpMutationSchema.parse({
+        ...server,
+        toolPolicy: "allowlist",
+        allowedTools: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      runtimeMcpMutationSchema.parse({
+        ...server,
+        toolPolicy: "all",
+        allowedTools: ["search"],
+      }),
+    ).toThrow();
   });
 });
 

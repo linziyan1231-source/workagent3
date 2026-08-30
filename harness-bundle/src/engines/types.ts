@@ -36,12 +36,18 @@ export type EngineBridge = {
   create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    options?: EngineSessionOptions,
   ): Promise<BridgeSession>;
   resume(
     nativeId: string,
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    options?: EngineSessionOptions,
   ): Promise<BridgeSession>;
   close(): Promise<void>;
   status(): Promise<NativeEngineStatus>;
+};
+
+export type EngineSessionOptions = {
+  mcpServers: readonly import("@workagent/contracts").RuntimeMcpServer[];
 };

@@ -1,4 +1,5 @@
 export * from "./engine.js";
+export * from "./capability.js";
 export * from "./interaction.js";
 export * from "./migration.js";
 export * from "./model-access.js";

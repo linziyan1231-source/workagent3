@@ -15,6 +15,7 @@ import {
   type PresetMutation,
 } from "@workagent/contracts";
 import type { ModelAccessStore } from "./model-access-store.js";
+import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 const builtin = (
   now: string,
@@ -43,11 +44,20 @@ const builtin = (
 export class PresetStore {
   readonly #path: string;
   readonly #models: ModelAccessStore;
+  readonly #skills: SkillCatalogStore | undefined;
+  readonly #mcp: McpCatalogStore | undefined;
   readonly #versions = new Map<string, PresetDefinition[]>();
 
-  constructor(dshHome: string, models: ModelAccessStore) {
+  constructor(
+    dshHome: string,
+    models: ModelAccessStore,
+    skills?: SkillCatalogStore,
+    mcp?: McpCatalogStore,
+  ) {
     this.#path = join(dshHome, "workagent", "presets.json");
     this.#models = models;
+    this.#skills = skills;
+    this.#mcp = mcp;
     if (existsSync(this.#path)) {
       const parsed: unknown = JSON.parse(readFileSync(this.#path, "utf8"));
       if (!Array.isArray(parsed))
@@ -157,7 +167,16 @@ export class PresetStore {
     return {
       presetId: preset.id,
       presetVersion: preset.version,
-      resolvedSnapshot: { ...preset, resolvedAt: new Date().toISOString() },
+      resolvedSnapshot: {
+        ...preset,
+        resolvedAt: new Date().toISOString(),
+        resolvedSkills: preset.skillIds.map(
+          (id) => this.#skills!.getSkill(id)!,
+        ),
+        resolvedMcpServers: preset.mcpServerIds.map(
+          (id) => this.#mcp!.getServer(id)!,
+        ),
+      },
     };
   }
 
@@ -169,13 +188,30 @@ export class PresetStore {
   }
 
   #validate(preset: PresetDefinition): void {
-    if (preset.modelId === null) return;
-    const authorization = this.#models.authorizationFor(preset.modelId);
-    if (!authorization.authorized)
-      throw new Error(`invalid_model_binding:${authorization.reason}`);
-    const model = this.#models.getModel(preset.modelId)!;
-    if (model.providerId !== preset.engine)
-      throw new Error("invalid_model_binding:engine_mismatch");
+    if (preset.modelId !== null) {
+      const authorization = this.#models.authorizationFor(preset.modelId);
+      if (!authorization.authorized)
+        throw new Error(`invalid_model_binding:${authorization.reason}`);
+      const model = this.#models.getModel(preset.modelId)!;
+      if (model.providerId !== preset.engine)
+        throw new Error("invalid_model_binding:engine_mismatch");
+    }
+    for (const id of preset.skillIds) {
+      const skill = this.#skills?.getSkill(id);
+      if (skill === undefined)
+        throw new Error(`invalid_skill_binding:${id}:not_found`);
+      if (!skill.enabled)
+        throw new Error(`invalid_skill_binding:${id}:disabled`);
+    }
+    for (const id of preset.mcpServerIds) {
+      const server = this.#mcp?.getServer(id);
+      if (server === undefined)
+        throw new Error(`invalid_mcp_binding:${id}:not_found`);
+      if (!server.enabled)
+        throw new Error(`invalid_mcp_binding:${id}:disabled`);
+      if (server.oauthState === "needs_auth")
+        throw new Error(`invalid_mcp_binding:${id}:needs_auth`);
+    }
   }
 
   #save(): void {

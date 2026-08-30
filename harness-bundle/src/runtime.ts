@@ -24,8 +24,9 @@ import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { MessageStore } from "./message-store.js";
-import type { PresetBinding } from "@workagent/contracts";
+import type { PresetBinding, RuntimeMcpServer } from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
+import type { McpCatalogStore } from "./capability-store.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -171,12 +172,14 @@ export class RuntimeController {
   readonly #workspaces: WorkspaceStore;
   readonly #messages: MessageStore;
   readonly #presets: PresetStore;
+  readonly #mcp: McpCatalogStore;
 
   constructor(
     ctx: Context,
     token: string,
     workspaces: WorkspaceStore,
     presets: PresetStore,
+    mcp: McpCatalogStore,
   ) {
     this.#ctx = ctx;
     this.#token = token;
@@ -187,6 +190,7 @@ export class RuntimeController {
     this.#messages = new MessageStore(dshHome);
     this.#workspaces = workspaces;
     this.#presets = presets;
+    this.#mcp = mcp;
     const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
@@ -559,6 +563,20 @@ export class RuntimeController {
       writeJson(response, 400, { error: "preset_engine_mismatch" });
       return;
     }
+    if (preset.resolvedSnapshot.skillIds.length !== 0) {
+      writeJson(response, 400, { error: "unsupported_skill_binding" });
+      return;
+    }
+    let mcpServers: readonly RuntimeMcpServer[];
+    try {
+      mcpServers = this.#resolvedMcpServers(preset);
+      this.#validateMcpCompatibility(input.engine, mcpServers);
+    } catch (error) {
+      writeJson(response, 400, {
+        error: error instanceof Error ? error.message : "invalid_mcp_binding",
+      });
+      return;
+    }
     const record: SessionRecord = {
       activating: undefined,
       engine: input.engine,
@@ -590,6 +608,7 @@ export class RuntimeController {
           (event) => {
             this.#publish(record, this.#nativeEvent(publicId, record, event));
           },
+          { mcpServers },
         );
         record.nativeId = record.native.nativeId;
       }
@@ -724,11 +743,44 @@ export class RuntimeController {
     }
     const bridge = this.#bridges.get(record.engine);
     if (bridge === undefined) throw new Error("engine unavailable");
+    const mcpServers = this.#resolvedMcpServers(record.preset);
+    this.#validateMcpCompatibility(record.engine, mcpServers);
     record.native = await bridge.resume(
       record.nativeId,
       this.#workspaces.engineRoot(record.workspaceId),
       (event) => this.#publish(record, this.#nativeEvent(id, record, event)),
+      { mcpServers },
     );
+  }
+
+  #resolvedMcpServers(binding: PresetBinding): readonly RuntimeMcpServer[] {
+    const snapshot = binding.resolvedSnapshot;
+    if (snapshot.resolvedMcpServers !== undefined)
+      return snapshot.resolvedMcpServers;
+    return snapshot.mcpServerIds.map((id) => {
+      const server = this.#mcp.getServer(id);
+      if (server === undefined)
+        throw new Error(`invalid_mcp_binding:${id}:not_found`);
+      return server;
+    });
+  }
+
+  #validateMcpCompatibility(
+    engine: SessionRecord["engine"],
+    servers: readonly RuntimeMcpServer[],
+  ): void {
+    if (servers.length !== 0 && engine !== "kimi")
+      throw new Error(`unsupported_mcp_binding:${engine}`);
+    for (const server of servers) {
+      if (server.toolPolicy !== "all")
+        throw new Error(`unsupported_mcp_tool_policy:${server.id}`);
+      const credentials =
+        server.transport.kind === "stdio"
+          ? server.transport.environmentCredentialIds
+          : server.transport.headerCredentialIds;
+      if (Object.keys(credentials).length !== 0)
+        throw new Error(`mcp_credentials_unavailable:${server.id}`);
+    }
   }
 
   #record(session: StoredSession, defaultWorkspaceId: string): SessionRecord {

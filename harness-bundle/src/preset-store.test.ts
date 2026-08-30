@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ModelAccessStore } from "./model-access-store.js";
 import { PresetStore } from "./preset-store.js";
+import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 describe("SID-private preset store", () => {
   it("keeps immutable versions and resolves a stable session snapshot", () => {
@@ -50,6 +51,59 @@ describe("SID-private preset store", () => {
     const store = new PresetStore(home, new ModelAccessStore(home));
     expect(() => store.update("builtin-general", { name: "Changed" })).toThrow(
       "builtin_preset_immutable",
+    );
+  });
+
+  it("reports missing capability bindings instead of silently dropping them", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      new SkillCatalogStore(home),
+      new McpCatalogStore(home),
+    );
+    expect(() =>
+      store.create({
+        name: "Missing MCP",
+        engine: "kimi",
+        mcpServerIds: ["missing"],
+      }),
+    ).toThrow("invalid_mcp_binding:missing:not_found");
+  });
+
+  it("freezes resolved MCP definitions in the session binding", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const mcp = new McpCatalogStore(home);
+    const server = mcp.create({
+      name: "Original name",
+      source: "user",
+      enabled: true,
+      transport: {
+        kind: "http",
+        url: "http://127.0.0.1:8123/mcp",
+        headerCredentialIds: {},
+      },
+      toolPolicy: "all",
+      allowedTools: [],
+      oauthState: "none",
+    });
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      new SkillCatalogStore(home),
+      mcp,
+    );
+    const preset = store.create({
+      name: "MCP preset",
+      engine: "kimi",
+      mcpServerIds: [server.id],
+    });
+    const binding = store.resolve(preset.id);
+
+    mcp.update(server.id, { name: "Changed name" });
+
+    expect(binding.resolvedSnapshot.resolvedMcpServers?.[0]?.name).toBe(
+      "Original name",
     );
   });
 });

@@ -63,6 +63,7 @@ export class CodexBridge implements EngineBridge {
   async create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    _options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     const result = await rpc.request<ThreadResponse>("thread/start", {
@@ -82,6 +83,7 @@ export class CodexBridge implements EngineBridge {
     nativeId: string,
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    _options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     await rpc.request("thread/resume", {

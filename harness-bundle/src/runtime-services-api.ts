@@ -7,6 +7,8 @@ import type {
   ModelAccessStore,
 } from "./model-access-store.js";
 import type { PresetStore } from "./preset-store.js";
+import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
+import { runtimeMcpMutationSchema } from "@workagent/contracts";
 
 const json = (
   response: ServerResponse,
@@ -36,6 +38,8 @@ export class RuntimeServicesController {
     models: ModelAccessStore,
     credentials: CredentialStatusStore,
     presets: PresetStore,
+    skills: SkillCatalogStore,
+    mcp: McpCatalogStore,
   ) {
     const route = (
       path: string,
@@ -47,7 +51,11 @@ export class RuntimeServicesController {
       ctx.effect(
         () =>
           ctx.webServer.register({
-            kind: path === "/v1/presets" ? "prefix" : "exact",
+            kind: ["/v1/presets", "/v1/skills", "/v1/mcp-servers"].includes(
+              path,
+            )
+              ? "prefix"
+              : "exact",
             path,
             handler: (request, response) => {
               if (!authorized(request, token)) {
@@ -78,6 +86,98 @@ export class RuntimeServicesController {
     route("/v1/presets", (request, response) =>
       this.#presets(request, response, presets),
     );
+    route("/v1/skills", (request, response) =>
+      this.#skills(request, response, skills),
+    );
+    route("/v1/mcp-servers", (request, response) =>
+      this.#mcp(request, response, mcp),
+    );
+  }
+
+  async #skills(
+    request: IncomingMessage,
+    response: ServerResponse,
+    skills: SkillCatalogStore,
+  ): Promise<void> {
+    const path = new URL(request.url ?? "/", "http://runtime").pathname;
+    if (path === "/v1/skills" && request.method === "GET")
+      return json(response, 200, skills.listSkills());
+    const match = /^\/v1\/skills\/([^/]+)$/.exec(path);
+    if (match === null) return json(response, 404, { error: "not_found" });
+    if (request.method !== "PATCH") return this.#method(response, "PATCH");
+    try {
+      const input = await body(request);
+      if (
+        input === null ||
+        typeof input !== "object" ||
+        Array.isArray(input) ||
+        typeof (input as Record<string, unknown>).enabled !== "boolean"
+      )
+        return json(response, 400, { error: "invalid_enabled_state" });
+      json(
+        response,
+        200,
+        skills.setEnabled(
+          decodeURIComponent(match[1] ?? ""),
+          (input as { enabled: boolean }).enabled,
+        ),
+      );
+    } catch (error) {
+      json(
+        response,
+        error instanceof Error && error.message === "skill_not_found"
+          ? 404
+          : 400,
+        {
+          error: error instanceof Error ? error.message : "invalid_request",
+        },
+      );
+    }
+  }
+
+  async #mcp(
+    request: IncomingMessage,
+    response: ServerResponse,
+    mcp: McpCatalogStore,
+  ): Promise<void> {
+    const path = new URL(request.url ?? "/", "http://runtime").pathname;
+    try {
+      if (path === "/v1/mcp-servers") {
+        if (request.method === "GET")
+          return json(response, 200, mcp.listServers());
+        if (request.method === "POST")
+          return json(
+            response,
+            201,
+            mcp.create(runtimeMcpMutationSchema.parse(await body(request))),
+          );
+        return this.#method(response, "GET, POST");
+      }
+      const match = /^\/v1\/mcp-servers\/([^/]+)$/.exec(path);
+      if (match === null) return json(response, 404, { error: "not_found" });
+      const id = decodeURIComponent(match[1] ?? "");
+      if (request.method === "GET") {
+        const server = mcp.getServer(id);
+        return server === undefined
+          ? json(response, 404, { error: "mcp_server_not_found" })
+          : json(response, 200, server);
+      }
+      if (request.method === "PATCH")
+        return json(response, 200, mcp.update(id, await body(request)));
+      if (request.method === "DELETE") {
+        mcp.delete(id);
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      this.#method(response, "GET, PATCH, DELETE");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "invalid_request";
+      json(response, message === "mcp_server_not_found" ? 404 : 400, {
+        error: message,
+      });
+    }
   }
 
   async #presets(

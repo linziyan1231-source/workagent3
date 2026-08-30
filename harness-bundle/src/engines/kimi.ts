@@ -9,6 +9,7 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
+  type McpServer,
 } from "@agentclientprotocol/sdk";
 import { nativeEngineEnvironment } from "./environment.js";
 import type {
@@ -33,11 +34,12 @@ export class KimiBridge implements EngineBridge {
   async create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
     const result = await connection.newSession({
       cwd: workspace,
-      mcpServers: [],
+      mcpServers: projectMcpServers(options?.mcpServers ?? []),
     });
     const session = new KimiSession(connection, result.sessionId, onEvent, () =>
       this.#sessions.delete(result.sessionId),
@@ -50,12 +52,13 @@ export class KimiBridge implements EngineBridge {
     nativeId: string,
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
+    options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
     await connection.unstable_resumeSession({
       sessionId: nativeId,
       cwd: workspace,
-      mcpServers: [],
+      mcpServers: projectMcpServers(options?.mcpServers ?? []),
     });
     const session = new KimiSession(connection, nativeId, onEvent, () => {
       this.#sessions.delete(nativeId);
@@ -137,6 +140,31 @@ export class KimiBridge implements EngineBridge {
     return connection;
   }
 }
+
+export const projectMcpServers = (
+  servers: readonly import("@workagent/contracts").RuntimeMcpServer[],
+): McpServer[] =>
+  servers.map((server) => {
+    const transport = server.transport;
+    if (transport.kind === "stdio") {
+      if (Object.keys(transport.environmentCredentialIds).length !== 0)
+        throw new Error(`mcp_credentials_unavailable:${server.id}`);
+      return {
+        name: server.name,
+        command: transport.command,
+        args: transport.args,
+        env: [],
+      };
+    }
+    if (Object.keys(transport.headerCredentialIds).length !== 0)
+      throw new Error(`mcp_credentials_unavailable:${server.id}`);
+    return {
+      type: transport.kind,
+      name: server.name,
+      url: transport.url,
+      headers: [],
+    };
+  });
 
 class KimiClient implements Client {
   readonly #sessions: Map<string, KimiSession>;

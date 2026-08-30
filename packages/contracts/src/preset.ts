@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { engineIdSchema } from "./engine.js";
+import {
+  runtimeMcpServerSchema,
+  skillCatalogEntrySchema,
+} from "./capability.js";
 
 export const presetSourceSchema = z.enum(["builtin", "user"]);
 export const workspacePolicySchema = z.enum([
@@ -54,6 +58,8 @@ export type PresetMutation = z.infer<typeof presetMutationSchema>;
 
 export const resolvedPresetSnapshotSchema = presetDefinitionSchema.extend({
   resolvedAt: z.iso.datetime({ offset: true }),
+  resolvedSkills: z.array(skillCatalogEntrySchema).optional(),
+  resolvedMcpServers: z.array(runtimeMcpServerSchema).optional(),
 });
 export type ResolvedPresetSnapshot = z.infer<
   typeof resolvedPresetSnapshotSchema

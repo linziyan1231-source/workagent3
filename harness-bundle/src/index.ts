@@ -16,6 +16,7 @@ import {
 } from "./model-access-store.js";
 import { PresetStore } from "./preset-store.js";
 import { RuntimeServicesController } from "./runtime-services-api.js";
+import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -110,15 +111,19 @@ export function apply(ctx: Context): void {
   }
   const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
   const models = new ModelAccessStore(dshHome);
-  const presets = new PresetStore(dshHome, models);
+  const skills = new SkillCatalogStore(dshHome);
+  const mcp = new McpCatalogStore(dshHome);
+  const presets = new PresetStore(dshHome, models, skills, mcp);
   new RuntimeServicesController(
     ctx,
     token,
     models,
     new CredentialStatusStore(dshHome),
     presets,
+    skills,
+    mcp,
   );
-  const runtime = new RuntimeController(ctx, token, workspaces, presets);
+  const runtime = new RuntimeController(ctx, token, workspaces, presets, mcp);
   runtime.mount();
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),
