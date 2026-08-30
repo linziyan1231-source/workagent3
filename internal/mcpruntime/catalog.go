@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,11 @@ var (
 	ErrNotFound             = errors.New("MCP server not found")
 	ErrUnsupportedTransport = errors.New("MCP transport is not supported by engine")
 	ErrServerUnavailable    = errors.New("MCP server is unavailable")
+)
+
+var (
+	environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	headerName      = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 )
 
 type Transport struct {
@@ -199,6 +205,16 @@ func validateServer(server Server) error {
 	}
 	if server.ToolPolicy != "allowlist" && len(server.AllowedTools) != 0 {
 		return errors.New("MCP tools are only valid with allowlist policy")
+	}
+	for name, id := range server.Transport.EnvironmentCredentialIDs {
+		if !environmentName.MatchString(name) || id == "" {
+			return errors.New("invalid MCP environment credential reference")
+		}
+	}
+	for name, id := range server.Transport.HeaderCredentialIDs {
+		if !headerName.MatchString(name) || id == "" {
+			return errors.New("invalid MCP header credential reference")
+		}
 	}
 	switch server.Transport.Kind {
 	case "stdio":

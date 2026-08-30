@@ -42,6 +42,26 @@ func TestCatalogRejectsUnsafeRemoteAndRelativeStdioTransports(t *testing.T) {
 	}
 }
 
+func TestCatalogRejectsUnsafeCredentialNames(t *testing.T) {
+	catalog, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	for _, transport := range []Transport{
+		{Kind: "stdio", Command: filepath.Join(t.TempDir(), "server.exe"), EnvironmentCredentialIDs: map[string]string{"BAD=NAME": "credential"}},
+		{Kind: "http", URL: "https://example.com/mcp", HeaderCredentialIDs: map[string]string{"Bad\r\nHeader": "credential"}},
+	} {
+		_, err := catalog.Create(t.Context(), Server{
+			ID: "unsafe", Name: "Unsafe", Source: "user", Enabled: true, Transport: transport,
+			ToolPolicy: "all", OAuthState: "none", Health: "unknown",
+		})
+		if err == nil {
+			t.Fatalf("unsafe credential name was accepted: %#v", transport)
+		}
+	}
+}
+
 func TestProjectionFailsExplicitlyForUnsupportedOrUnavailableServer(t *testing.T) {
 	server := Server{ID: "mcp-sse", Enabled: true, Transport: Transport{Kind: "sse"}, OAuthState: "ready", Health: "healthy"}
 	if _, err := Project([]Server{server}, EngineCapabilities{Engine: "codex", Stdio: true, HTTP: true}); !errors.Is(err, ErrUnsupportedTransport) {

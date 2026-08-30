@@ -30,7 +30,7 @@ type runtimeGateway struct {
 	oauth       *mcpOAuthManager
 }
 
-func newRuntimeGateway(runtimeDirectory, managedSkillsRoot string, target *url.URL, token string) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, managedSkillsRoot string, target *url.URL, token string, assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func newRuntimeGateway(runtimeDirectory, managedSkillsRoot string, target *url.U
 		return nil, err
 	}
 	oauth := newMCPOAuthManager(catalog, credentials, publisher)
-	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token)
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, assigners...)
 	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth}, nil
 }
 
@@ -115,7 +115,7 @@ type runtimeCredentialCatalog interface {
 	Revoke(context.Context, string) error
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string) http.Handler {
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
@@ -125,7 +125,7 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
-	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher))
+	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher, assigners...))
 	mux.HandleFunc("GET /v1/skills", listSkills(skills))
 	mux.HandleFunc("GET /v1/skills/export", exportUserSkill(skills))
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
