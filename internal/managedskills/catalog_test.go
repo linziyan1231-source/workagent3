@@ -56,7 +56,7 @@ func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := skills.List(t.Context())
-	if err != nil || len(entries) != 7 {
+	if err != nil || len(entries) != 8 {
 		t.Fatalf("release entries = %#v, %v", entries, err)
 	}
 	for _, entry := range entries {
@@ -65,6 +65,9 @@ func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
 		}
 		if entry.ID == "dwg-quantity-surveyor" && (len(entry.RequiredMCPServerIDs) != 1 || entry.RequiredMCPServerIDs[0] != "dwg-quantity-surveyor") {
 			t.Fatalf("DWG dependency = %#v", entry.RequiredMCPServerIDs)
+		}
+		if entry.ID == "professional-database" && (entry.Enabled || len(entry.RequiredMCPServerIDs) != 1 || entry.RequiredMCPServerIDs[0] != "professional-database") {
+			t.Fatalf("professional database release = %#v", entry)
 		}
 	}
 	err = filepath.Walk(release, func(path string, info os.FileInfo, walkErr error) error {

@@ -12,6 +12,15 @@
       "requiredMcpServerIds": ["dwg-quantity-surveyor"]
     },
     {
+      "id": "professional-database",
+      "name": "professional-database",
+      "description": "Query the professional databases authorized for the current employee through the managed datasource MCP.",
+      "version": "0.1.0",
+      "relativePath": "professional-database",
+      "enabledByDefault": false,
+      "requiredMcpServerIds": ["professional-database"]
+    },
+    {
       "id": "wiki-dream",
       "name": "wiki-dream",
       "description": "Run an incremental or weekly deep maintenance cycle for an OKF project wiki.",
