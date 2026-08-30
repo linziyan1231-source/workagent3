@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-workagent",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@workagent/harness-bundle": "link:../../harness-bundle"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@workagent/harness-bundle"
+      ]
+    }
+  }
+}

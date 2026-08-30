@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.cache/
+.env
+.env.*
+!.env.example
+*.local
+*.log
+bin/
+data/
+runtime/
+dsh-home/
+

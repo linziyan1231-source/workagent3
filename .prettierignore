@@ -1,0 +1,7 @@
+plan.md
+pnpm-lock.yaml
+go.sum
+node_modules/
+.cache/
+dist/
+coverage/
