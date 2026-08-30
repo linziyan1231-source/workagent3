@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@workagent/harness-bundle": "link:../../harness-bundle"
+    "@workagent/harness-bundle": "file:../../harness-bundle"
   },
   "dsh": {
     "profile": {

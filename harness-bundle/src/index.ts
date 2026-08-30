@@ -1,10 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
+import type {} from "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-agent-default-model";
 import type {} from "@deepseek-ai/dsh-host-webserver";
+import type {} from "@deepseek-ai/dsh-session";
+import { RuntimeController } from "./runtime.js";
 
 export const name = "workagent-runtime-api";
-export const inject = ["webServer"];
+export const inject = ["agentDefaultModel", "agents", "sessions", "webServer"];
 
 const json = (
   response: ServerResponse,
@@ -18,7 +22,7 @@ const json = (
   response.end(JSON.stringify(value));
 };
 
-const authorized = (
+export const authorized = (
   request: IncomingMessage,
   expectedToken: string,
 ): boolean => {
@@ -85,4 +89,6 @@ export function apply(ctx: Context): void {
       }),
     "workagent-runtime-api: capability route",
   );
+  const runtime = new RuntimeController(ctx, token);
+  runtime.mount();
 }
