@@ -102,4 +102,54 @@ describe("ConversationPort", () => {
       { id: "codex", state: "needs_auth" },
     ]);
   });
+
+  it("restores messages and separates the displayed text from engine context", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: "message-1",
+              sessionId: "session-1",
+              role: "user",
+              text: "Review this",
+              createdAt: "2026-08-30T10:00:00.000Z",
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accepted: true }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await conversationPort.messages("session-1");
+    await conversationPort.send(
+      "session-1",
+      "Review this\n\nAttached workspace files:\n- .workagent/file.txt",
+      "Review this",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runtime/v1/sessions/session-1/messages",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runtime/v1/sessions/session-1/turns",
+      expect.objectContaining({
+        body: JSON.stringify({
+          content:
+            "Review this\n\nAttached workspace files:\n- .workagent/file.txt",
+          displayContent: "Review this",
+        }),
+      }),
+    );
+  });
 });

@@ -167,6 +167,13 @@ try {
               `${engine} session creation failed with ${created.status}: ${await created.text()}`,
             );
           }
+          const session = await created.json();
+          const messages = await fetch(
+            `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(session.id)}/messages`,
+            { headers: { authorization: `Bearer ${token}` } },
+          );
+          if (!messages.ok || (await messages.json()).length !== 0)
+            throw new Error(`${engine} session message log was not empty`);
         }
         process.stdout.write(
           `workagent Harness profile healthy on loopback port ${port}\n`,

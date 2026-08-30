@@ -12,16 +12,13 @@ import type {
   EngineStatus,
   PendingInteraction,
   RuntimeSession,
+  RuntimeMessage,
   WorkspaceAsset,
 } from "@workagent/contracts";
 import type { AuthUser } from "../auth/authPort.js";
 import { conversationPort, type ConversationPort } from "./conversationPort.js";
 
-export type Message = {
-  id: string;
-  role: "assistant" | "user";
-  text: string;
-};
+export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;
 
 export function reduceMessages(
   messages: readonly Message[],
@@ -151,6 +148,19 @@ export function ConversationPage({
         setInteractions((current) => ({ ...current, [activeId]: items })),
       )
       .catch(() => setNotice("Pending approvals could not be refreshed."));
+    void port
+      .messages(activeId)
+      .then((items) =>
+        setMessages((current) => {
+          const merged = new Map<string, Message>(
+            items.map(({ id, role, text }) => [id, { id, role, text }]),
+          );
+          for (const message of current[activeId] ?? [])
+            merged.set(message.id, message);
+          return { ...current, [activeId]: [...merged.values()] };
+        }),
+      )
+      .catch(() => setNotice("Conversation history could not be refreshed."));
     return port.subscribe(activeId, (event) => applyEvent(activeId, event));
   }, [activeId, port]);
 
@@ -256,7 +266,7 @@ export function ConversationPage({
         referenced.length === 0
           ? content
           : `${content}\n\nAttached workspace files:\n${referenced.map((asset) => `- ${asset.path}`).join("\n")}`;
-      await port.send(activeId, prompt);
+      await port.send(activeId, prompt, content);
       setStagedAssets((current) => ({ ...current, [activeId]: [] }));
     } catch {
       setNotice("Message delivery failed. Your draft is still visible above.");

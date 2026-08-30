@@ -23,6 +23,7 @@ import { ApprovalBridge } from "./approval-bridge.js";
 import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
+import { MessageStore } from "./message-store.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -165,6 +166,7 @@ export class RuntimeController {
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
+  readonly #messages: MessageStore;
 
   constructor(ctx: Context, token: string, workspaces: WorkspaceStore) {
     this.#ctx = ctx;
@@ -173,6 +175,7 @@ export class RuntimeController {
     if (dshHome === undefined)
       throw new Error("workagent-runtime-api: DSH_HOME is required");
     this.#index = new SessionIndex(dshHome);
+    this.#messages = new MessageStore(dshHome);
     this.#workspaces = workspaces;
     const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
@@ -381,6 +384,7 @@ export class RuntimeController {
         }
         this.#sessions.delete(id);
         this.#index.delete(id);
+        this.#messages.delete(id);
         for (const subscriber of this.#subscribers.get(id) ?? []) {
           subscriber.end();
         }
@@ -393,7 +397,9 @@ export class RuntimeController {
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume)$/.exec(path);
+      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume|messages)$/.exec(
+        path,
+      );
     if (match === null) {
       writeJson(response, 404, { error: "not_found" });
       return;
@@ -404,7 +410,7 @@ export class RuntimeController {
       writeJson(response, 404, { error: "session_not_found" });
       return;
     }
-    if (match[2] !== "events") {
+    if (match[2] !== "events" && match[2] !== "messages") {
       try {
         await this.#activate(id, record);
       } catch (error) {
@@ -413,9 +419,19 @@ export class RuntimeController {
         return;
       }
     }
+    if (match[2] === "messages" && request.method === "GET") {
+      writeJson(response, 200, this.#messages.list(id));
+      return;
+    }
     if (match[2] === "turns" && request.method === "POST") {
       const input = await readJson(request);
-      if (typeof input.content !== "string" || input.content.trim() === "") {
+      if (
+        typeof input.content !== "string" ||
+        input.content.trim() === "" ||
+        (input.displayContent !== undefined &&
+          (typeof input.displayContent !== "string" ||
+            input.displayContent.trim() === ""))
+      ) {
         writeJson(response, 400, { error: "content_required" });
         return;
       }
@@ -435,6 +451,16 @@ export class RuntimeController {
           return;
         }
       }
+      this.#messages.append({
+        id: `message-${randomUUID()}`,
+        sessionId: id,
+        role: "user",
+        text:
+          typeof input.displayContent === "string"
+            ? input.displayContent
+            : input.content,
+        createdAt: new Date().toISOString(),
+      });
       this.#persist(id, record);
       writeJson(response, 202, { accepted: true });
       return;
@@ -594,6 +620,27 @@ export class RuntimeController {
   #publish(record: SessionRecord, event: PublicEvent): void {
     record.events.push(event);
     if (record.events.length > 2_000) record.events.shift();
+    if (
+      event.type === "assistant.completed" &&
+      typeof event.content === "string"
+    ) {
+      this.#messages.append({
+        id: typeof event.turnId === "string" ? event.turnId : event.eventId,
+        sessionId: event.sessionId,
+        role: "assistant",
+        text: event.content,
+        createdAt: event.occurredAt,
+      });
+    }
+    if (event.type === "turn.failed" && typeof event.message === "string") {
+      this.#messages.append({
+        id: `${typeof event.turnId === "string" ? event.turnId : event.eventId}-failed`,
+        sessionId: event.sessionId,
+        role: "assistant",
+        text: `I couldn't finish that request: ${event.message}`,
+        createdAt: event.occurredAt,
+      });
+    }
     for (const response of this.#subscribers.get(event.sessionId) ?? []) {
       response.write(
         `id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`,
