@@ -194,6 +194,10 @@ export class RuntimeController {
     });
   }
 
+  workspaceForSession(sessionId: string): string | undefined {
+    return this.#sessions.get(sessionId)?.workspaceId;
+  }
+
   mount(): void {
     this.#ctx.effect(
       () => () =>

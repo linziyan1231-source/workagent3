@@ -32,6 +32,18 @@ export type WorkspaceEntry = {
   modifiedAt: string;
 };
 
+export type WorkspaceAsset = {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  kind: "attachment" | "artifact";
+  name: string;
+  path: string;
+  mediaType: string;
+  size: number;
+  createdAt: string;
+};
+
 const validWorkspace = (value: unknown): value is Workspace => {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return false;
@@ -41,6 +53,38 @@ const validWorkspace = (value: unknown): value is Workspace => {
     typeof item.name === "string" &&
     typeof item.createdAt === "string"
   );
+};
+
+const validAsset = (value: unknown): value is WorkspaceAsset => {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.id === "string" &&
+    typeof item.workspaceId === "string" &&
+    typeof item.sessionId === "string" &&
+    (item.kind === "attachment" || item.kind === "artifact") &&
+    typeof item.name === "string" &&
+    typeof item.path === "string" &&
+    typeof item.mediaType === "string" &&
+    typeof item.size === "number" &&
+    typeof item.createdAt === "string"
+  );
+};
+
+const validComponent = (value: string, error: string): string => {
+  const trimmed = value.trim();
+  if (
+    trimmed === "" ||
+    trimmed.length > 255 ||
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\") ||
+    trimmed.includes(":")
+  )
+    throw new Error(error);
+  return trimmed;
 };
 
 const validateRelativePath = (value: string, allowEmpty = true): string => {
@@ -62,19 +106,31 @@ const validateRelativePath = (value: string, allowEmpty = true): string => {
 export class WorkspaceStore {
   readonly #root: string;
   readonly #indexPath: string;
+  readonly #assetIndexPath: string;
   readonly #workspaces = new Map<string, Workspace>();
+  readonly #assets = new Map<string, WorkspaceAsset>();
 
   constructor(root: string, dshHome: string) {
     if (!isAbsolute(root)) throw new Error("workspace root must be absolute");
     this.#root = resolve(root);
     this.#indexPath = join(dshHome, "workagent", "workspaces.json");
+    this.#assetIndexPath = join(dshHome, "workagent", "workspace-assets.json");
     mkdirSync(this.#root, { recursive: true, mode: 0o700 });
-    if (!existsSync(this.#indexPath)) return;
-    const parsed: unknown = JSON.parse(readFileSync(this.#indexPath, "utf8"));
-    if (!Array.isArray(parsed) || !parsed.every(validWorkspace))
-      throw new Error("WorkAgent workspace index is invalid");
-    for (const workspace of parsed)
-      this.#workspaces.set(workspace.id, workspace);
+    if (existsSync(this.#indexPath)) {
+      const parsed: unknown = JSON.parse(readFileSync(this.#indexPath, "utf8"));
+      if (!Array.isArray(parsed) || !parsed.every(validWorkspace))
+        throw new Error("WorkAgent workspace index is invalid");
+      for (const workspace of parsed)
+        this.#workspaces.set(workspace.id, workspace);
+    }
+    if (existsSync(this.#assetIndexPath)) {
+      const parsed: unknown = JSON.parse(
+        readFileSync(this.#assetIndexPath, "utf8"),
+      );
+      if (!Array.isArray(parsed) || !parsed.every(validAsset))
+        throw new Error("WorkAgent workspace asset index is invalid");
+      for (const asset of parsed) this.#assets.set(asset.id, asset);
+    }
   }
 
   list(): Workspace[] {
@@ -114,6 +170,7 @@ export class WorkspaceStore {
       .filter(
         (entry) =>
           entry.name !== ".workagent-trash" &&
+          entry.name !== ".workagent" &&
           (entry.isDirectory() || entry.isFile()),
       )
       .map((entry): WorkspaceEntry => {
@@ -162,6 +219,66 @@ export class WorkspaceStore {
       size: stat.size,
       modifiedAt: stat.mtime.toISOString(),
     };
+  }
+
+  listAssets(workspaceId: string, sessionId: string): WorkspaceAsset[] {
+    this.#workspaceRoot(workspaceId);
+    return [...this.#assets.values()]
+      .filter(
+        (asset) =>
+          asset.workspaceId === workspaceId && asset.sessionId === sessionId,
+      )
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  addAttachment(
+    workspaceId: string,
+    sessionId: string,
+    name: string,
+    mediaType: string,
+    content: Buffer,
+  ): WorkspaceAsset {
+    const safeSession = validComponent(sessionId, "invalid_session_id");
+    const safeName = validComponent(name, "invalid_asset_name");
+    const id = `asset-${randomUUID()}`;
+    const path = `.workagent/sessions/${safeSession}/attachments/${id}-${safeName}`;
+    const entry = this.write(workspaceId, path, content);
+    return this.#addAsset({
+      id,
+      workspaceId,
+      sessionId,
+      kind: "attachment",
+      name: safeName,
+      path,
+      mediaType: mediaType.trim() || "application/octet-stream",
+      size: entry.size,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  registerArtifact(
+    workspaceId: string,
+    sessionId: string,
+    path: string,
+    name?: string,
+    mediaType = "application/octet-stream",
+  ): WorkspaceAsset {
+    validComponent(sessionId, "invalid_session_id");
+    const normalizedPath = validateRelativePath(path, false);
+    const absolute = this.#resolve(workspaceId, normalizedPath, false);
+    const stat = statSync(absolute);
+    if (!stat.isFile()) throw new Error("not_a_file");
+    return this.#addAsset({
+      id: `asset-${randomUUID()}`,
+      workspaceId,
+      sessionId,
+      kind: "artifact",
+      name: validComponent(name ?? basename(absolute), "invalid_asset_name"),
+      path: normalizedPath,
+      mediaType: mediaType.trim() || "application/octet-stream",
+      size: stat.size,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   mkdir(id: string, path: string): void {
@@ -238,5 +355,22 @@ export class WorkspaceStore {
       mode: 0o600,
     });
     renameSync(temporary, this.#indexPath);
+  }
+
+  #addAsset(asset: WorkspaceAsset): WorkspaceAsset {
+    this.#assets.set(asset.id, asset);
+    this.#saveAssets();
+    return asset;
+  }
+
+  #saveAssets(): void {
+    mkdirSync(dirname(this.#assetIndexPath), { recursive: true, mode: 0o700 });
+    const temporary = `${this.#assetIndexPath}.${process.pid}.tmp`;
+    writeFileSync(
+      temporary,
+      `${JSON.stringify([...this.#assets.values()], null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    renameSync(temporary, this.#assetIndexPath);
   }
 }

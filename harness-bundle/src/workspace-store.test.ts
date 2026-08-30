@@ -57,4 +57,38 @@ describe("WorkspaceStore", () => {
       "reparse_point_rejected",
     );
   });
+
+  it("persists session attachments and registered artifacts", () => {
+    const root = mkdtempSync(join(tmpdir(), "workagent-workspace-"));
+    const files = join(root, "files");
+    const dsh = join(root, "dsh");
+    const store = new WorkspaceStore(files, dsh);
+    const workspace = store.create("Project");
+    const attachment = store.addAttachment(
+      workspace.id,
+      "session-1",
+      "brief.txt",
+      "text/plain",
+      Buffer.from("brief"),
+    );
+    store.write(workspace.id, "reports/final.pdf", Buffer.from("pdf"));
+    const artifact = store.registerArtifact(
+      workspace.id,
+      "session-1",
+      "reports/final.pdf",
+      undefined,
+      "application/pdf",
+    );
+
+    expect(store.listFiles(workspace.id).map((entry) => entry.name)).toEqual([
+      "reports",
+    ]);
+    expect(store.read(workspace.id, attachment.path).toString()).toBe("brief");
+    expect(
+      new WorkspaceStore(files, dsh).listAssets(workspace.id, "session-1"),
+    ).toMatchObject([
+      { id: attachment.id, kind: "attachment", name: "brief.txt" },
+      { id: artifact.id, kind: "artifact", name: "final.pdf" },
+    ]);
+  });
 });

@@ -54,7 +54,9 @@ const errorStatus = (error: unknown): [number, string] => {
     code === "reparse_point_rejected" ||
     code === "unsafe_workspace_root" ||
     code === "not_a_directory" ||
-    code === "not_a_file"
+    code === "not_a_file" ||
+    code === "invalid_session_id" ||
+    code === "invalid_asset_name"
   )
     return [400, code];
   console.error("workagent-workspace-api: operation failed", error);
@@ -64,8 +66,15 @@ const errorStatus = (error: unknown): [number, string] => {
 export class WorkspaceController {
   readonly #token: string;
   readonly #store: WorkspaceStore;
+  readonly #workspaceForSession: (sessionId: string) => string | undefined;
 
-  constructor(ctx: Context, token: string, store?: WorkspaceStore) {
+  constructor(
+    ctx: Context,
+    token: string,
+    store?: WorkspaceStore,
+    workspaceForSession: (sessionId: string) => string | undefined = () =>
+      undefined,
+  ) {
     this.#token = token;
     if (store === undefined) {
       const root = process.env.WORKAGENT_WORKSPACE_ROOT;
@@ -75,6 +84,7 @@ export class WorkspaceController {
       store = new WorkspaceStore(root, dshHome);
     }
     this.#store = store;
+    this.#workspaceForSession = workspaceForSession;
     ctx.effect(
       () =>
         ctx.webServer.register({
@@ -127,7 +137,7 @@ export class WorkspaceController {
       }
     }
     const match =
-      /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move)$/.exec(
+      /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move|assets|attachments)$/.exec(
         url.pathname,
       );
     if (match === null) {
@@ -137,6 +147,7 @@ export class WorkspaceController {
     const id = decodeURIComponent(match[1] ?? "");
     const action = match[2];
     const path = url.searchParams.get("path") ?? "";
+    const sessionId = url.searchParams.get("sessionId") ?? "";
     if (action === "files" && request.method === "GET") {
       json(response, 200, this.#store.listFiles(id, path));
       return;
@@ -187,6 +198,63 @@ export class WorkspaceController {
       response.end();
       return;
     }
+    if (action === "assets" && request.method === "GET") {
+      if (!this.#sessionBelongsToWorkspace(sessionId, id)) {
+        json(response, 404, { error: "session_not_found" });
+        return;
+      }
+      json(response, 200, this.#store.listAssets(id, sessionId));
+      return;
+    }
+    if (action === "attachments" && request.method === "PUT") {
+      if (!this.#sessionBelongsToWorkspace(sessionId, id)) {
+        json(response, 404, { error: "session_not_found" });
+        return;
+      }
+      const name = url.searchParams.get("name") ?? "";
+      json(
+        response,
+        201,
+        this.#store.addAttachment(
+          id,
+          sessionId,
+          name,
+          request.headers["content-type"] ?? "application/octet-stream",
+          await body(request, MAX_UPLOAD_BYTES),
+        ),
+      );
+      return;
+    }
+    if (action === "assets" && request.method === "POST") {
+      const input = await objectBody(request);
+      if (
+        !this.#sessionBelongsToWorkspace(sessionId, id) ||
+        typeof input.path !== "string" ||
+        (input.name !== undefined && typeof input.name !== "string") ||
+        (input.mediaType !== undefined && typeof input.mediaType !== "string")
+      ) {
+        json(response, 400, { error: "invalid_artifact" });
+        return;
+      }
+      json(
+        response,
+        201,
+        this.#store.registerArtifact(
+          id,
+          sessionId,
+          input.path,
+          input.name,
+          input.mediaType,
+        ),
+      );
+      return;
+    }
     json(response, 405, { error: "method_not_allowed" });
+  }
+
+  #sessionBelongsToWorkspace(sessionId: string, workspaceId: string): boolean {
+    return (
+      sessionId !== "" && this.#workspaceForSession(sessionId) === workspaceId
+    );
   }
 }

@@ -3,6 +3,13 @@ import { authPort, type AuthUser } from "../features/auth/authPort.js";
 import { LoginPage } from "../features/auth/LoginPage.js";
 import { ConversationPage } from "../features/conversation/ConversationPage.js";
 import { WorkspacePanel } from "../features/workspace/WorkspacePanel.js";
+import { workspacePort } from "../features/workspace/workspacePort.js";
+
+const workspaceAssets = {
+  list: workspacePort.assets,
+  attach: workspacePort.attach,
+  downloadUrl: workspacePort.downloadUrl,
+};
 
 export function App() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
@@ -31,6 +38,8 @@ export function App() {
     <ConversationPage
       user={user}
       workspaceId={workspaceId}
+      onWorkspaceSelect={setWorkspaceId}
+      assetPort={workspaceAssets}
       workspacePanel={
         <WorkspacePanel selectedId={workspaceId} onSelect={setWorkspaceId} />
       }

@@ -1,6 +1,7 @@
 import {
   workspaceApiSchemas,
   type Workspace,
+  type WorkspaceAsset,
   type WorkspaceEntry,
 } from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
@@ -49,6 +50,32 @@ export const workspacePort = {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ path }),
       },
+    );
+  },
+  async assets(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<WorkspaceAsset[]> {
+    return workspaceApiSchemas.assetList.parse(
+      await requestJson<unknown>(
+        `${base}/${encodeURIComponent(workspaceId)}/assets?sessionId=${encodeURIComponent(sessionId)}`,
+      ),
+    );
+  },
+  async attach(
+    workspaceId: string,
+    sessionId: string,
+    file: File,
+  ): Promise<WorkspaceAsset> {
+    return workspaceApiSchemas.asset.parse(
+      await requestJson<unknown>(
+        `${base}/${encodeURIComponent(workspaceId)}/attachments?sessionId=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(file.name)}`,
+        {
+          method: "PUT",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file,
+        },
+      ),
     );
   },
   downloadUrl(workspaceId: string, path: string): string {

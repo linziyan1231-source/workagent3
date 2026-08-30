@@ -361,7 +361,7 @@ select:focus-visible {
 .conversation {
   min-width: 0;
   display: grid;
-  grid-template-rows: 58px minmax(0, 1fr) auto;
+  grid-template-rows: 58px minmax(0, 1fr) auto auto;
   background: var(--bg-base);
 }
 .conversation-header {
@@ -569,6 +569,32 @@ select:focus-visible {
   background: white;
   box-shadow: 0 8px 24px rgb(29 33 41 / 6%);
 }
+.conversation-assets {
+  width: min(760px, calc(100% - 48px));
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  margin: 0 auto 8px;
+}
+.conversation-assets button,
+.conversation-assets a {
+  min-height: 28px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-base);
+  border-radius: 8px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-decoration: none;
+  background: var(--bg-1);
+}
+.conversation-assets button.staged {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+  background: var(--brand-light);
+}
 .composer:focus-within {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px rgb(117 131 178 / 12%);
@@ -593,18 +619,39 @@ select:focus-visible {
   color: var(--text-tertiary);
   font-size: 11px;
 }
+.composer-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 .composer-footer button {
   width: 32px;
   height: 32px;
   border: 0;
   border-radius: 50%;
+}
+.composer-footer .send-button {
   color: white;
   font-size: 17px;
   background: var(--brand);
 }
-.composer-footer button:disabled {
+.composer-footer .send-button:disabled {
   color: white;
   background: #d3d4d9;
+  cursor: default;
+}
+.composer-footer .attach-button {
+  width: 28px;
+  height: 28px;
+  color: var(--text-secondary);
+  font-size: 18px;
+  background: transparent;
+}
+.composer-footer .attach-button:hover {
+  background: var(--bg-hover);
+}
+.composer-footer .attach-button:disabled {
+  color: var(--text-tertiary);
   cursor: default;
 }
 
@@ -798,7 +845,7 @@ select:focus-visible {
     background: rgb(29 33 41 / 22%);
   }
   .conversation {
-    grid-template-rows: 56px minmax(0, 1fr) auto;
+    grid-template-rows: 56px minmax(0, 1fr) auto auto;
   }
   .conversation-header {
     gap: 9px;
@@ -834,5 +881,8 @@ select:focus-visible {
   .composer {
     width: calc(100% - 24px);
     margin-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  .conversation-assets {
+    width: calc(100% - 24px);
   }
 }

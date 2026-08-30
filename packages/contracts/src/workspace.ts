@@ -26,9 +26,24 @@ export const workspaceEntrySchema = z.object({
 });
 export type WorkspaceEntry = z.infer<typeof workspaceEntrySchema>;
 
+export const workspaceAssetSchema = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  sessionId: z.string().min(1),
+  kind: z.enum(["attachment", "artifact"]),
+  name: z.string().min(1).max(255),
+  path: workspaceEntrySchema.shape.path,
+  mediaType: z.string().min(1).max(200),
+  size: z.number().int().nonnegative(),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+export type WorkspaceAsset = z.infer<typeof workspaceAssetSchema>;
+
 export const workspaceApiSchemas = {
   workspace: workspaceSchema,
   workspaceList: z.array(workspaceSchema),
   entry: workspaceEntrySchema,
   entryList: z.array(workspaceEntrySchema),
+  asset: workspaceAssetSchema,
+  assetList: z.array(workspaceAssetSchema),
 } as const;

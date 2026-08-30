@@ -103,5 +103,7 @@ export function apply(ctx: Context): void {
   const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
   const runtime = new RuntimeController(ctx, token, workspaces);
   runtime.mount();
-  new WorkspaceController(ctx, token, workspaces);
+  new WorkspaceController(ctx, token, workspaces, (sessionId) =>
+    runtime.workspaceForSession(sessionId),
+  );
 }

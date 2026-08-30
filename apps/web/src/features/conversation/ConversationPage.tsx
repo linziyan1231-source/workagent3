@@ -12,6 +12,7 @@ import type {
   EngineStatus,
   PendingInteraction,
   RuntimeSession,
+  WorkspaceAsset,
 } from "@workagent/contracts";
 import type { AuthUser } from "../auth/authPort.js";
 import { conversationPort, type ConversationPort } from "./conversationPort.js";
@@ -61,6 +62,16 @@ type Props = {
   port?: ConversationPort;
   workspaceId?: string;
   workspacePanel?: ReactNode;
+  onWorkspaceSelect?: (workspaceId: string) => void;
+  assetPort?: {
+    list(workspaceId: string, sessionId: string): Promise<WorkspaceAsset[]>;
+    attach(
+      workspaceId: string,
+      sessionId: string,
+      file: File,
+    ): Promise<WorkspaceAsset>;
+    downloadUrl(workspaceId: string, path: string): string;
+  };
 };
 
 export function ConversationPage({
@@ -69,6 +80,8 @@ export function ConversationPage({
   port = conversationPort,
   workspaceId,
   workspacePanel,
+  onWorkspaceSelect,
+  assetPort,
 }: Props) {
   const [sessions, setSessions] = useState<RuntimeSession[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -81,17 +94,24 @@ export function ConversationPage({
   const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [assets, setAssets] = useState<Record<string, WorkspaceAsset[]>>({});
+  const [stagedAssets, setStagedAssets] = useState<Record<string, string[]>>(
+    {},
+  );
   const [workspaceOpen, setWorkspaceOpen] = useState(
     () => typeof window !== "undefined" && window.innerWidth > 1080,
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const active = sessions.find((session) => session.id === activeId);
   const activeMessages = useMemo(
     () => (activeId ? (messages[activeId] ?? []) : []),
     [activeId, messages],
   );
   const activeInteractions = activeId ? (interactions[activeId] ?? []) : [];
+  const activeAssets = activeId ? (assets[activeId] ?? []) : [];
+  const activeStaged = activeId ? (stagedAssets[activeId] ?? []) : [];
   const selectedEngine = engineStatuses.find((item) => item.id === engine);
   const engineBlocked =
     selectedEngine?.state === "needs_auth" ||
@@ -107,9 +127,21 @@ export function ConversationPage({
       .then((items) => {
         setSessions(items);
         setActiveId(items[0]?.id);
+        if (items[0] !== undefined) onWorkspaceSelect?.(items[0].workspaceId);
       })
       .catch(() => setNotice("Your runtime is starting. Try again shortly."));
-  }, [port]);
+  }, [onWorkspaceSelect, port]);
+
+  useEffect(() => {
+    if (active === undefined || assetPort === undefined) return;
+    onWorkspaceSelect?.(active.workspaceId);
+    void assetPort
+      .list(active.workspaceId, active.id)
+      .then((items) =>
+        setAssets((current) => ({ ...current, [active.id]: items })),
+      )
+      .catch(() => setNotice("Session attachments could not be refreshed."));
+  }, [active, assetPort, onWorkspaceSelect]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -188,6 +220,7 @@ export function ConversationPage({
       });
       setSessions((current) => [session, ...current]);
       setActiveId(session.id);
+      onWorkspaceSelect?.(session.workspaceId);
       setSidebarOpen(false);
       inputRef.current?.focus();
     } catch {
@@ -216,10 +249,58 @@ export function ConversationPage({
       ],
     }));
     try {
-      await port.send(activeId, content);
+      const referenced = activeAssets.filter((asset) =>
+        activeStaged.includes(asset.id),
+      );
+      const prompt =
+        referenced.length === 0
+          ? content
+          : `${content}\n\nAttached workspace files:\n${referenced.map((asset) => `- ${asset.path}`).join("\n")}`;
+      await port.send(activeId, prompt);
+      setStagedAssets((current) => ({ ...current, [activeId]: [] }));
     } catch {
       setNotice("Message delivery failed. Your draft is still visible above.");
     }
+  }
+
+  async function attach(files: FileList | null) {
+    if (active === undefined || assetPort === undefined || files === null)
+      return;
+    try {
+      for (const file of files) {
+        const asset = await assetPort.attach(
+          active.workspaceId,
+          active.id,
+          file,
+        );
+        setAssets((current) => ({
+          ...current,
+          [active.id]: [...(current[active.id] ?? []), asset],
+        }));
+        setStagedAssets((current) => ({
+          ...current,
+          [active.id]: [...(current[active.id] ?? []), asset.id],
+        }));
+      }
+    } catch {
+      setNotice("Attachment upload failed. Files up to 25 MB are supported.");
+    } finally {
+      if (attachmentInputRef.current !== null)
+        attachmentInputRef.current.value = "";
+    }
+  }
+
+  function toggleAsset(assetId: string) {
+    if (activeId === undefined) return;
+    setStagedAssets((current) => {
+      const selected = current[activeId] ?? [];
+      return {
+        ...current,
+        [activeId]: selected.includes(assetId)
+          ? selected.filter((id) => id !== assetId)
+          : [...selected, assetId],
+      };
+    });
   }
 
   return (
@@ -257,6 +338,7 @@ export function ConversationPage({
               key={session.id}
               onClick={() => {
                 setActiveId(session.id);
+                onWorkspaceSelect?.(session.workspaceId);
                 setSidebarOpen(false);
               }}
             >
@@ -331,11 +413,13 @@ export function ConversationPage({
                   );
                 })}
               </select>
-              {selectedEngine?.detail && selectedEngine.state !== "ready" && (
-                <small className={`engine-state ${selectedEngine.state}`}>
-                  {selectedEngine.detail}
-                </small>
-              )}
+              {selectedEngine?.detail &&
+                (selectedEngine.state === "needs_auth" ||
+                  selectedEngine.state === "unavailable") && (
+                  <small className={`engine-state ${selectedEngine.state}`}>
+                    {selectedEngine.detail}
+                  </small>
+                )}
             </label>
             {workspacePanel && (
               <button
@@ -408,6 +492,34 @@ export function ConversationPage({
             </article>
           ))}
         </div>
+        {active && activeAssets.length > 0 && assetPort && (
+          <div className="conversation-assets" aria-label="Session files">
+            {activeAssets.map((asset) =>
+              asset.kind === "attachment" ? (
+                <button
+                  type="button"
+                  key={asset.id}
+                  className={activeStaged.includes(asset.id) ? "staged" : ""}
+                  onClick={() => toggleAsset(asset.id)}
+                  title={
+                    activeStaged.includes(asset.id)
+                      ? "Remove from next message"
+                      : "Attach to next message"
+                  }
+                >
+                  ＋ {asset.name}
+                </button>
+              ) : (
+                <a
+                  key={asset.id}
+                  href={assetPort.downloadUrl(active.workspaceId, asset.path)}
+                >
+                  ↧ {asset.name}
+                </a>
+              ),
+            )}
+          </div>
+        )}
         <form className="composer" onSubmit={send}>
           <textarea
             ref={inputRef}
@@ -421,8 +533,30 @@ export function ConversationPage({
             rows={2}
           />
           <div className="composer-footer">
-            <span>Workspace · Personal</span>
-            <button disabled={!active} aria-label="Send message">
+            <div>
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => attach(event.target.files)}
+              />
+              <button
+                className="attach-button"
+                type="button"
+                disabled={!active || assetPort === undefined}
+                aria-label="Attach files"
+                onClick={() => attachmentInputRef.current?.click()}
+              >
+                ＋
+              </button>
+              <span>Workspace · Personal</span>
+            </div>
+            <button
+              className="send-button"
+              disabled={!active}
+              aria-label="Send message"
+            >
               ↑
             </button>
           </div>
