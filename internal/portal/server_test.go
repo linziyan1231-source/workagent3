@@ -37,6 +37,7 @@ func TestLoginAndRuntimeRoutingUsesAuthenticatedSID(t *testing.T) {
 	}
 	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"alice","password":"correct horse battery staple"}`))
 	login.Header.Set("Content-Type", "application/json")
+	login.Header.Set("Origin", "http://example.com")
 	loginResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(loginResponse, login)
 	if loginResponse.Code != http.StatusOK {
@@ -52,6 +53,35 @@ func TestLoginAndRuntimeRoutingUsesAuthenticatedSID(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"path":"/v1/sessions"`) {
 		t.Fatalf("runtime response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPortalRejectsCrossOriginWrites(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	server, _ := New(data, StaticRouter{}, false)
+
+	for _, origin := range []string{"", "https://evil.example"} {
+		request := httptest.NewRequest(http.MethodPost, "http://workagent.example/api/auth/login", strings.NewReader(`{}`))
+		request.Header.Set("Origin", origin)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "cross_origin_request") {
+			t.Fatalf("origin %q returned %d: %s", origin, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestSecurePortalAcceptsMatchingHTTPSOrigin(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	server, _ := New(data, StaticRouter{}, true)
+	request := httptest.NewRequest(http.MethodPost, "https://workagent.example/api/auth/login", strings.NewReader(`{}`))
+	request.Header.Set("Origin", "https://workagent.example")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("matching origin did not reach login handler: %d", response.Code)
 	}
 }
 

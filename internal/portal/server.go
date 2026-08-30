@@ -49,7 +49,26 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
-	return s.securityHeaders(mux)
+	return s.securityHeaders(s.sameOriginWrites(mux))
+}
+
+func (s *Server) sameOriginWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		scheme := "http"
+		if s.secure || request.TLS != nil {
+			scheme = "https"
+		}
+		expected := scheme + "://" + request.Host
+		if !strings.EqualFold(request.Header.Get("Origin"), expected) {
+			writeError(writer, http.StatusForbidden, "cross_origin_request")
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
 }
 
 type userHandler func(http.ResponseWriter, *http.Request, store.User)
