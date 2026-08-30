@@ -20,6 +20,14 @@ export function useExtensionSettingsTabs(): IExtensionSettingsTab[] {
       extensionName: "workagent",
       position: { relativeTo: "system", placement: "before" as const },
     },
+    {
+      id: "workagent-migration",
+      label: t("settings.migration", { defaultValue: "Migration" }),
+      url: "workagent:migration",
+      order: 2,
+      extensionName: "workagent",
+      position: { relativeTo: "system", placement: "before" as const },
+    },
   ];
 }
 export function useExtI18n() {
