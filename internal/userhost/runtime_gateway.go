@@ -1,6 +1,7 @@
 package userhost
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -12,12 +13,14 @@ import (
 	"strings"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
 )
 
 type runtimeGateway struct {
-	server  *http.Server
-	catalog *mcpruntime.Catalog
+	server      *http.Server
+	catalog     *mcpruntime.Catalog
+	credentials *credentialbroker.Store
 }
 
 func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (*runtimeGateway, error) {
@@ -25,25 +28,40 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 	if err != nil {
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandler(catalog, target, token)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog}, nil
+	credentials, err := credentialbroker.Open(filepath.Join(runtimeDirectory, "credential-broker.db"), credentialbroker.NewUserProtector())
+	if err != nil {
+		catalog.Close()
+		return nil, err
+	}
+	handler := newRuntimeGatewayHandler(catalog, credentials, target, token)
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials}, nil
 }
 
 func (g *runtimeGateway) Close() error {
 	serverErr := g.server.Close()
 	catalogErr := g.catalog.Close()
+	credentialErr := g.credentials.Close()
 	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
 		return serverErr
 	}
-	return catalogErr
+	if catalogErr != nil {
+		return catalogErr
+	}
+	return credentialErr
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, target *url.URL, token string) http.Handler {
+type credentialCatalog interface {
+	ListMetadata(context.Context) ([]credentialbroker.Metadata, error)
+	Metadata(context.Context, string) (credentialbroker.Metadata, error)
+}
+
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
 	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog))
-	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog))
-	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog))
+	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials))
+	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials))
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog))
 	mux.Handle("/", proxy)
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -54,6 +72,43 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, target *url.URL, toke
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func listCredentialStatuses(credentials credentialCatalog, target *url.URL, token string) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		brokerStatuses, err := credentials.ListMetadata(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		downstreamURL := target.ResolveReference(&url.URL{Path: "/v1/credentials"})
+		downstreamRequest, err := http.NewRequestWithContext(request.Context(), http.MethodGet, downstreamURL.String(), nil)
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_status_failed")
+			return
+		}
+		downstreamRequest.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(downstreamRequest)
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadGateway, "credential_status_failed")
+			return
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			writeRuntimeError(writer, http.StatusBadGateway, "credential_status_failed")
+			return
+		}
+		var statuses []json.RawMessage
+		if json.NewDecoder(io.LimitReader(response.Body, 256*1024)).Decode(&statuses) != nil {
+			writeRuntimeError(writer, http.StatusBadGateway, "credential_status_failed")
+			return
+		}
+		for _, status := range brokerStatuses {
+			encoded, _ := json.Marshal(status)
+			statuses = append(statuses, encoded)
+		}
+		writeRuntimeJSON(writer, http.StatusOK, statuses)
+	}
 }
 
 func listMCPServers(catalog *mcpruntime.Catalog) http.HandlerFunc {
@@ -67,7 +122,7 @@ func listMCPServers(catalog *mcpruntime.Catalog) http.HandlerFunc {
 	}
 }
 
-func createMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
+func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input mcpMutation
 		decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
@@ -78,7 +133,7 @@ func createMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_mcp_server")
 			return
 		}
-		if len(input.Transport.EnvironmentCredentialIDs) != 0 || len(input.Transport.HeaderCredentialIDs) != 0 {
+		if !validCredentialReferences(request.Context(), credentials, *input.Transport) {
 			writeRuntimeError(writer, http.StatusBadRequest, "credential_reference_not_found")
 			return
 		}
@@ -104,7 +159,7 @@ func createMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
 	}
 }
 
-func updateMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
+func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		server, err := catalog.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, mcpruntime.ErrNotFound) {
@@ -137,7 +192,7 @@ func updateMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
 			server.Enabled = *input.Enabled
 		}
 		if input.Transport != nil {
-			if len(input.Transport.EnvironmentCredentialIDs) != 0 || len(input.Transport.HeaderCredentialIDs) != 0 {
+			if !validCredentialReferences(request.Context(), credentials, *input.Transport) {
 				writeRuntimeError(writer, http.StatusBadRequest, "credential_reference_not_found")
 				return
 			}
@@ -160,6 +215,22 @@ func updateMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
 		}
 		writeRuntimeJSON(writer, http.StatusOK, server)
 	}
+}
+
+func validCredentialReferences(ctx context.Context, credentials credentialCatalog, transport mcpruntime.Transport) bool {
+	for _, id := range transport.EnvironmentCredentialIDs {
+		metadata, err := credentials.Metadata(ctx, id)
+		if err != nil || metadata.Kind != credentialbroker.KindMCPEnv || metadata.State != credentialbroker.StateReady {
+			return false
+		}
+	}
+	for _, id := range transport.HeaderCredentialIDs {
+		metadata, err := credentials.Metadata(ctx, id)
+		if err != nil || (metadata.Kind != credentialbroker.KindMCPHeader && metadata.Kind != credentialbroker.KindMCPOAuth) || metadata.State != credentialbroker.StateReady {
+			return false
+		}
+	}
+	return true
 }
 
 func deleteMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {

@@ -42,6 +42,8 @@ export const credentialKindSchema = z.enum([
   "codex_native",
   "kimi_native",
   "provider",
+  "mcp_header",
+  "mcp_env",
   "mcp_oauth",
 ]);
 export const credentialStatusSchema = z.object({
