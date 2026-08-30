@@ -30,6 +30,15 @@
       "requiredMcpServerIds": []
     },
     {
+      "id": "puxin-help",
+      "name": "puxin-help",
+      "description": "Answer product-usage questions from the bundled WorkAgent3 help guide.",
+      "version": "0.1.0",
+      "relativePath": "puxin-help",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
       "id": "wiki-dream",
       "name": "wiki-dream",
       "description": "Run an incremental or weekly deep maintenance cycle for an OKF project wiki.",

@@ -56,7 +56,7 @@ func TestReleaseCatalogInstallsAdaptedDWGAndWikiSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := skills.List(t.Context())
-	if err != nil || len(entries) != 9 {
+	if err != nil || len(entries) != 10 {
 		t.Fatalf("release entries = %#v, %v", entries, err)
 	}
 	for _, entry := range entries {
