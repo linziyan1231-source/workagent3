@@ -5,6 +5,7 @@ import type {
 } from "@workagent/contracts";
 import { mcpPort } from "../../features/mcp/mcpPort.js";
 import { credentialPort } from "../../features/credentials/credentialPort.js";
+import { conversationPort } from "../../features/conversation/conversationPort.js";
 
 export type IExtensionSettingsTab = {
   id: string;
@@ -159,6 +160,18 @@ const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
   provider: () => {},
   invoke,
 });
+
+export const conversation = {
+  confirmMessage: command(
+    async (input: { confirm_key: string; msg_id: string }) => {
+      await conversationPort.respond(
+        input.msg_id,
+        input.confirm_key.startsWith("reject") ? "reject" : "allow",
+      );
+      return true;
+    },
+  ),
+};
 
 const toRuntimeTransport = async (
   transport: IMcpServerTransport,

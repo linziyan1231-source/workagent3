@@ -37,7 +37,7 @@ import { AionExtensionSettingsPage } from "../../shared/ui/aionui/AionExtensionS
 import { AionSider } from "../../shared/ui/aionui/AionSider.js";
 import type { AutomationUiPort } from "../../shared/ui/aionui/AionAutomationPage.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
-import { AionMessage } from "../../shared/ui/aionui/AionMessage.js";
+import { AionMessageList } from "../../shared/ui/aionui/AionMessageList.js";
 import RendererLayout from "@renderer/components/layout/Layout";
 import {
   WORKSPACE_STATE_EVENT,
@@ -677,11 +677,11 @@ export function ConversationPage({
                   <section
                     className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}
                   >
-                    <div
-                      className="aion-message-scroll chat-surface-container"
-                      aria-live="polite"
-                    >
-                      {isGuid && (
+                    {isGuid ? (
+                      <div
+                        className="aion-message-scroll chat-surface-container"
+                        aria-live="polite"
+                      >
                         <AionGuidEmptyState
                           engine={engine}
                           engines={engineStatuses}
@@ -704,11 +704,15 @@ export function ConversationPage({
                           onSend={send}
                           onAttach={() => attachmentInputRef.current?.click()}
                         />
-                      )}
-                      <div className="chat-surface-fluid">
-                        {notice && <div className="notice">{notice}</div>}
-                        {!isGuid &&
-                          activeInteractions.map((interaction) => (
+                      </div>
+                    ) : (
+                      <div
+                        className="chat-surface-container flex-1 flex flex-col px-20px min-h-0"
+                        aria-live="polite"
+                      >
+                        <div className="chat-surface-fluid">
+                          {notice && <div className="notice">{notice}</div>}
+                          {activeInteractions.map((interaction) => (
                             <article
                               className="approval-card message-item"
                               key={interaction.id}
@@ -742,18 +746,18 @@ export function ConversationPage({
                               </div>
                             </article>
                           ))}
-                        {!isGuid &&
-                          activeMessages.map((message) => (
-                            <AionMessage
-                              key={message.id}
-                              conversationId={activeId!}
-                              id={message.id}
-                              role={message.role}
-                              text={message.text}
-                            />
-                          ))}
+                        </div>
+                        {active && (
+                          <AionMessageList
+                            conversationId={active.id}
+                            engine={active.engine}
+                            workspace={active.workspaceId}
+                            messages={activeMessages}
+                            processing={running.includes(active.id)}
+                          />
+                        )}
                       </div>
-                    </div>
+                    )}
                     {active && activeAssets.length > 0 && assetPort && (
                       <div
                         className="conversation-assets"

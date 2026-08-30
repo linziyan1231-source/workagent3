@@ -95,6 +95,9 @@ importers:
       classnames:
         specifier: 2.5.1
         version: 2.5.1
+      diff:
+        specifier: 8.0.3
+        version: 8.0.3
       diff2html:
         specifier: 3.4.55
         version: 3.4.55
@@ -4431,6 +4434,10 @@ packages:
 
   diff@7.0.0:
     resolution: {integrity: sha512-PJWHUb1RFevKCwaFA9RlG5tCd+FO5iRh9A8HEtkmBH2Li03iJriB6m6JIN4rGz3K3JLawI7/veA1xzRKP6ISBw==}
+    engines: {node: '>=0.3.1'}
+
+  diff@8.0.3:
+    resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
     engines: {node: '>=0.3.1'}
 
   diff@9.0.0:
@@ -11109,6 +11116,8 @@ snapshots:
       highlight.js: 11.9.0
 
   diff@7.0.0: {}
+
+  diff@8.0.3: {}
 
   diff@9.0.0: {}
 

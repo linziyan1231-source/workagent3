@@ -16,6 +16,7 @@ WorkAgent3 application. Product integration belongs in the WorkAgent3 adapter
 layer; refresh this snapshot mechanically from the pinned source repository.
 
 The only in-tree compatibility changes are the event-neutral `onCancel`/`onOk`
-wrappers in `renderer/components/base/AionModal.tsx`; they preserve runtime
-behavior and allow the source component to compile under WorkAgent3's stricter
-TypeScript configuration. Other Web integration remains in the adapter layer.
+wrappers in `renderer/components/base/AionModal.tsx` and the absolute hooks
+module specifier in `renderer/pages/conversation/Messages/MessageList.tsx`.
+They preserve visual/runtime behavior while allowing WorkAgent3's Web adapter
+to replace desktop state. Other Web integration remains in the adapter layer.

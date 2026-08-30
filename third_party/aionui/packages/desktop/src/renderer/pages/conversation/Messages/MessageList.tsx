@@ -33,7 +33,7 @@ import {
   useMessageList,
   useMessageListLoading,
   useMessagePaginationState,
-} from './hooks';
+} from '@renderer/pages/conversation/Messages/hooks';
 import MessageAgentStatus from './components/MessageAgentStatus';
 import MessagePlan from './components/MessagePlan';
 import MessageTips from './components/MessageTips';

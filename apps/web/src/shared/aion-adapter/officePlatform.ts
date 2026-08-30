@@ -1,4 +1,13 @@
-export const theme = { Color: { PrimaryColor: "#165dff" } };
+export const theme = {
+  Color: {
+    PrimaryColor: "#165dff",
+    FunctionalColor: {
+      success: "#00b42a",
+      warn: "#ff7d00",
+      error: "#f53f3f",
+    },
+  },
+};
 
 /** Browser-safe stand-in for Electron-only providers still declared by the
  * upstream bridge. WorkAgent3-owned features use HTTP/SSE adapters instead. */

@@ -12,8 +12,8 @@
       "@renderer/components/chat/SendBox": [
         "src/shared/aion-adapter/sendBox.d.ts"
       ],
-      "@renderer/pages/conversation/Messages/components/MessageText": [
-        "src/shared/aion-adapter/messageText.d.ts"
+      "@renderer/pages/conversation/Messages/MessageList": [
+        "src/shared/aion-adapter/messageListComponent.d.ts"
       ],
       "@renderer/pages/settings/ModeSettings": [
         "src/shared/aion-adapter/settingsPages.d.ts"
@@ -78,7 +78,7 @@
         "src/shared/aion-adapter/themeContext.ts"
       ],
       "@/renderer/hooks/context/ConversationContext": [
-        "src/shared/aion-adapter/conversationContext.ts"
+        "src/shared/aion-adapter/conversationContext.tsx"
       ],
       "@/renderer/hooks/context/AuthContext": [
         "src/shared/aion-adapter/authContext.tsx"
@@ -106,7 +106,13 @@
         "src/shared/aion-adapter/pasteService.ts"
       ],
       "@renderer/pages/conversation/Messages/hooks": [
-        "src/shared/aion-adapter/messageList.ts"
+        "src/shared/aion-adapter/messageList.tsx"
+      ],
+      "@renderer/pages/conversation/runtime/useConversationRuntimeView": [
+        "src/shared/aion-adapter/messageRuntime.ts"
+      ],
+      "@renderer/hooks/file/useAutoPreviewOfficeFiles": [
+        "src/shared/aion-adapter/autoPreviewOfficeFiles.ts"
       ],
       "@renderer/services/FileService": [
         "src/shared/aion-adapter/fileService.ts"
@@ -148,6 +154,7 @@
       "@icon-park/react": ["node_modules/@icon-park/react"],
       "@iconify/react": ["node_modules/@iconify/react"],
       "classnames": ["node_modules/classnames"],
+      "diff": ["node_modules/diff/libesm/index.d.ts"],
       "diff2html": ["node_modules/diff2html"],
       "eventemitter3": ["node_modules/eventemitter3"],
       "i18next": ["node_modules/i18next"],

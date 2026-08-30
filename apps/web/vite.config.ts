@@ -150,7 +150,7 @@ export default defineConfig({
       },
       {
         find: "@/renderer/hooks/context/ConversationContext",
-        replacement: adapter("conversationContext.ts"),
+        replacement: adapter("conversationContext.tsx"),
       },
       {
         find: "@/renderer/hooks/context/AuthContext",
@@ -247,7 +247,21 @@ export default defineConfig({
       },
       {
         find: "@renderer/pages/conversation/Messages/hooks",
-        replacement: adapter("messageList.ts"),
+        replacement: adapter("messageList.tsx"),
+      },
+      {
+        find: "@renderer/pages/conversation/runtime/useConversationRuntimeView",
+        replacement: adapter("messageRuntime.ts"),
+      },
+      {
+        find: "@renderer/hooks/file/useAutoPreviewOfficeFiles",
+        replacement: adapter("autoPreviewOfficeFiles.ts"),
+      },
+      {
+        find: "diff",
+        replacement: fileURLToPath(
+          new URL("./node_modules/diff/libesm/index.js", import.meta.url),
+        ),
       },
       {
         find: "@renderer/services/FileService",
