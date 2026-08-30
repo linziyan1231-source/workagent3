@@ -182,7 +182,31 @@ func (s *Store) Delete(ctx context.Context, id, actorUsername string, admin bool
 	if !admin && !strings.EqualFold(entry.PublisherUsername, actorUsername) {
 		return ErrForbidden
 	}
+	archivePath, pathErr := s.resolveArchivePath(entry.ObjectKey)
+	archiveTrash := ""
+	if pathErr == nil {
+		if info, statErr := os.Lstat(archivePath); statErr == nil {
+			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+				return errors.New("skill market archive is not a regular file")
+			}
+			trashRoot := filepath.Join(s.archiveRoot, ".trash")
+			if err := os.MkdirAll(trashRoot, 0o700); err != nil {
+				return err
+			}
+			archiveTrash = filepath.Join(trashRoot, safeMarketFile(entry.ID)+"-"+fmt.Sprint(s.now().UTC().UnixMilli())+".zip")
+			if err := os.Rename(archivePath, archiveTrash); err != nil {
+				return err
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		}
+	} else if !errors.Is(pathErr, os.ErrNotExist) {
+		return pathErr
+	}
 	_, err = s.db.ExecContext(ctx, `DELETE FROM skill_market_entries WHERE id=?`, id)
+	if err != nil && archiveTrash != "" {
+		_ = os.Rename(archiveTrash, archivePath)
+	}
 	return err
 }
 
@@ -197,22 +221,9 @@ func (s *Store) ApprovedPackage(ctx context.Context, id string) (contracts.Skill
 	if entry.ArchiveBytes <= 0 || entry.ArchiveBytes > 50<<20 {
 		return contracts.SkillMarketPackage{}, errors.New("skill market archive exceeds installation limit")
 	}
-	cleanKey := filepath.Clean(filepath.FromSlash(entry.ObjectKey))
-	if filepath.IsAbs(cleanKey) || cleanKey == "." || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(filepath.Separator)) {
-		return contracts.SkillMarketPackage{}, errors.New("invalid skill market object key")
-	}
-	archivePath := filepath.Join(s.archiveRoot, cleanKey)
-	resolvedRoot, err := filepath.EvalSymlinks(s.archiveRoot)
+	resolvedArchive, err := s.resolveArchivePath(entry.ObjectKey)
 	if err != nil {
 		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
-	}
-	resolvedArchive, err := filepath.EvalSymlinks(archivePath)
-	if err != nil {
-		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
-	}
-	relative, err := filepath.Rel(resolvedRoot, resolvedArchive)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return contracts.SkillMarketPackage{}, errors.New("invalid skill market object key")
 	}
 	info, err := os.Lstat(resolvedArchive)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() != entry.ArchiveBytes {
@@ -233,6 +244,33 @@ func (s *Store) ApprovedPackage(ctx context.Context, id string) (contracts.Skill
 		return contracts.SkillMarketPackage{}, errors.New("skill market archive integrity check failed")
 	}
 	return contracts.SkillMarketPackage{ID: entry.ID, Name: entry.Name, Description: entry.Description, Version: entry.Version, Archive: archive}, nil
+}
+
+func (s *Store) resolveArchivePath(objectKey string) (string, error) {
+	cleanKey := filepath.Clean(filepath.FromSlash(objectKey))
+	if filepath.IsAbs(cleanKey) || cleanKey == "." || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(filepath.Separator)) {
+		return "", errors.New("invalid skill market object key")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(s.archiveRoot)
+	if err != nil {
+		return "", err
+	}
+	resolvedArchive, err := filepath.EvalSymlinks(filepath.Join(s.archiveRoot, cleanKey))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolvedArchive)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", errors.New("invalid skill market object key")
+	}
+	return resolvedArchive, nil
+}
+
+func safeMarketFile(value string) string {
+	if marketIDPattern.MatchString(value) {
+		return value
+	}
+	return "entry"
 }
 
 func (s *Store) PublishPackage(ctx context.Context, input contracts.SkillMarketPublishInput, archive []byte) (contracts.SkillMarketEntry, error) {

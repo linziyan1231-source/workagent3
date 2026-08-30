@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"workagent3/internal/contracts"
 )
 
 func TestReviewGatesMarketVisibility(t *testing.T) {
@@ -77,6 +80,29 @@ func TestApprovedPackageVerifiesArchiveBoundaryAndDigest(t *testing.T) {
 	}
 	if _, err := store.ApprovedPackage(t.Context(), entry.ID); err == nil {
 		t.Fatal("tampered package was accepted")
+	}
+}
+
+func TestPublishPackageAndDeleteRetainRecoverableArchive(t *testing.T) {
+	root := t.TempDir()
+	store, err := OpenWithArchiveRoot(filepath.Join(t.TempDir(), "market.db"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.now = func() time.Time { return time.UnixMilli(1_700_000_000_000) }
+	entry, err := store.PublishPackage(t.Context(), contracts.SkillMarketPublishInput{
+		ID: "published", Name: "Published", Description: "Published skill", Version: "1.0.0", PublisherUsername: "alice",
+	}, []byte("archive"))
+	if err != nil || entry.ID != "published" {
+		t.Fatalf("published entry = %#v, %v", entry, err)
+	}
+	if err := store.Delete(t.Context(), entry.ID, "alice", false); err != nil {
+		t.Fatal(err)
+	}
+	trash, err := os.ReadDir(filepath.Join(root, ".trash"))
+	if err != nil || len(trash) != 1 {
+		t.Fatalf("deleted archive was not retained: %#v, %v", trash, err)
 	}
 }
 
