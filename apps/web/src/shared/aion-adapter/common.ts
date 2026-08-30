@@ -1,3 +1,5 @@
+import { modelAccessPort } from "../../features/models/modelAccessPort.js";
+
 export const ipcBridge = {
   theme: {
     requestCurrent: { invoke: async () => null },
@@ -14,6 +16,24 @@ export const ipcBridge = {
   },
   extensions: {
     getMcpServers: { invoke: async () => [] },
+  },
+  mode: {
+    listProviders: { invoke: () => modelAccessPort.providers() },
+    createProvider: {
+      invoke: async () => {
+        throw new Error("managed_model_catalog_read_only");
+      },
+    },
+    updateProvider: {
+      invoke: async () => {
+        throw new Error("managed_model_catalog_read_only");
+      },
+    },
+    deleteProvider: {
+      invoke: async () => {
+        throw new Error("managed_model_catalog_read_only");
+      },
+    },
   },
   application: {
     systemInfo: {
@@ -87,8 +107,15 @@ export const ipcBridge = {
   acpConversation: new Proxy(
     {},
     {
-      get: () => ({
-        invoke: async () => undefined,
+      get: (_target, key) => ({
+        invoke: async () =>
+          key === "checkProviderHealth"
+            ? {
+                status: "unknown",
+                message: "managed_health_status_only",
+                elapsed_ms: 0,
+              }
+            : undefined,
         on: () => () => undefined,
         emit: () => undefined,
       }),

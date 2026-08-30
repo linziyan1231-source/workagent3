@@ -385,6 +385,7 @@ export type ManagedProviderPresentation = {
 const MANAGED_PROVIDER_PRESENTATIONS: Record<string, ManagedProviderPresentation> = {
   'managed-cliproxy-chatgpt': { displayName: 'ChatGPT', hideCredentials: true, lockModelList: true },
   'managed-cliproxy-kimi': { displayName: 'KIMI', hideCredentials: true, lockModelList: true },
+  'managed-workagent-harness': { displayName: 'Harness', hideCredentials: true, lockModelList: true },
 };
 
 export const getManagedProviderPresentation = (providerId: string): ManagedProviderPresentation | undefined =>

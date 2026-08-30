@@ -26,6 +26,18 @@ export const modelAuthorizationSchema = z.object({
 });
 export type ModelAuthorization = z.infer<typeof modelAuthorizationSchema>;
 
+export const authorizedModelCatalogEntrySchema = modelCatalogEntrySchema.extend(
+  {
+    authorization: modelAuthorizationSchema,
+  },
+);
+export type AuthorizedModelCatalogEntry = z.infer<
+  typeof authorizedModelCatalogEntrySchema
+>;
+export const authorizedModelCatalogListSchema = z.array(
+  authorizedModelCatalogEntrySchema,
+);
+
 export const credentialKindSchema = z.enum([
   "codex_native",
   "kimi_native",
@@ -40,6 +52,7 @@ export const credentialStatusSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }).nullable(),
 });
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
+export const credentialStatusListSchema = z.array(credentialStatusSchema);
 
 export interface ModelCatalogPort {
   listModels(): Promise<readonly ModelCatalogEntry[]>;
