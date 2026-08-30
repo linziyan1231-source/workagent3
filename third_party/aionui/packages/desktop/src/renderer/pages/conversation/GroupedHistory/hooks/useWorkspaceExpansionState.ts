@@ -37,13 +37,6 @@ export const dispatchWorkspaceExpansionChange = (expandedWorkspaces: string[]): 
   );
 };
 
-export const replaceExpandedWorkspacePath = (oldWorkspace: string, newWorkspace: string): void => {
-  const replaced = readExpandedWorkspaces().map((workspace) => (workspace === oldWorkspace ? newWorkspace : workspace));
-  const unique = replaced.filter((workspace, index) => replaced.indexOf(workspace) === index);
-  localStorage.setItem(WORKSPACE_EXPANSION_STORAGE_KEY, JSON.stringify(unique));
-  dispatchWorkspaceExpansionChange(unique);
-};
-
 export const useWorkspaceExpansionState = (): string[] => {
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>(() => readExpandedWorkspaces());
 

@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { IConversationMcpStatus, TSharedConversationMeta } from '@/common/config/storage';
+import type { IConversationMcpStatus } from '@/common/config/storage';
+import type { ChatFileRef } from '@/common/types/chatFile';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
+import ConversationPlanBar from '@renderer/pages/conversation/PlanBar/ConversationPlanBar';
+import { usePlanRecovery } from '@renderer/pages/conversation/PlanBar/usePlanRecovery';
 import { CHAT_SURFACE_CONTAINER_CLASS } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
@@ -21,8 +24,6 @@ import {
 import { usePendingConfirmationsRecovery } from '@renderer/pages/conversation/Messages/usePendingConfirmationsRecovery';
 import HOC from '@renderer/utils/ui/HOC';
 import React from 'react';
-import { useEffect } from 'react';
-import { subscribeSharedEvents } from '@/common/adapter/httpBridge';
 import AcpE2EStreamInjector from './AcpE2EStreamInjector';
 import AcpSendBox from './AcpSendBox';
 import { useAcpMessage } from './useAcpMessage';
@@ -39,10 +40,11 @@ const AcpChat: React.FC<{
   loadedSkills?: string[];
   loadedMcpServers?: string[];
   loadedMcpStatuses?: IConversationMcpStatus[];
-  teamSendMessage?: (payload: { input: string; files: string[] }) => Promise<void>;
+  teamSendMessage?: (payload: { input: string; files: ChatFileRef[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
   assistantId?: string;
-  shared?: TSharedConversationMeta;
+  forkCapability?: { at_turn: boolean };
+  promptCapability?: { image: boolean; audio: boolean };
 }> = ({
   conversation_id,
   workspace,
@@ -58,16 +60,17 @@ const AcpChat: React.FC<{
   teamSendMessage,
   teamRuntime,
   assistantId,
-  shared,
+  forkCapability,
+  promptCapability,
 }) => {
-  useEffect(() => {
-    if (!shared) return;
-    return subscribeSharedEvents();
-  }, [shared]);
   useMessageLstCache(conversation_id);
-  usePendingConfirmationsRecovery(conversation_id, { disabled: Boolean(shared) });
+  usePendingConfirmationsRecovery(conversation_id);
+  usePlanRecovery(conversation_id);
   const teamPermission = useTeamPermission();
-  const messageState = useAcpMessage(conversation_id, { skipWarmup: Boolean(teamPermission || shared) });
+  const messageState = useAcpMessage(conversation_id, {
+    skipWarmup: Boolean(teamPermission),
+    prepareRuntime: teamPermission?.warmupSession,
+  });
 
   return (
     <ConversationProvider
@@ -75,30 +78,29 @@ const AcpChat: React.FC<{
         conversation_id: conversation_id,
         workspace,
         type: 'acp',
-        backend,
-        agentName: agent_name,
         cron_job_id,
         hideSendBox,
         loadedSkills,
         loadedMcpServers,
         loadedMcpStatuses,
         assistantId,
-        shared,
+        forkCapability,
+        promptCapability,
       }}
     >
-      <ConversationArtifactProvider conversation_id={conversation_id} disabled={Boolean(shared)}>
+      <ConversationArtifactProvider conversation_id={conversation_id}>
         <div className={`${CHAT_SURFACE_CONTAINER_CLASS} flex-1 flex flex-col px-20px min-h-0`}>
           <FlexFullContainer>
             <MessageList className='flex-1' emptySlot={emptySlot} />
           </FlexFullContainer>
           <AcpE2EStreamInjector conversationId={conversation_id} />
+          <ConversationPlanBar conversation_id={conversation_id} />
           {!hideSendBox && (
             <AcpSendBox
               conversation_id={conversation_id}
               backend={backend}
               session_mode={session_mode}
               agent_name={agent_name}
-              workspacePath={workspace}
               messageState={messageState}
               teamSendMessage={teamSendMessage}
               teamRuntime={teamRuntime}

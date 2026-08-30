@@ -57,11 +57,17 @@ interface MessageIndex {
   call_idIndex: Map<string, number>; // tool_call.call_id -> index
   tool_call_idIndex: Map<string, number>; // acp_tool_call.update.tool_call_id -> index
   permission_call_idIndex: Map<string, number>; // permission.content.call_id -> index
+  terminal_idIndex: Map<string, number>; // acp_terminal_output.content.terminal_id -> index
 }
 
 function getMessageIndexKey(message: TMessage): string | undefined {
   if (!message.msg_id) return undefined;
-  return message.type === 'thinking' ? `thinking:${message.msg_id}` : message.msg_id;
+  // Every frame of a turn shares one msg_id, so any type that needs its own
+  // slot in the shared msgIdIndex must namespace its key. Without this, a plan
+  // update resolves to whatever frame was appended last and rewrites it.
+  if (message.type === 'thinking') return `thinking:${message.msg_id}`;
+  if (message.type === 'plan') return `plan:${message.msg_id}`;
+  return message.msg_id;
 }
 
 // 使用 WeakMap 缓存索引，当列表被 GC 时自动清理
@@ -83,11 +89,12 @@ export function logDroppedToolCallWithoutCallId(message: TMessage | undefined): 
 
 // 构建消息索引
 // Build message index
-function buildMessageIndex(list: TMessage[]): MessageIndex {
+export function buildMessageIndex(list: TMessage[]): MessageIndex {
   const msgIdIndex = new Map<string, number>();
   const call_idIndex = new Map<string, number>();
   const tool_call_idIndex = new Map<string, number>();
   const permission_call_idIndex = new Map<string, number>();
+  const terminal_idIndex = new Map<string, number>();
 
   for (let i = 0; i < list.length; i++) {
     const msg = list[i];
@@ -104,9 +111,12 @@ function buildMessageIndex(list: TMessage[]): MessageIndex {
     if (msg.type === 'permission' && msg.content?.call_id) {
       permission_call_idIndex.set(msg.content.call_id, i);
     }
+    if (msg.type === 'acp_terminal_output' && msg.content?.terminal_id) {
+      terminal_idIndex.set(msg.content.terminal_id, i);
+    }
   }
 
-  return { msgIdIndex, call_idIndex, tool_call_idIndex, permission_call_idIndex };
+  return { msgIdIndex, call_idIndex, tool_call_idIndex, permission_call_idIndex, terminal_idIndex };
 }
 
 // 获取或构建索引（带缓存）
@@ -127,7 +137,11 @@ const sanitizeMessageForList = (message: TMessage): TMessage =>
 
 // 使用索引优化的消息合并函数
 // Index-optimized message compose function
-function composeMessageWithIndex(message: TMessage | undefined, list: TMessage[], index: MessageIndex): TMessage[] {
+export function composeMessageWithIndex(
+  message: TMessage | undefined,
+  list: TMessage[],
+  index: MessageIndex
+): TMessage[] {
   if (!message) return list || [];
 
   if (logDroppedToolCallWithoutCallId(message)) {
@@ -163,6 +177,26 @@ function composeMessageWithIndex(message: TMessage | undefined, list: TMessage[]
     return result;
   }
 
+  // A superseding tip replaces its predecessor wherever it already sits in the
+  // list instead of appending: codex reports a stalled turn as a series of retry
+  // attempts ("Reconnecting... 1/5", then 2/5 …) and the user should watch one
+  // card count up rather than collect ten near-identical ones. Matching on the
+  // key — not msg_id, which differs per attempt — also survives other messages
+  // arriving in between. Tips are rare, so the scan costs nothing.
+  if (message.type === 'tips' && message.content?.supersedes_key) {
+    const key = message.content.supersedes_key;
+    const existingIdx = list.findIndex((item) => item.type === 'tips' && item.content?.supersedes_key === key);
+    if (existingIdx >= 0) {
+      const newList = list.slice();
+      newList[existingIdx] = { ...list[existingIdx], ...message, content: message.content } as TMessage;
+      return newList;
+    }
+    const newIdx = list.length;
+    const msgIndexKey = getMessageIndexKey(message);
+    if (msgIndexKey) index.msgIdIndex.set(msgIndexKey, newIdx);
+    return list.concat(message);
+  }
+
   // tool_call: 使用 call_idIndex 快速查找
   // tool_call: use call_idIndex for fast lookup
   if (message.type === 'tool_call' && message.content?.call_id) {
@@ -177,10 +211,44 @@ function composeMessageWithIndex(message: TMessage | undefined, list: TMessage[]
       }
     }
     // 未找到，添加新消息并更新索引
+    // A TERMINAL frame that finds no card to settle is suspicious: it means the
+    // running card is somewhere else (or was never indexed), so the user is left
+    // with a spinner that never stops plus a duplicate card. Codex's detached
+    // exec makes this reachable — its terminal lands minutes later, under a
+    // different turn. Log it so the next occurrence is diagnosable.
+    const status = (message.content as { status?: string } | undefined)?.status;
+    if (status === 'completed' || status === 'error' || status === 'canceled') {
+      console.warn('[tool-call] terminal frame found no card to settle; appending a new one', {
+        conversation_id: message.conversation_id,
+        msg_id: message.msg_id,
+        call_id: message.content.call_id,
+        status,
+        indexed_call_ids: index.call_idIndex.size,
+        list_len: list.length,
+      });
+    }
     const newIdx = list.length;
     index.call_idIndex.set(message.content.call_id, newIdx);
     const msgIndexKey = getMessageIndexKey(message);
     if (msgIndexKey) index.msgIdIndex.set(msgIndexKey, newIdx);
+    return list.concat(message);
+  }
+
+  // acp_terminal_output: one live card per terminal_id, replaced in place
+  // (every frame of a turn shares msg_id, so the generic msg_id arm would
+  // collapse two terminals of the same turn into one card).
+  if (message.type === 'acp_terminal_output' && message.content?.terminal_id) {
+    const existingIdx = index.terminal_idIndex.get(message.content.terminal_id);
+    if (existingIdx !== undefined && existingIdx < list.length) {
+      const existingMsg = list[existingIdx];
+      if (existingMsg.type === 'acp_terminal_output') {
+        const newList = list.slice();
+        newList[existingIdx] = { ...existingMsg, content: message.content };
+        return newList;
+      }
+    }
+    const newIdx = list.length;
+    index.terminal_idIndex.set(message.content.terminal_id, newIdx);
     return list.concat(message);
   }
 
@@ -229,20 +297,9 @@ function composeMessageWithIndex(message: TMessage | undefined, list: TMessage[]
     if (existingIdx !== undefined && existingIdx < list.length) {
       const existingMsg = list[existingIdx];
       if (existingMsg.type === 'text') {
-        // User messages can arrive first through realtime without the richer shared-participant
-        // metadata and then through the send acknowledgement. Keep one bubble, but merge the
-        // acknowledgement so the sender name/avatar appears immediately without rehydration.
+        // User messages (right position) are complete — skip if already exists to prevent duplicates
         if (message.position === 'right') {
-          const newList = list.slice();
-          newList[existingIdx] = {
-            ...existingMsg,
-            ...message,
-            content: {
-              ...existingMsg.content,
-              ...message.content,
-            },
-          };
-          return newList;
+          return list;
         }
         // Complete teammate messages are not streaming chunks — skip if already exists
         if ((message.content as { teammateMessage?: boolean })?.teammateMessage) {
@@ -307,25 +364,23 @@ function composeMessageWithIndex(message: TMessage | undefined, list: TMessage[]
     return list.concat(message);
   }
 
-  // plan message: update content and move to end of list
+  // plan message: a full-replacement snapshot, updated in place.
+  // The key is namespaced (see getMessageIndexKey) because the whole turn shares
+  // one msg_id. The type guard is a second line of defence: a stale index entry
+  // must never let a plan overwrite a different kind of message.
   if (message.type === 'plan' && message.msg_id) {
-    const existingIdx = index.msgIdIndex.get(message.msg_id);
+    const planKey = `plan:${message.msg_id}`;
+    const existingIdx = index.msgIdIndex.get(planKey);
     if (existingIdx !== undefined && existingIdx < list.length) {
       const existingMsg = list[existingIdx];
-      const newList = list.slice();
-      newList.splice(existingIdx, 1);
-      const updated = { ...existingMsg, ...message, content: message.content } as TMessage;
-      newList.push(updated);
-      // Rebuild index after splice
-      const rebuilt = buildMessageIndex(newList);
-      index.msgIdIndex = rebuilt.msgIdIndex;
-      index.call_idIndex = rebuilt.call_idIndex;
-      index.tool_call_idIndex = rebuilt.tool_call_idIndex;
-      index.permission_call_idIndex = rebuilt.permission_call_idIndex;
-      return newList;
+      if (existingMsg.type === 'plan') {
+        const newList = list.slice();
+        newList[existingIdx] = { ...existingMsg, content: message.content } as TMessage;
+        return newList;
+      }
     }
     const newIdx = list.length;
-    index.msgIdIndex.set(message.msg_id, newIdx);
+    index.msgIdIndex.set(planKey, newIdx);
     return list.concat(message);
   }
 
@@ -403,6 +458,9 @@ export const useMergeLiveMessage = () => {
           }
           if (msg.type === 'permission' && msg.content?.call_id) {
             index.permission_call_idIndex.set(msg.content.call_id, newIdx);
+          }
+          if (msg.type === 'acp_terminal_output' && msg.content?.terminal_id) {
+            index.terminal_idIndex.set(msg.content.terminal_id, newIdx);
           }
           newList = newList.concat(msg);
         } else {
@@ -650,6 +708,16 @@ const normalizeDbTipsMessage = (msg: TMessage): TMessage => {
         normalizeAgentStreamError({ ...parsed, message: parsed.content }))
       : undefined;
 
+  // The merge key has to survive the round trip: it is what tells the history
+  // fold below that these rows are one card the user watched count up, not a
+  // stack of separate warnings.
+  const supersedesKey =
+    typeof parsed.supersedes_key === 'string' && parsed.supersedes_key
+      ? parsed.supersedes_key
+      : typeof existingContent?.supersedes_key === 'string' && existingContent.supersedes_key
+        ? existingContent.supersedes_key
+        : undefined;
+
   return {
     ...msg,
     content: {
@@ -658,9 +726,48 @@ const normalizeDbTipsMessage = (msg: TMessage): TMessage => {
       ...(tipType !== 'error' && code ? { code } : {}),
       ...(tipType !== 'error' && params ? { params } : {}),
       ...(structuredError ? { error: structuredError } : {}),
+      ...(supersedesKey ? { supersedes_key: supersedesKey } : {}),
     },
   } as IMessageTips;
 };
+
+/**
+ * Collapse superseding tips loaded from history into the single card the user
+ * saw live. Every retry attempt is persisted — the backend cannot know which
+ * one turns out to be the last — so without this, reopening a conversation
+ * re-expands "Reconnecting... 1/5" through "5/5" into a stack, even though the
+ * live stream had folded them into one card counting up.
+ *
+ * The first occurrence keeps its position (so scroll anchors and ordering are
+ * stable) and carries the newest attempt's content, which is exactly what the
+ * live merge in composeMessageWithIndex produces.
+ */
+export function foldSupersededTips(messages: TMessage[]): TMessage[] {
+  const supersedesKeyOf = (message: TMessage): string | undefined =>
+    message.type === 'tips' ? message.content?.supersedes_key : undefined;
+
+  const latestByKey = new Map<string, TMessage>();
+  for (const message of messages) {
+    const key = supersedesKeyOf(message);
+    if (key) latestByKey.set(key, message);
+  }
+  if (!latestByKey.size) return messages;
+
+  const seen = new Set<string>();
+  const folded: TMessage[] = [];
+  for (const message of messages) {
+    const key = supersedesKeyOf(message);
+    if (!key) {
+      folded.push(message);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const latest = latestByKey.get(key);
+    folded.push(!latest || latest === message ? message : ({ ...message, content: latest.content } as TMessage));
+  }
+  return folded.length === messages.length ? messages : folded;
+}
 
 /**
  * Normalize a message loaded from backend DB into renderer runtime shape.
@@ -687,15 +794,11 @@ const preferPersistedOrLiveMessage = (persisted: TMessage, live: TMessage): TMes
   return persisted;
 };
 
-export function mergeLoadedPageWithCurrent(
-  conversationId: string,
-  messages: TMessage[],
-  currentList: TMessage[]
-): TMessage[] {
-  if (!currentList.length) return messages;
+function mergeLoadedPageWithCurrent(conversationId: string, messages: TMessage[], currentList: TMessage[]): TMessage[] {
+  if (!currentList.length) return foldSupersededTips(messages);
 
   const sameConversation = currentList.filter((message) => message.conversation_id === conversationId);
-  if (!sameConversation.length) return messages;
+  if (!sameConversation.length) return foldSupersededTips(messages);
 
   const currentById = new Map(sameConversation.map((message) => [message.id, message]));
   const currentByKey = new Map(sameConversation.map((message) => [getMessageMergeKey(message), message]));
@@ -706,18 +809,15 @@ export function mergeLoadedPageWithCurrent(
     const live = currentById.get(message.id) ?? currentByKey.get(getMessageMergeKey(message));
     return live ? preferPersistedOrLiveMessage(message, live) : message;
   });
-  const isLoadedMessage = (message: TMessage) =>
-    loadedIds.has(message.id) || loadedKeys.has(getMessageMergeKey(message));
-  const firstLoadedCurrentIndex = sameConversation.findIndex(isLoadedMessage);
+  const liveOnly = sameConversation.filter(
+    (message) => !loadedIds.has(message.id) && !loadedKeys.has(getMessageMergeKey(message))
+  );
 
-  if (firstLoadedCurrentIndex === -1) {
-    return [...mergedMessages, ...sameConversation];
-  }
-
-  const liveBefore = sameConversation.slice(0, firstLoadedCurrentIndex).filter((message) => !isLoadedMessage(message));
-  const liveAfter = sameConversation.slice(firstLoadedCurrentIndex).filter((message) => !isLoadedMessage(message));
-
-  return [...liveBefore, ...mergedMessages, ...liveAfter];
+  // Fold after the concat, not before: the live card and the persisted rows of
+  // the same retry run reach this point as separate entries (a persisted tip has
+  // no msg_id, so neither merge key matches), and only a key-based fold sees
+  // that they are one card.
+  return foldSupersededTips(liveOnly.length ? [...mergedMessages, ...liveOnly] : mergedMessages);
 }
 
 export function prependHistoryMessages(currentList: TMessage[], messages: TMessage[]): TMessage[] {
@@ -728,7 +828,9 @@ export function prependHistoryMessages(currentList: TMessage[], messages: TMessa
   const uniqueHistory = messages.filter(
     (message) => !currentIds.has(message.id) && !currentKeys.has(getMessageMergeKey(message))
   );
-  return uniqueHistory.length ? [...uniqueHistory, ...currentList] : currentList;
+  // Folding the combined list (not the page alone) also covers a retry run whose
+  // attempts straddle a page boundary.
+  return uniqueHistory.length ? foldSupersededTips([...uniqueHistory, ...currentList]) : currentList;
 }
 
 export const usePrependHistoryPage = () => {
@@ -830,8 +932,17 @@ export const useLoadAnchorMessageWindow = (conversationId?: string) => {
 
 export const useMessageLstCache = (key: string) => {
   const update = useUpdateMessageList();
+  const list = useMessageList();
   const setLoading = useUpdateMessageListLoading();
   const setPagination = useUpdateMessagePaginationState();
+  // Mirrors the current list into a ref so the turnCompleted handler below
+  // can inspect it synchronously without re-subscribing to the WS event on
+  // every list change (useState's functional updater runs asynchronously,
+  // so update((list) => ...) can't be used for a synchronous read here).
+  const listRef = useRef(list);
+  useEffect(() => {
+    listRef.current = list;
+  }, [list]);
   const loadMessages = useCallback(async (): Promise<TMessage[]> => {
     const result = await loadLatestConversationMessages(key, {
       limit: DEFAULT_MESSAGE_PAGE_LIMIT,
@@ -896,9 +1007,6 @@ export const useMessageLstCache = (key: string) => {
             created_at: payload.created_at,
             content: {
               content: payload.content,
-              teammateMessage: payload.teammate_message,
-              senderName: payload.sender_name,
-              senderUserId: payload.sender_user_id,
             },
           },
           list,
@@ -909,23 +1017,55 @@ export const useMessageLstCache = (key: string) => {
   }, [key, update]);
 
   useEffect(() => {
-    if (!key) return;
-    const reconnectEmitter = ipcBridge.realtime?.reconnected;
-    const disconnectedEmitter = ipcBridge.realtime?.disconnected;
-    const reconcileEmitter = ipcBridge.realtime?.reconcileRequested;
-    const reconcile = (reason: string) => {
-      void loadMessages().catch((error) => {
-        console.error(`[useMessageLstCache] Failed to reconcile messages after ${reason}:`, error);
-      });
-    };
-    const disposers = [
-      reconnectEmitter?.on(() => reconcile('realtime reconnect')),
-      disconnectedEmitter?.on(() => reconcile('realtime disconnect')),
-      reconcileEmitter?.on((event) => {
-        if (event.conversation_id === key) reconcile('conversation status check');
-      }),
-    ].filter((dispose): dispose is () => void => typeof dispose === 'function');
-    return () => disposers.forEach((dispose) => dispose());
+    if (!key) {
+      return;
+    }
+
+    // Flips a mid-turn-delivered user message's badge from "unread" to
+    // consumed once the agent actually picks it up (claude command_lifecycle
+    // Started; codex synthetic receipt). Correlates by msg_id — the same
+    // server-assigned id message.userCreated used to add the row — never by
+    // text/time.
+    return ipcBridge.conversation.statusChanged.on((payload) => {
+      if (payload.conversation_id !== key) {
+        return;
+      }
+
+      update((list) =>
+        list.map((message) => (message.msg_id === payload.msg_id ? { ...message, status: payload.status } : message))
+      );
+    });
+  }, [key, update]);
+
+  useEffect(() => {
+    if (!key) {
+      return;
+    }
+
+    // Reconciliation backstop at every turn boundary. The live statusChanged
+    // flip above is best-effort — a live window can miss the event (codex
+    // ack-timeout, a WS gap, or a row left orphaned by a server restart) and
+    // then never self-heal because the conversation stays mounted and never
+    // reloads. The DB row is the authoritative source of truth, so once a
+    // turn for this conversation finishes we re-pull the latest page if (and
+    // only if) a right-position text message is still showing 'pending' —
+    // loadMessages's merge (preferPersistedOrLiveMessage) lets DB truth win
+    // without disturbing anything else in the list.
+    return ipcBridge.conversation.turnCompleted.on((payload) => {
+      if (payload.session_id !== key) {
+        return;
+      }
+
+      const hasPendingDelivery = listRef.current.some(
+        (message) => message.type === 'text' && message.position === 'right' && message.status === 'pending'
+      );
+
+      if (hasPendingDelivery) {
+        void loadMessages().catch((error) => {
+          console.error('[useMessageLstCache] Failed to reconcile pending messages after turn completion:', error);
+        });
+      }
+    });
   }, [key, loadMessages]);
 };
 

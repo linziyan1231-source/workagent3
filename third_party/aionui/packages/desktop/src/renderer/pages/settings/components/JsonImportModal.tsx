@@ -324,19 +324,13 @@ const JsonImportModal: React.FC<JsonImportModalProps> = ({ visible, server, onCa
 
   return (
     <AionModal
+      variant='standard'
       visible={visible}
       onCancel={onCancel}
       onOk={handleSubmit}
       okButtonProps={{ disabled: !validation.isValid || submitting, loading: submitting }}
       header={{ title: server ? t('settings.mcpEditServer') : t('settings.mcpImportFromJSON'), showClose: true }}
-      style={{ width: 600, height: 450 }}
-      contentStyle={{
-        borderRadius: 16,
-        padding: '24px',
-        background: 'var(--dialog-fill-0)',
-        overflow: 'auto',
-        height: 420 - 80,
-      }} // 与“添加模型”弹窗保持统一尺寸 / Keep same size as Add Model modal
+      style={{ width: 600 }}
     >
       <div className='space-y-12px'>
         <div>
@@ -384,7 +378,7 @@ const JsonImportModal: React.FC<JsonImportModalProps> = ({ visible, server, onCa
               <Button
                 size='mini'
                 type='outline'
-                className='absolute top-2 right-2 z-10'
+                className='absolute top-2 end-2 z-10'
                 onClick={() => {
                   const copyToClipboard = async () => {
                     try {
@@ -434,7 +428,7 @@ const JsonImportModal: React.FC<JsonImportModalProps> = ({ visible, server, onCa
           content={
             <div>
               <div>{t('settings.mcpImportTips')}</div>
-              <ul className='list-disc pl-5 mt-2 space-y-1 text-sm'>
+              <ul className='list-disc ps-5 mt-2 space-y-1 text-sm'>
                 <li>{t('settings.mcpImportTip1')}</li>
                 <li>{t('settings.mcpImportTip2')}</li>
                 <li>{t('settings.mcpImportTip3')}</li>

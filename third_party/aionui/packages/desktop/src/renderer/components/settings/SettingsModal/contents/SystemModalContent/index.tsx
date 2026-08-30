@@ -5,37 +5,29 @@
  */
 
 import { ipcBridge } from '@/common';
-import type {
-  IGpuStatus,
-  IStartOnBootStatus,
-  PortalSharedConversation,
-  PortalSharedProject,
-} from '@/common/adapter/ipcBridge';
+import type { IGpuStatus, IStartOnBootStatus } from '@/common/adapter/ipcBridge';
 import { configService } from '@/common/config/configService';
 import AionScrollArea from '@/renderer/components/base/AionScrollArea';
 import FeedbackButton from '@/renderer/components/base/FeedbackButton';
 import LanguageSwitcher from '@/renderer/components/settings/LanguageSwitcher';
-import AionSelect from '@/renderer/components/base/AionSelect';
+import { useCrossSessionMessageEnabled } from '@/renderer/hooks/chat/useCrossSessionMessageEnabled';
 import { getClientBusinessSetting, setClientBusinessSetting } from '@/renderer/services/clientBusinessSettings';
+import {
+  DEFAULT_TEXT_PREVIEW_LIMIT_MB,
+  MAX_TEXT_PREVIEW_LIMIT_MB,
+  MIN_TEXT_PREVIEW_LIMIT_MB,
+  normalizeTextPreviewLimitMb,
+} from '@/renderer/utils/file/previewPayload';
 import { notifyManualRestartRequired } from '@/renderer/utils/appRestart';
 import { isElectronDesktop } from '@/renderer/utils/platform';
-import { useOptionalAuth } from '@/renderer/hooks/context/AuthContext';
-import { Alert, Button, Collapse, Form, Input, InputNumber, Message, Modal, Switch } from '@arco-design/web-react';
+import { Alert, Collapse, Form, InputNumber, Message, Modal, Switch } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
-const SERVICE_RESTART_RELOAD_DEFAULT_MS = 2_000;
-const SERVICE_RESTART_RELOAD_MIN_MS = 1_000;
-const SERVICE_RESTART_RELOAD_MAX_MS = 30_000;
-
-const normalizeServiceRestartReloadDelay = (value: number): number => {
-  const delay = Number.isFinite(value) ? value : SERVICE_RESTART_RELOAD_DEFAULT_MS;
-  return Math.min(SERVICE_RESTART_RELOAD_MAX_MS, Math.max(SERVICE_RESTART_RELOAD_MIN_MS, delay));
-};
 import useSWR from 'swr';
 import { useSettingsViewMode } from '../../settingsViewContext';
 import BrowserNotificationGrant from './BrowserNotificationGrant';
 import DevSettings from './DevSettings';
+import BrowserDataSection from './BrowserDataSection';
 import DirInputItem from './DirInputItem';
 import PreferenceRow from './PreferenceRow';
 import VoiceInputSection from './VoiceInputSection';
@@ -49,8 +41,6 @@ import VoiceInputSection from './VoiceInputSection';
 const SystemModalContent: React.FC = () => {
   const { t } = useTranslation();
   const isDesktop = isElectronDesktop();
-  const auth = useOptionalAuth();
-  const user = auth?.user;
   const [form] = Form.useForm();
   const [modal, modalContextHolder] = Modal.useModal();
   const [error, setError] = useState<string | null>(null);
@@ -68,143 +58,23 @@ const SystemModalContent: React.FC = () => {
   const [gpuStatus, setGpuStatus] = useState<IGpuStatus | null>(null);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [cronNotificationEnabled, setCronNotificationEnabled] = useState(false);
-  const [weixinCompletionDeliveryEnabled, setWeixinCompletionDeliveryEnabled] = useState(false);
-  const [weixinIdleTimeoutMinutes, setWeixinIdleTimeoutMinutes] = useState<number | undefined>(120);
-  const [weixinIdlePolicy, setWeixinIdlePolicy] = useState<'auto' | 'ask' | 'disabled'>('ask');
   const [promptTimeout, setPromptTimeout] = useState<number>(300);
   const [agentIdleTimeout, setAgentIdleTimeout] = useState<number>(5);
+  /**
+   * The committed limit — what is stored, and what the field falls back to.
+   *
+   * The field itself is left uncontrolled while typing. Arco's `InputNumber` skips its
+   * internal "user is typing" state whenever a `value` prop is present, and then
+   * renders the number it parsed rather than the characters that were entered. `1.` is
+   * not a number, so the dot was dropped on the keystroke that produced it and `1.5`
+   * came out as `15`.
+   *
+   * Remounting on commit (via `key`) is what lets an uncontrolled field still show a
+   * clamped result: type `0.2`, blur, and the field comes back as the accepted `1`.
+   */
+  const [previewLimitMb, setPreviewLimitMb] = useState<number>(DEFAULT_TEXT_PREVIEW_LIMIT_MB);
+  const previewLimitDraftRef = useRef<string>(String(DEFAULT_TEXT_PREVIEW_LIMIT_MB));
   const [saveUploadToWorkspace, setSaveUploadToWorkspace] = useState(false);
-  const [autoPreviewOfficeFiles, setAutoPreviewOfficeFiles] = useState(true);
-  const [forkMode, setForkMode] = useState<'fork_only' | 'fork_and_edit'>('fork_and_edit');
-  const [displayName, setDisplayName] = useState(user?.display_name ?? user?.username ?? '');
-  const [collaborationEnabled, setCollaborationEnabled] = useState(Boolean(user?.collaboration_enabled));
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [hiddenSharedProjects, setHiddenSharedProjects] = useState<PortalSharedProject[]>([]);
-  const [hiddenSharedConversations, setHiddenSharedConversations] = useState<PortalSharedConversation[]>([]);
-  const [restoringSharedProject, setRestoringSharedProject] = useState<string>();
-  const [restoringSharedConversation, setRestoringSharedConversation] = useState<string>();
-  const [restartingService, setRestartingService] = useState(false);
-
-  const refreshHiddenSharedProjects = useCallback(async () => {
-    try {
-      const [projects, conversations] = await Promise.all([
-        ipcBridge.portal.listAllSharedProjects.invoke(),
-        ipcBridge.portal.listAllSharedConversations.invoke(),
-      ]);
-      setHiddenSharedProjects(projects.projects.filter((project) => project.hidden));
-      setHiddenSharedConversations(conversations.conversations.filter((conversation) => conversation.hidden));
-    } catch {
-      setHiddenSharedProjects([]);
-      setHiddenSharedConversations([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (user?.collaboration_enabled) void refreshHiddenSharedProjects();
-  }, [refreshHiddenSharedProjects, user?.collaboration_enabled]);
-
-  const restoreSharedProject = useCallback(
-    async (project: PortalSharedProject) => {
-      setRestoringSharedProject(project.id);
-      try {
-        await ipcBridge.portal.setSharedProjectHidden.invoke({ project_id: project.id, hidden: false });
-        ipcBridge.conversation.listChanged.emit({
-          conversation_id: `shared-project:${project.id}`,
-          action: 'updated',
-          source: 'shared-project-restored',
-        });
-        await refreshHiddenSharedProjects();
-        Message.success(t('settings.collaboration.projectRestored', { defaultValue: 'Shared project restored' }));
-      } catch {
-        Message.error(
-          t('settings.collaboration.projectRestoreFailed', { defaultValue: 'Shared project could not be restored' })
-        );
-      } finally {
-        setRestoringSharedProject(undefined);
-      }
-    },
-    [refreshHiddenSharedProjects, t]
-  );
-
-  const restoreSharedConversation = useCallback(
-    async (conversation: PortalSharedConversation) => {
-      setRestoringSharedConversation(conversation.id);
-      try {
-        await ipcBridge.portal.setSharedConversationHidden.invoke({
-          conversation_id: conversation.id,
-          hidden: false,
-        });
-        ipcBridge.conversation.listChanged.emit({
-          conversation_id: `shared:${conversation.id}`,
-          action: 'updated',
-          source: 'shared-conversation-restored',
-        });
-        await refreshHiddenSharedProjects();
-        Message.success(
-          t('settings.collaboration.conversationRestored', { defaultValue: 'Shared conversation restored' })
-        );
-      } catch {
-        Message.error(
-          t('settings.collaboration.conversationRestoreFailed', {
-            defaultValue: 'Shared conversation could not be restored',
-          })
-        );
-      } finally {
-        setRestoringSharedConversation(undefined);
-      }
-    },
-    [refreshHiddenSharedProjects, t]
-  );
-
-  useEffect(() => {
-    setDisplayName(user?.display_name ?? user?.username ?? '');
-    setCollaborationEnabled(Boolean(user?.collaboration_enabled));
-  }, [user]);
-
-  const savePortalProfile = useCallback(async () => {
-    const normalized = displayName.trim();
-    if (!normalized) {
-      Message.error(t('settings.profile.displayNameRequired'));
-      return;
-    }
-    setSavingProfile(true);
-    try {
-      const result = await ipcBridge.portal.updateProfile.invoke({
-        display_name: normalized,
-        collaboration_enabled: collaborationEnabled,
-      });
-      setDisplayName(result.profile.display_name);
-      setCollaborationEnabled(result.profile.collaboration_enabled);
-      await auth?.refresh();
-      Message.success(t('settings.profile.saved'));
-    } catch {
-      Message.error(t('settings.profile.saveFailed'));
-    } finally {
-      setSavingProfile(false);
-    }
-  }, [auth, collaborationEnabled, displayName, t]);
-
-  const restartService = useCallback(() => {
-    modal.confirm({
-      title: t('settings.serviceRestart.confirmTitle'),
-      content: t('settings.serviceRestart.confirmDescription'),
-      okButtonProps: { status: 'danger' },
-      onOk: async () => {
-        setRestartingService(true);
-        try {
-          const result = await ipcBridge.portal.restartService.invoke();
-          Message.success(t('settings.serviceRestart.accepted'));
-          window.setTimeout(
-            () => window.location.reload(),
-            normalizeServiceRestartReloadDelay(result.reconnect_after_ms)
-          );
-        } catch {
-          setRestartingService(false);
-          Message.error(t('settings.serviceRestart.failed'));
-        }
-      },
-    });
-  }, [modal, t]);
 
   useEffect(() => {
     if (!isDesktop) {
@@ -243,15 +113,7 @@ const SystemModalContent: React.FC = () => {
     }
     setNotificationEnabled(configService.get('system.notificationEnabled') ?? true);
     setCronNotificationEnabled(configService.get('system.cronNotificationEnabled') ?? false);
-    setWeixinCompletionDeliveryEnabled(configService.get('system.weixinCompletionDeliveryEnabled') ?? false);
-    const storedWeixinIdleTimeout = configService.get('system.weixinIdleTimeoutMinutes') ?? 120;
-    setWeixinIdleTimeoutMinutes(storedWeixinIdleTimeout);
-    setWeixinIdlePolicy(
-      configService.get('system.weixinIdlePolicy') ?? (storedWeixinIdleTimeout === 0 ? 'disabled' : 'ask')
-    );
     setSaveUploadToWorkspace(configService.get('upload.saveToWorkspace') ?? false);
-    setAutoPreviewOfficeFiles(configService.get('system.autoPreviewOfficeFiles') ?? true);
-    setForkMode(configService.get('conversation.forkMode') ?? 'fork_and_edit');
   }, [isDesktop]);
 
   useEffect(() => {
@@ -259,9 +121,10 @@ const SystemModalContent: React.FC = () => {
 
     const loadAcpTimeouts = async () => {
       try {
-        const [storedPromptTimeout, storedAgentIdleTimeout] = await Promise.all([
+        const [storedPromptTimeout, storedAgentIdleTimeout, storedPreviewLimitMb] = await Promise.all([
           getClientBusinessSetting('acp.promptTimeout'),
           getClientBusinessSetting('acp.agentIdleTimeout'),
+          getClientBusinessSetting('preview.textSizeLimitMb'),
         ]);
         if (cancelled) {
           return;
@@ -272,6 +135,14 @@ const SystemModalContent: React.FC = () => {
         }
         if (typeof storedAgentIdleTimeout === 'number' && storedAgentIdleTimeout > 0) {
           setAgentIdleTimeout(storedAgentIdleTimeout);
+        }
+        // Normalized rather than range-checked inline: the same clamp guards the
+        // stored value, the field, and the size check, so a hand-edited or legacy
+        // entry cannot present one limit here and apply another when a file opens.
+        if (storedPreviewLimitMb !== undefined) {
+          const stored = normalizeTextPreviewLimitMb(storedPreviewLimitMb);
+          setPreviewLimitMb(stored);
+          previewLimitDraftRef.current = String(stored);
         }
       } catch {
         // Keep the in-memory defaults when backend settings are unavailable.
@@ -389,18 +260,6 @@ const SystemModalContent: React.FC = () => {
     });
   }, []);
 
-  const handleWeixinCompletionDeliveryChange = useCallback(
-    (checked: boolean) => {
-      setWeixinCompletionDeliveryEnabled(checked);
-      configService.set('system.weixinCompletionDeliveryEnabled', checked).catch(() => {
-        setWeixinCompletionDeliveryEnabled(!checked);
-        configService.setLocal('system.weixinCompletionDeliveryEnabled', !checked);
-        Message.error(t('settings.weixinCompletionDeliveryUpdateFailed'));
-      });
-    },
-    [t]
-  );
-
   const handlePromptTimeoutChange = useCallback((val: number | undefined) => {
     setPromptTimeout(val as number);
   }, []);
@@ -421,6 +280,59 @@ const SystemModalContent: React.FC = () => {
     void setClientBusinessSetting('acp.agentIdleTimeout', clamped).catch(() => {});
   }, [agentIdleTimeout]);
 
+  /**
+   * Keep what the user typed, not a number parsed from it.
+   *
+   * A decimal is typed one character at a time, and `1.` is a necessary intermediate
+   * state on the way to `1.5`. Storing it as a number turns it back into `1`, the
+   * controlled value re-renders the field as `"1"`, and the trailing dot is gone
+   * before the next keystroke arrives — so `1.5` came out as `15`. Holding the raw
+   * string lets the dot survive until the value is actually used.
+   *
+   * Nothing downstream sees this string: {@link handlePreviewLimitMbBlur} is the only
+   * writer, and it normalizes first.
+   */
+  const handlePreviewLimitMbChange = useCallback((val: number | string) => {
+    previewLimitDraftRef.current = val === undefined || val === null ? '' : String(val);
+  }, []);
+
+  /**
+   * Persist on blur, not on every keystroke: the field is cleared to empty while
+   * retyping, and writing that intermediate state would store a limit the user never
+   * chose. The clamp runs here too, so the stored value is always one the size check
+   * would accept.
+   *
+   * Only newly opened preview tabs see the new limit — tabs already open captured
+   * theirs when they opened. That is deliberate: reclassifying an open tab would move
+   * a file being edited into the "too large to show" state mid-edit.
+   */
+  const handlePreviewLimitMbBlur = useCallback(() => {
+    const typed = previewLimitDraftRef.current.trim();
+    // An emptied field means "unset", which normalize turns into the default; Number('')
+    // would be 0 and clamp up to the minimum instead, silently choosing for the user.
+    const clamped = normalizeTextPreviewLimitMb(typed === '' ? undefined : Number(typed));
+    setPreviewLimitMb(clamped);
+    previewLimitDraftRef.current = String(clamped);
+    void setClientBusinessSetting('preview.textSizeLimitMb', clamped).catch(() => {});
+  }, []);
+
+  // Cross-session messaging master switch. Unlike its neighbours this one is a
+  // typed column on `system_settings`, so it goes through `PATCH /api/settings`
+  // (the hook owns that call); `changeLanguage` on this same page is the
+  // precedent for the different channel.
+  const { enabled: crossSessionMessageEnabled, setEnabled: setCrossSessionMessageEnabled } =
+    useCrossSessionMessageEnabled();
+  const handleCrossSessionMessageChange = useCallback(
+    (checked: boolean) => {
+      void setCrossSessionMessageEnabled(checked).catch(() => {
+        // The hook already rolled the local state back; surface the failure so
+        // the user does not believe a panic button took effect when it did not.
+        Message.error(t('settings.crossSessionMessageUpdateFailed'));
+      });
+    },
+    [setCrossSessionMessageEnabled, t]
+  );
+
   const handleSaveUploadToWorkspaceChange = useCallback((checked: boolean) => {
     setSaveUploadToWorkspace(checked);
     configService.set('upload.saveToWorkspace', checked).catch(() => {
@@ -428,39 +340,6 @@ const SystemModalContent: React.FC = () => {
       configService.setLocal('upload.saveToWorkspace', !checked);
     });
   }, []);
-
-  const handleAutoPreviewOfficeFilesChange = useCallback((checked: boolean) => {
-    setAutoPreviewOfficeFiles(checked);
-    configService.set('system.autoPreviewOfficeFiles', checked).catch(() => {
-      setAutoPreviewOfficeFiles(!checked);
-      configService.setLocal('system.autoPreviewOfficeFiles', !checked);
-    });
-  }, []);
-
-  const saveWeixinIdleTimeout = useCallback(
-    (minutes: number) => {
-      const previous = weixinIdleTimeoutMinutes ?? 120;
-      const next = Math.max(1, Math.min(10080, Math.round(minutes)));
-      setWeixinIdleTimeoutMinutes(next);
-      configService.set('system.weixinIdleTimeoutMinutes', next).catch(() => {
-        setWeixinIdleTimeoutMinutes(previous);
-        configService.setLocal('system.weixinIdleTimeoutMinutes', previous);
-      });
-    },
-    [weixinIdleTimeoutMinutes]
-  );
-
-  const handleWeixinIdlePolicyChange = useCallback(
-    (next: 'auto' | 'ask' | 'disabled') => {
-      const previous = weixinIdlePolicy;
-      setWeixinIdlePolicy(next);
-      configService.set('system.weixinIdlePolicy', next).catch(() => {
-        setWeixinIdlePolicy(previous);
-        configService.setLocal('system.weixinIdlePolicy', previous);
-      });
-    },
-    [weixinIdlePolicy]
-  );
 
   // Get system directory info
   const { data: systemInfo } = useSWR('system.dir.info', () => ipcBridge.application.systemInfo.invoke());
@@ -477,36 +356,6 @@ const SystemModalContent: React.FC = () => {
   }, [systemInfo, form]);
 
   const preferenceItems = [
-    ...(!isDesktop && user?.collaboration_capable && !user.admin
-      ? [
-          {
-            key: 'portalProfile',
-            label: t('settings.profile.title'),
-            description: t('settings.profile.description'),
-            component: (
-              <div className='flex flex-wrap items-center justify-end gap-8px'>
-                <Input
-                  aria-label={t('settings.profile.displayName')}
-                  value={displayName}
-                  maxLength={64}
-                  onChange={setDisplayName}
-                  style={{ width: 180 }}
-                  placeholder={t('settings.profile.displayName')}
-                />
-                <Switch
-                  checked={collaborationEnabled}
-                  onChange={setCollaborationEnabled}
-                  checkedText={t('settings.profile.collaborationOn')}
-                  uncheckedText={t('settings.profile.collaborationOff')}
-                />
-                <Button type='primary' loading={savingProfile} onClick={() => void savePortalProfile()}>
-                  {t('common.save')}
-                </Button>
-              </div>
-            ),
-          },
-        ]
-      : []),
     { key: 'language', label: t('settings.language'), component: <LanguageSwitcher /> },
     {
       key: 'startOnBoot',
@@ -520,12 +369,6 @@ const SystemModalContent: React.FC = () => {
       key: 'closeToTray',
       label: t('settings.closeToTray'),
       component: <Switch checked={closeToTray} onChange={handleCloseToTrayChange} />,
-    },
-    {
-      key: 'weixinCompletionDelivery',
-      label: t('settings.weixinCompletionDelivery'),
-      description: t('settings.weixinCompletionDeliveryDesc'),
-      component: <Switch checked={weixinCompletionDeliveryEnabled} onChange={handleWeixinCompletionDeliveryChange} />,
     },
     ...(isDesktop && gpuStatus
       ? [
@@ -576,28 +419,21 @@ const SystemModalContent: React.FC = () => {
       ),
     },
     {
-      key: 'weixinIdleTimeout',
-      label: t('settings.weixinIdleTimeout'),
-      description: t('settings.weixinIdleTimeoutDesc'),
+      key: 'previewTextSizeLimit',
+      label: t('settings.previewTextSizeLimit'),
+      description: t('settings.previewTextSizeLimitDesc'),
       component: (
-        <div className='flex items-center gap-8px'>
-          <AionSelect value={weixinIdlePolicy} onChange={handleWeixinIdlePolicyChange} style={{ width: 120 }}>
-            <AionSelect.Option value='auto'>{t('settings.weixinIdlePolicyAuto')}</AionSelect.Option>
-            <AionSelect.Option value='ask'>{t('settings.weixinIdlePolicyAsk')}</AionSelect.Option>
-            <AionSelect.Option value='disabled'>{t('settings.weixinIdlePolicyDisabled')}</AionSelect.Option>
-          </AionSelect>
-          <InputNumber
-            value={weixinIdleTimeoutMinutes}
-            disabled={weixinIdlePolicy === 'disabled'}
-            min={1}
-            max={10080}
-            step={30}
-            style={{ width: 120 }}
-            suffix='min'
-            onChange={setWeixinIdleTimeoutMinutes}
-            onBlur={() => saveWeixinIdleTimeout(weixinIdleTimeoutMinutes || 120)}
-          />
-        </div>
+        <InputNumber
+          key={`preview-limit-${previewLimitMb}`}
+          defaultValue={previewLimitMb}
+          onChange={handlePreviewLimitMbChange}
+          onBlur={handlePreviewLimitMbBlur}
+          min={MIN_TEXT_PREVIEW_LIMIT_MB}
+          max={MAX_TEXT_PREVIEW_LIMIT_MB}
+          step={0.5}
+          style={{ width: 120 }}
+          suffix='MB'
+        />
       ),
     },
     {
@@ -606,34 +442,13 @@ const SystemModalContent: React.FC = () => {
       component: <Switch checked={saveUploadToWorkspace} onChange={handleSaveUploadToWorkspaceChange} />,
     },
     {
-      key: 'autoPreviewOfficeFiles',
-      label: t('settings.autoPreviewOfficeFiles'),
-      description: t('settings.autoPreviewOfficeFilesDesc'),
-      component: <Switch checked={autoPreviewOfficeFiles} onChange={handleAutoPreviewOfficeFilesChange} />,
-    },
-    {
-      key: 'conversationForkMode',
-      label: t('settings.conversationForkMode'),
-      description: t('settings.conversationForkModeDesc'),
-      component: (
-        <AionSelect
-          value={forkMode ?? 'fork_and_edit'}
-          style={{ width: 160 }}
-          onChange={(value) => {
-            const previous = forkMode;
-            const next = value as 'fork_only' | 'fork_and_edit';
-            setForkMode(next);
-            void configService.set('conversation.forkMode', next).catch(() => {
-              setForkMode(previous);
-              configService.setLocal('conversation.forkMode', previous);
-              Message.error(t('settings.conversationForkModeUpdateFailed'));
-            });
-          }}
-        >
-          <AionSelect.Option value='fork_only'>{t('settings.conversationForkModeOnly')}</AionSelect.Option>
-          <AionSelect.Option value='fork_and_edit'>{t('settings.conversationForkModeEdit')}</AionSelect.Option>
-        </AionSelect>
-      ),
+      // Positive wording, default on (spec §5.7): every other switch on this
+      // page is phrased affirmatively, and a negated one would read as a double
+      // negative next to them.
+      key: 'crossSessionMessage',
+      label: t('settings.crossSessionMessage'),
+      description: t('settings.crossSessionMessageDesc'),
+      component: <Switch checked={crossSessionMessageEnabled} onChange={handleCrossSessionMessageChange} />,
     },
   ];
 
@@ -712,7 +527,7 @@ const SystemModalContent: React.FC = () => {
                 showExpandIcon={false}
                 header={
                   <div className='flex flex-1 items-center justify-between w-full'>
-                    <span className='text-14px text-2 ml-12px'>{t('settings.notification')}</span>
+                    <span className='text-14px text-2 ms-12px'>{t('settings.notification')}</span>
                     <Switch
                       checked={notificationEnabled}
                       onClick={(e) => e.stopPropagation()}
@@ -722,7 +537,7 @@ const SystemModalContent: React.FC = () => {
                 }
               >
                 {isDesktop ? (
-                  <div className='pl-12px'>
+                  <div className='ps-12px'>
                     <PreferenceRow label={t('settings.cronNotificationEnabled')}>
                       <Switch
                         checked={cronNotificationEnabled}
@@ -746,7 +561,7 @@ const SystemModalContent: React.FC = () => {
                   content={
                     <span>
                       {typeof error === 'string' ? error : JSON.stringify(error)}
-                      <FeedbackButton module='system-settings' className='ml-6px' />
+                      <FeedbackButton module='system-settings' className='ms-6px' />
                     </span>
                   }
                 />
@@ -754,98 +569,14 @@ const SystemModalContent: React.FC = () => {
             </Form>
           </div>
 
-          {user?.collaboration_enabled && (
-            <div className='px-[12px] md:px-[32px] py-16px bg-2 rd-16px'>
-              <div className='mb-12px flex items-center justify-between'>
-                <div>
-                  <div className='text-14px font-500 text-t-primary'>
-                    {t('settings.collaboration.hiddenProjects', { defaultValue: 'Hidden shared projects' })}
-                  </div>
-                  <div className='mt-2px text-12px text-t-tertiary'>
-                    {t('settings.collaboration.hiddenProjectsDescription', {
-                      defaultValue: 'Restore projects that you previously hid from the conversation sidebar.',
-                    })}
-                  </div>
-                </div>
-                <Button size='small' onClick={() => void refreshHiddenSharedProjects()}>
-                  {t('common.refresh', { defaultValue: 'Refresh' })}
-                </Button>
-              </div>
-              {hiddenSharedProjects.length === 0 ? (
-                <div className='rounded-8px bg-fill-1 px-12px py-10px text-12px text-t-tertiary'>
-                  {t('settings.collaboration.noHiddenProjects', { defaultValue: 'No hidden shared projects' })}
-                </div>
-              ) : (
-                <div className='flex flex-col gap-8px'>
-                  {hiddenSharedProjects.map((project) => (
-                    <div key={project.id} className='flex items-center gap-12px rounded-8px bg-fill-1 px-12px py-10px'>
-                      <div className='min-w-0 flex-1'>
-                        <div className='truncate text-13px text-t-primary'>{project.name}</div>
-                        <div className='truncate text-12px text-t-tertiary'>{project.owner_name}</div>
-                      </div>
-                      <Button
-                        size='small'
-                        loading={restoringSharedProject === project.id}
-                        onClick={() => void restoreSharedProject(project)}
-                      >
-                        {t('common.restore', { defaultValue: 'Restore' })}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className='mb-8px mt-16px text-14px font-500 text-t-primary'>
-                {t('settings.collaboration.hiddenConversations', { defaultValue: 'Hidden shared conversations' })}
-              </div>
-              {hiddenSharedConversations.length === 0 ? (
-                <div className='rounded-8px bg-fill-1 px-12px py-10px text-12px text-t-tertiary'>
-                  {t('settings.collaboration.noHiddenConversations', {
-                    defaultValue: 'No hidden shared conversations',
-                  })}
-                </div>
-              ) : (
-                <div className='flex flex-col gap-8px'>
-                  {hiddenSharedConversations.map((conversation) => (
-                    <div
-                      key={conversation.id}
-                      className='flex items-center gap-12px rounded-8px bg-fill-1 px-12px py-10px'
-                    >
-                      <div className='min-w-0 flex-1'>
-                        <div className='truncate text-13px text-t-primary'>{conversation.name}</div>
-                        <div className='truncate text-12px text-t-tertiary'>{conversation.project_name}</div>
-                      </div>
-                      <Button
-                        size='small'
-                        loading={restoringSharedConversation === conversation.id}
-                        onClick={() => void restoreSharedConversation(conversation)}
-                      >
-                        {t('common.restore', { defaultValue: 'Restore' })}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Voice input (speech-to-text) settings */}
           <VoiceInputSection />
 
+          {/* In-app browser: sign-in state and cache */}
+          <BrowserDataSection />
+
           {/* Developer settings: DevTools + CDP (only visible in dev mode) */}
           <DevSettings />
-
-          {!isDesktop && (
-            <div className='px-[12px] md:px-[32px] py-16px bg-2 rd-16px'>
-              <PreferenceRow
-                label={t('settings.serviceRestart.title')}
-                description={t('settings.serviceRestart.description')}
-              >
-                <Button status='danger' loading={restartingService} onClick={restartService}>
-                  {t('settings.serviceRestart.action')}
-                </Button>
-              </PreferenceRow>
-            </div>
-          )}
         </div>
       </AionScrollArea>
     </div>

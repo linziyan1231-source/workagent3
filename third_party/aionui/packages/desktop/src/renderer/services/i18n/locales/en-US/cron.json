@@ -5,6 +5,7 @@
   "nextRun": "Next run",
   "lastRun": "Last run",
   "lastError": "Error",
+  "lastErrorWithDetail": "Last error: {{error}}",
   "message": "Message",
   "goToConversation": "Go to conversation",
   "status": {
@@ -13,7 +14,7 @@
     "error": "Error",
     "unread": "New execution",
     "unconfigured": "No scheduled task",
-    "defaultPrompt": "Every day at 10am, search for the latest AI news, summarize and output an insight report."
+    "defaultPrompt": "Every day at 10am, search for the latest AI news, summarize and output an insight report. (Please use the /cron skill to create a scheduled task in AionUi.)"
   },
   "actions": {
     "goTo": "View Chat",
@@ -53,10 +54,12 @@
     "newTask": "New task",
     "createViaChat": "Create via chat",
     "createManually": "Create manually",
-    "description": "Run tasks on a schedule. You can also ask Puxin AI in any conversation to create one for you.",
+    "description": "Run tasks on a schedule. You can also ask AionUi in any conversation to create one for you.",
     "awakeBanner": "Scheduled tasks only run while your computer is awake.",
     "keepAwake": "Keep awake",
-    "keepAwakeTooltip": "When enabled, Puxin AI will prevent your computer from going to sleep",
+    "keepAwakeTooltip": "When enabled, AionUi will prevent your computer from going to sleep",
+    "searchPlaceholder": "Search tasks...",
+    "noSearchResults": "No matching scheduled tasks.",
     "createTask": "Create Scheduled Task",
     "editTask": "Edit Scheduled Task",
     "createSuccess": "Task created successfully",
@@ -81,6 +84,8 @@
       "prompt": "Prompt",
       "promptRequired": "Prompt is required",
       "promptPlaceholder": "Instructions for the assistant to execute",
+      "queue": "Queue protection",
+      "queueHint": "When enabled, a new trigger is skipped while the previous scheduled conversation is still running, without interrupting the assistant.",
       "frequency": "Frequency",
       "cronExpr": "Cron Expression",
       "cronExprRequired": "Cron expression is required",
@@ -124,6 +129,20 @@
       "dailyAt": "Every day at {{time}}",
       "weekdaysAt": "Weekdays at {{time}}",
       "weeklyAt": "Every {{day}} at {{time}}"
+    },
+    "custom": {
+      "modeLabel": "Repeat pattern",
+      "interval": "Every interval",
+      "monthly": "Monthly",
+      "advanced": "Advanced Cron expression",
+      "every": "Every",
+      "unit": "Unit",
+      "minutes": "Minutes",
+      "hours": "Hours",
+      "time": "Time",
+      "weekdays": "Weekdays",
+      "monthDay": "Day of month",
+      "preview": "Generated Cron"
     }
   },
   "trigger": {

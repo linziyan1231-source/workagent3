@@ -12,6 +12,7 @@ import {
   type LocaleData,
   type SupportedLanguage,
 } from '@/common/config/i18n';
+import { applyDocumentDirection } from './direction';
 
 // Static imports for all locales to ensure packaged app can always switch language.
 import enUS from './locales/en-US/index';
@@ -25,6 +26,7 @@ import ukUA from './locales/uk-UA/index';
 import ptBR from './locales/pt-BR/index';
 import deDE from './locales/de-DE/index';
 import esES from './locales/es-ES/index';
+import frFR from './locales/fr-FR/index';
 import faIR from './locales/fa-IR/index';
 export type { I18nKey, I18nModule } from './i18n-keys';
 
@@ -46,6 +48,7 @@ const localeData: LocaleData = {
   'pt-BR': ptBR,
   'de-DE': deDE,
   'es-ES': esES,
+  'fr-FR': frFR,
   'fa-IR': faIR,
 };
 
@@ -165,6 +168,13 @@ i18n.on('languageChanged', async (lang: string) => {
     console.error(`Failed to load language ${normalizedLang}:`, error);
   }
 });
+
+// Keep <html dir>/<html lang> in step with the app language (fa-IR is RTL).
+// Separate listener: the one above early-returns once the bundle is loaded.
+i18n.on('languageChanged', (lang: string) => {
+  applyDocumentDirection(lang);
+});
+applyDocumentDirection(initialLanguage);
 
 // Initialize on module load
 void initLanguage();

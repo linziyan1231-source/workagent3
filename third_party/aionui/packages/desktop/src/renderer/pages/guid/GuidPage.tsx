@@ -5,11 +5,17 @@
  */
 
 import { ipcBridge } from '@/common';
+import { buildGuidSlashCommands } from '@/common/chat/slash/guidSlashCommands';
+import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { resolveLocaleKey } from '@/common/utils';
 import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
 
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
+import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
+import { getFuzzyMatchIndices, useSlashCommandController } from '@/renderer/hooks/chat/useSlashCommandController';
+import { openExternalUrl } from '@/renderer/utils/platform';
+import SlashCommandMenu, { type SlashCommandMenuItem } from '@/renderer/components/chat/SlashCommandMenu';
 import AssistantSelectionArea from './components/AssistantSelectionArea';
 import GuidActionRow from './components/GuidActionRow';
 import GuidInputCard from './components/GuidInputCard';
@@ -24,24 +30,28 @@ import { useTypewriterPlaceholder } from './hooks/useTypewriterPlaceholder';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { resolveGuidAssistantDefaults } from './utils/assistantDefaults';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
+import { chatFileRefPath, uploadFileRef } from '@/common/types/chatFile';
+import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
+import { ArrowRightUp } from '@icon-park/react';
 import { Button, ConfigProvider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
 import styles from './index.module.css';
-import {
-  DWG_QUANTITY_SKILL_NAME,
-  PROFESSIONAL_DATABASE_MCP_ID,
-  PROFESSIONAL_DATABASE_SKILL_NAME,
-  isDwgQuantityMcp,
-  isDwgQuantitySkill,
-  isProfessionalDatabaseMcp,
-  isProfessionalDatabaseSkill,
-  resolveDwgQuantityMcpId,
-} from './utils/capabilityBundles';
+
+type GuidNavigationState = {
+  resetAssistant?: boolean;
+  selectedAssistantId?: string;
+  prefillPrompt?: string;
+  prefillFiles?: string[];
+  preservePrefillDraft?: boolean;
+  focusPrefill?: boolean;
+  workspace?: string;
+  [key: string]: unknown;
+};
 
 const GuidPage: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -52,6 +62,15 @@ const GuidPage: React.FC = () => {
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  // Open external link
+  const openLink = useCallback(async (url: string) => {
+    try {
+      await openExternalUrl(url);
+    } catch (error) {
+      console.error('Failed to open external link:', error);
+    }
+  }, []);
 
   // --- Skills state ---
   // Skill metadata comes from the database-backed catalog. Built-in auto-inject
@@ -89,122 +108,33 @@ const GuidPage: React.FC = () => {
       });
   }, []);
 
-  const setProfessionalDatabaseBundle = useCallback((enabled: boolean) => {
-    setGuidEnabledSkills((prev) => {
-      const current = prev ?? [];
-      return enabled
-        ? current.includes(PROFESSIONAL_DATABASE_SKILL_NAME)
-          ? current
-          : [...current, PROFESSIONAL_DATABASE_SKILL_NAME]
-        : current.filter((name) => name !== PROFESSIONAL_DATABASE_SKILL_NAME);
-    });
-    setGuidSelectedMcpServerIds((prev) => {
-      const current = prev ?? [];
-      return enabled
-        ? current.includes(PROFESSIONAL_DATABASE_MCP_ID)
-          ? current
-          : [...current, PROFESSIONAL_DATABASE_MCP_ID]
-        : current.filter((id) => id !== PROFESSIONAL_DATABASE_MCP_ID);
-    });
+  const handleToggleSkill = useCallback((skillName: string, isAuto: boolean) => {
+    if (isAuto) {
+      setGuidDisabledBuiltinSkills((prev) => {
+        const list = prev ?? [];
+        return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
+      });
+    } else {
+      setGuidEnabledSkills((prev) => {
+        const list = prev ?? [];
+        return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
+      });
+    }
   }, []);
 
-  const setDwgQuantityBundle = useCallback(
-    (enabled: boolean) => {
-      const mcpId = resolveDwgQuantityMcpId(availableMcpServers);
-      setGuidEnabledSkills((prev) => {
-        const current = prev ?? [];
-        return enabled
-          ? current.includes(DWG_QUANTITY_SKILL_NAME)
-            ? current
-            : [...current, DWG_QUANTITY_SKILL_NAME]
-          : current.filter((name) => name !== DWG_QUANTITY_SKILL_NAME);
-      });
-      if (!mcpId) return;
-      setGuidSelectedMcpServerIds((prev) => {
-        const current = prev ?? [];
-        return enabled
-          ? current.includes(mcpId)
-            ? current
-            : [...current, mcpId]
-          : current.filter((id) => id !== mcpId);
-      });
-    },
-    [availableMcpServers]
-  );
-
-  const handleToggleSkill = useCallback(
-    (skillName: string, isAuto: boolean) => {
-      if (isProfessionalDatabaseSkill(skillName)) {
-        const selected = (guidEnabledSkills ?? []).includes(PROFESSIONAL_DATABASE_SKILL_NAME);
-        setProfessionalDatabaseBundle(!selected);
-        return;
-      }
-      if (isDwgQuantitySkill(skillName)) {
-        const selected = (guidEnabledSkills ?? []).includes(DWG_QUANTITY_SKILL_NAME);
-        setDwgQuantityBundle(!selected);
-        return;
-      }
-      if (isAuto) {
-        setGuidDisabledBuiltinSkills((prev) => {
-          const list = prev ?? [];
-          return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
-        });
-      } else {
-        setGuidEnabledSkills((prev) => {
-          const list = prev ?? [];
-          return list.includes(skillName) ? list.filter((s) => s !== skillName) : [...list, skillName];
-        });
-      }
-    },
-    [guidEnabledSkills, setDwgQuantityBundle, setProfessionalDatabaseBundle]
-  );
-
-  const handleToggleMcpServer = useCallback(
-    (serverId: string) => {
-      if (isProfessionalDatabaseMcp(serverId)) {
-        const selected = (guidSelectedMcpServerIds ?? []).includes(PROFESSIONAL_DATABASE_MCP_ID);
-        setProfessionalDatabaseBundle(!selected);
-        return;
-      }
-      const server = availableMcpServers.find((item) => item.id === serverId);
-      if (server && isDwgQuantityMcp(server)) {
-        const selected = (guidSelectedMcpServerIds ?? []).includes(server.id);
-        setDwgQuantityBundle(!selected);
-        return;
-      }
-      setGuidSelectedMcpServerIds((prev) => {
-        const current = prev ?? [];
-        return current.includes(serverId) ? current.filter((id) => id !== serverId) : [...current, serverId];
-      });
-    },
-    [availableMcpServers, guidSelectedMcpServerIds, setDwgQuantityBundle, setProfessionalDatabaseBundle]
-  );
-
-  useEffect(() => {
-    if (guidEnabledSkills === undefined || guidSelectedMcpServerIds === undefined) return;
-    const skillSelected = guidEnabledSkills.includes(PROFESSIONAL_DATABASE_SKILL_NAME);
-    const mcpSelected = guidSelectedMcpServerIds.includes(PROFESSIONAL_DATABASE_MCP_ID);
-    if (skillSelected !== mcpSelected) setProfessionalDatabaseBundle(true);
-  }, [guidEnabledSkills, guidSelectedMcpServerIds, setProfessionalDatabaseBundle]);
-
-  useEffect(() => {
-    if (guidEnabledSkills === undefined || guidSelectedMcpServerIds === undefined) return;
-    const mcpId = resolveDwgQuantityMcpId(availableMcpServers);
-    if (!mcpId) return;
-    const skillSelected = guidEnabledSkills.includes(DWG_QUANTITY_SKILL_NAME);
-    const mcpSelected = guidSelectedMcpServerIds.includes(mcpId);
-    if (skillSelected !== mcpSelected) setDwgQuantityBundle(true);
-  }, [availableMcpServers, guidEnabledSkills, guidSelectedMcpServerIds, setDwgQuantityBundle]);
+  const handleToggleMcpServer = useCallback((serverId: string) => {
+    setGuidSelectedMcpServerIds((prev) => {
+      const current = prev ?? [];
+      return current.includes(serverId) ? current.filter((id) => id !== serverId) : [...current, serverId];
+    });
+  }, []);
 
   // --- Hooks ---
   // Only aionrs uses this provider-based model picker now (Gemini runs as a
   // regular ACP backend with its own model selector).
   const modelSelection = useGuidModelSelection('aionrs');
 
-  const navState = location.state as {
-    resetAssistant?: boolean;
-    selectedAssistantId?: string;
-  } | null;
+  const navState = location.state as GuidNavigationState | null;
   const resetAssistantRequested = navState?.resetAssistant === true;
   const preselectAssistantId = navState?.selectedAssistantId;
   const agentSelection = useGuidAssistantSelection({
@@ -216,6 +146,14 @@ const GuidPage: React.FC = () => {
   const guidInput = useGuidInput({
     locationState: location.state as { workspace?: string } | null,
   });
+  // The `/open` builtin + attach picker browse the backend machine's filesystem
+  // (native dialog / server-fs) → `local` refs, not uploads.
+  const { onSlashBuiltinCommand } = useOpenFileSelector({
+    onFilesSelected: guidInput.handleFilesPicked,
+  });
+  // Display/remove lanes stay path-based; the ref kind is carried only by the
+  // send path (useGuidSend).
+  const displayFilePaths = useMemo(() => guidInput.files.map(chatFileRefPath), [guidInput.files]);
 
   const resetMentionOpen = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(() => {}, []);
   const resetMentionQuery = useCallback<React.Dispatch<React.SetStateAction<string | null>>>(() => {}, []);
@@ -234,6 +172,78 @@ const GuidPage: React.FC = () => {
     () => resolveGuidAssistantDefaults(selectedAssistantDetail),
     [selectedAssistantDetail]
   );
+  const selectedSkillNames = useMemo(() => {
+    const disabledBuiltinSkillSet = new Set(
+      guidDisabledBuiltinSkills ?? resolvedAssistantDefaults.disabledBuiltinSkillIds
+    );
+    const enabledSkillSet = new Set(guidEnabledSkills ?? resolvedAssistantDefaults.skillIds);
+
+    return allSkills
+      .filter((skill) => (skill.isAuto ? !disabledBuiltinSkillSet.has(skill.name) : enabledSkillSet.has(skill.name)))
+      .map((skill) => skill.name);
+  }, [
+    allSkills,
+    guidDisabledBuiltinSkills,
+    guidEnabledSkills,
+    resolvedAssistantDefaults.disabledBuiltinSkillIds,
+    resolvedAssistantDefaults.skillIds,
+  ]);
+  const skillDescriptionByName = useMemo(
+    () => new Map(allSkills.map((skill) => [skill.name, skill.description])),
+    [allSkills]
+  );
+  const guidBuiltinSlashCommands = useMemo<SlashCommandItem[]>(
+    () => [
+      {
+        name: 'open',
+        description: t('conversation.workspace.addFile', { defaultValue: 'Add File' }),
+        kind: 'builtin',
+        source: 'builtin',
+      },
+    ],
+    [t]
+  );
+  const guidSlashCommands = useMemo(
+    () =>
+      buildGuidSlashCommands({
+        builtinCommands: guidBuiltinSlashCommands,
+        agentCommands: agentSelection.currentAgentAvailableCommands,
+        selectedSkills: selectedSkillNames,
+        descriptionByName: skillDescriptionByName,
+        skillFallbackDescription: t('conversation.skills.slashHint', { defaultValue: 'Skill' }),
+      }),
+    [
+      agentSelection.currentAgentAvailableCommands,
+      guidBuiltinSlashCommands,
+      selectedSkillNames,
+      skillDescriptionByName,
+      t,
+    ]
+  );
+  const slashController = useSlashCommandController({
+    input: guidInput.input,
+    commands: guidSlashCommands,
+    onExecuteBuiltin: (name) => {
+      onSlashBuiltinCommand(name);
+      guidInput.setInput('');
+    },
+    onSelectTemplate: (name) => {
+      guidInput.setInput(`/${name} `);
+    },
+  });
+  const slashMenuItems = useMemo<SlashCommandMenuItem[]>(
+    () =>
+      slashController.filteredCommands.map((command) => ({
+        key: command.name,
+        label: `/${command.name}`,
+        description: command.description,
+        badge: command.hint,
+        highlightIndices: slashController.query
+          ? getFuzzyMatchIndices(command.name, slashController.query)?.map((index) => index + 1)
+          : undefined,
+      })),
+    [slashController.filteredCommands, slashController.query]
+  );
 
   const send = useGuidSend({
     // Input state
@@ -251,9 +261,7 @@ const GuidPage: React.FC = () => {
     selectedAssistantBackend: agentSelection.selectedAssistantBackend,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
-    selectedAcpThoughtLevel: agentSelection.selectedAcpThoughtLevel,
-    currentAgentThoughtLevel: agentSelection.currentAgentThoughtLevel,
-    currentAcpCachedModelInfo: agentSelection.currentAcpCachedModelInfo,
+    selectedThoughtLevelValue: agentSelection.selectedThoughtLevelValue,
     current_model: modelSelection.current_model,
 
     guidDisabledBuiltinSkills,
@@ -287,13 +295,20 @@ const GuidPage: React.FC = () => {
 
   const handleInputKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (slashController.onKeyDown(event)) {
+        return;
+      }
+
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        if (!guidInput.input.trim()) return;
+        // Empty input is allowed — it creates an empty conversation ("start
+        // chat"). Mirror the send button's gate so Enter and click behave
+        // identically (blocked only while loading or with no assistant).
+        if (send.isButtonDisabled) return;
         send.sendMessageHandler();
       }
     },
-    [guidInput.input, send.sendMessageHandler]
+    [send.isButtonDisabled, send.sendMessageHandler, slashController]
   );
 
   const handleSelectAssistant = useCallback(
@@ -327,7 +342,7 @@ const GuidPage: React.FC = () => {
       return resolvedPrompts;
     }
 
-    return [t('guid.defaultPrompts.capabilities'), t('guid.defaultPrompts.skills'), t('guid.defaultPrompts.tools')];
+    return [t('guid.defaultPrompts.understand'), t('guid.defaultPrompts.cleanup'), t('guid.defaultPrompts.create')];
   }, [localeKey, selectedAssistantDetail, selectedAssistantRecord, selectedAssistantId, t]);
 
   // Sync disabledBuiltinSkills + enabledSkills from assistant detail defaults.
@@ -345,10 +360,12 @@ const GuidPage: React.FC = () => {
 
   const appliedAssistantDefaultsKeyRef = useRef<string | null>(null);
   const manualModelSelectionAssistantRef = useRef<string | null>(null);
+  const manualThoughtLevelSelectionAssistantRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedAssistantId || !selectedAssistantDetail) {
       appliedAssistantDefaultsKeyRef.current = null;
       manualModelSelectionAssistantRef.current = null;
+      manualThoughtLevelSelectionAssistantRef.current = null;
       return;
     }
 
@@ -358,8 +375,8 @@ const GuidPage: React.FC = () => {
       defaults: selectedAssistantDetail.defaults,
       preferences: {
         last_model_id: selectedAssistantDetail.preferences.last_model_id,
-        last_thought_level: selectedAssistantDetail.preferences.last_thought_level,
         last_permission_value: selectedAssistantDetail.preferences.last_permission_value,
+        last_thought_level_value: selectedAssistantDetail.preferences.last_thought_level_value,
         last_mcp_ids: selectedAssistantDetail.preferences.last_mcp_ids,
       },
       availableModels: {
@@ -370,7 +387,7 @@ const GuidPage: React.FC = () => {
         })),
       },
       availableModes: agentSelection.currentAgentModeOptions.map((mode) => mode.value),
-      availableThoughtLevels: agentSelection.currentAgentThoughtLevel?.options.map((option) => option.value) ?? [],
+      availableThoughtLevels: agentSelection.currentThoughtLevelOption?.options.map((option) => option.value) ?? [],
     });
     if (appliedAssistantDefaultsKeyRef.current === signature) {
       return;
@@ -381,6 +398,7 @@ const GuidPage: React.FC = () => {
       const resolvedDefaults = resolveGuidAssistantDefaults(selectedAssistantDetail);
       const effectiveBackend = agentSelection.selectedAssistantBackend;
       const shouldApplyDefaultModel = manualModelSelectionAssistantRef.current !== selectedAssistantId;
+      const shouldApplyDefaultThoughtLevel = manualThoughtLevelSelectionAssistantRef.current !== selectedAssistantId;
 
       if (shouldApplyDefaultModel && effectiveBackend === 'aionrs') {
         if (resolvedDefaults.modelId) {
@@ -422,12 +440,18 @@ const GuidPage: React.FC = () => {
           }
         }
       }
-      if (resolvedDefaults.thoughtLevel) {
-        const availableThoughtLevels = new Set(
-          agentSelection.currentAgentThoughtLevel?.options.map((option) => option.value) ?? []
+      if (shouldApplyDefaultThoughtLevel && agentSelection.currentThoughtLevelOption) {
+        const availableThoughtLevelValues = new Set(
+          agentSelection.currentThoughtLevelOption.options.map((option) => option.value)
         );
-        if (availableThoughtLevels.size === 0 || availableThoughtLevels.has(resolvedDefaults.thoughtLevel)) {
-          agentSelection.setSelectedAcpThoughtLevel(resolvedDefaults.thoughtLevel);
+        if (resolvedDefaults.thoughtLevel && availableThoughtLevelValues.has(resolvedDefaults.thoughtLevel)) {
+          agentSelection.setSelectedThoughtLevelValue(resolvedDefaults.thoughtLevel, { persistPreference: false });
+        } else {
+          const fallbackThoughtLevel =
+            agentSelection.currentThoughtLevelOption.currentValue ||
+            agentSelection.currentThoughtLevelOption.options[0]?.value ||
+            '';
+          agentSelection.setSelectedThoughtLevelValue(fallbackThoughtLevel, { persistPreference: false });
         }
       }
       setGuidSelectedMcpServerIds(resolvedDefaults.mcpIds);
@@ -439,11 +463,11 @@ const GuidPage: React.FC = () => {
   }, [
     agentSelection.currentAcpCachedModelInfo?.available_models,
     agentSelection.currentAgentModeOptions,
-    agentSelection.currentAgentThoughtLevel,
+    agentSelection.currentThoughtLevelOption,
     agentSelection.selectedAssistantBackend,
     agentSelection.setSelectedAcpModel,
     agentSelection.setSelectedMode,
-    agentSelection.setSelectedAcpThoughtLevel,
+    agentSelection.setSelectedThoughtLevelValue,
     modelSelection.modelList,
     modelSelection.resetCurrentModel,
     modelSelection.setCurrentModel,
@@ -461,6 +485,13 @@ const GuidPage: React.FC = () => {
     (model: React.SetStateAction<string | null>) => {
       manualModelSelectionAssistantRef.current = selectedAssistantId;
       agentSelection.setSelectedAcpModel(model, { persistPreference: !hasSelectedAssistant });
+    },
+    [agentSelection, hasSelectedAssistant, selectedAssistantId]
+  );
+  const setGuidSelectedThoughtLevel = useCallback(
+    (value: string) => {
+      manualThoughtLevelSelectionAssistantRef.current = selectedAssistantId;
+      agentSelection.setSelectedThoughtLevelValue(value, { persistPreference: !hasSelectedAssistant });
     },
     [agentSelection, hasSelectedAssistant, selectedAssistantId]
   );
@@ -489,15 +520,22 @@ const GuidPage: React.FC = () => {
   // one such follow-up pass skip the clear, preserving the seeded prompt.
   const skipNextClearRef = useRef(false);
   useLayoutEffect(() => {
-    const prefillState = location.state as { prefillPrompt?: string; prefillFiles?: string[] } | null;
+    const prefillState = location.state as GuidNavigationState | null;
     const prefillPrompt = prefillState?.prefillPrompt;
     const prefillFiles = prefillState?.prefillFiles;
+    const preserveCurrentDraft = Boolean(prefillState?.preservePrefillDraft || skipNextClearRef.current);
     if (prefillPrompt && consumedPrefillKeyRef.current !== location.key) {
       // Consume prompt + optional attachments (e.g. bug-report screenshots) once.
       consumedPrefillKeyRef.current = location.key;
       skipNextClearRef.current = true;
-      guidInput.setInput(prefillPrompt);
-      guidInput.setFiles(prefillFiles && prefillFiles.length > 0 ? prefillFiles : []);
+      if (prefillState.preservePrefillDraft) {
+        guidInput.setInput((draft) => appendPromptToDraft(draft, prefillPrompt));
+      } else {
+        guidInput.setInput(prefillPrompt);
+        // Prefill attachments (e.g. "via chat" screenshots) arrive as bare paths
+        // with no source tag; treat them as uploads to preserve prior behavior.
+        guidInput.setFiles(prefillFiles && prefillFiles.length > 0 ? prefillFiles.map(uploadFileRef) : []);
+      }
     } else if (skipNextClearRef.current) {
       // This pass is the state-clearing replace() right after a prefill — keep
       // the seeded input instead of clearing it.
@@ -507,10 +545,29 @@ const GuidPage: React.FC = () => {
       guidInput.setFiles([]);
     }
     guidInput.setLoading(false);
-    if (!(location.state as { workspace?: string } | null)?.workspace) {
+    if (!preserveCurrentDraft && !(location.state as { workspace?: string } | null)?.workspace) {
       guidInput.setDir('');
     }
   }, [guidInput.setDir, guidInput.setFiles, guidInput.setInput, guidInput.setLoading, location.key, location.state]);
+
+  // A draft-preserving prefill is an action, not durable navigation state.
+  // Strip it after consumption so browser history or a remount cannot replay it.
+  useEffect(() => {
+    const prefillState = location.state as GuidNavigationState | null;
+    if (!prefillState?.preservePrefillDraft || !prefillState.prefillPrompt) return;
+
+    const {
+      prefillPrompt: _prefillPrompt,
+      prefillFiles: _prefillFiles,
+      preservePrefillDraft: _preservePrefillDraft,
+      focusPrefill: _focusPrefill,
+      ...remainingState
+    } = prefillState;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: Object.keys(remainingState).length > 0 ? remainingState : null,
+    });
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
 
   // Clear resetAssistant from location.state after the hook has consumed it,
   // so that re-renders don't re-trigger the reset logic.
@@ -541,9 +598,8 @@ const GuidPage: React.FC = () => {
       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
       selectedAcpModel={agentSelection.selectedAcpModel}
       setSelectedAcpModel={setGuidSelectedAcpModel}
-      thoughtLevel={agentSelection.currentAgentThoughtLevel}
-      selectedThoughtLevel={agentSelection.selectedAcpThoughtLevel}
-      setSelectedThoughtLevel={agentSelection.setSelectedAcpThoughtLevel}
+      thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
+      onThoughtLevelSelect={setGuidSelectedThoughtLevel}
     />
   );
 
@@ -558,9 +614,19 @@ const GuidPage: React.FC = () => {
   // Build the action row
   const actionRowNode = (
     <GuidActionRow
-      files={guidInput.files}
+      files={displayFilePaths}
       onFilesUploaded={guidInput.handleFilesUploaded}
+      onFilesPicked={guidInput.handleFilesPicked}
       modelSelectorNode={modelSelectorNode}
+      isGeminiMode={isGeminiMode}
+      modelList={modelSelection.modelList}
+      current_model={modelSelection.current_model}
+      setCurrentModel={setGuidCurrentModel}
+      currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
+      selectedAcpModel={agentSelection.selectedAcpModel}
+      setSelectedAcpModel={setGuidSelectedAcpModel}
+      thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
+      onThoughtLevelSelect={setGuidSelectedThoughtLevel}
       modeBackend={agentSelection.selectedAssistantBackend}
       selectedMode={agentSelection.selectedMode}
       dynamicModes={agentSelection.currentAgentModeOptions}
@@ -573,24 +639,37 @@ const GuidPage: React.FC = () => {
       selectedMcpServerIds={guidSelectedMcpServerIds ?? []}
       onToggleMcpServer={handleToggleMcpServer}
       speechInputNode={
-        <SpeechInputButton
-          disabled={guidInput.loading}
-          onLiveTranscript={handleLiveTranscript}
-          onTranscript={handleSpeechTranscript}
-        />
+        <SpeechInputButton onLiveTranscript={handleLiveTranscript} onTranscript={handleSpeechTranscript} />
       }
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}
       onSend={send.sendMessageHandler}
     />
   );
+  const slashCommandMenuNode = slashController.isOpen ? (
+    <SlashCommandMenu
+      title={t('messages.slash.title', { defaultValue: 'Commands' })}
+      hint={t('messages.slash.hint', { defaultValue: 'Type / to open command menu' })}
+      items={slashMenuItems}
+      activeIndex={slashController.activeIndex}
+      loading={false}
+      onHoverItem={slashController.setActiveIndex}
+      onSelectItem={(item) => {
+        const targetIndex = slashController.filteredCommands.findIndex((command) => command.name === item.key);
+        if (targetIndex >= 0) {
+          slashController.onSelectByIndex(targetIndex);
+        }
+      }}
+      emptyText={t('messages.slash.empty', { defaultValue: 'No commands found' })}
+    />
+  ) : null;
 
   return (
     <ConfigProvider getPopupContainer={() => guidContainerRef.current || document.body}>
       <div ref={guidContainerRef} className={styles.guidContainer}>
         <div className={styles.guidLayout}>
           <div className={styles.heroHeader}>
-            <p className='text-2xl font-semibold mb-0 text-0 text-center'>{t('conversation.welcome.title')}</p>
+            <p className='text-2xl font-semibold mb-0 text-t-primary text-center'>{t('conversation.welcome.title')}</p>
           </div>
 
           <AssistantSelectionArea
@@ -601,6 +680,7 @@ const GuidPage: React.FC = () => {
           />
 
           <GuidInputCard
+            focusRequestKey={navState?.focusPrefill && navState.prefillPrompt ? location.key : undefined}
             input={guidInput.input}
             onInputChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
@@ -614,17 +694,18 @@ const GuidPage: React.FC = () => {
             inactiveBorderColor={inactiveBorderColor}
             activeShadow={activeShadow}
             dragHandlers={guidInput.dragHandlers}
-            files={guidInput.files}
+            files={displayFilePaths}
             onRemoveFile={guidInput.handleRemoveFile}
             actionRow={actionRowNode}
+            slashCommandMenu={slashCommandMenuNode}
             workspaceDir={guidInput.dir}
             onSelectWorkspace={(dir) => guidInput.setDir(dir)}
             onClearWorkspace={() => guidInput.setDir('')}
           />
 
           {selectedAssistantPrompts.length > 0 ? (
-            <div className='mt-18px w-full animate-fade-in'>
-              <div className={`${styles.assistantPromptHint} mb-10px text-left`}>
+            <div className='mt-18px w-full animate-fade-in ps-20px'>
+              <div className={`${styles.assistantPromptHint} mb-10px text-start`}>
                 {t('guid.promptExamplesHint', { defaultValue: 'Try these example prompts:' })}
               </div>
               <div className='flex flex-col gap-9px'>
@@ -632,13 +713,18 @@ const GuidPage: React.FC = () => {
                   <Button
                     key={`${index}-${prompt}`}
                     type='text'
-                    className='!h-auto !w-full !rounded-10px !border !border-border-2 !bg-bg-base !px-10px !py-10px !text-left !text-12.5px !text-t-secondary !whitespace-normal !break-words transition-colors hover:!border-aou-6 hover:!text-t-primary'
+                    className='group !h-auto !w-full !border-none !bg-transparent !px-0 !py-6px !text-start !text-12.5px !text-t-secondary !whitespace-normal !break-words transition-colors hover:!bg-transparent hover:!text-t-primary'
                     onClick={() => {
                       guidInput.setInput(prompt);
                       guidInput.handleTextareaFocus();
                     }}
                   >
-                    {prompt}
+                    <span>{prompt}</span>
+                    <ArrowRightUp
+                      theme='outline'
+                      size='13'
+                      className='ms-6px inline-flex flex-shrink-0 align-[-1px] text-t-primary opacity-0 transition-opacity group-hover:opacity-100'
+                    />
                   </Button>
                 ))}
               </div>
@@ -647,6 +733,7 @@ const GuidPage: React.FC = () => {
         </div>
 
         <QuickActionButtons
+          onOpenLink={openLink}
           onOpenBugReport={() => setShowFeedbackModal(true)}
           inactiveBorderColor={inactiveBorderColor}
           activeShadow={activeShadow}

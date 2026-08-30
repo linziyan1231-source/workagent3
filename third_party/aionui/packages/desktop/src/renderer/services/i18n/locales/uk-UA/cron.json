@@ -5,6 +5,7 @@
   "nextRun": "Наступний запуск",
   "lastRun": "Останній запуск",
   "lastError": "Помилка",
+  "lastErrorWithDetail": "Остання помилка: {{error}}",
   "message": "Повідомлення",
   "goToConversation": "Перейти до діалогу",
   "status": {
@@ -13,7 +14,7 @@
     "error": "Помилка",
     "unread": "Нове виконання",
     "unconfigured": "Немає запланованих завдань",
-    "defaultPrompt": "Кожного дня о 10 ранку шукай останні новини про ШІ, роби резюме та виводь аналітичний звіт."
+    "defaultPrompt": "Кожного дня о 10 ранку шукай останні новини про ШІ, роби резюме та виводь аналітичний звіт. (Будь ласка, використай навичку /cron, щоб створити заплановане завдання в AionUi.)"
   },
   "actions": {
     "goTo": "Переглянути чат",
@@ -53,10 +54,10 @@
     "newTask": "Нове завдання",
     "createViaChat": "Створити через чат",
     "createManually": "Створити вручну",
-    "description": "Запускайте завдання за розкладом. Ви також можете попросити Puxin AI у будь-якому діалозі створити завдання для вас.",
+    "description": "Запускайте завдання за розкладом. Ви також можете попросити AionUi у будь-якому діалозі створити завдання для вас.",
     "awakeBanner": "Заплановані завдання запускаються лише тоді, коли ваш комп'ютер увімкнений.",
     "keepAwake": "Не дозволяти засинати",
-    "keepAwakeTooltip": "Якщо увімкнено, Puxin AI не дозволить вашому комп'ютеру перейти в режим сну",
+    "keepAwakeTooltip": "Якщо увімкнено, AionUi не дозволить вашому комп'ютеру перейти в режим сну",
     "createTask": "Створити заплановане завдання",
     "editTask": "Редагувати заплановане завдання",
     "createSuccess": "Завдання успішно створено",
@@ -80,6 +81,8 @@
       "prompt": "Промпт",
       "promptRequired": "Промпт обов'язковий",
       "promptPlaceholder": "Інструкції для виконання агентом",
+      "queue": "Захист черги",
+      "queueHint": "Якщо ввімкнено, новий запуск буде пропущено, доки попередня запланована розмова ще виконується, не перериваючи асистента.",
       "frequency": "Частота",
       "cronExpr": "Вираз Cron",
       "cronExprRequired": "Вираз Cron обов'язковий",
@@ -124,7 +127,23 @@
       "weekdaysAt": "У будні о {{time}}",
       "weeklyAt": "Що{{day}} о {{time}}"
     },
-    "customCronWarning": "This task has a custom schedule that can't be edited here. Changing the frequency will replace it."
+    "customCronWarning": "This task has a custom schedule that can't be edited here. Changing the frequency will replace it.",
+    "custom": {
+      "modeLabel": "Режим повторення",
+      "interval": "Через інтервал",
+      "monthly": "Щомісяця",
+      "advanced": "Розширений Cron-вираз",
+      "every": "Кожні",
+      "unit": "Одиниця",
+      "minutes": "Хвилини",
+      "hours": "Години",
+      "time": "Час",
+      "weekdays": "Дні тижня",
+      "monthDay": "День місяця",
+      "preview": "Створений Cron-вираз"
+    },
+    "searchPlaceholder": "Пошук завдань...",
+    "noSearchResults": "Немає відповідних запланованих завдань."
   },
   "trigger": {
     "runScheduledTask": "Запустити заплановане завдання: {{name}}"

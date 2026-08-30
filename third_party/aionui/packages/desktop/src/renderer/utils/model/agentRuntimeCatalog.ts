@@ -5,43 +5,31 @@
  */
 
 import type { AcpModelInfo, AcpSessionConfigOption } from '@/common/types/platform/acpTypes';
+import { mapAgentAvailableCommandsToSlashCommands } from '@/common/chat/slash/guidSlashCommands';
+import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { AgentModeOption } from './agentTypes';
-
-const MANAGED_KIMI_MODEL_IDS = new Set([
-  'kimi-code/kimi-for-coding',
-  'kimi-code/kimi-for-coding,thinking',
-  'kimi-code/kimi-for-coding-highspeed',
-  'kimi-code/kimi-for-coding-highspeed,thinking',
-  'kimi-code/kimi-k3',
-  'kimi-code/kimi-k3,thinking',
-]);
-
-const MANAGED_KIMI_MODEL_CATALOGS = [
-  new Set([
-    'kimi-code/kimi-for-coding',
-    'kimi-code/kimi-for-coding,thinking',
-    'kimi-code/kimi-for-coding-highspeed',
-    'kimi-code/kimi-for-coding-highspeed,thinking',
-  ]),
-  MANAGED_KIMI_MODEL_IDS,
-];
-
-const MANAGED_KIMI_THINKING_LABELS = new Map([
-  ['kimi-code/kimi-for-coding,thinking', 'kimi-k2.7'],
-  ['kimi-code/kimi-for-coding-highspeed,thinking', 'kimi-k2.7-highspeed'],
-  ['kimi-code/kimi-k3,thinking', 'kimi-k3'],
-]);
 
 export type AgentRuntimeCatalog = {
   available_models?: unknown;
   available_modes?: unknown;
+  available_commands?: unknown;
   config_options?: unknown;
+  handshake?: {
+    available_commands?: unknown;
+  };
 };
 
-export type AgentRuntimeSelectState = {
+export type AgentRuntimeSelectOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+export type AgentRuntimeDerivedOption = {
   id: string;
+  category: string;
   currentValue?: string;
-  options: AgentModeOption[];
+  options: AgentRuntimeSelectOption[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,6 +107,32 @@ function getConfigOptionCurrentValue(option: AcpSessionConfigOption): string | u
   return option.current_value || option.selected_value || optionRecord.currentValue;
 }
 
+function buildSelectOptionFromConfigOptions(
+  configOptions: AcpSessionConfigOption[],
+  category: string,
+  fallbackIds: string[] = []
+): AgentRuntimeDerivedOption | null {
+  const option =
+    configOptions.find((item) => item.category === category) ||
+    configOptions.find((item) => fallbackIds.includes(item.id));
+  if (!option || option.type !== 'select') return null;
+
+  const options = (option.options ?? [])
+    .filter((item) => typeof item.value === 'string' && item.value.trim())
+    .map((item) => ({
+      value: item.value,
+      label: item.label || item.name || item.value,
+      description: item.description || undefined,
+    }));
+
+  return {
+    id: option.id,
+    category,
+    currentValue: getConfigOptionCurrentValue(option),
+    options,
+  };
+}
+
 function buildModelInfoFromConfigOptions(configOptions: AcpSessionConfigOption[]): AcpModelInfo | null {
   const modelOption = configOptions.find((option) => option.category === 'model' && option.type === 'select');
   if (!modelOption?.options || modelOption.options.length === 0) return null;
@@ -138,50 +152,12 @@ function buildModelInfoFromConfigOptions(configOptions: AcpSessionConfigOption[]
   };
 }
 
-export function isManagedKimiModelCatalog(values: string[]): boolean {
-  const uniqueValues = new Set(values);
-  return MANAGED_KIMI_MODEL_CATALOGS.some(
-    (catalog) =>
-      values.length === catalog.size &&
-      uniqueValues.size === catalog.size &&
-      [...uniqueValues].every((value) => catalog.has(value))
-  );
-}
-
-export function getManagedKimiThinkingLabel(value: string): string | undefined {
-  return MANAGED_KIMI_THINKING_LABELS.get(value);
-}
-
-export function toManagedKimiThinkingModel(value: string | null): string | null {
-  if (!value || !MANAGED_KIMI_MODEL_IDS.has(value)) return value;
-  return value.endsWith(',thinking') ? value : `${value},thinking`;
-}
-
-export function normalizeManagedKimiModelInfo(modelInfo: AcpModelInfo | null): AcpModelInfo | null {
-  if (!modelInfo || !isManagedKimiModelCatalog(modelInfo.available_models.map((model) => model.id))) {
-    return modelInfo;
-  }
-
-  const currentModelId = toManagedKimiThinkingModel(modelInfo.current_model_id);
-  const availableModels = modelInfo.available_models
-    .filter((model) => MANAGED_KIMI_THINKING_LABELS.has(model.id))
-    .map((model) => Object.assign({}, model, { label: MANAGED_KIMI_THINKING_LABELS.get(model.id)! }));
-
-  return {
-    ...modelInfo,
-    current_model_id: currentModelId,
-    current_model_label:
-      (currentModelId && MANAGED_KIMI_THINKING_LABELS.get(currentModelId)) || modelInfo.current_model_label,
-    available_models: availableModels,
-  };
-}
-
 export function buildAgentRuntimeModelInfo(agent: AgentRuntimeCatalog | null | undefined): AcpModelInfo | null {
   if (!agent) return null;
 
-  return normalizeManagedKimiModelInfo(
+  return (
     buildModelInfoFromConfigOptions(normalizeConfigOptions(agent.config_options)) ??
-      buildModelInfoFromPayload(agent.available_models)
+    buildModelInfoFromPayload(agent.available_models)
   );
 }
 
@@ -255,24 +231,18 @@ export function buildAgentRuntimeModeState(agent: AgentRuntimeCatalog | null | u
   return { options: [] };
 }
 
-export function buildAgentRuntimeThoughtLevel(
+export function buildAgentRuntimeThoughtLevelOption(
   agent: AgentRuntimeCatalog | null | undefined
-): AgentRuntimeSelectState | null {
+): AgentRuntimeDerivedOption | null {
   if (!agent) return null;
+  return buildSelectOptionFromConfigOptions(normalizeConfigOptions(agent.config_options), 'thought_level', [
+    'thought_level',
+    'reasoning_effort',
+  ]);
+}
 
-  const configOptions = normalizeConfigOptions(agent.config_options);
-  const thoughtLevel =
-    configOptions.find((option) => option.category === 'thought_level') ??
-    configOptions.find((option) => option.id === 'thought_level' || option.id === 'reasoning_effort');
-  if (thoughtLevel?.type !== 'select' || !thoughtLevel.options?.length) return null;
+export function buildAgentRuntimeSlashCommands(agent: AgentRuntimeCatalog | null | undefined): SlashCommandItem[] {
+  if (!agent) return [];
 
-  return {
-    id: thoughtLevel.id,
-    currentValue: getConfigOptionCurrentValue(thoughtLevel),
-    options: thoughtLevel.options.map((option) => ({
-      value: option.value,
-      label: option.label || option.name || option.value,
-      description: option.description,
-    })),
-  };
+  return mapAgentAvailableCommandsToSlashCommands(agent.available_commands ?? agent.handshake?.available_commands);
 }

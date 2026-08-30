@@ -5,6 +5,7 @@
   "nextRun": "Next run",
   "lastRun": "Last run",
   "lastError": "Error",
+  "lastErrorWithDetail": "Son hata: {{error}}",
   "message": "Message",
   "goToConversation": "Go to conversation",
   "status": {
@@ -13,7 +14,7 @@
     "error": "Error",
     "unread": "New execution",
     "unconfigured": "No scheduled task",
-    "defaultPrompt": "Every day at 10am, search for the latest AI news, summarize and output an insight report."
+    "defaultPrompt": "Every day at 10am, search for the latest AI news, summarize and output an insight report. (AionUi'de zamanlanmış bir görev oluşturmak için lütfen /cron becerisini kullan.)"
   },
   "actions": {
     "goTo": "View Chat",
@@ -66,10 +67,10 @@
     "newTask": "Yeni görev",
     "createViaChat": "Sohbetle oluştur",
     "createManually": "Manuel oluştur",
-    "description": "Görevleri bir zamanlamayla çalıştırın. Ayrıca herhangi bir konuşmada Puxin AI'den sizin için bir görev oluşturmasını isteyebilirsiniz.",
+    "description": "Görevleri bir zamanlamayla çalıştırın. Ayrıca herhangi bir konuşmada AionUi'den sizin için bir görev oluşturmasını isteyebilirsiniz.",
     "awakeBanner": "Zamanlanmış görevler yalnızca bilgisayarınız açıkken çalışır.",
     "keepAwake": "Uyanık tut",
-    "keepAwakeTooltip": "Etkinleştirildiğinde Puxin AI bilgisayarınızın uyku moduna geçmesini engeller",
+    "keepAwakeTooltip": "Etkinleştirildiğinde AionUi bilgisayarınızın uyku moduna geçmesini engeller",
     "createTask": "Zamanlanmış Görev Oluştur",
     "editTask": "Zamanlanmış Görevi Düzenle",
     "createSuccess": "Görev başarıyla oluşturuldu",
@@ -94,6 +95,8 @@
       "prompt": "Komut",
       "promptRequired": "Komut gereklidir",
       "promptPlaceholder": "Asistanın yürüteceği talimatlar",
+      "queue": "Kuyruk koruması",
+      "queueHint": "Etkinleştirildiğinde, önceki zamanlanmış konuşma hâlâ çalışıyorsa yeni tetikleme atlanır ve asistan kesintiye uğratılmaz.",
       "frequency": "Sıklık",
       "cronExpr": "Cron İfadesi",
       "cronExprRequired": "Cron ifadesi gereklidir",
@@ -137,7 +140,23 @@
       "dailyAt": "Her gün {{time}}'de çalıştır",
       "weekdaysAt": "Hafta içi {{time}}'de çalıştır",
       "weeklyAt": "Her {{day}} {{time}}'de çalıştır"
-    }
+    },
+    "custom": {
+      "modeLabel": "Tekrar düzeni",
+      "interval": "Aralıklarla",
+      "monthly": "Aylık",
+      "advanced": "Gelişmiş Cron ifadesi",
+      "every": "Her",
+      "unit": "Birim",
+      "minutes": "Dakika",
+      "hours": "Saat",
+      "time": "Saat",
+      "weekdays": "Haftanın günleri",
+      "monthDay": "Ayın günü",
+      "preview": "Oluşturulan Cron"
+    },
+    "searchPlaceholder": "Görev ara...",
+    "noSearchResults": "Eşleşen zamanlanmış görev yok."
   },
   "trigger": {
     "runScheduledTask": "Zamanlanmış görev çalıştır: {{name}}"

@@ -1,13 +1,7 @@
 {
-  "shared": {
-    "mentionCandidates": "Assistant and members",
-    "assistant": "Assistant",
-    "member": "Member",
-    "files": "Files"
-  },
   "welcome": {
     "title": "Olá, qual é o seu plano para hoje?",
-    "placeholder": "Envie uma mensagem, faça upload de arquivos, abra uma pasta, ou crie uma tarefa agendada...",
+    "placeholder": "Envie uma mensagem, faça upload de arquivos, abra uma pasta, crie uma tarefa agendada ou digite / para comandos...",
     "linkFolder": "Abrir Pasta",
     "newConversation": "Novo Chat",
     "selectModel": "Selecionar Modelo",
@@ -18,21 +12,14 @@
     "clearWorkspace": "Remover projeto",
     "openFolder": "Abrir Pasta",
     "none": "Nenhum",
-    "quickActionsTitle": "O que o Puxin AI pode fazer?",
+    "quickActionsTitle": "O que o AionUi pode fazer?",
     "quickActionFeedback": "Reportar Problema",
     "quickActionStar": "Gostou? Nos dê uma estrela!",
-    "skillsMarket": "Mercado de Habilidades Puxin AI",
+    "skillsMarket": "Mercado de Habilidades AionUi",
     "skillsMarketDesc": "Pesquise e ative as Habilidades da comunidade sob demanda. Configure uma vez, disponível para todos os agentes.",
     "skillsMarketDetails": "Ver Mais >>"
   },
   "history": {
-    "hideSharedConversation": "Hide conversation",
-    "sharedConversationHidden": "Shared conversation hidden",
-    "sharedConversationHideFailed": "Shared conversation could not be hidden",
-    "sharedProjectHidden": "Shared project hidden",
-    "sharedProjectHideFailed": "Shared project could not be hidden",
-    "newPrivateSharedConversation": "New conversation in this shared project",
-    "hideSharedProject": "Hide shared project",
     "recents": "Recentes",
     "noHistory": "Nenhum histórico de chat",
     "deleteTitle": "Excluir",
@@ -43,6 +30,7 @@
     "saveName": "Salvar",
     "cancelEdit": "Cancelar",
     "rename": "Renomear",
+    "createCronTask": "Criar tarefa agendada",
     "renameTitle": "Renomear Chat",
     "renamePlaceholder": "Por favor, digite um novo nome",
     "renameSuccess": "Renomeado com sucesso",
@@ -55,7 +43,11 @@
     "batchExportConfirm": "Exportar {{count}} tópicos selecionados?",
     "batchDelete": "Excluir em Lote",
     "batchDeleteConfirm": "Excluir {{count}} tópicos selecionados?",
+    "batchDeleteConfirm_one": "Excluir {{count}} tópico selecionado?",
+    "batchDeleteConfirm_other": "Excluir {{count}} tópicos selecionados?",
     "batchDeleteSuccess": "{{count}} tópicos excluídos",
+    "batchDeleteSuccess_one": "{{count}} tópico excluído",
+    "batchDeleteSuccess_other": "{{count}} tópicos excluídos",
     "batchNoSelection": "Por favor, selecione os tópicos primeiro",
     "export": "Exportar",
     "exportDialogTitle": "Exportar Tópicos",
@@ -70,12 +62,10 @@
     "exportFailed": "A exportação falhou",
     "pin": "Fixar",
     "unpin": "Desafixar",
+    "markAsUnread": "Marcar como não lida",
+    "markAsRead": "Marcar como lida",
     "pinned": "Fixado",
     "pinFailed": "Falha na operação de fixar",
-    "weixinReminder": "Lembrete do WeChat",
-    "weixinReminderEnabled": "Lembrete ativado",
-    "weixinReminderDisabled": "Lembrete desativado",
-    "weixinReminderUpdateFailed": "Falha ao atualizar o lembrete do WeChat",
     "pinnedSection": "Fixados",
     "deleteSuccess": "Excluído com sucesso",
     "deleteFailed": "Falha ao excluir",
@@ -85,25 +75,21 @@
     "earlier": "Mais Antigos",
     "projectsSection": "Projetos",
     "conversationsSection": "Conversas",
-    "renameProjectTitle": "Renomear projeto",
-    "renameProject": "Renomear projeto",
-    "renameProjectPlaceholder": "Digite o novo nome do projeto",
-    "renameProjectSuccess": "Projeto renomeado para “{{name}}”",
-    "renameProjectExists": "Já existe um projeto com este nome",
-    "renameProjectInvalid": "O nome do projeto é inválido",
-    "renameProjectInUse": "O projeto está em uso. Pare as tarefas relacionadas e tente novamente",
-    "renameProjectForce": "Forçar encerramento dos programas e renomear",
-    "renameProjectForceRisk": "Risco: programas que usam esta pasta serão encerrados à força e dados não salvos poderão ser perdidos.",
-    "renameProjectForceConfirmTitle": "Forçar encerramento dos programas em uso?",
-    "renameProjectForceConfirmContent": "Programas do usuário atual do Windows que estejam usando arquivos deste projeto serão encerrados antes de renomear a pasta. Trabalho não salvo poderá ser perdido. Esta ação não pode ser desfeita.",
-    "renameProjectForceConfirm": "Forçar encerramento e renomear",
-    "renameProjectForceFailed": "Nem todos os programas puderam ser identificados ou encerrados com segurança; a pasta não foi renomeada",
-    "renameProjectFailed": "Não foi possível renomear o projeto",
-    "removeProjectTitle": "Remover projeto",
-    "removeProject": "Remover projeto",
-    "removeProjectConfirm": "Remover o projeto \"{{name}}\"? Suas {{count}} conversa(s) também serão removidas.",
     "newConversationInProject": "Novo chat neste projeto",
-    "deleting": "Excluindo..."
+    "deleting": "Excluindo...",
+    "reorderPinned": "Arraste para reordenar a conversa fixada",
+    "forkedFrom": "Bifurcada de “{{name}}”",
+    "forkedConversation": "Conversa bifurcada",
+    "archive": "Arquivar",
+    "archiveSuccess": "Arquivado",
+    "archiveFailed": "Falha ao arquivar",
+    "batchArchive": "Batch archive",
+    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
+    "batchArchiveSuccess": "Archived {{count}} topics",
+    "archiveProject": "Archive project",
+    "archiveProjectTitle": "Archive project",
+    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
+    "archiving": "Archiving..."
   },
   "historySearch": {
     "tooltip": "Pesquisar mensagens",
@@ -330,8 +316,8 @@
       },
       "WORKSPACE_PATH_CONTAINS_WHITESPACE_RUNTIME_UNSUPPORTED": {
         "title": "Este caminho de projeto não é mais compatível com execução",
-        "body": "Esta conversa ou tarefa existente usa um caminho de projeto cujos nomes de diretório contêm espaços ou outros caracteres de espaço em branco. O Puxin AI não oferece mais suporte ao envio de mensagens em caminhos desse tipo. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco.",
-        "bodyWithPath": "O caminho de projeto existente \"{{workspacePath}}\" contém espaços ou outros caracteres de espaço em branco. O Puxin AI não oferece mais suporte ao envio de mensagens em conversas ou tarefas que usam esse caminho. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco."
+        "body": "Esta conversa ou tarefa existente usa um caminho de projeto cujos nomes de diretório contêm espaços ou outros caracteres de espaço em branco. O AionUi não oferece mais suporte ao envio de mensagens em caminhos desse tipo. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco.",
+        "bodyWithPath": "O caminho de projeto existente \"{{workspacePath}}\" contém espaços ou outros caracteres de espaço em branco. O AionUi não oferece mais suporte ao envio de mensagens em conversas ou tarefas que usam esse caminho. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco."
       },
       "UNKNOWN_UPSTREAM_ERROR": {
         "title": "O agente ou provedor upstream falhou",
@@ -339,7 +325,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -347,11 +333,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -368,10 +354,6 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
-      },
-      "USER_AGENT_RESOURCE_EXHAUSTED": {
-        "title": "Pouca memória no ambiente do usuário",
-        "body": "Uma visualização ou tarefa em segundo plano está usando muitos recursos. Feche as visualizações do Office, aguarde e tente novamente."
       }
     }
   },
@@ -455,7 +437,8 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "Terminal",
-      "explorer": "Explorador de Arquivos"
+      "explorer": "Explorador de Arquivos",
+      "browser": "Navegador"
     }
   },
   "minimap": {
@@ -463,7 +446,9 @@
     "searchHint": "Clique aqui para pesquisar palavras-chave",
     "empty": "Nenhum turno de perguntas e respostas ainda",
     "noMatch": "Nenhum conteúdo correspondente encontrado",
-    "count": "{{count}} turnos"
+    "count": "{{count}} turnos",
+    "count_one": "{{count}} turno",
+    "count_other": "{{count}} turnos"
   },
   "chat": {
     "noModelSelected": "Nenhum modelo selecionado para a sessão atual, impossível enviar mensagem",
@@ -481,6 +466,7 @@
     "switchAgentFailed": "Falha ao mudar o agente",
     "speech": {
       "recordTooltip": "Iniciar entrada de voz",
+      "recordTooltipWithShortcut": "Entrada de voz cmd+M",
       "pickFileTooltip": "Selecione um arquivo de áudio",
       "stopTooltip": "Parar gravação",
       "processing": "Transcrevendo áudio...",
@@ -516,8 +502,8 @@
     "error": "Falha ao responder à pergunta paralela."
   },
   "commandQueue": {
-    "title": "Comandos na Fila",
-    "clear": "Limpar Fila",
+    "title": "Rascunhos",
+    "clear": "Limpar rascunhos",
     "edit": "Editar",
     "editing": "Editando",
     "editPlaceholder": "Atualize o comando agendado antes que ele seja executado.",
@@ -527,15 +513,44 @@
     "reorder": "Arraste para reordenar o comando agendado",
     "remove": "Remover",
     "files": "{{count}} arquivos",
+    "files_one": "{{count}} arquivo",
+    "files_other": "{{count}} arquivos",
     "pausedAfterFailure": "O próximo comando na fila não pôde ser iniciado. Edite, reordene ou o remova para continuar.",
     "emptyInput": "Comandos na fila não podem ficar vazios.",
     "queueFull": "A fila está cheia. Remova um comando antes de adicionar mais.",
     "inputTooLong": "Este comando na fila é muito longo. Encurte-o antes de enviar.",
     "tooManyFiles": "Muitos arquivos anexados a este comando na fila.",
-    "queueTooLarge": "Os dados na fila são muito grandes para serem persistidos com segurança. Remova alguns comandos na fila primeiro."
+    "queueTooLarge": "Os dados na fila são muito grandes para serem persistidos com segurança. Remova alguns comandos na fila primeiro.",
+    "sendNow": "Enviar agora",
+    "modeToggle": "Alternar modo de envio",
+    "help": "Ajuda",
+    "helpIntro": "As mensagens enviadas enquanto a IA responde ficam aqui.",
+    "helpAuto": ": enviadas automaticamente uma a uma após cada resposta terminar.",
+    "helpManual": ": mantidas aqui sem enviar; envie cada uma com Enviar agora.",
+    "clearConfirmTitle": "Limpar a caixa de rascunhos de envio?",
+    "clearConfirmContent": "Todas as mensagens pendentes serão removidas. Isso não pode ser desfeito.",
+    "mode": {
+      "auto": "Envio automático",
+      "manual": "Envio manual"
+    },
+    "addToQueue": "Adicionar à caixa de rascunhos",
+    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
+    "midturnBlocked": "Não é possível interromper enquanto este agente está respondendo. Use Adicionar à caixa de rascunhos.",
+    "enterShortcut": "Enter",
+    "actionMode": "Choose send action",
+    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
+    "addToQueueBusyHint": "Save to Draft box and send it later."
   },
   "contextUsage": {
-    "contextUsed": "contexto usado"
+    "contextUsed": "contexto usado",
+    "tokensUsed": "{{tokens}} tokens usados",
+    "windowUnknown": "Tamanho da janela de contexto desconhecido",
+    "sessionCost": "Custo da sessão",
+    "input": "Entrada",
+    "output": "Saída",
+    "thought": "Raciocínio",
+    "cachedRead": "Leitura de cache",
+    "cachedWrite": "Escrita de cache"
   },
   "skill_generator": {
     "title": "Gerar Habilidade/Regra",
@@ -575,18 +590,27 @@
       "loaded": "Carregado",
       "failed": "Falhou",
       "unsupported": "Não compatível"
-    }
+    },
+    "selected": "MCP selecionado"
   },
   "runtimePreparing": {
     "sendboxHint": "Preparando o ambiente de execução. A primeira inicialização pode demorar um pouco mais."
   },
   "sendbox": {
-    "hint": "Digite / para comandos, @ para referenciar arquivos"
+    "hint": "Digite / para comandos, @ para referenciar arquivos, ↑/↓ para o histórico de mensagens",
+    "mediaPathFallback": "Este agente não tem suporte nativo para este tipo de arquivo; ele será enviado como um caminho de arquivo.",
+    "hintWithSessions": "/ para comandos, @ para arquivos, @@ para conversas, ↑/↓ para o histórico"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Esta solicitação não gerou nenhuma resposta visível."
+      },
+      "ACP_EMPTY_TURN_NEEDS_AUTH": {
+        "body": "Esta solicitação não produziu nenhuma resposta visível. Se você já fez login, pode ser um problema temporário de backend ou de conexão — tente novamente ou inicie uma nova conversa. Se ainda não fez login, você pode fazer login: {{hint}}."
+      },
+      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
+        "body": "Esta solicitação não produziu nenhuma resposta visível. A conversa atual pode estar se aproximando do limite de comprimento de contexto — tente novamente ou inicie uma nova conversa e tente de novo."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "Esta solicitação atingiu o limite de tokens de saída do modelo antes de produzir qualquer resposta visível."
@@ -596,8 +620,172 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "O modelo recusou esta solicitação antes de produzir qualquer resposta visível."
+      },
+      "ANTIGRAVITY_STEPS_FAILED": {
+        "body": "{{count}} etapa(s) falharam e NÃO tiveram efeito. O agy encerra esses turnos como bem-sucedidos mesmo assim, então confira o resultado real em vez da resposta."
+      },
+      "CLI_VERSION_OLDER": {
+        "body": "O {{cli}} instalado é anterior à versão verificada pelo AionUi; alguns recursos podem estar ausentes. Considere atualizar o {{cli}}. (instalado: {{reported}} / verificado pelo AionUi: {{verified}})"
+      },
+      "CLI_VERSION_NEWER": {
+        "body": "O {{cli}} instalado é posterior à versão verificada pelo AionUi. Deve continuar funcionando; relate qualquer comportamento estranho. (instalado: {{reported}} / verificado pelo AionUi: {{verified}})"
+      },
+      "CODEX_RETRYING": {
+        "body": "{{detail}} (tentativa {{attempts}}, {{elapsed}} decorridos — o provedor do agente derruba a conexão repetidamente; o AionUi está aguardando.)"
       }
     }
   },
-  "notFound": "Conversa não encontrada ou foi deletada"
+  "notFound": "Conversa não encontrada ou foi deletada",
+  "explorer": {
+    "addFolder": "Add folder to project",
+    "removeFolder": "Remove from project",
+    "attachDuplicate": "This folder is already in the project",
+    "attachOverlap": "This folder overlaps a folder already in the project",
+    "attachFailed": "Couldn't add the folder",
+    "removeFailed": "Couldn't remove the folder",
+    "contextMenu": {
+      "rename": "Renomear",
+      "newFile": "Novo arquivo",
+      "newDir": "Nova pasta",
+      "addToChat": "Adicionar ao chat",
+      "copyRelativePath": "Copiar caminho relativo",
+      "copyAbsolutePath": "Copiar caminho absoluto",
+      "refresh": "Atualizar"
+    },
+    "namePlaceholder": "Nome",
+    "deleteConfirm": "Excluir “{{name}}”? Isso não pode ser desfeito.",
+    "renameFailed": "Não foi possível renomear",
+    "newFileFailed": "Não foi possível criar o arquivo",
+    "newDirFailed": "Não foi possível criar a pasta",
+    "tabs": {
+      "files": "Arquivos",
+      "changes": "Alterações"
+    },
+    "addedToChat": "{{name}} adicionado ao chat",
+    "imported": "{{count}} arquivo(s) importado(s)",
+    "importPartialFailed": "{{copied}} copiado(s), {{failed}} com falha (conflitos de nome ou não suportados)",
+    "importFailed": "Falha ao importar os arquivos",
+    "copyNodeFailed": "Falha ao copiar",
+    "moveNodeFailed": "Falha ao mover",
+    "search": {
+      "placeholder": "Buscar arquivos por nome",
+      "searching": "Buscando…",
+      "empty": "Nenhum arquivo corresponde",
+      "limitReached": "Mostrando os primeiros {{count}} — refine a busca"
+    },
+    "scm": {
+      "notARepository": "Esta pasta não está sob controle de versão",
+      "noChanges": "Nenhuma alteração",
+      "loading": "Carregando alterações…",
+      "loadFailed": "Não foi possível carregar as alterações",
+      "refresh": "Atualizar",
+      "groups": {
+        "staged": "Alterações preparadas",
+        "unstaged": "Alterações",
+        "changes": "Alterações",
+        "blocked": "Precisa ser resolvido"
+      },
+      "sections": {
+        "repositories": "Repositórios",
+        "changes": "Alterações"
+      },
+      "viewAsTree": "Ver como árvore",
+      "viewAsList": "Ver como lista",
+      "worktree": "Árvore de trabalho",
+      "expandWorktrees": "Mostrar árvores de trabalho",
+      "collapseWorktrees": "Ocultar árvores de trabalho",
+      "state": {
+        "created": "Adicionado",
+        "modified": "Modificado",
+        "deleted": "Excluído",
+        "renamed": "Renomeado",
+        "conflicted": "Conflito",
+        "unknown": "Estado não reconhecido"
+      },
+      "badge": {
+        "created": "A",
+        "modified": "M",
+        "deleted": "D",
+        "renamed": "R",
+        "conflicted": "!",
+        "unknown": "?"
+      },
+      "conflictedHint": "Resolva este conflito fora do AionUi primeiro",
+      "opaqueHint": "Este estado vem de um backend mais novo — exibido somente leitura",
+      "degraded": "A atualização está em modo mais lento porque o índice do git não pode ser gravado",
+      "truncated": "Alterações demais para listar — mostrando apenas a primeira parte",
+      "renamedFrom": "{{from}} → {{to}}",
+      "diff": {
+        "loading": "Carregando diferenças…",
+        "failed": "Não foi possível carregar as diferenças",
+        "binary": "Arquivo binário — sem diferenças de texto",
+        "truncated": "Diferenças truncadas (arquivo grande)",
+        "empty": "Nenhuma alteração de texto",
+        "close": "Fechar diferenças"
+      },
+      "actions": {
+        "stage": "Preparar alterações",
+        "unstage": "Retirar da preparação",
+        "discard": "Descartar alterações",
+        "stageAll": "Preparar tudo",
+        "unstageAll": "Retirar tudo da preparação",
+        "blockedHint": "Resolva o conflito fora do AionUi antes de preparar ou descartar",
+        "confirmDiscardTitle": "Descartar alterações?",
+        "confirmDiscardTracked": "As edições em {{count}} arquivos serão perdidas. Isso não pode ser desfeito.",
+        "confirmDiscardUntracked": "{{count}} novos arquivos serão movidos para a lixeira.",
+        "confirmDiscardMixed": "As edições em {{tracked}} arquivo(s) serão perdidas de forma irreversível; {{untracked}} novo(s) arquivo(s) vão para a lixeira.",
+        "discardConfirmButton": "Descartar",
+        "okStage": "{{count}} arquivos preparados",
+        "okStage_one": "{{count}} arquivo preparado",
+        "okStage_other": "{{count}} arquivos preparados",
+        "okUnstage": "{{count}} arquivos retirados da preparação",
+        "okUnstage_one": "{{count}} arquivo retirado da preparação",
+        "okUnstage_other": "{{count}} arquivos retirados da preparação",
+        "okDiscard": "{{count}} arquivos descartados",
+        "okDiscard_one": "{{count}} arquivo descartado",
+        "okDiscard_other": "{{count}} arquivos descartados",
+        "partial": "{{succeeded}} de {{total}} concluídos —— {{failed}} não foi possível concluir",
+        "partialDetail": "Não concluídos: {{files}}",
+        "rejectedBlocked": "Nada foi alterado —— resolva o conflito primeiro",
+        "rejectedUnsupported": "Este repositório não suporta essa ação",
+        "rejectedFailed": "Não foi possível concluir a ação",
+        "retry": "Tentar novamente",
+        "notSent": "A solicitação não chegou ao backend — nada foi alterado. Você pode tentar novamente.",
+        "outcomeUnknown": "A conexão foi reiniciada antes da resposta — esta ação pode ou não ter sido concluída. Atualize e confira a lista de arquivos antes de tentar de novo.",
+        "allFailed": "Nenhum dos {{count}} arquivo(s) pôde ser processado",
+        "allFailed_one": "Não foi possível processar {{count}} arquivo",
+        "allFailed_other": "Nenhum dos {{count}} arquivos pôde ser processado"
+      }
+    },
+    "pathCopied": "Caminho copiado",
+    "copyFailed": "Falha ao copiar o caminho"
+  },
+  "terminal": {
+    "running": "Executando",
+    "stopped": "Parado",
+    "exited": "Saída {{code}}",
+    "stop": "Parar",
+    "truncated": "(saída anterior truncada)"
+  },
+  "emptyState": {
+    "greeting": "Olá! Diga o que você precisa e eu já começo."
+  },
+  "crossSession": {
+    "mentionAgain": "Mencionar a conversa {{name}} na caixa de mensagem",
+    "mentionAgainHint": "Clique para mencionar esta conversa na caixa de mensagem",
+    "mentionUnavailable": "Essa conversa não pode mais ser mencionada.",
+    "mentionFailed": "Não foi possível mencionar essa conversa.",
+    "fromBadge": "Da conversa {{name}}",
+    "otherWorkspace": "espaço de trabalho diferente",
+    "rateLimitedTitle": "As mensagens entre conversas podem estar em loop",
+    "rateLimited": "As mensagens automáticas entre \"{{from}}\" e \"{{to}}\" estão excepcionalmente frequentes e podem estar em loop.",
+    "stopBoth": "Parar as duas conversas",
+    "disableFeature": "Desativar mensagens entre conversas"
+  },
+  "planBar": {
+    "title": "Plano",
+    "progress": "{{completed}}/{{total}}",
+    "expand": "Expandir plano",
+    "collapse": "Recolher plano"
+  }
 }

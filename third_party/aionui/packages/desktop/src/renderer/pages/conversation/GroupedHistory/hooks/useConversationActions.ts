@@ -5,20 +5,18 @@
  */
 
 import { ipcBridge } from '@/common';
-import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import type { TChatConversation } from '@/common/config/storage';
-import { replaceRecentWorkspace } from '@/renderer/components/workspace';
+import { requestConversationSendBoxPrefill } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { refreshConversationCache } from '@/renderer/pages/conversation/utils/conversationCache';
+import { isLegacyReadOnlyConversationType } from '@/renderer/pages/conversation/utils/conversationRuntime';
 import { emitter } from '@/renderer/utils/emitter';
 import { blockMobileInputFocus, blurActiveElement } from '@/renderer/utils/ui/focus';
-import { replaceWorkspaceTime } from '@/renderer/utils/workspace/workspaceHistory';
 import { Message, Modal } from '@arco-design/web-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { isConversationPinned } from '../utils/groupingHelpers';
-import { replaceExpandedWorkspacePath } from './useWorkspaceExpansionState';
 
 type UseConversationActionsParams = {
   batchMode: boolean;
@@ -28,6 +26,9 @@ type UseConversationActionsParams = {
   setSelectedConversationIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   toggleSelectedConversation: (conversation: TChatConversation) => void;
   markAsRead: (conversation_id: string) => void;
+  markManualUnread: (conversation_id: string) => void;
+  clearManualUnread: (conversation_id: string) => void;
+  isManualUnread: (conversation_id: string) => boolean;
 };
 
 export const useConversationActions = ({
@@ -38,6 +39,9 @@ export const useConversationActions = ({
   setSelectedConversationIds,
   toggleSelectedConversation,
   markAsRead,
+  markManualUnread,
+  clearManualUnread,
+  isManualUnread,
 }: UseConversationActionsParams) => {
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [renameModalName, setRenameModalName] = useState<string>('');
@@ -91,62 +95,36 @@ export const useConversationActions = ({
     [id, navigate]
   );
 
-  const handleDeleteClick = useCallback(
-    (conversation_id: string) => {
-      Modal.confirm({
-        title: t('conversation.history.deleteTitle'),
-        content: t('conversation.history.deleteConfirm'),
-        okText: t('conversation.history.confirmDelete'),
-        cancelText: t('conversation.history.cancelDelete'),
-        okButtonProps: { status: 'warning' },
-        onOk: async () => {
-          try {
-            const success = await removeConversation(conversation_id);
-            if (success) {
-              emitter.emit('chat.history.refresh');
-              Message.success(t('conversation.history.deleteSuccess'));
-            } else {
-              Message.error(t('conversation.history.deleteFailed'));
-            }
-          } catch (error) {
-            console.error('Failed to remove conversation:', error);
-            Message.error(t('conversation.history.deleteFailed'));
-          }
-        },
-        style: { borderRadius: '12px' },
-        alignCenter: true,
-        getPopupContainer: () => document.body,
-      });
-    },
-    [removeConversation, t]
-  );
-
-  const handleBatchDelete = useCallback(() => {
+  const handleBatchArchive = useCallback(() => {
     if (selectedConversationIds.size === 0) {
       Message.warning(t('conversation.history.batchNoSelection'));
       return;
     }
 
     Modal.confirm({
-      title: t('conversation.history.batchDelete'),
-      content: t('conversation.history.batchDeleteConfirm', { count: selectedConversationIds.size }),
-      okText: t('conversation.history.confirmDelete'),
-      cancelText: t('conversation.history.cancelDelete'),
-      okButtonProps: { status: 'warning' },
+      title: t('conversation.history.batchArchive'),
+      content: t('conversation.history.batchArchiveConfirm', { count: selectedConversationIds.size }),
+      okText: t('conversation.history.batchArchive'),
+      cancelText: t('common.cancel'),
       onOk: async () => {
+        // No batch endpoint exists; archive each selected conversation on its
+        // own. The active list (both read models) drops archived rows, so the
+        // refresh clears the selection's rows and the archive page picks them up.
         const selectedIds = Array.from(selectedConversationIds);
         try {
-          const results = await Promise.all(selectedIds.map((conversation_id) => removeConversation(conversation_id)));
-          const successCount = results.filter(Boolean).length;
+          const results = await Promise.allSettled(
+            selectedIds.map((item_id) => ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id }))
+          );
+          const successCount = results.filter((r) => r.status === 'fulfilled').length;
           emitter.emit('chat.history.refresh');
           if (successCount > 0) {
-            Message.success(t('conversation.history.batchDeleteSuccess', { count: successCount }));
+            Message.success(t('conversation.history.batchArchiveSuccess', { count: successCount }));
           } else {
-            Message.error(t('conversation.history.deleteFailed'));
+            Message.error(t('conversation.history.archiveFailed'));
           }
         } catch (error) {
-          console.error('Failed to batch delete conversations:', error);
-          Message.error(t('conversation.history.deleteFailed'));
+          console.error('Failed to batch archive conversations:', error);
+          Message.error(t('conversation.history.archiveFailed'));
         } finally {
           setSelectedConversationIds(new Set());
           onBatchModeChange?.(false);
@@ -156,7 +134,7 @@ export const useConversationActions = ({
       alignCenter: true,
       getPopupContainer: () => document.body,
     });
-  }, [onBatchModeChange, removeConversation, selectedConversationIds, t, setSelectedConversationIds]);
+  }, [onBatchModeChange, selectedConversationIds, t, setSelectedConversationIds]);
 
   const handleEditStart = useCallback((conversation: TChatConversation) => {
     setRenameModalId(conversation.id);
@@ -227,172 +205,116 @@ export const useConversationActions = ({
     [t]
   );
 
-  const handleToggleWeixinReminder = useCallback(
-    async (conversation: TChatConversation) => {
-      const enabled = (conversation.extra as Record<string, unknown> | undefined)?.weixinReminderEnabled === true;
-      try {
-        const success = await ipcBridge.conversation.update.invoke({
-          id: conversation.id,
-          updates: {
-            extra: {
-              weixinReminderEnabled: !enabled,
-            } as Partial<TChatConversation['extra']>,
-          } as Partial<TChatConversation>,
-          merge_extra: true,
-        });
-        if (!success) {
-          Message.error(t('conversation.history.weixinReminderUpdateFailed'));
-          return;
-        }
-        await refreshConversationCache(conversation.id);
-        emitter.emit('chat.history.refresh');
-        setDropdownVisibleId(null);
-        Message.success(
-          t(enabled ? 'conversation.history.weixinReminderDisabled' : 'conversation.history.weixinReminderEnabled')
-        );
-      } catch (error) {
-        console.error('Failed to toggle WeChat reminder:', error);
-        Message.error(t('conversation.history.weixinReminderUpdateFailed'));
-      }
-    },
-    [t]
-  );
-
   const handleMenuVisibleChange = useCallback((conversation_id: string, visible: boolean) => {
     setDropdownVisibleId(visible ? conversation_id : null);
   }, []);
+
+  const handleToggleManualUnread = useCallback(
+    (conversation: TChatConversation) => {
+      if (isManualUnread(conversation.id)) {
+        clearManualUnread(conversation.id);
+      } else {
+        markManualUnread(conversation.id);
+      }
+    },
+    [clearManualUnread, isManualUnread, markManualUnread]
+  );
 
   const handleOpenMenu = useCallback((conversation: TChatConversation) => {
     setDropdownVisibleId(conversation.id);
   }, []);
 
-  /**
-   * Remove project state — rendered via AionModal in the GroupedHistory component.
-   * Uses project's design system: AionModal component with danger-styled action button.
-   */
-  const [removeProjectTarget, setRemoveProjectTarget] = useState<{
-    name: string;
-    conversations: TChatConversation[];
-  } | null>(null);
-  const [removeProjectLoading, setRemoveProjectLoading] = useState(false);
+  const handleCreateCronTask = useCallback(
+    (conversation: TChatConversation) => {
+      const prefillPrompt = t('cron.status.defaultPrompt');
+      setDropdownVisibleId(null);
 
-  const [renameProjectTarget, setRenameProjectTarget] = useState<{
-    name: string;
-    workspace: string;
-    conversations: TChatConversation[];
-  } | null>(null);
-  const [renameProjectName, setRenameProjectName] = useState('');
-  const [renameProjectLoading, setRenameProjectLoading] = useState(false);
-  const [renameProjectForce, setRenameProjectForce] = useState(false);
-
-  const handleRenameProject = useCallback(
-    (projectName: string, workspace: string, conversations: TChatConversation[]) => {
-      setRenameProjectTarget({ name: projectName, workspace, conversations });
-      setRenameProjectName(projectName);
-      setRenameProjectForce(false);
-    },
-    []
-  );
-
-  const handleRenameProjectCancel = useCallback(() => {
-    if (renameProjectLoading) return;
-    setRenameProjectTarget(null);
-    setRenameProjectName('');
-    setRenameProjectForce(false);
-  }, [renameProjectLoading]);
-
-  const performProjectRename = useCallback(
-    async (force: boolean) => {
-      const nextName = renameProjectName.trim();
-      if (!renameProjectTarget || !nextName || nextName === renameProjectTarget.name) return;
-      setRenameProjectLoading(true);
-      try {
-        const result = await ipcBridge.portal.renameProject.invoke({
-          path: renameProjectTarget.workspace,
-          name: nextName,
-          force,
+      if (isLegacyReadOnlyConversationType(conversation.type)) {
+        void navigate('/guid', {
+          state: {
+            prefillPrompt,
+            preservePrefillDraft: true,
+            focusPrefill: true,
+          },
         });
-        replaceRecentWorkspace(result.old_path, result.new_path);
-        replaceWorkspaceTime(result.old_path, result.new_path);
-        replaceExpandedWorkspacePath(result.old_path, result.new_path);
-        await Promise.all(
-          renameProjectTarget.conversations.map((conversation) => refreshConversationCache(conversation.id))
-        );
-        emitter.emit('chat.history.refresh');
-        setRenameProjectTarget(null);
-        setRenameProjectName('');
-        setRenameProjectForce(false);
-        Message.success(t('conversation.history.renameProjectSuccess', { name: nextName }));
-      } catch (error) {
-        console.error('Failed to rename project:', error);
-        const key = isBackendHttpError(error)
-          ? error.code === 'PROJECT_EXISTS'
-            ? 'conversation.history.renameProjectExists'
-            : error.code === 'PROJECT_IN_USE'
-              ? 'conversation.history.renameProjectInUse'
-              : error.code === 'PROJECT_FORCE_STOP_FAILED'
-                ? 'conversation.history.renameProjectForceFailed'
-                : error.code === 'INVALID_PROJECT_NAME'
-                  ? 'conversation.history.renameProjectInvalid'
-                  : 'conversation.history.renameProjectFailed'
-          : 'conversation.history.renameProjectFailed';
-        Message.error(t(key));
-      } finally {
-        setRenameProjectLoading(false);
+      } else {
+        requestConversationSendBoxPrefill(conversation.id, prefillPrompt);
+        if (id !== conversation.id) {
+          void navigate(`/conversation/${conversation.id}`);
+        }
       }
+
+      onSessionClick?.();
     },
-    [renameProjectName, renameProjectTarget, t]
+    [id, navigate, onSessionClick, t]
   );
 
-  const handleRenameProjectConfirm = useCallback(async () => {
-    if (!renameProjectForce) {
-      await performProjectRename(false);
-      return;
-    }
-    Modal.confirm({
-      title: t('conversation.history.renameProjectForceConfirmTitle'),
-      content: t('conversation.history.renameProjectForceConfirmContent'),
-      okText: t('conversation.history.renameProjectForceConfirm'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { status: 'danger' },
-      onOk: () => performProjectRename(true),
-    });
-  }, [performProjectRename, renameProjectForce, t]);
+  /**
+   * Archive-project state — rendered via AionModal in the GroupedHistory component.
+   * The left panel groups conversations by workspace folder (not by a bound
+   * project record), so there is no project id to hand the `archiveProject`
+   * endpoint. Archiving the group therefore archives each conversation in it —
+   * the same soft move as the per-row and batch archive actions.
+   */
+  const [archiveProjectTarget, setArchiveProjectTarget] = useState<{
+    name: string;
+    conversations: TChatConversation[];
+  } | null>(null);
+  const [archiveProjectLoading, setArchiveProjectLoading] = useState(false);
 
-  const handleRemoveProject = useCallback((projectName: string, conversations: TChatConversation[]) => {
+  const handleArchiveProject = useCallback((projectName: string, conversations: TChatConversation[]) => {
     if (conversations.length === 0) return;
-    setRemoveProjectTarget({ name: projectName, conversations });
+    setArchiveProjectTarget({ name: projectName, conversations });
   }, []);
 
-  const handleRemoveProjectCancel = useCallback(() => {
-    if (removeProjectLoading) return;
-    setRemoveProjectTarget(null);
-  }, [removeProjectLoading]);
+  const handleArchiveProjectCancel = useCallback(() => {
+    if (archiveProjectLoading) return;
+    setArchiveProjectTarget(null);
+  }, [archiveProjectLoading]);
 
-  const handleRemoveProjectConfirm = useCallback(async () => {
-    if (!removeProjectTarget) return;
-    setRemoveProjectLoading(true);
+  const handleArchiveProjectConfirm = useCallback(async () => {
+    if (!archiveProjectTarget) return;
+    setArchiveProjectLoading(true);
     try {
-      const results = await Promise.all(removeProjectTarget.conversations.map((c) => removeConversation(c.id)));
-      const successCount = results.filter(Boolean).length;
+      const results = await Promise.allSettled(
+        archiveProjectTarget.conversations.map((c) =>
+          ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: c.id })
+        )
+      );
+      const successCount = results.filter((r) => r.status === 'fulfilled').length;
       emitter.emit('chat.history.refresh');
       if (successCount > 0) {
-        Message.success(
-          t('conversation.history.batchDeleteSuccess', {
-            count: successCount,
-          })
-        );
+        Message.success(t('conversation.history.batchArchiveSuccess', { count: successCount }));
       } else {
-        Message.error(t('conversation.history.deleteFailed'));
+        Message.error(t('conversation.history.archiveFailed'));
       }
-      setRemoveProjectTarget(null);
+      setArchiveProjectTarget(null);
     } catch (error) {
-      console.error('Failed to remove project:', error);
-      Message.error(t('conversation.history.deleteFailed'));
+      console.error('Failed to archive project:', error);
+      Message.error(t('conversation.history.archiveFailed'));
     } finally {
-      setRemoveProjectLoading(false);
+      setArchiveProjectLoading(false);
     }
-  }, [removeProjectTarget, removeConversation, t]);
+  }, [archiveProjectTarget, t]);
+
+  const handleArchive = useCallback(
+    async (conversation: TChatConversation) => {
+      // Archiving moves the conversation into the archived slice (the backend
+      // also unpins it). Both the new sidebar read model and the legacy list
+      // exclude archived rows, so the refresh drops the row from the active
+      // list on its own; the archived management page picks it up.
+      setDropdownVisibleId(null);
+      try {
+        await ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: conversation.id });
+        emitter.emit('chat.history.refresh');
+        Message.success(t('conversation.history.archiveSuccess'));
+      } catch (error) {
+        console.error('Failed to archive conversation:', error);
+        Message.error(t('conversation.history.archiveFailed'));
+      }
+    },
+    [t]
+  );
 
   return {
     renameModalVisible,
@@ -401,28 +323,20 @@ export const useConversationActions = ({
     renameLoading,
     dropdownVisibleId,
     handleConversationClick,
-    handleDeleteClick,
-    handleBatchDelete,
+    handleBatchArchive,
+    handleArchive,
     handleEditStart,
     handleRenameConfirm,
     handleRenameCancel,
     handleTogglePin,
-    handleToggleWeixinReminder,
     handleMenuVisibleChange,
     handleOpenMenu,
-    handleRemoveProject,
-    removeProjectTarget,
-    removeProjectLoading,
-    handleRemoveProjectCancel,
-    handleRemoveProjectConfirm,
-    renameProjectTarget,
-    renameProjectName,
-    setRenameProjectName,
-    renameProjectForce,
-    setRenameProjectForce,
-    renameProjectLoading,
-    handleRenameProject,
-    handleRenameProjectCancel,
-    handleRenameProjectConfirm,
+    handleToggleManualUnread,
+    handleCreateCronTask,
+    handleArchiveProject,
+    archiveProjectTarget,
+    archiveProjectLoading,
+    handleArchiveProjectCancel,
+    handleArchiveProjectConfirm,
   };
 };

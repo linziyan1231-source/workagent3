@@ -8,14 +8,13 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
 
 // Import KaTeX CSS to make it available in the document
 import 'katex/dist/katex.min.css';
 
 import { openExternalUrl } from '@/renderer/utils/platform';
+import { parseHttpUrl } from '@/renderer/utils/url';
+import { useOptionalPreviewContext } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
 import classNames from 'classnames';
 import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,10 +23,9 @@ import LocalImageView from '@renderer/components/media/LocalImageView';
 import CodeBlock from './CodeBlock';
 import LocalFileLink from './LocalFileLink';
 import ShadowView from './ShadowView';
+import { MARKDOWN_REMARK_PLUGINS, MarkdownTable, MarkdownTd } from './markdownComponents';
 import { resolveLocalFileLinkPath, resolveLocalFileLinkReference } from './markdownUtils';
 import type { LocalFileLinkReference } from './markdownUtils';
-
-const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks];
 
 const isLocalFilePath = (src: string): boolean => {
   if (src.startsWith('http://') || src.startsWith('https://')) return false;
@@ -49,6 +47,7 @@ type MarkdownViewProps = {
 const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
   ({ hiddenCodeCopyButton, codeStyle, className, onRef, onLocalFileLink, allowHtml, children: childrenProp }) => {
     const { t } = useTranslation();
+    const preview = useOptionalPreviewContext();
 
     const normalizedChildren = useMemo(() => {
       if (typeof childrenProp === 'string') {
@@ -65,11 +64,18 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         e.stopPropagation();
         const href = (e.currentTarget as HTMLAnchorElement).href;
         if (!href) return;
+        // Prefer the built-in browser tab for http(s) links; fall back to the
+        // system browser for other schemes or when no Preview panel is available.
+        const httpUrl = parseHttpUrl(href);
+        if (httpUrl && preview) {
+          preview.openBrowserTab(httpUrl);
+          return;
+        }
         openExternalUrl(href).catch((error: unknown) => {
           console.error(t('messages.openLinkFailed'), error);
         });
       },
-      [t]
+      [t, preview]
     );
 
     // Memoize components so React preserves component identity across re-renders.
@@ -87,6 +93,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
             {...(props as Parameters<typeof CodeBlock>[0])}
             codeStyle={codeStyle}
             hiddenCodeCopyButton={hiddenCodeCopyButton}
+            diagramPanZoom
           />
         ),
         a: ({ node: _node, ...rest }: Record<string, unknown>) => {
@@ -104,37 +111,15 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
             <a {...anchorProps} href={anchorProps.href} target='_blank' rel='noreferrer' onClick={handleLinkClick} />
           );
         },
-        table: ({ node: _node, ...rest }: Record<string, unknown>) => (
-          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-            <table
-              {...(rest as React.TableHTMLAttributes<HTMLTableElement>)}
-              style={{
-                ...(rest as { style?: React.CSSProperties }).style,
-                borderCollapse: 'collapse',
-                border: '1px solid var(--bg-3)',
-                minWidth: '100%',
-              }}
-            />
-          </div>
-        ),
-        td: ({ node: _node, ...rest }: Record<string, unknown>) => (
-          <td
-            {...(rest as React.TdHTMLAttributes<HTMLTableCellElement>)}
-            style={{
-              ...(rest as { style?: React.CSSProperties }).style,
-              padding: '8px',
-              border: '1px solid var(--bg-3)',
-              minWidth: '120px',
-            }}
-          />
-        ),
+        table: MarkdownTable,
+        td: MarkdownTd,
         img: ({ node: _node, ...rest }: Record<string, unknown>) => {
           const imgProps = rest as React.ImgHTMLAttributes<HTMLImageElement>;
           if (isLocalFilePath(imgProps.src || '')) {
             const src = decodeURIComponent(imgProps.src || '');
             return <LocalImageView src={src} alt={imgProps.alt || ''} className={imgProps.className} />;
           }
-          return <img {...imgProps} />;
+          return <img {...imgProps} alt={imgProps.alt || ''} />;
         },
       }),
       [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink]
@@ -147,7 +132,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         <ShadowView>
           <div ref={onRef} className='markdown-shadow-body'>
             <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
               rehypePlugins={rehypePlugins}
               components={components}
               urlTransform={(url) => (resolveLocalFileLinkPath(url) ? url : defaultUrlTransform(url))}

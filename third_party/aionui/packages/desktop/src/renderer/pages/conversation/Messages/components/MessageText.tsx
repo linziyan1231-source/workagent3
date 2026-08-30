@@ -5,26 +5,29 @@
  */
 
 import type { IMessageText } from '@/common/chat/chatLib';
-import { ipcBridge } from '@/common';
-import { AIONUI_FILES_MARKER } from '@/common/config/constants';
+import { parseFileMarker, resolveMessageFilePath } from './fileMarker';
+import SessionMentionAction from './SessionMentionAction';
+import { parseSessionMessageBlock, parseSessionsBlock } from './sessionMarkers';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useLocalFilePreview } from '@/renderer/pages/conversation/Preview/hooks/useLocalFilePreview';
 import { iconColors } from '@/renderer/styles/colors';
-import { Alert, Button, Input, Message, Modal, Tooltip } from '@arco-design/web-react';
-import { BranchOne, Copy, Edit } from '@icon-park/react';
+import { Alert, Message, Tooltip } from '@arco-design/web-react';
+import { Copy } from '@icon-park/react';
 import classNames from 'classnames';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import { copyText } from '@/renderer/utils/ui/clipboard';
 import CollapsibleContent from '@renderer/components/chat/CollapsibleContent';
 import FilePreview from '@renderer/components/media/FilePreview';
 import HorizontalFileList from '@renderer/components/media/HorizontalFileList';
 import MarkdownView from '@renderer/components/Markdown';
 import { stripThinkTags, hasThinkTags } from '@renderer/utils/chat/thinkTagFilter';
+import { buildTurnClipboardText } from '@renderer/utils/chat/turnCopy';
 import { stripSkillSuggest, hasSkillSuggest } from '@renderer/utils/chat/skillSuggestParser';
-import { useConfig } from '@/renderer/hooks/config/useConfig';
+import { isForkEnabled } from '@/common/chat/forkConversation';
+import { useForkConversation } from '@/renderer/hooks/chat/useForkConversation';
+import ForkBranchIcon from '@renderer/components/base/ForkBranchIcon';
 
 /**
  * Format a timestamp for message display.
@@ -51,47 +54,30 @@ export const formatMessageTime = (timestamp: number): string => {
 import MessageCronBadge from './MessageCronBadge';
 import { resolveAgentLogo, useAgentLogos } from '@/renderer/utils/model/agentLogo';
 import TeammateMessageAvatar from './TeammateMessageAvatar';
+import { useTeammateColor } from '@/renderer/pages/team/identity/TeamIdentityContext';
 
 const CODE_STYLE = { marginTop: 4, marginBlock: 4 };
 
-const parseFileMarker = (content: string) => {
-  const markerIndex = content.indexOf(AIONUI_FILES_MARKER);
-  if (markerIndex === -1) {
-    return { text: content, files: [] as string[] };
-  }
-  const text = content.slice(0, markerIndex).trimEnd();
-  const afterMarker = content.slice(markerIndex + AIONUI_FILES_MARKER.length).trim();
-  const files = afterMarker
-    ? afterMarker
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-    : [];
-  return { text, files };
+type TeamContextResetNotice = {
+  kind: 'context_reset';
+  member_name: string;
+  runtime_status: 'ready' | 'failed';
 };
 
-const isAbsoluteMessageFilePath = (file_path: string): boolean =>
-  file_path.startsWith('/') || /^[A-Za-z]:/.test(file_path);
-
-export const resolveMessageFilePath = (file_path: string, workspace?: string): string => {
-  if (!file_path || isAbsoluteMessageFilePath(file_path) || !workspace) {
-    return file_path;
+export const parseTeamContextResetNotice = (content: string): TeamContextResetNotice | null => {
+  try {
+    const value = JSON.parse(content) as Record<string, unknown>;
+    if (
+      value.kind === 'context_reset' &&
+      typeof value.member_name === 'string' &&
+      (value.runtime_status === 'ready' || value.runtime_status === 'failed')
+    ) {
+      return value as TeamContextResetNotice;
+    }
+  } catch {
+    // Ordinary teammate/system text is not a semantic notice.
   }
-
-  const normalizedWorkspace = workspace.replace(/[\\/]+$/, '').replace(/\\/g, '/');
-  const normalizedFilePath = file_path.replace(/^\.?[\\/]+/, '').replace(/\\/g, '/');
-  return `${normalizedWorkspace}/${normalizedFilePath}`.replace(/\/+/g, '/');
-};
-
-export const resolveSharedAssistantName = (
-  agentName?: string,
-  backend?: string,
-  assistantId?: string
-): string | undefined => {
-  if (agentName?.trim()) return agentName;
-  if (backend === 'codex') return 'Codex CLI';
-  if (backend === 'kimi') return 'Kimi';
-  return assistantId || backend;
+  return null;
 };
 
 const useFormatContent = (content: string) => {
@@ -109,7 +95,15 @@ const useFormatContent = (content: string) => {
   }, [content]);
 };
 
-const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = ({ message, showCopyRow = true }) => {
+const MessageText: React.FC<{
+  message: IMessageText;
+  showCopyRow?: boolean;
+  isLastMessage?: boolean;
+  hasForkAnchor?: boolean;
+  /** All text segments of this message's turn, in order — the copy button
+   * copies the whole reply, not just the segment it happens to sit on. */
+  turnTexts?: string[];
+}> = ({ message, showCopyRow = true, isLastMessage = false, hasForkAnchor = false, turnTexts }) => {
   const logos = useAgentLogos();
   // Filter think tags from content before rendering
   // 在渲染前过滤 think 标签
@@ -128,24 +122,50 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
     return content;
   }, [message.content.content]);
 
-  const { text, files } = parseFileMarker(contentToRender);
-  const { data, json } = useFormatContent(text);
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [showCopyAlert, setShowCopyAlert] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editContent, setEditContent] = useState('');
-  const [forking, setForking] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [forkMode] = useConfig('conversation.forkMode');
-  const conversationContext = useConversationContextSafe();
   const isUserMessage = message.position === 'right';
-  const isSharedAssistantMessage =
-    Boolean(conversationContext?.shared) && message.position === 'left' && message.content.teammateMessage !== true;
-  const isTeammateMessage =
-    message.position === 'left' && (message.content.teammateMessage === true || isSharedAssistantMessage);
-  const isParticipantMessage = message.content.teammateMessage === true || isSharedAssistantMessage;
-  const shouldRenderPlainText = isUserMessage;
+  // Delivered-but-not-yet-consumed marker for messages sent mid-turn to a
+  // supporting backend (claude/codex). The message already reached the
+  // server (it's rendered); this only answers "has the agent picked it up
+  // yet" — an IM delivered/read style badge, never a ghost/dashed bubble.
+  const isPendingDelivery = isUserMessage && message.status === 'pending';
+  const isTeammateMessage = message.position === 'left' && message.content.teammateMessage === true;
+  const senderName = message.content.senderName;
+  const senderAgentType = message.content.senderAgentType;
+  const senderConversationId = message.content.senderConversationId;
+  const { text, files } = useMemo(
+    () => parseFileMarker(contentToRender, isUserMessage),
+    [contentToRender, isUserMessage]
+  );
+  // Cross-session markers. Both live on USER messages: the sender-side
+  // `[[AION_SESSIONS]]` block is appended to the user's own message, and a
+  // delivery is persisted as a user message too. Not parsing them would show
+  // raw marker text in a bubble.
+  const { text: textWithoutMentions, sessions: mentionedSessions } = useMemo(
+    () => (isUserMessage ? parseSessionsBlock(text) : { text, sessions: [] }),
+    [isUserMessage, text]
+  );
+  const { text: visibleText, source: deliverySource } = useMemo(
+    () => (isUserMessage ? parseSessionMessageBlock(textWithoutMentions) : { text: textWithoutMentions, source: null }),
+    [isUserMessage, textWithoutMentions]
+  );
+  const contextResetNotice = useMemo(
+    () => (isTeammateMessage && senderName === 'team_system' ? parseTeamContextResetNotice(text) : null),
+    [isTeammateMessage, senderName, text]
+  );
+  const renderedText = contextResetNotice
+    ? t(
+        contextResetNotice.runtime_status === 'ready'
+          ? 'team.systemNotice.contextResetSuccess'
+          : 'team.systemNotice.contextResetRuntimeFailed',
+        { memberName: contextResetNotice.member_name }
+      )
+    : visibleText;
+  const { data, json } = useFormatContent(renderedText);
+  const shouldRenderPlainText = isUserMessage || Boolean(contextResetNotice);
+  const conversationContext = useConversationContextSafe();
+  const forkConversation = useForkConversation(conversationContext?.conversation_id);
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
   const handleLocalFileLink = useLocalFilePreview(conversationContext?.workspace);
@@ -153,13 +173,6 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
     () => files.map((file_path) => resolveMessageFilePath(file_path, conversationContext?.workspace)),
     [conversationContext?.workspace, files]
   );
-  const canForkConversation =
-    isUserMessage &&
-    conversationContext?.type === 'acp' &&
-    (conversationContext.backend === 'codex' || conversationContext.backend === 'kimi') &&
-    !conversationContext.cron_job_id &&
-    !conversationContext.shared &&
-    !conversationContext.hideSendBox;
 
   // 过滤空内容，避免渲染空DOM
   if (!message.content.content || (typeof message.content.content === 'string' && !message.content.content.trim())) {
@@ -167,9 +180,11 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
   }
 
   const handleCopy = () => {
-    const baseText = shouldRenderPlainText ? text : json ? JSON.stringify(data, null, 2) : text;
+    const baseText = shouldRenderPlainText ? renderedText : json ? JSON.stringify(data, null, 2) : renderedText;
     const fileList = files.length ? `Files:\n${files.map((path) => `- ${path}`).join('\n')}\n\n` : '';
-    const textToCopy = fileList + baseText;
+    // An AI turn split by tool calls / thinking stores several text messages;
+    // the row sits on the last one but must copy the whole reply.
+    const textToCopy = turnTexts?.length ? buildTurnClipboardText(turnTexts) : fileList + baseText;
     copyText(textToCopy)
       .then(() => {
         setShowCopyAlert(true);
@@ -178,40 +193,6 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
       .catch(() => {
         Message.error(t('common.copyFailed'));
       });
-  };
-
-  const forkFromMessage = async (replacementContent?: string) => {
-    if (!conversationContext || forking || editing) return;
-    const isEdit = replacementContent !== undefined;
-    if (isEdit) {
-      setEditing(true);
-    } else {
-      setForking(true);
-    }
-    try {
-      const result = await ipcBridge.conversation.fork.invoke({
-        conversation_id: conversationContext.conversation_id,
-        message_id: message.id,
-        replacement_content: replacementContent,
-      });
-      setEditOpen(false);
-      Message.success(t(isEdit ? 'messages.editSuccess' : 'messages.forkSuccess'));
-      await navigate(`/conversation/${result.conversation.id}`);
-    } catch (error) {
-      console.error('Conversation fork failed', error);
-      Message.error(t(isEdit ? 'messages.editFailed' : 'messages.forkFailed'));
-    } finally {
-      if (isEdit) {
-        setEditing(false);
-      } else {
-        setForking(false);
-      }
-    }
-  };
-
-  const openEdit = () => {
-    setEditContent(text);
-    setEditOpen(true);
   };
 
   const copyButton = (
@@ -226,39 +207,92 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
     </Tooltip>
   );
 
+  // Fork entry point: only when the agent declares the capability, and only on
+  // messages the backend can actually fork at (any message for at_turn/codex,
+  // the last message otherwise) — see `isForkEnabled`.
+  const showForkButton = isForkEnabled(conversationContext?.forkCapability, {
+    isLastMessage,
+    hasTurnAnchor: hasForkAnchor,
+  });
+  const forkButton = showForkButton ? (
+    <Tooltip content={t('messages.fork.action')}>
+      <div
+        className='p-4px rd-4px cursor-pointer hover:bg-3 transition-colors opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'
+        onClick={() => void forkConversation(message.msg_id ?? message.id)}
+        style={{ lineHeight: 0 }}
+        data-testid='message-fork-button'
+      >
+        <ForkBranchIcon size={16} fill={iconColors.secondary} />
+      </div>
+    </Tooltip>
+  ) : null;
+
   const cronMeta = message.content.cronMeta;
-  const senderName =
-    message.content.senderName ||
-    (isSharedAssistantMessage
-      ? resolveSharedAssistantName(
-          conversationContext?.agentName,
-          conversationContext?.backend,
-          conversationContext?.shared?.assistant_id
-        )
-      : undefined);
-  const senderUserId = message.content.senderUserId;
-  const senderAgentType =
-    message.content.senderAgentType || (isSharedAssistantMessage ? conversationContext?.backend : undefined);
-  const senderConversationId = message.content.senderConversationId;
+  const displaySenderName = senderName === 'team_system' ? t('team.systemNotice.sender') : senderName;
   const fallbackBackendLogo = senderAgentType ? resolveAgentLogo(logos, { backend: senderAgentType }) : null;
+  // 团队 teammate 消息：按发送者会话取身份色，做气泡左色条 + 彩色发送者名；非团队场景为 undefined。
+  const teammateColor = useTeammateColor(isTeammateMessage ? senderConversationId : undefined);
 
   return (
     <>
       <div className={classNames('min-w-0 flex flex-col group', isUserMessage ? 'items-end' : 'items-start')}>
         {cronMeta && <MessageCronBadge meta={cronMeta} />}
-        {isParticipantMessage && senderName && (
-          <div className={classNames('flex items-center gap-6px mb-4px', { 'self-end': isUserMessage })}>
+        {isTeammateMessage && displaySenderName && (
+          <div className='flex items-center gap-6px mb-4px'>
             <TeammateMessageAvatar
-              senderName={senderName}
-              senderUserId={senderUserId}
+              senderName={displaySenderName}
               senderConversationId={senderConversationId}
               backendLogo={fallbackBackendLogo}
             />
-            <span className='text-12px text-t-secondary'>{senderName}</span>
+            <span
+              className='text-12px'
+              style={teammateColor ? { color: teammateColor } : { color: 'var(--text-secondary)' }}
+            >
+              {displaySenderName}
+            </span>
+          </div>
+        )}
+        {deliverySource && (
+          <div
+            className={classNames('mb-4px flex items-center gap-4px text-12px text-t-secondary', {
+              'self-end': isUserMessage,
+            })}
+          >
+            <SessionMentionAction
+              id={deliverySource.fromId}
+              name={deliverySource.fromName || deliverySource.fromId}
+              label={t('conversation.crossSession.fromBadge', {
+                name: deliverySource.fromName || deliverySource.fromId,
+                defaultValue: 'From conversation {{name}}',
+              })}
+            />
+            {deliverySource.workspace && deliverySource.workspace !== 'same' && (
+              <span
+                className='px-4px rounded-4px'
+                style={{ background: 'var(--color-fill-2)' }}
+                title={deliverySource.workspace}
+              >
+                {t('conversation.crossSession.otherWorkspace', { defaultValue: 'different workspace' })}
+              </span>
+            )}
+          </div>
+        )}
+        {mentionedSessions.length > 0 && (
+          <div className={classNames('mb-4px flex flex-wrap gap-4px', { 'self-end': isUserMessage })}>
+            {mentionedSessions.map((session) => (
+              <SessionMentionAction
+                key={session.id}
+                id={session.id}
+                name={session.name}
+                label={`@@${session.name}`}
+                title={session.workspace}
+                chip
+              />
+            ))}
           </div>
         )}
         {files.length > 0 && (
-          <div className={classNames('mt-6px', { 'self-end': isUserMessage })}>
+          <div className={classNames('mt-6px min-w-0 max-w-full', { 'self-end': isUserMessage })}>
             {resolvedFiles.length === 1 ? (
               <div className='flex items-center'>
                 <FilePreview path={resolvedFiles[0]} onRemove={() => undefined} readonly />
@@ -282,14 +316,17 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
             ...(isUserMessage || cronMeta
               ? { borderRadius: '8px 0 8px 8px', color: 'var(--text-primary)' }
               : isTeammateMessage
-                ? { borderRadius: '0 8px 8px 8px' }
+                ? {
+                    borderRadius: '0 8px 8px 8px',
+                    ...(teammateColor ? { borderLeft: `3px solid ${teammateColor}` } : {}),
+                  }
                 : undefined),
           }}
         >
           {/* JSON 内容使用折叠组件 Use CollapsibleContent for JSON content */}
           {shouldRenderPlainText ? (
-            <div className='whitespace-pre-wrap break-words' data-testid='message-text-content'>
-              {text}
+            <div className='whitespace-pre-wrap [overflow-wrap:anywhere]' data-testid='message-text-content'>
+              {renderedText}
             </div>
           ) : json ? (
             <CollapsibleContent maxHeight={200} defaultCollapsed={true}>
@@ -308,42 +345,23 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
             </div>
           )}
         </div>
+        {isPendingDelivery && (
+          <div className='text-12px text-t-secondary mt-4px select-none' data-testid='message-status-badge'>
+            {t('messages.delivery.pending', { defaultValue: 'Unread' })}
+          </div>
+        )}
         {/* Hover-revealed copy + timestamp row. Mobile has no hover affordance,
             so we drop the row entirely — system-level long-press still copies.
             For AI replies split across several text messages, only the last text
             of the turn shows this row (showCopyRow); user messages always do. */}
         {!isMobile && showCopyRow && (
           <div
-            className={classNames(
-              'h-0 mt-0 overflow-hidden opacity-0 pointer-events-none flex items-center gap-8px transition-all',
-              'group-hover:h-32px group-hover:mt-4px group-hover:opacity-100 group-hover:pointer-events-auto',
-              'focus-within:h-32px focus-within:mt-4px focus-within:opacity-100 focus-within:pointer-events-auto',
-              {
-                'flex-row-reverse': isUserMessage,
-              }
-            )}
+            className={classNames('h-32px flex items-center mt-4px gap-8px', {
+              'flex-row-reverse': isUserMessage,
+            })}
           >
             {copyButton}
-            {canForkConversation && (
-              <Tooltip content={t(forkMode === 'fork_only' ? 'messages.fork' : 'messages.edit')}>
-                <Button
-                  type='text'
-                  size='mini'
-                  loading={forkMode === 'fork_only' ? forking : editing}
-                  disabled={forking || editing}
-                  icon={
-                    forkMode === 'fork_only' ? (
-                      <BranchOne theme='outline' size='16' fill={iconColors.secondary} />
-                    ) : (
-                      <Edit theme='outline' size='16' fill={iconColors.secondary} />
-                    )
-                  }
-                  aria-label={t(forkMode === 'fork_only' ? 'messages.fork' : 'messages.edit')}
-                  className='opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'
-                  onClick={forkMode === 'fork_only' ? () => void forkFromMessage() : openEdit}
-                />
-              </Tooltip>
-            )}
+            {forkButton}
             {message.created_at && (
               <span className='text-12px text-t-secondary opacity-0 group-hover:opacity-100 transition-opacity select-none'>
                 {formatMessageTime(message.created_at)}
@@ -362,26 +380,6 @@ const MessageText: React.FC<{ message: IMessageText; showCopyRow?: boolean }> = 
           closable={false}
         />
       )}
-      <Modal
-        visible={editOpen}
-        title={t('messages.editTitle')}
-        okText={t('messages.editConfirm')}
-        cancelText={t('common.cancel')}
-        confirmLoading={editing}
-        okButtonProps={{ disabled: !editContent.trim() }}
-        onCancel={() => setEditOpen(false)}
-        onOk={() => void forkFromMessage(editContent.trim())}
-        unmountOnExit
-      >
-        <Input.TextArea
-          value={editContent}
-          onChange={setEditContent}
-          placeholder={t('messages.editPlaceholder')}
-          autoSize={{ minRows: 4, maxRows: 10 }}
-          maxLength={100000}
-          showWordLimit
-        />
-      </Modal>
     </>
   );
 };

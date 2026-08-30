@@ -1,14 +1,10 @@
 {
   "plan": "计划模式",
   "default": "默认",
-  "on": "开启",
-  "off": "关闭",
   "acceptEdits": "自动接受编辑",
   "autoEdit": "自动编辑",
   "auto_edit": "自动编辑",
   "read-only": "只读",
-  "agent": "智能体",
-  "agent-full-access": "智能体（完全访问）",
   "full-access": "完全访问",
   "yolo": "全自动",
   "yoloNoSandbox": "全自动（无沙盒）",
@@ -21,5 +17,6 @@
   "permission": "权限",
   "switchMode": "授权模式",
   "switchSuccess": "模式切换成功",
+  "switchPendingNextTurn": "将在下一轮生效",
   "switchFailed": "模式切换失败"
 }

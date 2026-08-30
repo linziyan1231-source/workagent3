@@ -10,10 +10,17 @@ import FeedbackReportModal, {
   type FeedbackEventTags,
   type PrefilledScreenshot,
 } from '@/renderer/components/settings/SettingsModal/contents/FeedbackReportModal';
+import type {
+  FeedbackDiagnosticsExplicitContext,
+  FeedbackDiagnosticsProfile,
+} from '@/common/types/feedbackDiagnostics';
+import { captureFeedbackRoute, feedbackDiagnosticsContextFromRoute } from '@/renderer/services/feedback/routeContext';
 
 type OpenFeedbackOptions = {
   module?: string;
   autoScreenshot?: boolean;
+  diagnosticsContext?: FeedbackDiagnosticsExplicitContext;
+  diagnosticsProfiles?: FeedbackDiagnosticsProfile[];
   tags?: FeedbackEventTags;
   extra?: FeedbackEventExtra;
 };
@@ -46,11 +53,33 @@ export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [prefilledScreenshots, setPrefilledScreenshots] = useState<PrefilledScreenshot[] | undefined>(undefined);
   const [feedbackTags, setFeedbackTags] = useState<FeedbackEventTags | undefined>(undefined);
   const [feedbackExtra, setFeedbackExtra] = useState<FeedbackEventExtra | undefined>(undefined);
+  const [feedbackDiagnosticsContext, setFeedbackDiagnosticsContext] = useState<
+    | {
+        explicitContext?: FeedbackDiagnosticsExplicitContext;
+        explicitProfiles?: FeedbackDiagnosticsProfile[];
+        routeAtOpen?: string;
+      }
+    | undefined
+  >(undefined);
 
   const openFeedback = useCallback(async (options?: OpenFeedbackOptions) => {
+    const routeAtOpen = captureFeedbackRoute();
+    const routeContext = feedbackDiagnosticsContextFromRoute(routeAtOpen);
+    const explicitContext =
+      routeContext || options?.diagnosticsContext
+        ? {
+            ...routeContext,
+            ...options?.diagnosticsContext,
+          }
+        : undefined;
     setDefaultModule(options?.module);
     setFeedbackTags(options?.tags);
     setFeedbackExtra(options?.extra);
+    setFeedbackDiagnosticsContext({
+      explicitContext,
+      explicitProfiles: options?.diagnosticsProfiles,
+      routeAtOpen,
+    });
     if (options?.autoScreenshot) {
       const shot = await captureScreenshot();
       setPrefilledScreenshots(shot ? [shot] : undefined);
@@ -65,6 +94,7 @@ export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setPrefilledScreenshots(undefined);
     setFeedbackTags(undefined);
     setFeedbackExtra(undefined);
+    setFeedbackDiagnosticsContext(undefined);
   }, []);
 
   const value = useMemo(() => ({ openFeedback }), [openFeedback]);
@@ -79,6 +109,7 @@ export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         prefilledScreenshots={prefilledScreenshots}
         feedbackTags={feedbackTags}
         feedbackExtra={feedbackExtra}
+        feedbackDiagnosticsContext={feedbackDiagnosticsContext}
       />
     </FeedbackContext.Provider>
   );

@@ -6,24 +6,33 @@
 
 import type { SpeechToTextConfig } from '@/common/types/provider/speech';
 import type { Theme } from '@/common/theme/types';
-import { storage } from '@office-ai/platform';
+import { buildStorage } from '@/common/platform/storage';
 
 // 系统配置存储
-export const ConfigStorage = storage.buildStorage<IConfigStorageRefer>('agent.config');
+export const ConfigStorage = buildStorage<IConfigStorageRefer>('agent.config');
 
 // 系统环境变量存储
-export const EnvStorage = storage.buildStorage<IEnvStorageRefer>('agent.env');
+export const EnvStorage = buildStorage<IEnvStorageRefer>('agent.env');
 
 export interface IConfigStorageRefer {
   language: string;
-  theme: string; // @deprecated migrated to theme.activeId/theme.userThemes
-  colorScheme: string; // @deprecated migrated to theme.activeId/theme.userThemes
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Per-region configurable font sizes (px), set in Appearance settings */
+  'ui.fontSize.app'?: number;
   'ui.fontSize.chat'?: number;
   'ui.fontSize.markdown'?: number;
   'ui.fontSize.code'?: number;
+  /** Per-region configurable font families, set in Appearance settings */
+  'ui.fontFamily.app'?: string;
+  'ui.fontFamily.chat'?: string;
+  'ui.fontFamily.markdown'?: string;
+  'ui.fontFamily.code'?: string;
+  /** Per-region configurable font weights (standard tiers), set in Appearance settings */
+  'ui.fontWeight.app'?: string;
+  'ui.fontWeight.chat'?: string;
+  'ui.fontWeight.markdown'?: string;
+  'ui.fontWeight.code'?: string;
   /** Last-known main window size and position, restored on next launch */
   'window.bounds'?: { x?: number; y?: number; width: number; height: number };
   /** 桌面模式下是否自动启用 WebUI / Auto-enable WebUI in desktop mode */
@@ -32,9 +41,6 @@ export interface IConfigStorageRefer {
   'webui.desktop.allowRemote'?: boolean;
   /** 桌面模式下 WebUI 端口 / WebUI port in desktop mode */
   'webui.desktop.port'?: number;
-  customCss: string; // 自定义 CSS 样式 // @deprecated migrated to theme.activeId/theme.userThemes
-  'css.themes': ICssTheme[]; // 自定义 CSS 主题列表 / Custom CSS themes list // @deprecated migrated to theme.activeId/theme.userThemes
-  'css.activeThemeId': string; // 当前激活的主题 ID / Currently active theme ID // @deprecated migrated to theme.activeId/theme.userThemes
   /** Active unified theme ID */
   'theme.activeId': string;
   /** User-created themes */
@@ -49,14 +55,9 @@ export interface IConfigStorageRefer {
   'system.notificationEnabled'?: boolean;
   // 定时任务完成时显示系统通知 / Show system notification when scheduled task completes
   'system.cronNotificationEnabled'?: boolean;
-  // 任务完成后将最终回答发送到最近活跃的已授权微信对话
-  'system.weixinCompletionDeliveryEnabled'?: boolean;
-  'system.weixinIdleTimeoutMinutes'?: number;
-  'system.weixinIdlePolicy'?: 'auto' | 'ask' | 'disabled';
   // 阻止系统休眠以保证定时任务执行 / Prevent system sleep to ensure scheduled tasks run
   'system.keepAwake'?: boolean;
   // Automatically preview newly created Office files in the current workspace
-  'system.autoPreviewOfficeFiles'?: boolean;
   // Skills Market: whether the external skills market source is enabled
   'skillsMarket.enabled'?: boolean;
   /**
@@ -132,8 +133,8 @@ export type TConversationRuntimeStateKind =
   | 'starting'
   | 'running'
   | 'cancelling'
-  | 'waiting_confirmation'
-  | 'completed';
+  | 'restarting'
+  | 'waiting_confirmation';
 
 export type TConversationRuntimeSummary = {
   state: TConversationRuntimeStateKind;
@@ -143,6 +144,11 @@ export type TConversationRuntimeSummary = {
   is_processing: boolean;
   pending_confirmations: number;
   turn_id: string | null;
+  /** Whether a message sent right now reaches the agent without waiting for
+   * the current turn to end. The ONLY capability bit the frontend may gate
+   * mid-turn UI on. Optional/undefined is treated as false for older
+   * backends/responses that don't send it yet. */
+  supports_midturn_delivery?: boolean;
 };
 
 export type TConversationAssistantIdentity = {
@@ -151,17 +157,6 @@ export type TConversationAssistantIdentity = {
   name: string;
   avatar: string;
   backend: string;
-};
-
-export type TSharedConversationMeta = {
-  conversation_id: string;
-  project_id: string;
-  project_name: string;
-  role: 'owner' | 'member';
-  assistant_id: string;
-  assistant_backend: 'codex' | 'kimi';
-  model_id: string;
-  thinking_effort: string;
 };
 
 interface IChatConversation<T, Extra> {
@@ -181,23 +176,76 @@ interface IChatConversation<T, Extra> {
   channel_chat_id?: string;
   /** Explicit assistant identity for assistant-led conversations */
   assistant?: TConversationAssistantIdentity;
+  /**
+   * Owning Project id (top-level, from `ConversationResponse.project_id`, stage3
+   * contract). Drives Project-scoped Explorer mounting + preview isolation.
+   * Optional: absent until the backend that populates it ships / for
+   * conversations without a bound project.
+   */
+  project_id?: string;
+  /**
+   * Session-fork capability (from `ConversationResponse.fork_capability`).
+   * Filled ONLY on the single-conversation detail response (never on lists).
+   * Present = the fork entry point may be shown; `at_turn` = any message may
+   * be forked (codex), otherwise only the latest turn (claude / ACP HEAD fork).
+   */
+  fork_capability?: { at_turn: boolean };
+  /**
+   * Prompt media capability (from `ConversationResponse.prompt_capability`).
+   * Filled ONLY on the single-conversation detail response (never on lists).
+   * Absent = unknown/unsupported — media attachments are delivered to the
+   * agent as file paths instead of native image/audio content blocks.
+   */
+  prompt_capability?: { image: boolean; audio: boolean };
+}
+
+/**
+ * Fork lineage riding `extra.fork` on a forked conversation (server-minted by
+ * the fork API). Purely informational for the renderer: badge + jump link.
+ */
+export interface TConversationForkLineage {
+  parent_conversation_id: string;
+  parent_message_id: string;
+  /** Backend session snapshot/anchor fields — renderer never consumes these. */
+  parent_session_id?: string;
+  last_turn_id?: string;
 }
 
 // Token 使用统计数据类型
+export interface TokenUsageBreakdown {
+  input_tokens?: number;
+  output_tokens?: number;
+  thought_tokens?: number;
+  cached_read_tokens?: number;
+  cached_write_tokens?: number;
+}
+
+export interface TokenUsageCost {
+  amount: number;
+  /** ISO 4217 currency code, e.g. "USD" */
+  currency: string;
+}
+
 export interface TokenUsageData {
   total_tokens: number;
+  /** Per-turn token counters from the agent's end-of-turn usage report */
+  breakdown?: TokenUsageBreakdown;
+  /** Cumulative session cost as reported by the agent */
+  cost?: TokenUsageCost;
 }
 
 export type TChatConversation =
   | Omit<
       IChatConversation<
-        'acp',
+        // Antigravity (agy CLI) shares this shape exactly: the backend reports
+        // its own conversation type, but the renderer treats it as an ACP-family
+        // conversation because the extra payload and event stream are identical.
+        'acp' | 'antigravity',
         {
           workspace?: string;
           backend: string;
           cli_path?: string;
           custom_workspace?: boolean;
-          is_project_workspace?: boolean;
           agent_name?: string;
           custom_agent_id?: string; // UUID for identifying specific custom agent
           preset_context?: string; // 智能助手的预设规则/提示词 / Preset context from smart assistant
@@ -232,8 +280,6 @@ export type TChatConversation =
           session_mode?: string;
           /** Persisted model ID for resume support / 持久化的模型 ID，用于恢复 */
           current_model_id?: string;
-          /** Persisted thinking effort for managed shared runtimes. */
-          thought_level?: string;
           /** Cached config options from ACP backend / 缓存的 ACP 配置选项 */
           cached_config_options?: import('@/common/types/platform/acpTypes').AcpSessionConfigOption[];
           /** Pending config option selections from Guid page / Guid 页面待应用的配置选项 */
@@ -242,10 +288,8 @@ export type TChatConversation =
           is_health_check?: boolean;
           /** Cron job ID that spawned this conversation */
           cron_job_id?: string;
-          /** User collaboration metadata. Presence selects the shared transport while retaining the ordinary chat UI. */
-          shared?: TSharedConversationMeta;
-          /** Virtual workspace identity; never an internal host path. */
-          shared_workspace?: string;
+          /** Fork lineage (present only on forked conversations). */
+          fork?: TConversationForkLineage;
         }
       >,
       'model'
@@ -465,6 +509,15 @@ export type ModelCapability = {
   isUserSelected?: boolean;
 };
 
+export type ModelOpenAiApiMode = 'chat_completions' | 'responses';
+
+export type ModelImageInputCapability = 'supported' | 'unsupported';
+
+export type ModelSettings = {
+  image_input?: ModelImageInputCapability;
+  openai_api_mode?: ModelOpenAiApiMode;
+};
+
 export interface IProvider {
   id: string;
   platform: string;
@@ -524,6 +577,11 @@ export interface IProvider {
       error?: string; // 错误信息 / error message
     }
   >;
+  /**
+   * Explicit per-model overrides. Missing entries retain automatic image-input
+   * capability and OpenAI API mode resolution.
+   */
+  model_settings?: Record<string, ModelSettings>;
   is_full_url?: boolean;
 }
 

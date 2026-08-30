@@ -10,8 +10,14 @@ const INSTALLATION_INTEGRITY_REPORT_FLUSH_TIMEOUT_MS = 2000;
 type InstallationIntegrityDialogKind =
   | 'incomplete_installation'
   | 'data_migration'
+  | 'database_newer_than_app'
   | 'local_data_repair'
-  | 'recoverable_database_corruption';
+  | 'recoverable_database_corruption'
+  | 'transient_concurrent_startup'
+  | 'startup_directory'
+  | 'backend_exited'
+  | 'port_report_timeout'
+  | 'startup_failed';
 
 export type InstallationIntegrityDiagnostics = {
   source: 'backend_startup_failure' | 'runtime_status';
@@ -32,17 +38,55 @@ export function openDownloadLatest(): void {
   window.open(AIONUI_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
 }
 
+/**
+ * Per-kind dialog configuration: which `common.backendStartup.*` section the
+ * copy lives in, and which footer actions the dialog offers. One row per kind
+ * replaces the previous per-suffix ternary chains.
+ *
+ * `showDiagnostics: false` kinds (the downgrade dialog) have no diagnostics
+ * button at all: the root cause is fully understood and the only remedy is
+ * updating, so the single download action stays unambiguous.
+ */
+const DIALOG_KIND_CONFIG: Record<
+  InstallationIntegrityDialogKind,
+  {
+    i18nSection: string;
+    showDiagnostics: boolean;
+    showDiagnosticsHint?: boolean;
+    showDownloadLatest?: boolean;
+    showRecover?: boolean;
+  }
+> = {
+  incomplete_installation: { i18nSection: 'incompleteInstallation', showDiagnostics: true, showDownloadLatest: true },
+  data_migration: { i18nSection: 'dataMigration', showDiagnostics: true },
+  database_newer_than_app: { i18nSection: 'databaseNewerThanApp', showDiagnostics: false, showDownloadLatest: true },
+  local_data_repair: { i18nSection: 'localDataRepair', showDiagnostics: true },
+  recoverable_database_corruption: {
+    i18nSection: 'recoverableDatabaseCorruption',
+    showDiagnostics: true,
+    showDiagnosticsHint: true,
+    showRecover: true,
+  },
+  transient_concurrent_startup: {
+    i18nSection: 'transientConcurrentStartup',
+    showDiagnostics: true,
+    showDiagnosticsHint: true,
+  },
+  startup_directory: { i18nSection: 'startupDirectory', showDiagnostics: true },
+  backend_exited: { i18nSection: 'exited', showDiagnostics: true },
+  port_report_timeout: { i18nSection: 'portReportTimeout', showDiagnostics: true },
+  startup_failed: { i18nSection: 'startupFailed', showDiagnostics: true },
+};
+
+function dialogKindText(t: TFunction, diagnosticsKind: InstallationIntegrityDialogKind, suffix: string): string {
+  return t(`common.backendStartup.${DIALOG_KIND_CONFIG[diagnosticsKind].i18nSection}.${suffix}`);
+}
+
 export function getInstallationIntegrityTitle(
   t: TFunction,
   diagnosticsKind: InstallationIntegrityDialogKind = 'incomplete_installation'
 ): string {
-  if (diagnosticsKind === 'recoverable_database_corruption') {
-    return t('common.backendStartup.recoverableDatabaseCorruption.title');
-  }
-  if (diagnosticsKind === 'local_data_repair') return t('common.backendStartup.localDataRepair.title');
-  return diagnosticsKind === 'data_migration'
-    ? t('common.backendStartup.dataMigration.title')
-    : t('common.backendStartup.incompleteInstallation.title');
+  return dialogKindText(t, diagnosticsKind, 'title');
 }
 
 export function getBackendStartupInstallationDescription(t: TFunction): string {
@@ -57,21 +101,14 @@ export function getInstallationIntegrityDownloadText(t: TFunction): string {
   return t('common.backendStartup.incompleteInstallation.downloadLatest');
 }
 
-export function getInstallationIntegritySendDiagnosticsText(t: TFunction): string {
-  return t('common.backendStartup.incompleteInstallation.sendDiagnostics');
-}
-
 export function getInstallationIntegrityDiagnosticsSentText(
   t: TFunction,
   diagnosticsKind: InstallationIntegrityDialogKind = 'incomplete_installation'
 ): string {
-  if (diagnosticsKind === 'recoverable_database_corruption') {
-    return t('common.backendStartup.recoverableDatabaseCorruption.diagnosticsSent');
-  }
-  if (diagnosticsKind === 'local_data_repair') return t('common.backendStartup.localDataRepair.diagnosticsSent');
-  return diagnosticsKind === 'data_migration'
-    ? t('common.backendStartup.dataMigration.diagnosticsSent')
-    : t('common.backendStartup.incompleteInstallation.diagnosticsSent');
+  // Kinds without a diagnostics button have no diagnosticsSent copy of their
+  // own; fall back to the generic text (unreachable from the dialog footer).
+  const kind = DIALOG_KIND_CONFIG[diagnosticsKind].showDiagnostics ? diagnosticsKind : 'incomplete_installation';
+  return dialogKindText(t, kind, 'diagnosticsSent');
 }
 
 function buildInstallationIntegrityTags(diagnostics: InstallationIntegrityDiagnostics): FeedbackEventTags {
@@ -149,25 +186,14 @@ export function getInstallationIntegrityModalActions(
   reportText?: string;
 } {
   const diagnosticsKind = options.diagnosticsKind ?? 'incomplete_installation';
+  const config = DIALOG_KIND_CONFIG[diagnosticsKind];
   return {
-    downloadText: undefined,
+    downloadText: config.showDownloadLatest ? getInstallationIntegrityDownloadText(t) : undefined,
     onDownloadLatest: options.onDownloadLatest ?? openDownloadLatest,
     onRecoverCorruptedDatabase: options.onRecoverCorruptedDatabase ?? (() => Promise.resolve()),
     onReportDiagnostics: options.onReportDiagnostics ?? (() => Promise.resolve()),
-    recoverText:
-      diagnosticsKind === 'incomplete_installation'
-        ? undefined
-        : diagnosticsKind === 'recoverable_database_corruption'
-          ? t('common.backendStartup.recoverableDatabaseCorruption.confirmRebuild')
-          : undefined,
-    reportText:
-      diagnosticsKind === 'recoverable_database_corruption'
-        ? t('common.backendStartup.recoverableDatabaseCorruption.sendDiagnostics')
-        : diagnosticsKind === 'local_data_repair'
-          ? t('common.backendStartup.localDataRepair.sendDiagnostics')
-          : diagnosticsKind === 'data_migration'
-            ? t('common.backendStartup.dataMigration.sendDiagnostics')
-            : undefined,
+    recoverText: config.showRecover ? dialogKindText(t, diagnosticsKind, 'confirmRebuild') : undefined,
+    reportText: config.showDiagnostics ? dialogKindText(t, diagnosticsKind, 'sendDiagnostics') : undefined,
   };
 }
 
@@ -205,7 +231,7 @@ export const InstallationIntegrityContent: React.FC<{ description: string; diagn
   </div>
 );
 
-const InstallationIntegrityFooter: React.FC<{
+export const InstallationIntegrityFooter: React.FC<{
   diagnostics?: InstallationIntegrityDiagnostics;
   diagnosticsKind?: InstallationIntegrityDialogKind;
 }> = ({ diagnostics, diagnosticsKind = 'incomplete_installation' }) => {
@@ -227,53 +253,47 @@ const InstallationIntegrityFooter: React.FC<{
     try {
       await actions.onReportDiagnostics();
       setReported(true);
-      Message.success(
-        diagnosticsKind === 'recoverable_database_corruption'
-          ? t('common.backendStartup.recoverableDatabaseCorruption.diagnosticsReportSuccess')
-          : diagnosticsKind === 'local_data_repair'
-            ? t('common.backendStartup.localDataRepair.diagnosticsReportSuccess')
-            : diagnosticsKind === 'data_migration'
-              ? t('common.backendStartup.dataMigration.diagnosticsReportSuccess')
-              : t('common.backendStartup.incompleteInstallation.diagnosticsReportSuccess')
-      );
+      Message.success(dialogKindText(t, diagnosticsKind, 'diagnosticsReportSuccess'));
     } catch {
-      Message.error(
-        diagnosticsKind === 'recoverable_database_corruption'
-          ? t('common.backendStartup.recoverableDatabaseCorruption.diagnosticsReportFailed')
-          : diagnosticsKind === 'local_data_repair'
-            ? t('common.backendStartup.localDataRepair.diagnosticsReportFailed')
-            : diagnosticsKind === 'data_migration'
-              ? t('common.backendStartup.dataMigration.diagnosticsReportFailed')
-              : t('common.backendStartup.incompleteInstallation.diagnosticsReportFailed')
-      );
+      Message.error(dialogKindText(t, diagnosticsKind, 'diagnosticsReportFailed'));
     } finally {
       setReporting(false);
     }
   };
 
-  const handleRecoverCorruptedDatabase = async () => {
+  const handleRecoverCorruptedDatabase = () => {
     if (recovering) return;
-    setRecovering(true);
-    try {
-      await actions.onRecoverCorruptedDatabase();
-    } catch {
-      Message.error(t('common.backendStartup.recoverableDatabaseCorruption.rebuildFailed'));
-      setRecovering(false);
-    }
+    // Rebuild is destructive (backs up the corrupted DB and creates an empty one),
+    // so gate it behind an explicit second confirmation before invoking recovery.
+    Modal.confirm({
+      title: t('common.backendStartup.recoverableDatabaseCorruption.confirmDialog.title'),
+      content: t('common.backendStartup.recoverableDatabaseCorruption.confirmDialog.content'),
+      okText: t('common.backendStartup.recoverableDatabaseCorruption.confirmDialog.okText'),
+      cancelText: t('common.backendStartup.recoverableDatabaseCorruption.confirmDialog.cancelText'),
+      onOk: async () => {
+        setRecovering(true);
+        try {
+          await actions.onRecoverCorruptedDatabase();
+        } catch {
+          Message.error(t('common.backendStartup.recoverableDatabaseCorruption.rebuildFailed'));
+          setRecovering(false);
+        }
+      },
+    });
   };
-
-  if (diagnosticsKind === 'incomplete_installation') return null;
 
   return (
     <Space>
-      <Button
-        data-testid='installation-integrity-report'
-        disabled={!diagnostics || reported}
-        loading={reporting}
-        onClick={handleReportDiagnostics}
-      >
-        {reported ? getInstallationIntegrityDiagnosticsSentText(t, diagnosticsKind) : actions.reportText}
-      </Button>
+      {actions.reportText ? (
+        <Button
+          data-testid='installation-integrity-report'
+          disabled={!diagnostics || reported}
+          loading={reporting}
+          onClick={handleReportDiagnostics}
+        >
+          {reported ? getInstallationIntegrityDiagnosticsSentText(t, diagnosticsKind) : actions.reportText}
+        </Button>
+      ) : null}
       {actions.downloadText ? (
         <Button data-testid='installation-integrity-download' type='primary' onClick={actions.onDownloadLatest}>
           {actions.downloadText}
@@ -283,7 +303,8 @@ const InstallationIntegrityFooter: React.FC<{
         <Button
           data-testid='recoverable-database-corruption-rebuild'
           loading={recovering}
-          type='primary'
+          status='danger'
+          type='outline'
           onClick={handleRecoverCorruptedDatabase}
         >
           {actions.recoverText}
@@ -301,13 +322,12 @@ export function showInstallationIntegrityModal(
   description: string,
   diagnostics?: InstallationIntegrityDiagnostics,
   diagnosticsKind: InstallationIntegrityDialogKind = 'incomplete_installation'
-): void {
-  const diagnosticsHint =
-    diagnosticsKind === 'recoverable_database_corruption'
-      ? t('common.backendStartup.recoverableDatabaseCorruption.diagnosticsHint')
-      : undefined;
+): ReturnType<InstallationIntegrityModalController['error']> {
+  const diagnosticsHint = DIALOG_KIND_CONFIG[diagnosticsKind].showDiagnosticsHint
+    ? dialogKindText(t, diagnosticsKind, 'diagnosticsHint')
+    : undefined;
 
-  modal.error({
+  return modal.error({
     title: getInstallationIntegrityTitle(t, diagnosticsKind),
     content: <InstallationIntegrityContent description={description} diagnosticsHint={diagnosticsHint} />,
     footer: <InstallationIntegrityFooter diagnostics={diagnostics} diagnosticsKind={diagnosticsKind} />,

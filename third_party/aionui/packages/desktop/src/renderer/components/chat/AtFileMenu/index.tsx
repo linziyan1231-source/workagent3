@@ -1,5 +1,10 @@
+import MentionMenuShell from '@/renderer/components/chat/MentionMenuShell';
 import type { FileOrFolderItem } from '@/renderer/utils/file/fileTypes';
 import React from 'react';
+
+/** Rows here are two lines tall, so the shell's single-line cap would only show
+ *  a handful. */
+const MAX_HEIGHT = 'min(40vh, 320px)';
 
 type AtFileMenuProps = {
   activeIndex: number;
@@ -8,12 +13,18 @@ type AtFileMenuProps = {
   label: string;
   loading: boolean;
   loadingText: string;
-  leadingContent?: React.ReactNode;
-  fileSectionLabel?: string;
   onHoverItem: (index: number) => void;
   onSelectItem: (item: FileOrFolderItem) => void;
+  /** Secondary line for an item. Defaults to its relative/absolute path; the
+   *  project path passes `PE_NAME · REL` here to disambiguate multi-folder hits. */
+  getSubtitle?: (item: FileOrFolderItem) => string;
 };
 
+/**
+ * The `@` picker's dropdown. Scrolling and the height cap belong to
+ * `MentionMenuShell` — a workspace search can return far more rows than fit
+ * above the send box.
+ */
 const AtFileMenu: React.FC<AtFileMenuProps> = ({
   activeIndex,
   emptyText,
@@ -21,27 +32,19 @@ const AtFileMenu: React.FC<AtFileMenuProps> = ({
   label,
   loading,
   loadingText,
-  leadingContent,
-  fileSectionLabel,
   onHoverItem,
   onSelectItem,
+  getSubtitle,
 }) => {
   return (
-    <div
-      className='rounded-14px border border-solid overflow-hidden p-6px flex flex-col gap-2px'
-      style={{
-        borderColor: 'var(--color-border-2)',
-        background: 'color-mix(in srgb, var(--color-bg-1) 94%, transparent)',
-        backdropFilter: 'blur(14px) saturate(1.05)',
-        WebkitBackdropFilter: 'blur(14px) saturate(1.05)',
-      }}
-      role='listbox'
-      aria-label={label}
+    <MentionMenuShell
+      activeIndex={activeIndex}
+      itemCount={items.length}
+      label={label}
+      loading={loading}
+      maxHeight={MAX_HEIGHT}
+      bodyClassName='flex flex-col gap-2px'
     >
-      {leadingContent}
-      {leadingContent && fileSectionLabel && (
-        <div className='px-12px pb-2px pt-6px text-11px font-500 text-t-tertiary'>{fileSectionLabel}</div>
-      )}
       {items.length === 0 ? (
         <div className='px-12px py-10px text-12px text-t-secondary'>{loading ? loadingText : emptyText}</div>
       ) : (
@@ -52,7 +55,7 @@ const AtFileMenu: React.FC<AtFileMenuProps> = ({
               key={item.path}
               role='option'
               aria-selected={isActive}
-              className='px-12px py-8px rounded-10px cursor-pointer transition-colors'
+              className='px-12px py-8px rounded-10px cursor-pointer transition-colors shrink-0'
               style={{
                 background: isActive ? 'var(--color-fill-2)' : 'transparent',
               }}
@@ -65,12 +68,14 @@ const AtFileMenu: React.FC<AtFileMenuProps> = ({
               }}
             >
               <div className='text-13px font-medium text-t-primary'>{item.name}</div>
-              <div className='text-12px text-t-secondary break-all'>{item.relativePath || item.path}</div>
+              <div className='text-12px text-t-secondary break-all'>
+                {getSubtitle ? getSubtitle(item) : item.relativePath || item.path}
+              </div>
             </div>
           );
         })
       )}
-    </div>
+    </MentionMenuShell>
   );
 };
 

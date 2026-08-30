@@ -20,9 +20,6 @@ type ResolveCronAgentConfigInput = {
   model_id?: string;
   config_options?: Record<string, string>;
   workspace?: string;
-  skill_ids?: string[];
-  mcp_ids?: string[];
-  weixin_reminder_enabled?: boolean;
   localeKey?: string;
   getMode: (assistant: Assistant) => string | undefined;
   aionrsModelRequiredMessage: string;
@@ -40,9 +37,6 @@ export function resolveCronAgentConfig(input: ResolveCronAgentConfigInput): Reso
     model_id,
     config_options,
     workspace,
-    skill_ids,
-    mcp_ids,
-    weixin_reminder_enabled,
     localeKey = 'en-US',
     getMode,
     aionrsModelRequiredMessage,
@@ -76,9 +70,6 @@ export function resolveCronAgentConfig(input: ResolveCronAgentConfigInput): Reso
         use_model: model_id,
       },
       workspace,
-      skill_ids,
-      mcp_ids,
-      weixin_reminder_enabled,
     };
   } else {
     agent_config = {
@@ -88,9 +79,6 @@ export function resolveCronAgentConfig(input: ResolveCronAgentConfigInput): Reso
       model_id,
       config_options,
       workspace,
-      skill_ids,
-      mcp_ids,
-      weixin_reminder_enabled,
     };
   }
 

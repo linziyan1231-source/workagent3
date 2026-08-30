@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="application-name" content="Puxin AI" />
+    <meta name="application-name" content="AionUi" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Puxin AI" />
+    <meta name="apple-mobile-web-app-title" content="AionUi" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#4E5969" />
-    <link rel="icon" type="image/png" sizes="64x64" href="./pwa/puxin-favicon-v2.png" />
+    <link rel="icon" type="image/png" href="./pwa/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="./pwa/puxin-icon-180-v2.png" />
-    <title>Puxin AI</title>
+    <link rel="apple-touch-icon" href="./pwa/icon-180.png" />
+    <title>AionUi</title>
     <script>
       // Synchronously restore theme appearance from localStorage to prevent theme flash
       (function () {
@@ -20,85 +20,6 @@
           var theme = localStorage.getItem('__aionui_theme');
           if (theme) document.documentElement.setAttribute('data-theme', theme);
         } catch (e) {}
-      })();
-    </script>
-    <script>
-      // Earliest bundle-independent recovery for a stale tab requesting an asset
-      // removed by a later immutable release. Automatic recovery is bounded to
-      // one attempt per tab; manual recovery explicitly resets that guard.
-      (function () {
-        var guardKey = '__aionui_asset_recovery_v1';
-        var messages = {
-          'zh-CN': ['页面资源更新后未能加载。', '重新加载'],
-          'zh-TW': ['頁面資源更新後無法載入。', '重新載入'],
-          'ja-JP': ['更新後のページリソースを読み込めませんでした。', '再読み込み'],
-          'ko-KR': ['업데이트된 페이지 리소스를 불러오지 못했습니다.', '다시 로드'],
-          'tr-TR': ['Güncellenen sayfa kaynağı yüklenemedi.', 'Yeniden yükle'],
-          'ru-RU': ['Не удалось загрузить обновлённые ресурсы страницы.', 'Перезагрузить'],
-          'uk-UA': ['Не вдалося завантажити оновлені ресурси сторінки.', 'Перезавантажити'],
-          'pt-BR': ['Não foi possível carregar os recursos atualizados da página.', 'Recarregar'],
-          'de-DE': ['Die aktualisierten Seitenressourcen konnten nicht geladen werden.', 'Neu laden'],
-          'es-ES': ['No se pudieron cargar los recursos actualizados de la página.', 'Recargar'],
-          'fa-IR': ['منابع به‌روزشده صفحه بارگیری نشدند.', 'بارگیری دوباره'],
-          'en-US': ['Updated page resources could not be loaded.', 'Reload'],
-        };
-        function copy() {
-          var language = navigator.language || 'en-US';
-          if (messages[language]) return messages[language];
-          var prefix = language.split('-')[0];
-          for (var key in messages) if (key.split('-')[0] === prefix) return messages[key];
-          return messages['en-US'];
-        }
-        function showRecovery() {
-          if (document.getElementById('aionui-asset-recovery')) return;
-          var text = copy();
-          var panel = document.createElement('div');
-          panel.id = 'aionui-asset-recovery';
-          panel.setAttribute('role', 'alert');
-          panel.style.cssText =
-            'position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:Canvas;color:CanvasText;font:16px sans-serif';
-          var message = document.createElement('p');
-          message.textContent = text[0];
-          var action = document.createElement('a');
-          action.href = window.location.href;
-          action.textContent = text[1];
-          action.onclick = function () {
-            try {
-              sessionStorage.removeItem(guardKey);
-            } catch (e) {}
-          };
-          panel.appendChild(message);
-          panel.appendChild(action);
-          document.body.appendChild(panel);
-        }
-        window.addEventListener(
-          'error',
-          function (event) {
-            var target = event.target;
-            var isScript = target && target.tagName === 'SCRIPT' && target.src;
-            var isStyle = target && target.tagName === 'LINK' && target.rel === 'stylesheet' && target.href;
-            if (!isScript && !isStyle) return;
-            var attempted = false;
-            try {
-              attempted = sessionStorage.getItem(guardKey) === 'attempted';
-              if (!attempted) sessionStorage.setItem(guardKey, 'attempted');
-            } catch (e) {
-              attempted = true;
-            }
-            if (attempted) {
-              showRecovery();
-              return;
-            }
-            var next = new URL(window.location.href);
-            next.searchParams.set('__aionui_recover', Date.now().toString());
-            if (typeof window.__aionuiAssetRecoveryReload === 'function') {
-              window.__aionuiAssetRecoveryReload(next.toString());
-            } else {
-              window.location.replace(next.toString());
-            }
-          },
-          true
-        );
       })();
     </script>
     <style>

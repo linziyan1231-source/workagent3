@@ -46,9 +46,10 @@ export const useUpdateConversationArtifactStatus = (): ((
   status: IConversationArtifactStatus
 ) => void) => useContext(ConversationArtifactContext).updateArtifactStatus;
 
-export const ConversationArtifactProvider: React.FC<
-  React.PropsWithChildren<{ conversation_id: string; disabled?: boolean }>
-> = ({ conversation_id, disabled, children }) => {
+export const ConversationArtifactProvider: React.FC<React.PropsWithChildren<{ conversation_id: string }>> = ({
+  conversation_id,
+  children,
+}) => {
   const [artifacts, setArtifacts] = useState<IConversationArtifact[]>([]);
 
   const upsertArtifact = useCallback((artifact: IConversationArtifact) => {
@@ -66,7 +67,6 @@ export const ConversationArtifactProvider: React.FC<
   useEffect(() => {
     let alive = true;
     setArtifacts([]);
-    if (disabled) return;
 
     void ipcBridge.conversation.listArtifacts
       .invoke({ conversation_id })
@@ -81,16 +81,16 @@ export const ConversationArtifactProvider: React.FC<
     return () => {
       alive = false;
     };
-  }, [conversation_id, disabled]);
+  }, [conversation_id]);
 
   useEffect(() => {
-    if (!conversation_id || disabled) return;
+    if (!conversation_id) return;
 
     return ipcBridge.conversation.artifactStream.on((artifact: IConversationArtifact) => {
       if (artifact.conversation_id !== conversation_id) return;
       upsertArtifact(artifact);
     });
-  }, [conversation_id, disabled, upsertArtifact]);
+  }, [conversation_id, upsertArtifact]);
 
   const value = useMemo<ConversationArtifactContextValue>(
     () => ({

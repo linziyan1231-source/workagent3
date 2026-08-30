@@ -5,10 +5,9 @@
  */
 
 import { ipcBridge } from '@/common';
-import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { addRecentWorkspace, getRecentWorkspaces } from '@/renderer/components/workspace';
-import { isElectronDesktop } from '@/renderer/utils/platform';
-import { Input, Message, Modal, Tooltip } from '@arco-design/web-react';
+import { AionInlineSearchInput } from '@/renderer/components/base';
+import { Tooltip } from '@arco-design/web-react';
 import { Close, Down } from '@icon-park/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -56,12 +55,8 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
 }) => {
   const { t } = useTranslation();
   const recentWorkspaces = getRecentWorkspaces();
-  const isDesktop = isElectronDesktop();
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [createProjectVisible, setCreateProjectVisible] = useState(false);
-  const [projectName, setProjectName] = useState('');
-  const [creatingProject, setCreatingProject] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement | HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -113,37 +108,6 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
     setSearchQuery('');
   }, []);
 
-  const handleOpenCreateProject = useCallback(() => {
-    closeDropdown();
-    setProjectName('');
-    setCreateProjectVisible(true);
-  }, [closeDropdown]);
-
-  const handleCreateProject = useCallback(async () => {
-    const name = projectName.trim();
-    if (!name || creatingProject) return;
-
-    setCreatingProject(true);
-    try {
-      const result = await ipcBridge.portal.createProject.invoke({ name });
-      addRecentWorkspace(result.path);
-      onSelectWorkspace(result.path);
-      setCreateProjectVisible(false);
-      setProjectName('');
-      Message.success(t('guid.workspace.createProjectSuccess', { name }));
-    } catch (error) {
-      const errorKey =
-        isBackendHttpError(error) && error.code === 'PROJECT_EXISTS'
-          ? 'guid.workspace.projectExists'
-          : isBackendHttpError(error) && error.code === 'INVALID_PROJECT_NAME'
-            ? 'guid.workspace.projectNameInvalid'
-            : 'guid.workspace.createProjectFailed';
-      Message.error(t(errorKey));
-    } finally {
-      setCreatingProject(false);
-    }
-  }, [creatingProject, onSelectWorkspace, projectName, t]);
-
   const toggleOpen = useCallback(() => {
     if (open) closeDropdown();
     else openDropdown();
@@ -180,25 +144,13 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
   const dropdownEl = open
     ? createPortal(
         <div ref={dropdownRef} className={styles.wsDropdown} style={dropdownStyle}>
-          <div className={styles.wsDropdownSearch}>
-            <svg
-              width='12'
-              height='12'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2'
-              viewBox='0 0 24 24'
-              style={{ flexShrink: 0, color: 'var(--color-text-3)' }}
-            >
-              <circle cx='11' cy='11' r='8' />
-              <path d='M21 21l-4.35-4.35' />
-            </svg>
-            <input
+          <div className='mb-8px'>
+            <AionInlineSearchInput
+              className='w-full'
               ref={searchRef}
-              className={styles.wsDropdownSearchInput}
-              placeholder={t('guid.workspace.searchPlaceholder')}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={setSearchQuery}
+              placeholder={t('guid.workspace.searchPlaceholder')}
             />
           </div>
 
@@ -221,7 +173,7 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
                     stroke='currentColor'
                     strokeWidth='2.5'
                     viewBox='0 0 24 24'
-                    style={{ marginLeft: 'auto', flexShrink: 0 }}
+                    style={{ marginInlineStart: 'auto', flexShrink: 0 }}
                   >
                     <path d='M20 6L9 17l-5-5' />
                   </svg>
@@ -231,16 +183,6 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
           })}
 
           {filteredRecent.length > 0 && <div className={styles.wsDropdownSep} />}
-
-          {!isDesktop && (
-            <div
-              className={`${styles.wsDropdownItem} ${styles.wsDropdownItemAccent}`}
-              onClick={handleOpenCreateProject}
-            >
-              <PlusIcon />
-              <span>{t('guid.workspace.createProject')}</span>
-            </div>
-          )}
 
           <div className={`${styles.wsDropdownItem} ${styles.wsDropdownItemAccent}`} onClick={handleBrowseWorkspace}>
             <PlusIcon />
@@ -317,11 +259,11 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
             ref={triggerRef as React.RefObject<HTMLButtonElement>}
             className={styles.workspaceEmptyBtn}
             data-testid='workspace-selector-btn'
-            onClick={!isDesktop || recentWorkspaces.length > 0 ? toggleOpen : handleBrowseWorkspace}
+            onClick={recentWorkspaces.length > 0 ? toggleOpen : handleBrowseWorkspace}
           >
             <FolderIcon size={14} />
             <span>{t('guid.workspace.workInProject')}</span>
-            {(!isDesktop || recentWorkspaces.length > 0) && (
+            {recentWorkspaces.length > 0 && (
               <Down
                 theme='outline'
                 size='12'
@@ -333,32 +275,6 @@ const GuidWorkspaceFootnote: React.FC<GuidWorkspaceFootnoteProps> = ({
           {dropdownEl}
         </>
       )}
-      <Modal
-        visible={createProjectVisible}
-        title={t('guid.workspace.createProject')}
-        okText={t('guid.workspace.createProject')}
-        cancelText={t('common.cancel')}
-        confirmLoading={creatingProject}
-        okButtonProps={{ disabled: !projectName.trim() || creatingProject }}
-        cancelButtonProps={{ disabled: creatingProject }}
-        onOk={() => void handleCreateProject()}
-        onCancel={() => {
-          if (!creatingProject) {
-            setCreateProjectVisible(false);
-            setProjectName('');
-          }
-        }}
-        unmountOnExit
-      >
-        <Input
-          autoFocus
-          maxLength={100}
-          value={projectName}
-          placeholder={t('guid.workspace.projectNamePlaceholder')}
-          onChange={setProjectName}
-          onPressEnter={() => void handleCreateProject()}
-        />
-      </Modal>
     </div>
   );
 };

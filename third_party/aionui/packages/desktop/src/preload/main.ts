@@ -16,7 +16,7 @@ import { ADAPTER_BRIDGE_EVENT_KEY } from '../common/adapter/constant';
  * @description 注入到renderer进程中, 用于与main进程通信
  * */
 contextBridge.exposeInMainWorld('electronAPI', {
-  emit: (name: string, data: any) => {
+  emit: (name: string, data: unknown) => {
     return ipcRenderer
       .invoke(
         ADAPTER_BRIDGE_EVENT_KEY,
@@ -30,8 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         throw error;
       });
   },
-  on: (callback: any) => {
-    const handler = (event: any, value: any) => {
+  on: (callback: (payload: { event: unknown; value: unknown }) => void) => {
+    const handler = (event: unknown, value: unknown) => {
       callback({ event, value });
     };
     ipcRenderer.on(ADAPTER_BRIDGE_EVENT_KEY, handler);
@@ -62,6 +62,21 @@ contextBridge.exposeInMainWorld('__initialLanguage', initialLanguage ?? null);
 contextBridge.exposeInMainWorld('__aionuiE2ETest', process.env.AIONUI_E2E_TEST === '1');
 contextBridge.exposeInMainWorld('__backendStartupFailed', backendStartupFailed === true);
 contextBridge.exposeInMainWorld('__backendStartupFailure', backendStartupFailure ?? null);
+
+// Backend startup state bridge: `getState` re-reads the current failure info on
+// mount (resolves the "READY arrived before the renderer subscribed" race), and
+// `subscribe` receives subsequent ready/exit pushes on the backend-startup-state
+// channel. All communication stays behind the preload contextBridge.
+contextBridge.exposeInMainWorld('__backendStartupBridge', {
+  getState: () => ipcRenderer.sendSync('get-backend-startup-failure'),
+  subscribe: (callback: (state: unknown) => void) => {
+    const handler = (_event: unknown, value: unknown) => callback(value);
+    ipcRenderer.on('backend-startup-state', handler);
+    return () => {
+      ipcRenderer.off('backend-startup-state', handler);
+    };
+  },
+});
 
 // 托盘事件监听 - 将 IPC 事件转换为 DOM 事件
 // Tray event listeners - convert IPC events to DOM events

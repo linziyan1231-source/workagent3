@@ -8,12 +8,14 @@ import {
   Communication,
   Computer,
   Earth,
+  Inbox,
   Info,
   Lightning,
   LinkCloud,
   Puzzle,
   Speed,
   System,
+  Toolkit,
 } from '@icon-park/react';
 import classNames from 'classnames';
 import React, { useMemo } from 'react';
@@ -21,17 +23,18 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Tooltip } from '@arco-design/web-react';
 import { getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
-import PortalUsageSidebar from './PortalUsageSidebar';
 
 /** Builtin settings tab IDs in display order (must match router paths). */
 export const BUILTIN_TAB_IDS = [
   'agent',
   'model',
-  'capabilities',
+  'skills',
+  'tools',
   'appearance',
   'webui',
   'pet',
   'system',
+  'archived',
   'about',
 ] as const;
 
@@ -41,8 +44,8 @@ export const BUILTIN_TAB_IDS = [
  * This keeps older extensions working without requiring them to update.
  */
 export const LEGACY_ANCHOR_REMAP: Record<string, string> = {
-  'skills-hub': 'capabilities',
-  tools: 'capabilities',
+  'skills-hub': 'skills',
+  capabilities: 'skills',
   display: 'appearance',
 };
 
@@ -54,6 +57,7 @@ export const LEGACY_ANCHOR_REMAP: Record<string, string> = {
 const GROUP_HEADER_BEFORE: Record<string, string> = {
   agent: 'settings.groupAiCore',
   appearance: 'settings.groupApp',
+  archived: 'settings.archived.title',
   about: 'settings.groupAbout',
 };
 
@@ -88,11 +92,17 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         icon: <Speed />,
         path: 'agent',
       },
-      capabilities: {
-        id: 'capabilities',
-        label: t('settings.capabilities', { defaultValue: 'Capabilities' }),
+      skills: {
+        id: 'skills',
+        label: t('settings.skills', { defaultValue: 'Skills' }),
         icon: <Lightning />,
-        path: 'capabilities',
+        path: 'skills',
+      },
+      tools: {
+        id: 'tools',
+        label: t('settings.tools', { defaultValue: 'Tools' }),
+        icon: <Toolkit />,
+        path: 'tools',
       },
       appearance: { id: 'appearance', label: t('settings.appearancePanel'), icon: <Computer />, path: 'appearance' },
       webui: {
@@ -103,6 +113,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
       },
       pet: { id: 'pet', label: t('pet.desktopPet'), icon: <Cat />, path: 'pet' },
       system: { id: 'system', label: t('settings.system'), icon: <System />, path: 'system' },
+      archived: {
+        id: 'archived',
+        label: t('settings.archived.navLabel'),
+        icon: <Inbox />,
+        path: 'archived',
+      },
       about: { id: 'about', label: t('settings.about'), icon: <Info />, path: 'about' },
     };
 
@@ -251,7 +267,6 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
           </React.Fragment>
         );
       })}
-      {!isDesktop && !collapsed && <PortalUsageSidebar />}
     </div>
   );
 };

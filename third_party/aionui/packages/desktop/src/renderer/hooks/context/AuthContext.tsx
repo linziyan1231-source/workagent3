@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ipcBridge } from '@/common';
+import { PREVIEW_SCOPE_KEY_PREFIX } from '@/renderer/pages/conversation/Preview/context/previewScope';
+import { refreshSession } from '@/common/adapter/sessionRefresh';
 // M6: CSRF removed with legacy webserver — stub functions for compatibility, re-implement in M7
 const withCsrfToken = <T extends Record<string, unknown>>(data: T): T => data;
 const hasValidCsrfToken = (): boolean => true;
@@ -11,23 +12,12 @@ type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
 export interface AuthUser {
   id: string;
   username: string;
-  display_name?: string;
-  admin?: boolean;
-  collaboration_enabled?: boolean;
-  collaboration_capable?: boolean;
 }
 
 interface LoginParams {
   username: string;
   password: string;
   remember?: boolean;
-}
-
-export interface ChangePasswordParams {
-  username: string;
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
 }
 
 type LoginErrorCode =
@@ -45,31 +35,11 @@ interface LoginResult {
   shouldClearCache?: boolean;
 }
 
-export type ChangePasswordErrorCode =
-  | 'requiredFields'
-  | 'passwordMismatch'
-  | 'invalidCurrentPassword'
-  | 'passwordPolicy'
-  | 'passwordReused'
-  | 'tooManyAttempts'
-  | 'serverError'
-  | 'networkError'
-  | 'securityError'
-  | 'unknown';
-
-export interface ChangePasswordResult {
-  success: boolean;
-  message?: string;
-  code?: ChangePasswordErrorCode;
-}
-
 interface AuthContextValue {
   ready: boolean;
   user: AuthUser | null;
   status: AuthStatus;
-  startupError: boolean;
   login: (params: LoginParams) => Promise<LoginResult>;
-  changePassword: (params: ChangePasswordParams) => Promise<ChangePasswordResult>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   clearAuthCache: () => void;
@@ -78,7 +48,6 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const AUTH_USER_ENDPOINT = '/api/auth/user';
-export const AUTH_USER_TIMEOUT_MS = 10_000;
 
 const isDesktopRuntime = typeof window !== 'undefined' && Boolean(window.electronAPI);
 
@@ -92,11 +61,20 @@ function clearAuthCache(): void {
     clearCookie(CSRF_COOKIE_NAME);
     clearCookie(CSRF_COOKIE_NAME, '/');
 
-    // Clear localStorage auth-related items
+    // Clear localStorage auth-related items, plus per-user UI state that must not
+    // leak across accounts. Preview scopes are keyed by project id and hold file
+    // content, so leaving them behind would show the next user the previous one's
+    // open tabs — and nothing else ever cleaned them up.
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && (key.includes('auth') || key.includes('csrf') || key.includes('token'))) {
+      if (
+        key &&
+        (key.includes('auth') ||
+          key.includes('csrf') ||
+          key.includes('token') ||
+          key.startsWith(PREVIEW_SCOPE_KEY_PREFIX))
+      ) {
         keysToRemove.push(key);
       }
     }
@@ -106,24 +84,31 @@ function clearAuthCache(): void {
   }
 }
 
-type CurrentUserResult =
-  | { kind: 'authenticated'; user: AuthUser }
-  | { kind: 'unauthenticated' }
-  | { kind: 'unavailable' };
-
-async function fetchCurrentUser(signal?: AbortSignal): Promise<CurrentUserResult> {
+async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> {
   try {
-    const response = await fetch(AUTH_USER_ENDPOINT, {
+    let response = await fetch(AUTH_USER_ENDPOINT, {
       method: 'GET',
       credentials: 'include',
       signal,
     });
 
-    if (response.status === 401 || response.status === 403) {
-      return { kind: 'unauthenticated' };
+    // The access cookie may have expired — attempt one silent session refresh
+    // and re-check before concluding the user is unauthenticated. Without this
+    // the status poll would kick a refreshable session to /login (#4124).
+    // refreshSession() single-flights with the httpBridge refresh path.
+    if (response.status === 401) {
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        response = await fetch(AUTH_USER_ENDPOINT, {
+          method: 'GET',
+          credentials: 'include',
+          signal,
+        });
+      }
     }
+
     if (!response.ok) {
-      return { kind: 'unavailable' };
+      return null;
     }
 
     const data = (await response.json()) as {
@@ -131,30 +116,28 @@ async function fetchCurrentUser(signal?: AbortSignal): Promise<CurrentUserResult
       user?: AuthUser;
     };
     if (data.success && data.user) {
-      return { kind: 'authenticated', user: data.user };
+      return data.user;
     }
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
-      return { kind: 'unavailable' };
+      return null;
     }
     console.error('Failed to fetch current user:', error);
   }
 
-  return { kind: 'unavailable' };
+  return null;
 }
 
 export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [ready, setReady] = useState(false);
-  const [startupError, setStartupError] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     if (isDesktopRuntime) {
       setStatus('authenticated');
       setUser(null);
-      setStartupError(false);
       setReady(true);
       return;
     }
@@ -163,26 +146,14 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus('checking');
-    setStartupError(false);
-    setReady(false);
 
-    const timeoutId = globalThis.setTimeout(() => controller.abort(), AUTH_USER_TIMEOUT_MS);
-    const result = await fetchCurrentUser(controller.signal);
-    globalThis.clearTimeout(timeoutId);
-
-    // A newer refresh or provider unmount owns the state now.
-    if (abortRef.current !== controller) return;
-
-    if (result.kind === 'authenticated') {
-      setUser(result.user);
+    const currentUser = await fetchCurrentUser(controller.signal);
+    if (currentUser) {
+      setUser(currentUser);
       setStatus('authenticated');
-    } else if (result.kind === 'unauthenticated') {
-      setUser(null);
-      setStatus('unauthenticated');
     } else {
       setUser(null);
-      setStatus('checking');
-      setStartupError(true);
+      setStatus('unauthenticated');
     }
     setReady(true);
   }, []);
@@ -191,27 +162,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     void refresh();
     return () => {
       abortRef.current?.abort();
-      abortRef.current = null;
     };
   }, [refresh]);
-
-  useEffect(() => {
-    if (isDesktopRuntime || typeof WebSocket === 'undefined') return;
-    const errorEmitter = ipcBridge.realtime?.error;
-    if (!errorEmitter) return;
-    return errorEmitter.on((event) => {
-      if (event.code !== 'REALTIME_AUTH_MISSING' && event.code !== 'REALTIME_AUTH_EXPIRED') return;
-      abortRef.current?.abort();
-      setUser(null);
-      setStatus('unauthenticated');
-      setStartupError(false);
-      setReady(true);
-      clearAuthCache();
-      if (!window.location.hash.includes('/login')) {
-        window.location.hash = '/login';
-      }
-    });
-  }, []);
 
   const login = useCallback(async ({ username, password, remember }: LoginParams): Promise<LoginResult> => {
     try {
@@ -290,11 +242,6 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       if (typeof window !== 'undefined' && (window as any).__websocketReconnect) {
         (window as any).__websocketReconnect();
       }
-      if (typeof window !== 'undefined') {
-        void import('@/common/adapter/httpBridge').then(({ reconnectRealtime }) => {
-          reconnectRealtime();
-        });
-      }
 
       return { success: true };
     } catch (error) {
@@ -321,66 +268,6 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     }
   }, []);
 
-  const changePassword = useCallback(
-    async ({
-      username,
-      currentPassword,
-      newPassword,
-      confirmPassword,
-    }: ChangePasswordParams): Promise<ChangePasswordResult> => {
-      if (isDesktopRuntime) {
-        return { success: false, code: 'serverError' };
-      }
-
-      try {
-        const response = await fetch('/api/auth/password', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            username,
-            current_password: currentPassword,
-            new_password: newPassword,
-            confirm_password: confirmPassword,
-          }),
-        });
-
-        const data = (await response.json()) as {
-          success?: boolean;
-          code?: string;
-          message?: string;
-        };
-
-        if (response.ok && data.success) {
-          return { success: true };
-        }
-
-        const backendCodeMap: Record<string, ChangePasswordErrorCode> = {
-          REQUIRED_FIELDS: 'requiredFields',
-          PASSWORD_MISMATCH: 'passwordMismatch',
-          INVALID_CURRENT_PASSWORD: 'invalidCurrentPassword',
-          PASSWORD_POLICY: 'passwordPolicy',
-          PASSWORD_REUSED: 'passwordReused',
-          RATE_LIMITED: 'tooManyAttempts',
-          ORIGIN_REJECTED: 'securityError',
-        };
-        let code: ChangePasswordErrorCode = backendCodeMap[data.code ?? ''] ?? 'unknown';
-        if (response.status === 401) code = 'invalidCurrentPassword';
-        if (response.status === 403) code = 'securityError';
-        if (response.status === 429) code = 'tooManyAttempts';
-        if (response.status >= 500) code = 'serverError';
-
-        return { success: false, code, message: data.message };
-      } catch (error) {
-        console.error('Password change request failed:', error);
-        return { success: false, code: 'networkError' };
-      }
-    },
-    []
-  );
-
   const logout = useCallback(async () => {
     if (isDesktopRuntime) {
       setUser(null);
@@ -389,24 +276,24 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       return;
     }
 
-    const response = await fetch('/logout', {
-      method: 'POST',
-      // Logout also needs CSRF token / 登出同样需要 CSRF Token
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(withCsrfToken({})),
-    });
-    if (!response.ok) {
-      throw new Error(`Logout failed with status ${response.status}`);
+    try {
+      await fetch('/logout', {
+        method: 'POST',
+        // Logout also needs CSRF token / 登出同样需要 CSRF Token
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(withCsrfToken({})),
+      });
+    } catch (error) {
+      console.error('Logout request failed:', error);
+    } finally {
+      setUser(null);
+      setStatus('unauthenticated');
+      // Clear cache on logout for security
+      clearAuthCache();
     }
-
-    setUser(null);
-    setStatus('unauthenticated');
-    // A full reload clears every user-scoped in-memory provider before another account can sign in.
-    clearAuthCache();
-    globalThis.location.reload();
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -414,14 +301,12 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       ready,
       user,
       status,
-      startupError,
       login,
-      changePassword,
       logout,
       refresh,
       clearAuthCache,
     }),
-    [changePassword, login, logout, ready, refresh, startupError, status, user]
+    [login, logout, ready, refresh, status, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -433,9 +318,4 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
-
-/** Optional access for components that are also rendered in isolated desktop tests/previews. */
-export function useOptionalAuth(): AuthContextValue | undefined {
-  return useContext(AuthContext);
 }

@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
+import { reconcileGeneratingFromRuntime } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
@@ -17,15 +18,17 @@ import {
   localSendAccepted,
   localSendFailed,
   localSendStarted,
+  localRestartFailed,
+  localRestartStarted,
+  localRestartSucceeded,
   localStopAcknowledged,
   localStopRequested,
-  reconcileSucceeded,
   resetLocalGate,
-  runtimeChanged,
   subscribeConversationRuntimeView,
   turnCompleted,
   type ConversationRuntimeView,
   type ConversationRuntimeViewLogEntry,
+  type ConversationRuntimeSendFailure,
 } from './conversationRuntimeViewStore';
 
 type UseConversationRuntimeViewReturn = {
@@ -35,11 +38,15 @@ type UseConversationRuntimeViewReturn = {
   isProcessing: boolean;
   canSendMessage: boolean;
   activeTurnId: string | null;
+  supportsMidturnDelivery: boolean;
   markSendStarted: () => void;
   markSendAccepted: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
-  markSendFailed: (reason: string) => void;
+  markSendFailed: (failure: ConversationRuntimeSendFailure) => void;
   markStopRequested: (turn_id: string) => void;
   markStopAcknowledged: (turn_id: string, runtime: TConversationRuntimeSummary) => void;
+  markRestartStarted: () => void;
+  markRestartSucceeded: (runtime: TConversationRuntimeSummary) => void;
+  markRestartFailed: (runtime: TConversationRuntimeSummary | null, reason: string) => void;
   resetLocalGate: (reason: string) => void;
 };
 
@@ -85,7 +92,14 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
         if (cancelled) {
           return;
         }
-        flushRuntimeViewLogs(hydrateSucceeded(conversation_id, getRuntimeOrNull(conversation?.runtime)));
+        const runtime = getRuntimeOrNull(conversation?.runtime);
+        flushRuntimeViewLogs(hydrateSucceeded(conversation_id, runtime));
+        // Reconcile the sidebar spinner against authoritative runtime state:
+        // a missed WS frame (window reload/reconnect race) can otherwise
+        // leave the row dark even though the runtime is still processing.
+        if (runtime) {
+          reconcileGeneratingFromRuntime(conversation_id, runtime.is_processing === true);
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -106,11 +120,8 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     }
 
     const turnCompletedEmitter = ipcBridge.conversation.turnCompleted;
-    const runtimeChangedEmitter = ipcBridge.conversation.runtimeChanged;
     const listChangedEmitter = ipcBridge.conversation.listChanged;
-    const realtimeReconnectedEmitter = ipcBridge.realtime?.reconnected;
-    const reconcileRequestedEmitter = ipcBridge.realtime?.reconcileRequested;
-    if (!turnCompletedEmitter || !listChangedEmitter || !realtimeReconnectedEmitter || !reconcileRequestedEmitter) {
+    if (!turnCompletedEmitter || !listChangedEmitter) {
       return;
     }
 
@@ -121,11 +132,6 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
       flushRuntimeViewLogs(turnCompleted(conversation_id, event.turn_id, event.runtime));
     });
 
-    const disposeRuntimeChanged = runtimeChangedEmitter?.on((event) => {
-      if (event.conversation_id !== conversation_id) return;
-      flushRuntimeViewLogs(runtimeChanged(conversation_id, event));
-    });
-
     const disposeListChanged = listChangedEmitter.on((event) => {
       if (event.conversation_id !== conversation_id || event.action !== 'deleted') {
         return;
@@ -133,39 +139,9 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
       flushRuntimeViewLogs(conversationDeleted(conversation_id));
     });
 
-    const disposeRealtimeReconnected = realtimeReconnectedEmitter.on(() => {
-      void getConversationOrNull(conversation_id)
-        .then((conversation) => {
-          flushRuntimeViewLogs(hydrateSucceeded(conversation_id, getRuntimeOrNull(conversation?.runtime)));
-        })
-        .catch((error: unknown) => {
-          const reason = error instanceof Error ? error.message : String(error);
-          flushRuntimeViewLogs(hydrateFailed(conversation_id, normalizeReason(reason)));
-        });
-    });
-
-    const disposeReconcileRequested = reconcileRequestedEmitter.on((event) => {
-      if (event.conversation_id !== conversation_id) return;
-      if (event.runtime !== undefined) {
-        flushRuntimeViewLogs(reconcileSucceeded(conversation_id, event.runtime));
-        return;
-      }
-      void getConversationOrNull(conversation_id)
-        .then((conversation) => {
-          flushRuntimeViewLogs(reconcileSucceeded(conversation_id, getRuntimeOrNull(conversation?.runtime)));
-        })
-        .catch((error: unknown) => {
-          const reason = error instanceof Error ? error.message : String(error);
-          flushRuntimeViewLogs(hydrateFailed(conversation_id, normalizeReason(reason)));
-        });
-    });
-
     return () => {
       disposeTurnCompleted();
-      disposeRuntimeChanged?.();
       disposeListChanged();
-      disposeRealtimeReconnected();
-      disposeReconcileRequested();
     };
   }, [conversation_id]);
 
@@ -176,13 +152,19 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
   const markSendAccepted = useCallback(
     (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => {
       flushRuntimeViewLogs(localSendAccepted(conversation_id, turn_id, runtime, msg_id));
+      reconcileGeneratingFromRuntime(conversation_id, runtime.is_processing === true);
     },
     [conversation_id]
   );
 
   const markSendFailed = useCallback(
-    (reason: string) => {
-      flushRuntimeViewLogs(localSendFailed(conversation_id, normalizeReason(reason)));
+    (failure: ConversationRuntimeSendFailure) => {
+      flushRuntimeViewLogs(
+        localSendFailed(conversation_id, {
+          ...failure,
+          reason: normalizeReason(failure.reason),
+        })
+      );
     },
     [conversation_id]
   );
@@ -201,6 +183,24 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     [conversation_id]
   );
 
+  const markRestartStarted = useCallback(() => {
+    flushRuntimeViewLogs(localRestartStarted(conversation_id));
+  }, [conversation_id]);
+
+  const markRestartSucceeded = useCallback(
+    (runtime: TConversationRuntimeSummary) => {
+      flushRuntimeViewLogs(localRestartSucceeded(conversation_id, runtime));
+    },
+    [conversation_id]
+  );
+
+  const markRestartFailed = useCallback(
+    (runtime: TConversationRuntimeSummary | null, reason: string) => {
+      flushRuntimeViewLogs(localRestartFailed(conversation_id, runtime, normalizeReason(reason)));
+    },
+    [conversation_id]
+  );
+
   const resetLocalRuntimeGate = useCallback(
     (reason: string) => {
       flushRuntimeViewLogs(resetLocalGate(conversation_id, normalizeReason(reason)));
@@ -215,11 +215,15 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     isProcessing: view.isProcessing,
     canSendMessage: view.canSendMessage,
     activeTurnId: view.activeTurnId,
+    supportsMidturnDelivery: view.supportsMidturnDelivery,
     markSendStarted,
     markSendAccepted,
     markSendFailed,
     markStopRequested,
     markStopAcknowledged,
+    markRestartStarted,
+    markRestartSucceeded,
+    markRestartFailed,
     resetLocalGate: resetLocalRuntimeGate,
   };
 };

@@ -31,6 +31,22 @@ export const webui = unavailableService;
 export const assistants = unavailableService;
 export const channel = unavailableService;
 export const acpConversation = unavailableService;
+export const dialog = unavailableService;
+export const fs = unavailableService;
+
+export type SessionMentionTarget = {
+  id: string;
+  name: string;
+  project?: string;
+  modified_at: number;
+};
+
+export const sessionMention = {
+  list: {
+    provider: () => {},
+    invoke: async () => ({ items: [] as SessionMentionTarget[] }),
+  },
+};
 export const shell = {
   ...unavailableService,
   openExternal: {

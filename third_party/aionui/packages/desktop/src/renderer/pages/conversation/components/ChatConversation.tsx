@@ -15,7 +15,7 @@ import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
 import { Button, Dropdown, Menu, Message, Tooltip, Typography } from '@arco-design/web-react';
-import { History, Peoples } from '@icon-park/react';
+import { History } from '@icon-park/react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +25,7 @@ import AcpChat from '../platforms/acp/AcpChat';
 import ChatLayout from './ChatLayout';
 import ChatSlider from './ChatSlider.tsx';
 import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
+import AcpRuntimeRestartButton from '@/renderer/components/agent/AcpRuntimeRestartButton';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import GoogleModelSelector from '../platforms/gemini/GoogleModelSelector';
@@ -35,9 +36,8 @@ import { useConversationRuntimeView } from '../runtime/useConversationRuntimeVie
 import { isLegacyReadOnlyConversationType } from '../utils/conversationRuntime';
 import { resolveConversationBackend } from '../utils/conversationAssistantIdentity';
 import LegacyReadOnlyConversation from '../platforms/legacy/LegacyReadOnlyConversation';
+import SingleChatEmptyState from './SingleChatEmptyState';
 import { useActiveLease } from '../hooks/useActiveLease';
-import SharedMembersModal from './SharedMembersModal';
-import SharedModelSelector from './SharedModelSelector';
 // import SkillRuleGenerator from './components/SkillRuleGenerator'; // Temporarily hidden
 
 const configErrorMessageKey = (error: unknown) => {
@@ -122,7 +122,10 @@ const _AddNewConversation: React.FC<{ conversation: TChatConversation }> = ({ co
                 modified_at: Date.now(),
                 // Clear ACP session fields to prevent new conversation from inheriting old session context
                 extra:
-                  source.type === 'acp'
+                  // Antigravity stores its resume anchor in the same fields, so
+                  // it must be cleared too — otherwise the clone resumes the
+                  // source conversation's agy session instead of starting clean.
+                  source.type === 'acp' || source.type === 'antigravity'
                     ? { ...source.extra, acp_session_id: undefined, acp_session_updated_at: undefined }
                     : source.extra,
               } as TChatConversation,
@@ -169,7 +172,10 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
     initialModel: conversation.model,
     onSelectModel,
   });
-  const workspaceEnabled = Boolean(conversation.extra?.workspace);
+  // Project conversations get the Layout-level Explorer column (stage3 FULL);
+  // ChatLayout's own right sider is only for no-project (legacy tree), so it does
+  // not double up or reserve an empty column.
+  const workspaceEnabled = Boolean(conversation.extra?.workspace) && !conversation.project_id;
   const cronJobId = resolveCronJobId(conversation.extra);
   const { info: presetAssistantInfo } = usePresetAssistantInfo(conversation);
   const aionrsAssistantId = presetAssistantInfo?.assistantId;
@@ -214,18 +220,35 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
       </div>
     ),
     workspaceEnabled,
+    // For project conversations the preview panel is hoisted to the Layout-level
+    // project host (structurally persistent across same-project conversation
+    // switches — no remount). ChatLayout then renders chat only.
+    previewHosted: Boolean(conversation.project_id),
     workspacePath: conversation.extra?.workspace,
+    // Key the workspace-panel collapse preference per-project (falls back to
+    // conversation_id inside ChatLayout when there is no project) so the panel's
+    // open/closed state restores when switching conversations within a project.
+    workspacePreferenceKey: conversation.project_id,
     isTemporaryWorkspace: (conversation.extra as { is_temporary_workspace?: boolean } | undefined)
       ?.is_temporary_workspace,
     backend: 'aionrs' as const,
     presetAssistant: presetAssistantInfo ? { ...presetAssistantInfo, id: aionrsAssistantId } : undefined,
   };
 
+  const emptySlot = (
+    <SingleChatEmptyState
+      conversation_id={conversation.id}
+      assistant_name={presetAssistantInfo?.name}
+      assistant_backend={presetAssistantInfo?.backend}
+    />
+  );
+
   return (
     <ChatLayout {...chatLayoutProps} conversation_id={conversation.id}>
       <AionrsChat
         conversation_id={conversation.id}
         workspace={conversation.extra.workspace}
+        emptySlot={emptySlot}
         modelSelection={modelSelection}
         session_mode={conversation.extra?.session_mode}
         cron_job_id={cronJobId}
@@ -236,6 +259,7 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
         }
         agent_name={presetAssistantInfo?.name}
         assistantId={aionrsAssistantId}
+        forkCapability={conversation.fork_capability}
       />
     </ChatLayout>
   );
@@ -245,16 +269,20 @@ const ChatConversation: React.FC<{
   conversation?: TChatConversation;
   hideSendBox?: boolean;
 }> = ({ conversation, hideSendBox }) => {
+  const [runtimeReadyConversationId, setRuntimeReadyConversationId] = useState<string | null>(null);
   const { t } = useTranslation();
-  const sharedMeta = (
-    conversation?.extra as { shared?: import('@/common/config/storage').TSharedConversationMeta } | undefined
-  )?.shared;
-  useActiveLease({ type: 'conversation', id: sharedMeta ? undefined : conversation?.id });
-  const workspaceEnabled = Boolean(conversation?.extra?.workspace);
+  // Stable identity: the selector reports readiness from an effect keyed on this
+  // callback, so an inline arrow would re-run it on every render.
+  const handleRuntimeReadyChange = useCallback(
+    (ready: boolean) => setRuntimeReadyConversationId(ready ? (conversation?.id ?? null) : null),
+    [conversation?.id]
+  );
+  useActiveLease({ type: 'conversation', id: conversation?.id });
+  const workspaceEnabled = Boolean(conversation?.extra?.workspace) && !conversation?.project_id;
   const cronJobId = resolveCronJobId(conversation?.extra);
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
-  const [membersVisible, setMembersVisible] = useState(false);
+
   const isAionrsConversation = conversation?.type === 'aionrs';
   const isLegacyReadOnlyConversation = isLegacyReadOnlyConversationType(conversation?.type);
   const resolvedHideSendBox = hideSendBox || isLegacyReadOnlyConversationType(conversation?.type);
@@ -271,11 +299,26 @@ const ChatConversation: React.FC<{
 
   const conversationNode = useMemo(() => {
     if (!conversation || isAionrsConversation) return null;
+    // Greeting shown while the conversation has no messages yet (freshly created
+    // or cloned window). Each *Chat forwards it to MessageList's empty slot.
+    const emptySlot = (
+      <SingleChatEmptyState
+        conversation_id={conversation.id}
+        assistant_name={assistantDisplayName}
+        assistant_backend={resolvedConversationBackend}
+      />
+    );
     if (isLegacyReadOnlyConversation) {
-      return <LegacyReadOnlyConversation key={conversation.id} conversation={conversation} />;
+      return <LegacyReadOnlyConversation key={conversation.id} conversation={conversation} emptySlot={emptySlot} />;
     }
     switch (conversation.type) {
       case 'acp':
+      // Antigravity reports its own conversation type but renders through the
+      // ACP chat surface: same extra payload, same event stream, same send box.
+      // Without this case it falls to `default: null` — the chat area renders
+      // empty, no send box mounts, and the queued initial message in
+      // `acp_initial_message_<id>` is never delivered, so the turn never starts.
+      case 'antigravity':
         return (
           <AcpChat
             key={conversation.id}
@@ -286,15 +329,15 @@ const ChatConversation: React.FC<{
             agent_name={assistantDisplayName}
             cron_job_id={cronJobId}
             hideSendBox={resolvedHideSendBox}
+            emptySlot={emptySlot}
             loadedSkills={(conversation.extra as { skills?: string[] } | undefined)?.skills}
             loadedMcpServers={(conversation.extra as { mcp_servers?: string[] } | undefined)?.mcp_servers}
             loadedMcpStatuses={
               (conversation.extra as { mcp_statuses?: IConversationMcpStatus[] } | undefined)?.mcp_statuses
             }
             assistantId={acpAssistantId}
-            shared={
-              (conversation.extra as { shared?: import('@/common/config/storage').TSharedConversationMeta }).shared
-            }
+            forkCapability={conversation.fork_capability}
+            promptCapability={conversation.prompt_capability}
           ></AcpChat>
         );
       default:
@@ -327,37 +370,23 @@ const ChatConversation: React.FC<{
     if (!conversation || isAionrsConversation) return undefined;
     if (isMobile) return undefined;
     if (isLegacyReadOnlyConversation) return undefined;
-    if (conversation.type === 'acp') {
+    // Antigravity included: the backend discovers agy's model list and writes it
+    // into the same catalog the ACP picker reads, so it must not fall through to
+    // the disabled selector below.
+    if (conversation.type === 'acp' || conversation.type === 'antigravity') {
       const extra = conversation.extra as { current_model_id?: string };
-      if (sharedMeta) {
-        return (
-          <SharedModelSelector
-            conversationID={conversation.id}
-            backend={sharedMeta.assistant_backend}
-            initialModelID={sharedMeta.model_id}
-            initialThinkingEffort={sharedMeta.thinking_effort}
-            running={conversation.runtime?.state === 'running'}
-          />
-        );
-      }
       return (
         <AcpModelSelector
           conversation_id={conversation.id}
           backend={resolvedConversationBackend}
           initialModelId={extra.current_model_id}
+          onRuntimeReadyChange={handleRuntimeReadyChange}
           waitForWarmup
         />
       );
     }
     return <GoogleModelSelector disabled={true} />;
-  }, [
-    conversation,
-    isAionrsConversation,
-    isMobile,
-    isLegacyReadOnlyConversation,
-    resolvedConversationBackend,
-    sharedMeta,
-  ]);
+  }, [conversation, isAionrsConversation, isMobile, isLegacyReadOnlyConversation, resolvedConversationBackend]);
 
   if (conversation && conversation.type === 'aionrs') {
     return <AionrsConversationPanel key={conversation.id} conversation={conversation} sliderTitle={sliderTitle} />;
@@ -384,40 +413,35 @@ const ChatConversation: React.FC<{
         </div>
       )}
       {modelSelector && <div className='shrink-0'>{modelSelector}</div>}
-      {sharedMeta && (
-        <Tooltip content={t('team.create.members', { defaultValue: 'Members' })}>
-          <Button size='mini' icon={<Peoples theme='outline' size='14' />} onClick={() => setMembersVisible(true)} />
-        </Tooltip>
+      {conversation && conversation.type === 'acp' && !isMobile && !isLegacyReadOnlyConversation && (
+        <div className='shrink-0'>
+          <AcpRuntimeRestartButton
+            conversation_id={conversation.id}
+            availability={runtimeReadyConversationId === conversation.id ? 'ready' : 'initializing'}
+          />
+        </div>
       )}
     </div>
   );
 
   return (
-    <>
-      {sharedMeta && (
-        <SharedMembersModal
-          visible={membersVisible}
-          projectID={sharedMeta.project_id}
-          role={sharedMeta.role}
-          onClose={() => setMembersVisible(false)}
-        />
-      )}
-      <ChatLayout
-        title={conversation?.name}
-        {...chatLayoutProps}
-        headerExtra={headerExtraNode}
-        siderTitle={sliderTitle}
-        sider={<ChatSlider conversation={conversation} />}
-        workspaceEnabled={workspaceEnabled}
-        workspacePath={conversation?.extra?.workspace}
-        isTemporaryWorkspace={
-          (conversation?.extra as { is_temporary_workspace?: boolean } | undefined)?.is_temporary_workspace
-        }
-        conversation_id={conversation?.id}
-      >
-        {conversationNode}
-      </ChatLayout>
-    </>
+    <ChatLayout
+      title={conversation?.name}
+      {...chatLayoutProps}
+      headerExtra={headerExtraNode}
+      siderTitle={sliderTitle}
+      sider={<ChatSlider conversation={conversation} />}
+      workspaceEnabled={workspaceEnabled}
+      previewHosted={Boolean(conversation?.project_id)}
+      workspacePath={conversation?.extra?.workspace}
+      workspacePreferenceKey={conversation?.project_id}
+      isTemporaryWorkspace={
+        (conversation?.extra as { is_temporary_workspace?: boolean } | undefined)?.is_temporary_workspace
+      }
+      conversation_id={conversation?.id}
+    >
+      {conversationNode}
+    </ChatLayout>
   );
 };
 

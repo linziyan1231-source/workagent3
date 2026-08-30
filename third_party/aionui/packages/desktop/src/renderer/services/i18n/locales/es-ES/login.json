@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI - Iniciar sesión",
-  "brand": "Puxin AI",
+  "pageTitle": "AionUi - Iniciar sesión",
+  "brand": "AionUi",
   "subtitle": "Bienvenido de nuevo, inicia sesión en tu cuenta",
   "username": "Usuario",
   "usernamePlaceholder": "Ingresa tu usuario",
@@ -15,34 +15,6 @@
   "languageToggle": "Cambiar idioma",
   "footerPrimary": "Transforma tu IA de línea de comandos",
   "footerSecondary": "Moderno y eficiente",
-  "changePassword": {
-    "link": "Cambiar contraseña",
-    "pageTitle": "Puxin AI - Cambiar contraseña",
-    "title": "Cambiar contraseña",
-    "subtitle": "Verifica tu contraseña actual y elige una nueva",
-    "currentPassword": "Contraseña actual",
-    "currentPasswordPlaceholder": "Ingresa tu contraseña actual",
-    "newPassword": "Nueva contraseña",
-    "newPasswordPlaceholder": "Ingresa tu nueva contraseña",
-    "confirmPassword": "Confirmar nueva contraseña",
-    "confirmPasswordPlaceholder": "Ingresa de nuevo tu nueva contraseña",
-    "requirement": "Usa al menos 12 caracteres y una contraseña distinta de la actual.",
-    "submit": "Cambiar contraseña",
-    "success": "Contraseña cambiada. Inicia sesión con tu nueva contraseña.",
-    "backToLogin": "Volver al inicio de sesión",
-    "errors": {
-      "required": "Completa todos los campos obligatorios",
-      "mismatch": "Las nuevas contraseñas no coinciden",
-      "invalidCurrentPassword": "El usuario o la contraseña actual son incorrectos",
-      "passwordPolicy": "La nueva contraseña debe tener al menos 12 caracteres",
-      "passwordReused": "La nueva contraseña debe ser distinta de la actual",
-      "tooManyAttempts": "Demasiados intentos. Inténtalo más tarde",
-      "networkError": "Error de conexión. Inténtalo de nuevo",
-      "serverError": "Error del servidor. Inténtalo más tarde",
-      "securityError": "Falló la verificación de seguridad. Actualiza la página e inténtalo de nuevo",
-      "unknown": "No se pudo cambiar la contraseña. Inténtalo más tarde"
-    }
-  },
   "errors": {
     "empty": "Ingresa usuario y contraseña",
     "invalidCredentials": "Usuario o contraseña inválidos",

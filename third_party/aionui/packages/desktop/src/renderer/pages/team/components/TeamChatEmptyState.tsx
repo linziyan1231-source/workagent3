@@ -5,8 +5,10 @@ import type { TChatConversation } from '@/common/config/storage';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { getSendBoxDraftHook } from '@renderer/hooks/chat/useSendBoxDraft';
 import { resolveAgentAvatar, useAgentLogos } from '@renderer/utils/model/agentLogo';
+import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import { usePresetAssistantInfo } from '@renderer/hooks/agent/usePresetAssistantInfo';
 import { resolveConversationBackend } from '@/renderer/pages/conversation/utils/conversationAssistantIdentity';
+import { useTeammateColor } from '../identity/TeamIdentityContext';
 import { Robot } from '@icon-park/react';
 
 const useAcpDraft = getSendBoxDraftHook('acp', { _type: 'acp', atPath: [], content: '', uploadFile: [] });
@@ -22,13 +24,13 @@ type Props = {
 
 const SUGGESTIONS = [
   { key: 'debate', icon: '🎭' },
-  { key: 'interview', icon: '🎙️' },
+  { key: 'add_member', icon: '➕' },
   { key: 'expert_review', icon: '🧠' },
 ];
 
 const SUGGESTION_DEFAULTS: Record<string, string> = {
   debate: 'Organize a debate with assistants taking different sides',
-  interview: 'Plan an in-depth interview between assistants',
+  add_member: 'Help me add a member good at ___ to the team',
   expert_review: 'Have multiple experts analyze the same problem',
 };
 
@@ -65,6 +67,8 @@ const TeamChatEmptyState: React.FC<Props> = ({
 }) => {
   const { t } = useTranslation();
   const logos = useAgentLogos();
+  // 头像下方的名字用该成员的身份色（拿不到时回退到主文字色）。
+  const identityColor = useTeammateColor(conversation_id);
 
   // Reuse the same SWR key as AgentChatSlot so this hits cache instead of a new fetch.
   const { data: conversation } = useSWR(conversation_id ? ['team-conversation', conversation_id] : null, () =>
@@ -116,7 +120,7 @@ const TeamChatEmptyState: React.FC<Props> = ({
         );
       }
       return (
-        <img
+        <ThemedLogo
           src={presetInfo.logo}
           alt={presetInfo.name}
           className='w-48px h-48px object-contain rounded-8px opacity-90'
@@ -125,7 +129,7 @@ const TeamChatEmptyState: React.FC<Props> = ({
     }
     if (agentAvatar.kind === 'image') {
       return (
-        <img
+        <ThemedLogo
           src={agentAvatar.value}
           alt={assistantName}
           className='w-48px h-48px object-contain rounded-8px opacity-80'
@@ -153,12 +157,19 @@ const TeamChatEmptyState: React.FC<Props> = ({
     >
       {renderAvatar()}
       <div className='flex flex-col gap-6px'>
-        <span className='text-16px font-semibold text-t-primary'>{assistantName}</span>
-        {isLeader && (
-          <span data-testid='team-chat-empty-state-subtitle' className='text-13px text-t-secondary'>
-            {t('team.emptyState.subtitle', { defaultValue: "Describe your goal and I'll get the team working on it" })}
-          </span>
-        )}
+        <span className='text-16px font-semibold' style={identityColor ? { color: identityColor } : undefined}>
+          {assistantName}
+        </span>
+        <span data-testid='team-chat-empty-state-subtitle' className='text-13px text-t-secondary'>
+          {isLeader
+            ? t('team.emptyState.leaderGreeting', {
+                defaultValue:
+                  "Hi, I'm the Leader. I understand your goal and coordinate the team — describe what you want and I'll arrange it.",
+              })
+            : t('team.emptyState.memberGreeting', {
+                defaultValue: "Hi, I'm a team member. I take direction from the Leader and you.",
+              })}
+        </span>
       </div>
       {isLeader && (
         <div className='flex flex-col gap-6px w-full'>
@@ -169,7 +180,7 @@ const TeamChatEmptyState: React.FC<Props> = ({
                 key={s.key}
                 data-testid={`team-chat-empty-state-suggestion-${s.key}`}
                 onClick={() => fillDraft(label)}
-                className='flex items-center gap-10px px-14px py-10px rd-10px bg-fill-2 hover:bg-fill-3 cursor-pointer transition-colors text-left border border-transparent hover:border-[var(--color-border-2)]'
+                className='flex items-center gap-10px px-14px py-10px rd-10px bg-fill-2 hover:bg-fill-3 cursor-pointer transition-colors text-start border border-transparent hover:border-[var(--color-border-2)]'
               >
                 <span className='text-15px shrink-0'>{s.icon}</span>
                 <span className='text-13px text-t-secondary'>{label}</span>

@@ -5,7 +5,10 @@ import zhCN from "@renderer/services/i18n/locales/zh-CN";
 
 function applyWorkAgentBrand<T>(resource: T): T {
   return JSON.parse(
-    JSON.stringify(resource).replaceAll("CLIENTNAME", "WorkAgent"),
+    JSON.stringify(resource)
+      .replaceAll("CLIENTNAME", "WorkAgent")
+      .replaceAll("AionUi", "WorkAgent")
+      .replaceAll("AionUI", "WorkAgent"),
   ) as T;
 }
 

@@ -105,7 +105,9 @@ export const ipcBridge = {
     },
   },
   acpConversation: new Proxy(
-    {},
+    {
+      getManagedAgents: { invoke: async () => [] },
+    },
     {
       get: (_target, key) => ({
         invoke: async () =>

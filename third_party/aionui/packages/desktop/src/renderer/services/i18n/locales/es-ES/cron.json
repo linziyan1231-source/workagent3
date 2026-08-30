@@ -5,6 +5,7 @@
   "nextRun": "Próxima ejecución",
   "lastRun": "Última ejecución",
   "lastError": "Error",
+  "lastErrorWithDetail": "Último error: {{error}}",
   "message": "Mensaje",
   "goToConversation": "Ir a la conversación",
   "status": {
@@ -15,7 +16,7 @@
     "unconfigured": "Sin tarea programada",
     "unconfiguredHint": "Aún no hay tareas programadas. ¡Crea una con tu agente!",
     "createNow": "Crear ahora",
-    "defaultPrompt": "Todos los días a las 10am, busca las últimas noticias de IA, resume y genera un informe de insights."
+    "defaultPrompt": "Todos los días a las 10am, busca las últimas noticias de IA, resume y genera un informe de insights. (Usa la habilidad /cron para crear una tarea programada en AionUi.)"
   },
   "actions": {
     "goTo": "Ver chat",
@@ -53,10 +54,10 @@
   },
   "page": {
     "newTask": "Nueva tarea",
-    "description": "Ejecuta tareas según un horario. También puedes pedirle a Puxin AI en cualquier conversación que cree una.",
+    "description": "Ejecuta tareas según un horario. También puedes pedirle a AionUi en cualquier conversación que cree una.",
     "awakeBanner": "Las tareas programadas solo se ejecutan mientras tu computadora esté encendida.",
     "keepAwake": "Mantener activa",
-    "keepAwakeTooltip": "Cuando está activado, Puxin AI evitará que tu computadora entre en modo de suspensión",
+    "keepAwakeTooltip": "Cuando está activado, AionUi evitará que tu computadora entre en modo de suspensión",
     "createTask": "Crear tarea programada",
     "editTask": "Editar tarea programada",
     "createSuccess": "Tarea creada correctamente",
@@ -83,6 +84,8 @@
       "prompt": "Prompt",
       "promptRequired": "El prompt es obligatorio",
       "promptPlaceholder": "Instrucciones para que el agente ejecute",
+      "queue": "Protección de cola",
+      "queueHint": "Cuando está activada, se omite una nueva ejecución mientras la conversación programada anterior siga en curso, sin interrumpir al asistente.",
       "frequency": "Frecuencia",
       "cronExpr": "Expresión Cron",
       "cronExprRequired": "La expresión cron es obligatoria",
@@ -129,7 +132,23 @@
       "weeklyAt": "Cada {{day}} a las {{time}}"
     },
     "createViaChat": "Create via chat",
-    "createManually": "Create manually"
+    "createManually": "Create manually",
+    "custom": {
+      "modeLabel": "Patrón de repetición",
+      "interval": "Cada intervalo",
+      "monthly": "Mensualmente",
+      "advanced": "Expresión Cron avanzada",
+      "every": "Cada",
+      "unit": "Unidad",
+      "minutes": "Minutos",
+      "hours": "Horas",
+      "time": "Hora",
+      "weekdays": "Días de la semana",
+      "monthDay": "Día del mes",
+      "preview": "Cron generado"
+    },
+    "searchPlaceholder": "Buscar tareas...",
+    "noSearchResults": "No hay tareas programadas coincidentes."
   },
   "trigger": {
     "runScheduledTask": "Ejecutar tarea programada: {{name}}"

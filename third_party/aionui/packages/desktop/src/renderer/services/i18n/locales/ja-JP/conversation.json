@@ -1,13 +1,7 @@
 {
-  "shared": {
-    "mentionCandidates": "Assistant and members",
-    "assistant": "Assistant",
-    "member": "Member",
-    "files": "Files"
-  },
   "welcome": {
     "title": "Hi、今日の予定は何ですか？",
-    "placeholder": "メッセージの送信、ファイルの追加、フォルダーの追加、またはスケジュールタスクの作成...",
+    "placeholder": "メッセージの送信、ファイルの追加、フォルダーの追加、スケジュールタスクの作成、または / でコマンド呼び出し...",
     "linkFolder": "フォルダを追加",
     "newConversation": "新しいチャット",
     "selectModel": "モデルを選択",
@@ -18,21 +12,14 @@
     "clearWorkspace": "プロジェクトを解除",
     "openFolder": "Open Folder",
     "none": "None",
-    "quickActionsTitle": "Puxin AI で何ができる？",
+    "quickActionsTitle": "AionUi で何ができる？",
     "quickActionFeedback": "問題を報告",
     "quickActionStar": "気に入った？スターをください！",
-    "skillsMarket": "Puxin AI Skills Market",
+    "skillsMarket": "AionUi Skills Market",
     "skillsMarketDesc": "コミュニティ Skills をオンデマンドで検索・有効化。一度設定すれば、すべてのAgentで利用可能。",
     "skillsMarketDetails": "詳細 >>"
   },
   "history": {
-    "hideSharedConversation": "Hide conversation",
-    "sharedConversationHidden": "Shared conversation hidden",
-    "sharedConversationHideFailed": "Shared conversation could not be hidden",
-    "sharedProjectHidden": "Shared project hidden",
-    "sharedProjectHideFailed": "Shared project could not be hidden",
-    "newPrivateSharedConversation": "New conversation in this shared project",
-    "hideSharedProject": "Hide shared project",
     "recents": "最近",
     "today": "今日",
     "yesterday": "昨日",
@@ -47,6 +34,7 @@
     "saveName": "保存",
     "cancelEdit": "キャンセル",
     "rename": "名前を変更",
+    "createCronTask": "スケジュールタスクを作成",
     "renameTitle": "チャット名を変更",
     "renamePlaceholder": "新しい名前を入力してください",
     "renameSuccess": "名前を変更しました",
@@ -59,7 +47,11 @@
     "batchExportConfirm": "Export {{count}} selected topics?",
     "batchDelete": "Batch Delete",
     "batchDeleteConfirm": "Delete {{count}} selected topics?",
+    "batchDeleteConfirm_one": "Delete {{count}} selected topics?",
+    "batchDeleteConfirm_other": "Delete {{count}} selected topics?",
     "batchDeleteSuccess": "{{count}} topics deleted",
+    "batchDeleteSuccess_one": "{{count}} topics deleted",
+    "batchDeleteSuccess_other": "{{count}} topics deleted",
     "batchNoSelection": "Please select topics first",
     "export": "Export",
     "exportDialogTitle": "Export Topics",
@@ -74,36 +66,30 @@
     "exportFailed": "Export failed",
     "pin": "Pin",
     "unpin": "Unpin",
+    "markAsUnread": "未読にする",
+    "markAsRead": "既読にする",
     "pinned": "Pinned",
     "pinFailed": "Pin operation failed",
-    "weixinReminder": "WeChat リマインダー",
-    "weixinReminderEnabled": "リマインダーをオンにしました",
-    "weixinReminderDisabled": "リマインダーをオフにしました",
-    "weixinReminderUpdateFailed": "WeChat リマインダーの更新に失敗しました",
     "pinnedSection": "Pinned",
     "deleteSuccess": "削除しました",
     "deleteFailed": "削除に失敗しました",
     "projectsSection": "プロジェクト",
     "conversationsSection": "会話",
-    "renameProjectTitle": "プロジェクト名を変更",
-    "renameProject": "プロジェクト名を変更",
-    "renameProjectPlaceholder": "新しいプロジェクト名を入力",
-    "renameProjectSuccess": "プロジェクト名を「{{name}}」に変更しました",
-    "renameProjectExists": "同じ名前のプロジェクトが既に存在します",
-    "renameProjectInvalid": "プロジェクト名が無効です",
-    "renameProjectInUse": "プロジェクトは使用中です。関連タスクを停止してから再試行してください",
-    "renameProjectForce": "使用中のプログラムを強制終了して名前を変更",
-    "renameProjectForceRisk": "注意：このフォルダーを使用しているプログラムが強制終了され、未保存のデータが失われる可能性があります。",
-    "renameProjectForceConfirmTitle": "使用中のプログラムを強制終了しますか？",
-    "renameProjectForceConfirmContent": "現在の Windows ユーザーが所有し、このプロジェクトのファイルを使用していると確認されたプログラムを終了してから、フォルダー名を変更します。未保存の作業は失われる可能性があり、元に戻せません。",
-    "renameProjectForceConfirm": "強制終了して名前を変更",
-    "renameProjectForceFailed": "使用中のプログラムを安全に特定または終了できなかったため、名前は変更されませんでした",
-    "renameProjectFailed": "プロジェクト名の変更に失敗しました",
-    "removeProjectTitle": "プロジェクトを削除",
-    "removeProject": "プロジェクトを削除",
-    "removeProjectConfirm": "プロジェクト「{{name}}」を削除しますか？プロジェクト内の {{count}} 件の会話も削除されます。",
     "newConversationInProject": "このプロジェクト内で新しい会話",
-    "deleting": "削除中..."
+    "deleting": "削除中...",
+    "reorderPinned": "ドラッグしてピン留め会話の順序を変更",
+    "forkedFrom": "「{{name}}」から分岐",
+    "forkedConversation": "分岐した会話",
+    "archive": "アーカイブ",
+    "archiveSuccess": "アーカイブしました",
+    "archiveFailed": "アーカイブに失敗しました",
+    "batchArchive": "Batch archive",
+    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
+    "batchArchiveSuccess": "Archived {{count}} topics",
+    "archiveProject": "Archive project",
+    "archiveProjectTitle": "Archive project",
+    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
+    "archiving": "Archiving..."
   },
   "historySearch": {
     "tooltip": "メッセージを検索",
@@ -333,7 +319,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -341,11 +327,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -362,10 +348,6 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
-      },
-      "USER_AGENT_RESOURCE_EXHAUSTED": {
-        "title": "ユーザーランタイムのメモリが不足しています",
-        "body": "プレビューまたはバックグラウンド処理が多くのリソースを使用しています。Office プレビューを閉じ、少し待ってから再試行してください。"
       }
     }
   },
@@ -449,7 +431,8 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "ターミナル",
-      "explorer": "エクスプローラー"
+      "explorer": "エクスプローラー",
+      "browser": "ブラウザ"
     }
   },
   "minimap": {
@@ -457,7 +440,9 @@
     "searchHint": "ここをクリックしてキーワードを検索",
     "empty": "まだQ&Aがありません",
     "noMatch": "一致する内容が見つかりません",
-    "count": "{{count}} 件"
+    "count": "{{count}} 件",
+    "count_one": "{{count}} 件",
+    "count_other": "{{count}} 件"
   },
   "chat": {
     "noModelSelected": "現在のセッションでモデルが選択されていないため、メッセージを送信できません",
@@ -475,6 +460,7 @@
     "switchAgentFailed": "エージェントの切り替えに失敗しました",
     "speech": {
       "recordTooltip": "音声入力を開始",
+      "recordTooltipWithShortcut": "音声入力 cmd+M",
       "pickFileTooltip": "音声ファイルを選択",
       "stopTooltip": "録音を停止",
       "processing": "音声を文字起こし中...",
@@ -510,8 +496,8 @@
     "error": "補足質問への回答に失敗しました。"
   },
   "commandQueue": {
-    "title": "キュー中の指示",
-    "clear": "キューをクリア",
+    "title": "ドラフトボックス",
+    "clear": "ドラフトボックスをクリア",
     "edit": "編集",
     "editing": "編集中",
     "editPlaceholder": "実行される前に、この待機中の指示を修正できます。",
@@ -521,15 +507,44 @@
     "reorder": "ドラッグしてキュー内コマンドの順序を変更",
     "remove": "削除",
     "files": "{{count}} 個のファイル",
+    "files_one": "{{count}} 個のファイル",
+    "files_other": "{{count}} 個のファイル",
     "pausedAfterFailure": "次のキュー中の指示を開始できませんでした。編集、並べ替え、または削除して続行してください。",
     "emptyInput": "キュー中の指示を空にはできません。",
     "queueFull": "キューがいっぱいです。追加する前にいくつか削除してください。",
     "inputTooLong": "キューに追加する指示が長すぎます。短くしてから送信してください。",
     "tooManyFiles": "このキュー中の指示にはファイルが多すぎます。",
-    "queueTooLarge": "キューのデータが大きすぎて安全に保持できません。いくつか削除してください。"
+    "queueTooLarge": "キューのデータが大きすぎて安全に保持できません。いくつか削除してください。",
+    "sendNow": "今すぐ送信",
+    "modeToggle": "送信モードを切り替え",
+    "help": "使い方",
+    "helpIntro": "AI の返信中に送信したメッセージはここに一時保存されます。",
+    "helpAuto": "：各返信が終わるたびに自動で順番に送信します。",
+    "helpManual": "：自動送信せず保管し、各メッセージを「今すぐ送信」で送ります。",
+    "clearConfirmTitle": "送信ドラフトボックスをクリアしますか？",
+    "clearConfirmContent": "保留中のメッセージはすべて削除され、元に戻せません。",
+    "mode": {
+      "auto": "自動送信",
+      "manual": "手動送信"
+    },
+    "addToQueue": "下書きボックスに追加",
+    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
+    "midturnBlocked": "このエージェントが応答中は割り込みができません。「下書きボックスに追加」をご利用ください。",
+    "enterShortcut": "Enter",
+    "actionMode": "Choose send action",
+    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
+    "addToQueueBusyHint": "Save to Draft box and send it later."
   },
   "contextUsage": {
-    "contextUsed": "コンテキスト使用量"
+    "contextUsed": "コンテキスト使用量",
+    "tokensUsed": "{{tokens}} トークン使用済み",
+    "windowUnknown": "コンテキストウィンドウのサイズは不明",
+    "sessionCost": "セッションコスト",
+    "input": "入力",
+    "output": "出力",
+    "thought": "思考",
+    "cachedRead": "キャッシュ読み取り",
+    "cachedWrite": "キャッシュ書き込み"
   },
   "skill_generator": {
     "title": "Generate Skill/Rule",
@@ -569,18 +584,27 @@
       "loaded": "読み込み済み",
       "failed": "失敗",
       "unsupported": "非対応"
-    }
+    },
+    "selected": "選択済み MCP"
   },
   "runtimePreparing": {
     "sendboxHint": "実行環境を準備しています。初回起動は少し時間がかかる場合があります。"
   },
   "sendbox": {
-    "hint": "/ でコマンド、@ でファイルを参照"
+    "hint": "/ でコマンド、@ でファイルを参照、↑/↓ でメッセージ履歴",
+    "mediaPathFallback": "このエージェントはこのファイル形式をネイティブに扱えないため、ファイルパスとして送信されます。",
+    "hintWithSessions": "/ でコマンド、@ でファイル、@@ で会話を参照、↑/↓ で履歴"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "このリクエストでは、表示できる返信はありませんでした。"
+      },
+      "ACP_EMPTY_TURN_NEEDS_AUTH": {
+        "body": "このリクエストは可視的な応答を生成しませんでした。すでにサインインしている場合は、バックエンドの一時的な問題や接続の問題の可能性があります。再試行するか、新しい会話を開始してください。まだサインインしていない場合は、サインインできます：{{hint}}。"
+      },
+      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
+        "body": "このリクエストは可視的な応答を生成しませんでした。現在の会話がコンテキスト長の上限に近づいている可能性があります。再試行するか、新しい会話を開始してからもう一度お試しください。"
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "このリクエストは、表示できる返信が生成される前にモデルの出力トークン上限に達しました。"
@@ -590,8 +614,172 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "モデルは、表示できる返信を生成する前にこのリクエストを拒否しました。"
+      },
+      "ANTIGRAVITY_STEPS_FAILED": {
+        "body": "このターンで {{count}} 件のステップが失敗し、実行されませんでした。agy はこうしたターンも成功として終了するため、返答ではなく実際の結果を確認してください。"
+      },
+      "CLI_VERSION_OLDER": {
+        "body": "インストール済みの {{cli}} は、AionUi が検証したバージョンより古いため、一部の機能が使えない可能性があります。{{cli}} の更新を検討してください。 （インストール済み {{reported}} / AionUi 検証済み {{verified}}）"
+      },
+      "CLI_VERSION_NEWER": {
+        "body": "インストール済みの {{cli}} は、AionUi が検証したバージョンより新しいです。通常は動作しますが、不審な挙動があればご報告ください。 （インストール済み {{reported}} / AionUi 検証済み {{verified}}）"
+      },
+      "CODEX_RETRYING": {
+        "body": "{{detail}}（累計 {{attempts}} 回目の再試行、経過 {{elapsed}} — エージェントの提供元が接続を切断し続けており、AionUi は再接続を待っています。）"
       }
     }
   },
-  "notFound": "会話が存在しないか、削除されました"
+  "notFound": "会話が存在しないか、削除されました",
+  "explorer": {
+    "addFolder": "Add folder to project",
+    "removeFolder": "Remove from project",
+    "attachDuplicate": "This folder is already in the project",
+    "attachOverlap": "This folder overlaps a folder already in the project",
+    "attachFailed": "Couldn't add the folder",
+    "removeFailed": "Couldn't remove the folder",
+    "contextMenu": {
+      "rename": "名前を変更",
+      "addToChat": "チャットに追加",
+      "copyRelativePath": "相対パスをコピー",
+      "copyAbsolutePath": "絶対パスをコピー",
+      "refresh": "更新",
+      "newFile": "新規ファイル",
+      "newDir": "新規フォルダー"
+    },
+    "namePlaceholder": "名前",
+    "deleteConfirm": "「{{name}}」を削除しますか？この操作は取り消せません。",
+    "renameFailed": "名前の変更に失敗しました",
+    "newFileFailed": "ファイルの作成に失敗しました",
+    "newDirFailed": "フォルダーの作成に失敗しました",
+    "tabs": {
+      "files": "ファイル",
+      "changes": "変更"
+    },
+    "addedToChat": "{{name}} をチャットに追加しました",
+    "imported": "{{count}} 件のファイルをインポートしました",
+    "importPartialFailed": "{{copied}} 件コピー、{{failed}} 件失敗（名前の重複または非対応）",
+    "importFailed": "ファイルのインポートに失敗しました",
+    "copyNodeFailed": "コピーに失敗しました",
+    "moveNodeFailed": "移動に失敗しました",
+    "search": {
+      "placeholder": "ファイル名で検索",
+      "searching": "検索中…",
+      "empty": "一致するファイルがありません",
+      "limitReached": "最初の {{count}} 件を表示 — 絞り込んでください"
+    },
+    "scm": {
+      "notARepository": "このフォルダーはバージョン管理されていません",
+      "noChanges": "変更はありません",
+      "loading": "変更を読み込み中…",
+      "loadFailed": "変更を読み込めませんでした",
+      "refresh": "更新",
+      "groups": {
+        "staged": "ステージ済みの変更",
+        "unstaged": "変更",
+        "changes": "変更",
+        "blocked": "要解決"
+      },
+      "sections": {
+        "repositories": "リポジトリ",
+        "changes": "変更"
+      },
+      "viewAsTree": "ツリー表示",
+      "viewAsList": "リスト表示",
+      "worktree": "ワークツリー",
+      "expandWorktrees": "ワークツリーを表示",
+      "collapseWorktrees": "ワークツリーを非表示",
+      "state": {
+        "created": "追加",
+        "modified": "変更",
+        "deleted": "削除",
+        "renamed": "名前変更",
+        "conflicted": "競合",
+        "unknown": "未知の状態"
+      },
+      "badge": {
+        "created": "A",
+        "modified": "M",
+        "deleted": "D",
+        "renamed": "R",
+        "conflicted": "!",
+        "unknown": "?"
+      },
+      "conflictedHint": "この競合は AionUi の外で解決してください",
+      "opaqueHint": "この状態は新しいバックエンドのものです — 読み取り専用で表示",
+      "degraded": "git のインデックスを更新できないため、低速モードで更新しています",
+      "truncated": "変更が多すぎるため、先頭部分のみ表示しています",
+      "renamedFrom": "{{from}} → {{to}}",
+      "diff": {
+        "loading": "差分を読み込み中…",
+        "failed": "差分を読み込めませんでした",
+        "binary": "バイナリファイル — テキスト差分なし",
+        "truncated": "差分は切り詰められました（大きいファイル）",
+        "empty": "テキストの変更はありません",
+        "close": "差分を閉じる"
+      },
+      "actions": {
+        "stage": "変更をステージ",
+        "unstage": "ステージを取り消す",
+        "discard": "変更を破棄",
+        "stageAll": "すべてステージ",
+        "unstageAll": "すべてステージ解除",
+        "blockedHint": "ステージや破棄の前に、AionUi の外で競合を解決してください",
+        "confirmDiscardTitle": "変更を破棄しますか？",
+        "confirmDiscardTracked": "{{count}} 個のファイルの編集は失われ、元に戻せません。",
+        "confirmDiscardUntracked": "{{count}} 個の新規ファイルがゴミ箱に移動されます。",
+        "confirmDiscardMixed": "{{tracked}} 個のファイルの編集は失われ元に戻せません。{{untracked}} 個の新規ファイルはゴミ箱に移動されます。",
+        "discardConfirmButton": "破棄",
+        "okStage": "{{count}} 個のファイルをステージしました",
+        "okStage_one": "{{count}} 個のファイルをステージしました",
+        "okStage_other": "{{count}} 個のファイルをステージしました",
+        "okUnstage": "{{count}} 個のファイルのステージを解除しました",
+        "okUnstage_one": "{{count}} 個のファイルのステージを解除しました",
+        "okUnstage_other": "{{count}} 個のファイルのステージを解除しました",
+        "okDiscard": "{{count}} 個のファイルを破棄しました",
+        "okDiscard_one": "{{count}} 個のファイルを破棄しました",
+        "okDiscard_other": "{{count}} 個のファイルを破棄しました",
+        "partial": "{{total}} 件のうち {{succeeded}} 件完了 —— {{failed}} 件は未完了",
+        "partialDetail": "未完了: {{files}}",
+        "rejectedBlocked": "何も変更されていません —— まず競合を解決してください",
+        "rejectedUnsupported": "このリポジトリはその操作に対応していません",
+        "rejectedFailed": "操作を完了できませんでした",
+        "retry": "再試行",
+        "notSent": "リクエストがバックエンドに届かず、何も変更されていません。再試行できます。",
+        "outcomeUnknown": "応答が届く前に接続がリセットされました——この操作は完了した可能性も、していない可能性もあります。再試行の前に更新してファイル一覧を確認してください。",
+        "allFailed": "{{count}} 個のファイルはいずれも処理できませんでした",
+        "allFailed_one": "{{count}} 個のファイルはいずれも処理できませんでした",
+        "allFailed_other": "{{count}} 個のファイルはいずれも処理できませんでした"
+      }
+    },
+    "pathCopied": "パスをコピーしました",
+    "copyFailed": "パスのコピーに失敗しました"
+  },
+  "terminal": {
+    "running": "実行中",
+    "stopped": "停止済み",
+    "exited": "終了コード {{code}}",
+    "stop": "停止",
+    "truncated": "(以前の出力は切り捨て)"
+  },
+  "emptyState": {
+    "greeting": "こんにちは！ご要望を教えてください。すぐに取りかかります。"
+  },
+  "crossSession": {
+    "mentionAgain": "入力欄で会話 {{name}} にメンション",
+    "mentionAgainHint": "クリックしてこの会話を入力欄でメンション",
+    "mentionUnavailable": "この会話はメンションできなくなりました",
+    "mentionFailed": "この会話にメンションできませんでした",
+    "fromBadge": "会話「{{name}}」から",
+    "otherWorkspace": "別のワークスペース",
+    "rateLimitedTitle": "会話間メッセージが空転している可能性があります",
+    "rateLimited": "「{{from}}」と「{{to}}」の間の自動メッセージが異常に頻繁で、空転している可能性があります。",
+    "stopBoth": "両方の会話を停止",
+    "disableFeature": "会話間メッセージをオフにする"
+  },
+  "planBar": {
+    "title": "プラン",
+    "progress": "{{completed}}/{{total}}",
+    "expand": "プランを展開",
+    "collapse": "プランを折りたたむ"
+  }
 }

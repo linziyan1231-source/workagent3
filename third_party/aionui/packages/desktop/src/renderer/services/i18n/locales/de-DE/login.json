@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI - Anmelden",
-  "brand": "Puxin AI",
+  "pageTitle": "AionUi - Anmelden",
+  "brand": "AionUi",
   "subtitle": "Willkommen zurück, bitte melde dich in deinem Konto an",
   "username": "Benutzername",
   "usernamePlaceholder": "Benutzernamen eingeben",
@@ -15,34 +15,6 @@
   "languageToggle": "Sprache ändern",
   "footerPrimary": "Verwandle deine Kommandozeilen-KI",
   "footerSecondary": "Modern & Effizient",
-  "changePassword": {
-    "link": "Passwort ändern",
-    "pageTitle": "Puxin AI - Passwort ändern",
-    "title": "Passwort ändern",
-    "subtitle": "Bestätige dein aktuelles Passwort und lege ein neues fest",
-    "currentPassword": "Aktuelles Passwort",
-    "currentPasswordPlaceholder": "Aktuelles Passwort eingeben",
-    "newPassword": "Neues Passwort",
-    "newPasswordPlaceholder": "Neues Passwort eingeben",
-    "confirmPassword": "Neues Passwort bestätigen",
-    "confirmPasswordPlaceholder": "Neues Passwort erneut eingeben",
-    "requirement": "Verwende mindestens 12 Zeichen und ein anderes Passwort als bisher.",
-    "submit": "Passwort ändern",
-    "success": "Passwort geändert. Melde dich mit dem neuen Passwort an.",
-    "backToLogin": "Zurück zur Anmeldung",
-    "errors": {
-      "required": "Bitte alle Pflichtfelder ausfüllen",
-      "mismatch": "Die neuen Passwörter stimmen nicht überein",
-      "invalidCurrentPassword": "Benutzername oder aktuelles Passwort ist falsch",
-      "passwordPolicy": "Das neue Passwort muss mindestens 12 Zeichen enthalten",
-      "passwordReused": "Das neue Passwort muss sich vom aktuellen unterscheiden",
-      "tooManyAttempts": "Zu viele Versuche. Bitte später erneut versuchen",
-      "networkError": "Verbindung fehlgeschlagen. Bitte erneut versuchen",
-      "serverError": "Serverfehler. Bitte später erneut versuchen",
-      "securityError": "Sicherheitsprüfung fehlgeschlagen. Seite neu laden und erneut versuchen",
-      "unknown": "Passwortänderung fehlgeschlagen. Bitte später erneut versuchen"
-    }
-  },
   "errors": {
     "empty": "Bitte Benutzername und Passwort eingeben",
     "invalidCredentials": "Ungültiger Benutzername oder Passwort",

@@ -8,10 +8,18 @@ const aionSrc = fileURLToPath(
   new URL("../../third_party/aionui/packages/desktop/src", import.meta.url),
 );
 const webModules = fileURLToPath(new URL("./node_modules", import.meta.url));
+const apiProxyTarget =
+  process.env.WORKAGENT_WEB_API_TARGET ?? "http://127.0.0.1:8080";
 const adapter = (name: string) =>
   fileURLToPath(new URL(`./src/shared/aion-adapter/${name}`, import.meta.url));
 
 export default defineConfig({
+  define: {
+    "process.env.AIONUI_MULTI_INSTANCE": "undefined",
+    "process.env.NODE_ENV": JSON.stringify(
+      process.env.NODE_ENV ?? "development",
+    ),
+  },
   plugins: [react(), UnoCSS(unoConfig)],
   resolve: {
     alias: [
@@ -25,13 +33,66 @@ export default defineConfig({
         find: "@icon-park/react",
         replacement: `${webModules}/@icon-park/react`,
       },
+      { find: "@iconify/react", replacement: `${webModules}/@iconify/react` },
       {
         find: "@uiw/react-codemirror",
         replacement: `${webModules}/@uiw/react-codemirror`,
       },
       {
+        find: "@sentry/electron/renderer",
+        replacement: adapter("sentryRenderer.ts"),
+      },
+      {
         find: "@codemirror/lang-json",
         replacement: `${webModules}/@codemirror/lang-json`,
+      },
+      {
+        find: "@codemirror/commands",
+        replacement: `${webModules}/@codemirror/commands`,
+      },
+      {
+        find: "@codemirror/lang-css",
+        replacement: `${webModules}/@codemirror/lang-css`,
+      },
+      {
+        find: "@codemirror/lang-html",
+        replacement: `${webModules}/@codemirror/lang-html`,
+      },
+      {
+        find: "@codemirror/lang-markdown",
+        replacement: `${webModules}/@codemirror/lang-markdown`,
+      },
+      {
+        find: "@codemirror/language",
+        replacement: `${webModules}/@codemirror/language`,
+      },
+      {
+        find: "@codemirror/language-data",
+        replacement: `${webModules}/@codemirror/language-data`,
+      },
+      {
+        find: "@codemirror/search",
+        replacement: `${webModules}/@codemirror/search`,
+      },
+      {
+        find: "@codemirror/state",
+        replacement: `${webModules}/@codemirror/state`,
+      },
+      {
+        find: "@codemirror/view",
+        replacement: `${webModules}/@codemirror/view`,
+      },
+      {
+        find: "@lezer/highlight",
+        replacement: `${webModules}/@lezer/highlight`,
+      },
+      {
+        find: "@monaco-editor/react",
+        replacement: `${webModules}/@monaco-editor/react`,
+      },
+      {
+        find: "@uiw/codemirror-extensions-langs",
+        replacement: `${webModules}/@uiw/codemirror-extensions-langs`,
       },
       { find: "@dnd-kit/core", replacement: `${webModules}/@dnd-kit/core` },
       {
@@ -43,11 +104,18 @@ export default defineConfig({
         replacement: `${webModules}/@dnd-kit/utilities`,
       },
       {
+        find: "@floating-ui/react",
+        replacement: `${webModules}/@floating-ui/react`,
+      },
+      {
         find: "@/common/adapter/ipcBridge",
         replacement: adapter("ipcBridge.ts"),
       },
       { find: "classnames", replacement: `${webModules}/classnames` },
+      { find: "diff2html", replacement: `${webModules}/diff2html` },
+      { find: "eventemitter3", replacement: `${webModules}/eventemitter3` },
       { find: "i18next", replacement: `${webModules}/i18next` },
+      { find: "json5", replacement: `${webModules}/json5` },
       { find: "react-i18next", replacement: `${webModules}/react-i18next` },
       {
         find: "react-router-dom",
@@ -61,6 +129,7 @@ export default defineConfig({
       },
       { find: "katex", replacement: `${webModules}/katex` },
       { find: "mermaid", replacement: `${webModules}/mermaid` },
+      { find: "postcss", replacement: `${webModules}/postcss` },
       { find: "react-markdown", replacement: `${webModules}/react-markdown` },
       {
         find: "react-syntax-highlighter",
@@ -68,9 +137,12 @@ export default defineConfig({
       },
       { find: "rehype-katex", replacement: `${webModules}/rehype-katex` },
       { find: "rehype-raw", replacement: `${webModules}/rehype-raw` },
+      { find: "rehype-sanitize", replacement: `${webModules}/rehype-sanitize` },
       { find: "remark-breaks", replacement: `${webModules}/remark-breaks` },
       { find: "remark-gfm", replacement: `${webModules}/remark-gfm` },
       { find: "remark-math", replacement: `${webModules}/remark-math` },
+      { find: "semver", replacement: `${webModules}/semver` },
+      { find: "wavedrom", replacement: `${webModules}/wavedrom` },
       { find: /^@\/common$/, replacement: adapter("common.ts") },
       {
         find: "@office-ai/platform",
@@ -149,7 +221,19 @@ export default defineConfig({
         replacement: adapter("localFilePreview.ts"),
       },
       {
-        find: "@/renderer/pages/conversation/Preview",
+        find: /^@\/renderer\/pages\/conversation\/Preview$/,
+        replacement: adapter("previewContext.ts"),
+      },
+      {
+        find: /^@renderer\/pages\/conversation\/Preview$/,
+        replacement: adapter("previewContext.ts"),
+      },
+      {
+        find: /^@renderer\/pages\/conversation\/Preview\/context\/PreviewContext$/,
+        replacement: adapter("previewContext.ts"),
+      },
+      {
+        find: /^@\/renderer\/pages\/conversation\/Preview\/context\/PreviewContext$/,
         replacement: adapter("previewContext.ts"),
       },
       { find: "@/renderer/utils/emitter", replacement: adapter("emitter.ts") },
@@ -287,7 +371,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8080",
+      "/api": apiProxyTarget,
     },
   },
   test: {

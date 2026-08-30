@@ -5,11 +5,16 @@ import { useModelProviderList } from '@/renderer/hooks/agent/useModelProviderLis
 import {
   buildAgentRuntimeModeState,
   buildAgentRuntimeModelInfo,
-  buildAgentRuntimeThoughtLevel,
+  buildAgentRuntimeThoughtLevelOption,
 } from '@/renderer/utils/model/agentRuntimeCatalog';
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
-import { DWG_QUANTITY_SKILL_NAME, resolveDwgQuantityMcpId } from '@/renderer/pages/guid/utils/capabilityBundles';
-import { Select, Tag } from '@arco-design/web-react';
+import { useAgentLogos, resolveAgentAvatar } from '@/renderer/utils/model/agentLogo';
+import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
+import type { AvailableBackend } from './types';
+import { filterAssistantEditorBackends } from './assistantUtils';
+import { AionInlineSearchInput } from '@/renderer/components/base';
+import { DROPDOWN_SEARCH_THRESHOLD } from '@/renderer/components/agent/runtimeSelectorOptions';
+import { Avatar, Select, Tag } from '@arco-design/web-react';
 import { Info, Robot } from '@icon-park/react';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +32,7 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
   const { t, i18n } = useTranslation();
   const localeKey = i18n.language;
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
+  const agentLogos = useAgentLogos();
   const { providers, getAvailableModels } = useModelProviderList();
   const [rulesExpanded, setRulesExpanded] = useState(false);
   const [addingPrompt, setAddingPrompt] = useState(false);
@@ -48,20 +54,64 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
   const editAgent = agent.value;
   const setEditAgent = agent.setValue;
   const availableBackends = agent.availableBackends;
+
+  // Agent search, matching the model picker's in-dropdown box: the trigger keeps
+  // showing the selection while a fixed search field sits above the list. Shown
+  // only past DROPDOWN_SEARCH_THRESHOLD (the same constant the model picker
+  // uses), so a two-agent install is not given a search box for two rows.
+  const [agentQuery, setAgentQuery] = useState('');
+  const showAgentSearch = availableBackends.length > DROPDOWN_SEARCH_THRESHOLD;
+  const filteredBackends = useMemo(
+    () => filterAssistantEditorBackends(availableBackends, agentQuery),
+    [availableBackends, agentQuery]
+  );
+
+  // Render the agent's own avatar (icon/logo) for a dropdown row. Falls back to
+  // a Robot glyph when the agent has neither an explicit icon nor a catalog logo.
+  const renderAgentAvatar = (option: AvailableBackend) => {
+    const avatar = resolveAgentAvatar(agentLogos, {
+      icon: option.icon,
+      backend: option.runtimeKey,
+      custom_agent_id: option.customAgentId,
+      isExtension: option.isExtension,
+    });
+    return (
+      <Avatar
+        size={20}
+        shape='square'
+        style={{ backgroundColor: avatar.kind === 'image' ? 'transparent' : 'var(--color-fill-2)' }}
+      >
+        {avatar.kind === 'image' ? (
+          <ThemedLogo
+            src={avatar.value}
+            alt={option.name}
+            className='object-contain'
+            // Arco Avatar forces color:var(--color-white); pin to theme text so
+            // the currentColor mask stays visible in light mode too.
+            style={{ width: 20, height: 20, color: 'var(--text-primary)' }}
+          />
+        ) : avatar.kind === 'emoji' ? (
+          <span className='text-14px leading-none'>{avatar.value}</span>
+        ) : (
+          <Robot theme='outline' size='14' />
+        )}
+      </Avatar>
+    );
+  };
   const editRecommendedPromptsText = prompts.text;
   const setEditRecommendedPromptsText = prompts.setText;
   const defaultModelMode = defaults.model.mode;
   const setDefaultModelMode = defaults.model.setMode;
   const defaultModelValue = defaults.model.value;
   const setDefaultModelValue = defaults.model.setValue;
-  const defaultThoughtLevelMode = defaults.thoughtLevel.mode;
-  const setDefaultThoughtLevelMode = defaults.thoughtLevel.setMode;
-  const defaultThoughtLevelValue = defaults.thoughtLevel.value;
-  const setDefaultThoughtLevelValue = defaults.thoughtLevel.setValue;
   const defaultPermissionMode = defaults.permission.mode;
   const setDefaultPermissionMode = defaults.permission.setMode;
   const defaultPermissionValue = defaults.permission.value;
   const setDefaultPermissionValue = defaults.permission.setValue;
+  const defaultThoughtLevelMode = defaults.thoughtLevel.mode;
+  const setDefaultThoughtLevelMode = defaults.thoughtLevel.setMode;
+  const defaultThoughtLevelValue = defaults.thoughtLevel.value;
+  const setDefaultThoughtLevelValue = defaults.thoughtLevel.setValue;
   const defaultSkillsMode = defaults.skills.mode;
   const setDefaultSkillsMode = defaults.skills.setMode;
   const defaultMcpMode = defaults.mcps.mode;
@@ -143,10 +193,11 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
       })),
     [currentAgentRuntimeCatalog, localeKey, t]
   );
-  const thoughtLevelOptions = useMemo(
-    () => buildAgentRuntimeThoughtLevel(currentAgentRuntimeCatalog)?.options ?? [],
+  const thoughtLevelOption = useMemo(
+    () => buildAgentRuntimeThoughtLevelOption(currentAgentRuntimeCatalog),
     [currentAgentRuntimeCatalog]
   );
+  const thoughtLevelOptions = thoughtLevelOption?.options ?? [];
   const recommendedPromptItems = useMemo(
     () =>
       editRecommendedPromptsText
@@ -268,17 +319,6 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
     const nextDisabledAuto = autoSkillNames.filter((skillName) => !values.includes(skillName));
     setSelectedSkills(nextSelected);
     setDisabledBuiltinSkills(nextDisabledAuto);
-
-    const dwgMcpId = resolveDwgQuantityMcpId(availableMcpServers);
-    if (!dwgMcpId) return;
-    const dwgSelected = nextSelected.includes(DWG_QUANTITY_SKILL_NAME);
-    const nextMcpIds = dwgSelected
-      ? selectedMcpIds.includes(dwgMcpId)
-        ? selectedMcpIds
-        : [...selectedMcpIds, dwgMcpId]
-      : selectedMcpIds.filter((id) => id !== dwgMcpId);
-    setSelectedMcpIds(nextMcpIds);
-    if (dwgSelected) setDefaultMcpMode('fixed');
   };
 
   const renderAvatarPreview = () => {
@@ -404,7 +444,12 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
         </div>
         <div className='flex items-center gap-12px'>
           <div className='w-86px flex-shrink-0 text-13px text-t-secondary'>
-            {t('settings.assistantMainAgent', { defaultValue: 'Main Agent' })}
+            <span className='flex items-center gap-6px leading-none'>
+              <span className='inline-flex shrink-0 items-center text-t-tertiary'>
+                <Robot theme='outline' size='14' />
+              </span>
+              <span>{t('settings.assistantMainAgent', { defaultValue: 'Agent' })}</span>
+            </span>
           </div>
           <div className='min-w-0 flex-1'>
             <Select
@@ -414,11 +459,49 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
               onChange={(value) => setEditAgent(value as string)}
               disabled={isGenerated}
               data-testid='select-assistant-agent'
+              onVisibleChange={(visible) => {
+                // Reset on close so reopening starts from the full list rather
+                // than the last search, which would look like agents vanished.
+                if (!visible) setAgentQuery('');
+              }}
+              dropdownRender={(menu) =>
+                showAgentSearch ? (
+                  <div>
+                    <div className='px-6px pt-4px pb-6px' style={{ background: 'var(--color-bg-popup)' }}>
+                      <AionInlineSearchInput
+                        value={agentQuery}
+                        onChange={setAgentQuery}
+                        placeholder={t('settings.assistantSearchAgent', { defaultValue: 'Search agents' })}
+                        data-testid='assistant-agent-search'
+                      />
+                    </div>
+                    {menu}
+                  </div>
+                ) : (
+                  menu
+                )
+              }
+              notFoundContent={
+                <div className='px-12px py-10px text-12px text-t-tertiary text-center'>
+                  {t('settings.assistantNoMatchingAgent', { defaultValue: 'No matching agents' })}
+                </div>
+              }
+              renderFormat={(_option, value) => {
+                const selected = availableBackends.find((item) => item.id === value);
+                if (!selected) return (value as string) ?? '';
+                return (
+                  <span className='flex items-center gap-8px'>
+                    {renderAgentAvatar(selected)}
+                    <span className='truncate'>{selected.name}</span>
+                  </span>
+                );
+              }}
             >
-              {availableBackends.map((option) => (
+              {filteredBackends.map((option) => (
                 <Select.Option key={option.id} value={option.id}>
-                  <span className='flex items-center gap-6px'>
-                    {option.name}
+                  <span className='flex items-center gap-8px'>
+                    {renderAgentAvatar(option)}
+                    <span className='truncate'>{option.name}</span>
                     {option.isExtension ? (
                       <Tag size='small' color='arcoblue'>
                         ext
@@ -448,21 +531,22 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
         setDefaultModelMode={setDefaultModelMode}
         defaultModelValue={defaultModelValue}
         setDefaultModelValue={setDefaultModelValue}
-        defaultThoughtLevelMode={defaultThoughtLevelMode}
-        setDefaultThoughtLevelMode={setDefaultThoughtLevelMode}
-        defaultThoughtLevelValue={defaultThoughtLevelValue}
-        setDefaultThoughtLevelValue={setDefaultThoughtLevelValue}
         defaultPermissionMode={defaultPermissionMode}
         setDefaultPermissionMode={setDefaultPermissionMode}
         defaultPermissionValue={defaultPermissionValue}
         setDefaultPermissionValue={setDefaultPermissionValue}
+        defaultThoughtLevelMode={defaultThoughtLevelMode}
+        setDefaultThoughtLevelMode={setDefaultThoughtLevelMode}
+        defaultThoughtLevelValue={defaultThoughtLevelValue}
+        setDefaultThoughtLevelValue={setDefaultThoughtLevelValue}
         defaultSkillsMode={defaultSkillsMode}
         setDefaultSkillsMode={setDefaultSkillsMode}
         defaultMcpMode={defaultMcpMode}
         setDefaultMcpMode={setDefaultMcpMode}
         modelOptions={modelOptions}
-        thoughtLevelOptions={thoughtLevelOptions}
         permissionOptions={permissionOptions}
+        showThoughtLevelDefault={thoughtLevelOption !== null}
+        thoughtLevelOptions={thoughtLevelOptions}
         editableSkillOptions={editableSkillOptions}
         selectedSkillValues={selectedSkillValues}
         enabledMcpServers={availableMcpServers}

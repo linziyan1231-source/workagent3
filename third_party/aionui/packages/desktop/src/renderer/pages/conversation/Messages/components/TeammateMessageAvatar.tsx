@@ -7,13 +7,12 @@
 import React from 'react';
 import useSWR from 'swr';
 import { usePresetAssistantInfo } from '@renderer/hooks/agent/usePresetAssistantInfo';
+import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { Robot } from '@icon-park/react';
 
 type Props = {
   senderName: string;
-  /** Stable Portal user id for human collaboration participants. */
-  senderUserId?: string;
   /** Sender teammate's conversation id — enables preset-aware avatar resolution via conversation extras. */
   senderConversationId?: string;
   /** Precomputed backend logo URL (fallback when no preset avatar is found). */
@@ -25,7 +24,7 @@ type Props = {
  * assistant icon (emoji or svg) over the generic backend logo so preset-backed
  * teammates keep their persona when messaging others.
  */
-const TeammateMessageAvatar: React.FC<Props> = ({ senderName, senderUserId, senderConversationId, backendLogo }) => {
+const TeammateMessageAvatar: React.FC<Props> = ({ senderName, senderConversationId, backendLogo }) => {
   // Share the SWR key with AgentChatSlot / TeamAgentIdentity so this hits cache
   // instead of firing another fetch for the same conversation.
   const { data: conversation } = useSWR(senderConversationId ? ['team-conversation', senderConversationId] : null, () =>
@@ -48,26 +47,13 @@ const TeammateMessageAvatar: React.FC<Props> = ({ senderName, senderUserId, send
         </span>
       );
     }
-    return <img src={presetInfo.logo} alt={presetInfo.name} className='w-20px h-20px rounded-full object-contain' />;
+    return (
+      <ThemedLogo src={presetInfo.logo} alt={presetInfo.name} className='w-20px h-20px rounded-full object-contain' />
+    );
   }
 
   if (backendLogo) {
-    return <img src={backendLogo} alt={senderName} className='w-20px h-20px rounded-full object-contain' />;
-  }
-
-  if (senderUserId) {
-    let hue = 0;
-    for (const character of senderUserId) hue = (hue * 31 + character.charCodeAt(0)) % 360;
-    const initial = Array.from(senderName.trim())[0]?.toLocaleUpperCase() || '?';
-    return (
-      <div
-        className='w-20px h-20px rounded-full flex items-center justify-center text-10px text-white font-600'
-        style={{ backgroundColor: `hsl(${hue} 55% 45%)` }}
-        aria-label={senderName}
-      >
-        {initial}
-      </div>
-    );
+    return <ThemedLogo src={backendLogo} alt={senderName} className='w-20px h-20px rounded-full object-contain' />;
   }
 
   return (

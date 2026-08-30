@@ -22,15 +22,3 @@ export const addRecentWorkspace = (path: string, storageKey: string = DEFAULT_RE
     localStorage.setItem(storageKey, JSON.stringify(next));
   } catch {}
 };
-
-export const replaceRecentWorkspace = (
-  oldPath: string,
-  newPath: string,
-  storageKey: string = DEFAULT_RECENT_WS_KEY
-): void => {
-  try {
-    const replaced = getRecentWorkspaces(storageKey).map((path) => (path === oldPath ? newPath : path));
-    const unique = replaced.filter((path, index) => replaced.indexOf(path) === index).slice(0, MAX_RECENT_WORKSPACES);
-    localStorage.setItem(storageKey, JSON.stringify(unique));
-  } catch {}
-};

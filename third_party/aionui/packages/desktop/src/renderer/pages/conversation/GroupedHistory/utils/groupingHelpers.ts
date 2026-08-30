@@ -33,23 +33,10 @@ export const groupConversationsByWorkspace = (
   const withoutWorkspaceConvs: TChatConversation[] = [];
 
   conversations.forEach((conv) => {
-    const extra = conv.extra as
-      | {
-          workspace?: string;
-          custom_workspace?: boolean;
-          is_project_workspace?: boolean;
-          is_temporary_workspace?: boolean;
-        }
-      | undefined;
-    const workspace = extra?.workspace;
-    const isProject =
-      extra?.is_temporary_workspace === true
-        ? false
-        : typeof extra?.is_project_workspace === 'boolean'
-          ? extra.is_project_workspace
-          : extra?.custom_workspace === true;
+    const workspace = conv.extra?.workspace;
+    const custom_workspace = conv.extra?.custom_workspace;
 
-    if (isProject && workspace) {
+    if (custom_workspace && workspace) {
       if (!allWorkspaceGroups.has(workspace)) {
         allWorkspaceGroups.set(workspace, []);
       }
@@ -75,11 +62,8 @@ export const groupConversationsByWorkspace = (
         // non-custom conversations end up in `withoutWorkspaceConvs` above
         // and never reach this helper. Passing `false` is therefore correct
         // without consulting `extra.is_temporary_workspace` per-row.
-        display_name:
-          (sortedConvs[0]?.extra as { shared?: { project_name?: string } } | undefined)?.shared?.project_name ||
-          getWorkspaceDisplayName(workspace, false, t),
+        display_name: getWorkspaceDisplayName(workspace, false, t),
         conversations: sortedConvs,
-        shared: Boolean((sortedConvs[0]?.extra as { shared?: unknown } | undefined)?.shared),
       },
     });
   });

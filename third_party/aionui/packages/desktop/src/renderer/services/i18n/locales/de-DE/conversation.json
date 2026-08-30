@@ -1,13 +1,7 @@
 {
-  "shared": {
-    "mentionCandidates": "Assistant and members",
-    "assistant": "Assistant",
-    "member": "Member",
-    "files": "Files"
-  },
   "welcome": {
     "title": "Hallo, was hast du heute vor?",
-    "placeholder": "Nachricht senden, Dateien hochladen, Ordner öffnen oder geplante Aufgabe erstellen...",
+    "placeholder": "Nachricht senden, Dateien hochladen, Ordner öffnen, eine geplante Aufgabe erstellen oder / für Befehle eingeben...",
     "linkFolder": "Ordner öffnen",
     "newConversation": "Neuer Chat",
     "selectModel": "Modell auswählen",
@@ -18,21 +12,14 @@
     "clearWorkspace": "Ordner entfernen",
     "openFolder": "Ordner öffnen",
     "none": "Keiner",
-    "quickActionsTitle": "Was kann Puxin AI?",
+    "quickActionsTitle": "Was kann AionUi?",
     "quickActionFeedback": "Feedback oder Vorschläge?",
-    "quickActionStar": "Gefällt dir Puxin AI? Gib uns einen Stern!",
-    "skillsMarket": "Puxin AI Skills-Markt",
+    "quickActionStar": "Gefällt dir AionUi? Gib uns einen Stern!",
+    "skillsMarket": "AionUi Skills-Markt",
     "skillsMarketDesc": "Community-Skills auf Abruf suchen und aktivieren. Einmal konfigurieren, für alle Agenten verfügbar.",
     "skillsMarketDetails": "Mehr anzeigen >>"
   },
   "history": {
-    "hideSharedConversation": "Hide conversation",
-    "sharedConversationHidden": "Shared conversation hidden",
-    "sharedConversationHideFailed": "Shared conversation could not be hidden",
-    "sharedProjectHidden": "Shared project hidden",
-    "sharedProjectHideFailed": "Shared project could not be hidden",
-    "newPrivateSharedConversation": "New conversation in this shared project",
-    "hideSharedProject": "Hide shared project",
     "recents": "Zuletzt",
     "noHistory": "Kein Chatverlauf",
     "deleteTitle": "Löschen",
@@ -43,6 +30,7 @@
     "saveName": "Speichern",
     "cancelEdit": "Abbrechen",
     "rename": "Umbenennen",
+    "createCronTask": "Geplante Aufgabe erstellen",
     "renameTitle": "Chat umbenennen",
     "renamePlaceholder": "Bitte neuen Namen eingeben",
     "renameSuccess": "Erfolgreich umbenannt",
@@ -55,7 +43,11 @@
     "batchExportConfirm": "{{count}} ausgewählte Themen exportieren?",
     "batchDelete": "Stapellöschung",
     "batchDeleteConfirm": "{{count}} ausgewählte Themen löschen?",
+    "batchDeleteConfirm_one": "{{count}} ausgewähltes Thema löschen?",
+    "batchDeleteConfirm_other": "{{count}} ausgewählte Themen löschen?",
     "batchDeleteSuccess": "{{count}} Themen gelöscht",
+    "batchDeleteSuccess_one": "{{count}} Thema gelöscht",
+    "batchDeleteSuccess_other": "{{count}} Themen gelöscht",
     "batchNoSelection": "Bitte zuerst Themen auswählen",
     "export": "Exportieren",
     "exportDialogTitle": "Themen exportieren",
@@ -70,12 +62,10 @@
     "exportFailed": "Export fehlgeschlagen",
     "pin": "Anheften",
     "unpin": "Loslösen",
+    "markAsUnread": "Als ungelesen markieren",
+    "markAsRead": "Als gelesen markieren",
     "pinned": "Angeheftet",
     "pinFailed": "Anheften fehlgeschlagen",
-    "weixinReminder": "WeChat-Erinnerung",
-    "weixinReminderEnabled": "Erinnerung aktiviert",
-    "weixinReminderDisabled": "Erinnerung deaktiviert",
-    "weixinReminderUpdateFailed": "WeChat-Erinnerung konnte nicht aktualisiert werden",
     "pinnedSection": "Angeheftet",
     "deleteSuccess": "Erfolgreich gelöscht",
     "deleteFailed": "Löschen fehlgeschlagen",
@@ -85,25 +75,21 @@
     "earlier": "Früher",
     "projectsSection": "Projekte",
     "conversationsSection": "Unterhaltungen",
-    "renameProjectTitle": "Projekt umbenennen",
-    "renameProject": "Projekt umbenennen",
-    "renameProjectPlaceholder": "Neuen Projektnamen eingeben",
-    "renameProjectSuccess": "Projekt wurde in „{{name}}“ umbenannt",
-    "renameProjectExists": "Ein Projekt mit diesem Namen ist bereits vorhanden",
-    "renameProjectInvalid": "Der Projektname ist ungültig",
-    "renameProjectInUse": "Das Projekt wird verwendet. Beenden Sie zugehörige Aufgaben und versuchen Sie es erneut",
-    "renameProjectForce": "Blockierende Programme beenden und umbenennen",
-    "renameProjectForceRisk": "Risiko: Programme, die diesen Ordner verwenden, werden zwangsweise beendet. Nicht gespeicherte Daten können verloren gehen.",
-    "renameProjectForceConfirmTitle": "Blockierende Programme zwangsweise beenden?",
-    "renameProjectForceConfirmContent": "Programme des aktuellen Windows-Benutzers, die nachweislich Dateien dieses Projekts verwenden, werden beendet, bevor der Ordner umbenannt wird. Nicht gespeicherte Arbeit kann verloren gehen. Dies kann nicht rückgängig gemacht werden.",
-    "renameProjectForceConfirm": "Beenden und umbenennen",
-    "renameProjectForceFailed": "Nicht alle blockierenden Programme konnten sicher erkannt oder beendet werden; der Ordner wurde nicht umbenannt",
-    "renameProjectFailed": "Projekt konnte nicht umbenannt werden",
-    "removeProjectTitle": "Projekt entfernen",
-    "removeProject": "Projekt entfernen",
-    "removeProjectConfirm": "Projekt \"{{name}}\" entfernen? Die {{count}} zugehörige(n) Unterhaltung(en) werden ebenfalls entfernt.",
     "newConversationInProject": "Neuer Chat in diesem Projekt",
-    "deleting": "Wird gelöscht..."
+    "deleting": "Wird gelöscht...",
+    "reorderPinned": "Ziehen, um angeheftete Unterhaltung neu anzuordnen",
+    "forkedFrom": "Verzweigt von „{{name}}“",
+    "forkedConversation": "Verzweigte Unterhaltung",
+    "archive": "Archivieren",
+    "archiveSuccess": "Archiviert",
+    "archiveFailed": "Archivieren fehlgeschlagen",
+    "batchArchive": "Batch archive",
+    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
+    "batchArchiveSuccess": "Archived {{count}} topics",
+    "archiveProject": "Archive project",
+    "archiveProjectTitle": "Archive project",
+    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
+    "archiving": "Archiving..."
   },
   "historySearch": {
     "tooltip": "Nachrichten durchsuchen",
@@ -333,7 +319,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -341,11 +327,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -362,10 +348,6 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
-      },
-      "USER_AGENT_RESOURCE_EXHAUSTED": {
-        "title": "Zu wenig Speicher in der Benutzerlaufzeit",
-        "body": "Eine Vorschau oder Hintergrundaufgabe verwendet zu viele Ressourcen. Schließe Office-Vorschauen, warte kurz und versuche es erneut."
       }
     }
   },
@@ -449,7 +431,8 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "Terminal",
-      "explorer": "Datei-Explorer"
+      "explorer": "Datei-Explorer",
+      "browser": "Browser"
     }
   },
   "minimap": {
@@ -457,7 +440,9 @@
     "searchHint": "Hier klicken, um nach Stichwörtern zu suchen",
     "empty": "Noch keine Frage-Antwort-Runden",
     "noMatch": "Keine übereinstimmenden Inhalte gefunden",
-    "count": "{{count}} Runden"
+    "count": "{{count}} Runden",
+    "count_one": "{{count}} Runde",
+    "count_other": "{{count}} Runden"
   },
   "chat": {
     "noModelSelected": "Kein Modell für die aktuelle Sitzung ausgewählt, Nachricht kann nicht gesendet werden",
@@ -476,6 +461,7 @@
     "switchAgentFailed": "Agentenwechsel fehlgeschlagen",
     "speech": {
       "recordTooltip": "Spracheingabe starten",
+      "recordTooltipWithShortcut": "Spracheingabe cmd+M",
       "pickFileTooltip": "Audiodatei auswählen",
       "stopTooltip": "Aufnahme stoppen",
       "processing": "Audio wird transkribiert...",
@@ -511,8 +497,8 @@
     "error": "Nebenfrage konnte nicht beantwortet werden."
   },
   "commandQueue": {
-    "title": "Wartende Befehle",
-    "clear": "Warteschlange leeren",
+    "title": "Entwurfsbox",
+    "clear": "Entwurfsbox leeren",
     "edit": "Bearbeiten",
     "editing": "Bearbeitung",
     "editPlaceholder": "Wartenden Befehl vor der Ausführung aktualisieren.",
@@ -522,15 +508,44 @@
     "reorder": "Zum Neuanordnen ziehen",
     "remove": "Entfernen",
     "files": "{{count}} Dateien",
+    "files_one": "{{count}} Datei",
+    "files_other": "{{count}} Dateien",
     "pausedAfterFailure": "Der nächste wartende Befehl konnte nicht gestartet werden. Bearbeite, ordne neu an oder entferne ihn, um fortzufahren.",
     "emptyInput": "Wartende Befehle dürfen nicht leer sein.",
     "queueFull": "Warteschlange ist voll. Entferne einen Befehl, bevor du weitere hinzufügst.",
     "inputTooLong": "Dieser wartende Befehl ist zu lang. Kürze ihn vor dem Senden.",
     "tooManyFiles": "Zu viele Dateien sind an diesen wartenden Befehl angehängt.",
-    "queueTooLarge": "Warteschlangendaten sind zu groß zum sicheren Speichern. Entferne zuerst einige Befehle."
+    "queueTooLarge": "Warteschlangendaten sind zu groß zum sicheren Speichern. Entferne zuerst einige Befehle.",
+    "sendNow": "Jetzt senden",
+    "modeToggle": "Sendemodus umschalten",
+    "help": "Hilfe",
+    "helpIntro": "Nachrichten, die du während der KI-Antwort sendest, warten hier.",
+    "helpAuto": ": werden nach jeder Antwort automatisch nacheinander gesendet.",
+    "helpManual": ": werden hier aufbewahrt, ohne zu senden; sende jede mit „Jetzt senden“.",
+    "clearConfirmTitle": "Sende-Entwurfsbox leeren?",
+    "clearConfirmContent": "Alle ausstehenden Nachrichten werden entfernt. Dies kann nicht rückgängig gemacht werden.",
+    "mode": {
+      "auto": "Auto senden",
+      "manual": "Manuell senden"
+    },
+    "addToQueue": "Zum Entwurfsfach hinzufügen",
+    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
+    "midturnBlocked": "Ein Einwurf wird nicht unterstützt, während dieser Agent antwortet. Verwende stattdessen „Zum Entwurfsfach hinzufügen“.",
+    "enterShortcut": "Enter",
+    "actionMode": "Choose send action",
+    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
+    "addToQueueBusyHint": "Save to Draft box and send it later."
   },
   "contextUsage": {
-    "contextUsed": "Kontext verwendet"
+    "contextUsed": "Kontext verwendet",
+    "tokensUsed": "{{tokens}} Tokens verwendet",
+    "windowUnknown": "Kontextfenstergröße unbekannt",
+    "sessionCost": "Sitzungskosten",
+    "input": "Eingabe",
+    "output": "Ausgabe",
+    "thought": "Denken",
+    "cachedRead": "Cache-Lesen",
+    "cachedWrite": "Cache-Schreiben"
   },
   "skill_generator": {
     "title": "Skill/Regel generieren",
@@ -570,18 +585,27 @@
       "loaded": "Geladen",
       "failed": "Fehlgeschlagen",
       "unsupported": "Nicht unterstützt"
-    }
+    },
+    "selected": "Ausgewählte MCP"
   },
   "runtimePreparing": {
     "sendboxHint": "Laufzeit-Umgebung wird vorbereitet. Der erste Start kann etwas länger dauern."
   },
   "sendbox": {
-    "hint": "Tippe / für Befehle, @ um Dateien zu referenzieren"
+    "hint": "Tippe / für Befehle, @ um Dateien zu referenzieren, ↑/↓ für den Nachrichtenverlauf",
+    "mediaPathFallback": "Dieser Agent unterstützt diesen Dateityp nicht nativ; die Datei wird als Dateipfad gesendet.",
+    "hintWithSessions": "/ für Befehle, @ für Dateien, @@ für Unterhaltungen, ↑/↓ für Verlauf"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Diese Anfrage hat keine sichtbare Antwort erzeugt."
+      },
+      "ACP_EMPTY_TURN_NEEDS_AUTH": {
+        "body": "Diese Anfrage hat keine sichtbare Antwort erzeugt. Wenn Sie bereits angemeldet sind, kann es sich um ein vorübergehendes Backend- oder Verbindungsproblem handeln – versuchen Sie es erneut oder starten Sie eine neue Unterhaltung. Wenn Sie noch nicht angemeldet sind, können Sie sich anmelden – {{hint}}."
+      },
+      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
+        "body": "Diese Anfrage hat keine sichtbare Antwort erzeugt. Die aktuelle Unterhaltung nähert sich möglicherweise der Kontextlängenbegrenzung – versuchen Sie es erneut oder starten Sie eine neue Unterhaltung und versuchen Sie es noch einmal."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "Diese Anfrage hat das Ausgabe-Token-Limit des Modells erreicht, bevor eine sichtbare Antwort erzeugt wurde."
@@ -591,8 +615,172 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "Das Modell hat diese Anfrage abgelehnt, bevor eine sichtbare Antwort erzeugt wurde."
+      },
+      "ANTIGRAVITY_STEPS_FAILED": {
+        "body": "{{count}} Schritt(e) sind fehlgeschlagen und wurden NICHT ausgeführt. agy schließt solche Durchläufe trotzdem als erfolgreich ab – prüfe daher das tatsächliche Ergebnis statt der Antwort."
+      },
+      "CLI_VERSION_OLDER": {
+        "body": "Das installierte {{cli}} ist älter als die von AionUi verifizierte Version; einige Funktionen fehlen möglicherweise. Ein Upgrade von {{cli}} wird empfohlen. (installiert: {{reported}} / von AionUi verifiziert: {{verified}})"
+      },
+      "CLI_VERSION_NEWER": {
+        "body": "Das installierte {{cli}} ist neuer als die von AionUi verifizierte Version. Es sollte weiterhin funktionieren; melden Sie ungewöhnliches Verhalten. (installiert: {{reported}} / von AionUi verifiziert: {{verified}})"
+      },
+      "CODEX_RETRYING": {
+        "body": "{{detail}} (Versuch {{attempts}}, bisher {{elapsed}} – der Anbieter des Agents bricht die Verbindung wiederholt ab; AionUi wartet ab.)"
       }
     }
   },
-  "notFound": "Unterhaltung nicht gefunden oder wurde gelöscht"
+  "notFound": "Unterhaltung nicht gefunden oder wurde gelöscht",
+  "explorer": {
+    "addFolder": "Add folder to project",
+    "removeFolder": "Remove from project",
+    "attachDuplicate": "This folder is already in the project",
+    "attachOverlap": "This folder overlaps a folder already in the project",
+    "attachFailed": "Couldn't add the folder",
+    "removeFailed": "Couldn't remove the folder",
+    "contextMenu": {
+      "rename": "Umbenennen",
+      "addToChat": "Zum Chat hinzufügen",
+      "copyRelativePath": "Relativen Pfad kopieren",
+      "copyAbsolutePath": "Absoluten Pfad kopieren",
+      "refresh": "Aktualisieren",
+      "newFile": "Neue Datei",
+      "newDir": "Neuer Ordner"
+    },
+    "namePlaceholder": "Name",
+    "deleteConfirm": "„{{name}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
+    "renameFailed": "Umbenennen fehlgeschlagen",
+    "newFileFailed": "Datei konnte nicht erstellt werden",
+    "newDirFailed": "Ordner konnte nicht erstellt werden",
+    "tabs": {
+      "files": "Dateien",
+      "changes": "Änderungen"
+    },
+    "addedToChat": "{{name}} zum Chat hinzugefügt",
+    "imported": "{{count}} Datei(en) importiert",
+    "importPartialFailed": "{{copied}} kopiert, {{failed}} fehlgeschlagen (Namenskonflikte oder nicht unterstützt)",
+    "importFailed": "Import der Dateien fehlgeschlagen",
+    "copyNodeFailed": "Kopieren fehlgeschlagen",
+    "moveNodeFailed": "Verschieben fehlgeschlagen",
+    "search": {
+      "placeholder": "Dateien nach Name suchen",
+      "searching": "Suche läuft…",
+      "empty": "Keine passenden Dateien",
+      "limitReached": "Erste {{count}} werden angezeigt — eingrenzen"
+    },
+    "scm": {
+      "notARepository": "Dieser Ordner steht nicht unter Versionskontrolle",
+      "noChanges": "Keine Änderungen",
+      "loading": "Änderungen werden geladen…",
+      "loadFailed": "Änderungen konnten nicht geladen werden",
+      "refresh": "Aktualisieren",
+      "groups": {
+        "staged": "Vorgemerkte Änderungen",
+        "unstaged": "Änderungen",
+        "changes": "Änderungen",
+        "blocked": "Muss gelöst werden"
+      },
+      "sections": {
+        "repositories": "Repositorys",
+        "changes": "Änderungen"
+      },
+      "viewAsTree": "Als Baum anzeigen",
+      "viewAsList": "Als Liste anzeigen",
+      "worktree": "Worktree",
+      "expandWorktrees": "Worktrees anzeigen",
+      "collapseWorktrees": "Worktrees ausblenden",
+      "state": {
+        "created": "Hinzugefügt",
+        "modified": "Geändert",
+        "deleted": "Gelöscht",
+        "renamed": "Umbenannt",
+        "conflicted": "Konflikt",
+        "unknown": "Unbekannter Status"
+      },
+      "badge": {
+        "created": "A",
+        "modified": "M",
+        "deleted": "D",
+        "renamed": "R",
+        "conflicted": "!",
+        "unknown": "?"
+      },
+      "conflictedHint": "Lösen Sie diesen Konflikt zuerst außerhalb von AionUi",
+      "opaqueHint": "Dieser Status kommt von einem neueren Backend — nur lesend angezeigt",
+      "degraded": "Die Aktualisierung läuft langsamer, weil der git-Index nicht geschrieben werden kann",
+      "truncated": "Zu viele Änderungen — nur der erste Teil wird angezeigt",
+      "renamedFrom": "{{from}} → {{to}}",
+      "diff": {
+        "loading": "Unterschiede werden geladen…",
+        "failed": "Unterschiede konnten nicht geladen werden",
+        "binary": "Binärdatei — kein Textvergleich",
+        "truncated": "Unterschiede gekürzt (große Datei)",
+        "empty": "Keine textlichen Änderungen",
+        "close": "Unterschiede schließen"
+      },
+      "actions": {
+        "stage": "Änderungen vormerken",
+        "unstage": "Vormerkung aufheben",
+        "discard": "Änderungen verwerfen",
+        "stageAll": "Alle vormerken",
+        "unstageAll": "Alle Vormerkungen aufheben",
+        "blockedHint": "Lösen Sie den Konflikt außerhalb von AionUi, bevor Sie vormerken oder verwerfen",
+        "confirmDiscardTitle": "Änderungen verwerfen?",
+        "confirmDiscardTracked": "Die Änderungen an {{count}} Dateien gehen verloren. Das kann nicht rückgängig gemacht werden.",
+        "confirmDiscardUntracked": "{{count}} neue Dateien werden in den Papierkorb verschoben.",
+        "confirmDiscardMixed": "Änderungen an {{tracked}} Datei(en) gehen unwiderruflich verloren; {{untracked}} neue Datei(en) landen im Papierkorb.",
+        "discardConfirmButton": "Verwerfen",
+        "okStage": "{{count}} Dateien vorgemerkt",
+        "okStage_one": "{{count}} Datei vorgemerkt",
+        "okStage_other": "{{count}} Dateien vorgemerkt",
+        "okUnstage": "Vormerkung für {{count}} Dateien aufgehoben",
+        "okUnstage_one": "Vormerkung für {{count}} Datei aufgehoben",
+        "okUnstage_other": "Vormerkung für {{count}} Dateien aufgehoben",
+        "okDiscard": "{{count}} Dateien verworfen",
+        "okDiscard_one": "{{count}} Datei verworfen",
+        "okDiscard_other": "{{count}} Dateien verworfen",
+        "partial": "{{succeeded}} von {{total}} erledigt —— {{failed}} konnten nicht abgeschlossen werden",
+        "partialDetail": "Nicht abgeschlossen: {{files}}",
+        "rejectedBlocked": "Es wurde nichts geändert —— lösen Sie zuerst den Konflikt",
+        "rejectedUnsupported": "Dieses Repository unterstützt diese Aktion nicht",
+        "rejectedFailed": "Die Aktion konnte nicht abgeschlossen werden",
+        "retry": "Wiederholen",
+        "notSent": "Die Anfrage hat das Backend nicht erreicht — es wurde nichts geändert. Sie können es erneut versuchen.",
+        "outcomeUnknown": "Die Verbindung wurde vor einer Antwort zurückgesetzt — diese Aktion kann abgeschlossen sein oder auch nicht. Aktualisieren und die Dateiliste prüfen, bevor Sie es erneut versuchen.",
+        "allFailed": "Keine der {{count}} Datei(en) konnte verarbeitet werden",
+        "allFailed_one": "{{count}} Datei konnte nicht verarbeitet werden",
+        "allFailed_other": "Keine der {{count}} Dateien konnte verarbeitet werden"
+      }
+    },
+    "pathCopied": "Pfad kopiert",
+    "copyFailed": "Pfad konnte nicht kopiert werden"
+  },
+  "terminal": {
+    "running": "Läuft",
+    "stopped": "Gestoppt",
+    "exited": "Exit {{code}}",
+    "stop": "Stopp",
+    "truncated": "(frühere Ausgabe gekürzt)"
+  },
+  "emptyState": {
+    "greeting": "Hallo! Sag mir, was du brauchst, und ich lege los."
+  },
+  "crossSession": {
+    "mentionAgain": "Unterhaltung {{name}} im Eingabefeld erwähnen",
+    "mentionAgainHint": "Klicken, um diese Unterhaltung im Eingabefeld zu erwähnen",
+    "mentionUnavailable": "Diese Unterhaltung kann nicht mehr erwähnt werden.",
+    "mentionFailed": "Diese Unterhaltung konnte nicht erwähnt werden.",
+    "fromBadge": "Aus Unterhaltung {{name}}",
+    "otherWorkspace": "anderer Arbeitsbereich",
+    "rateLimitedTitle": "Nachrichten zwischen Unterhaltungen laufen möglicherweise im Kreis",
+    "rateLimited": "Automatische Nachrichten zwischen „{{from}}“ und „{{to}}“ sind ungewöhnlich häufig und laufen möglicherweise im Kreis.",
+    "stopBoth": "Beide Unterhaltungen stoppen",
+    "disableFeature": "Nachrichten zwischen Unterhaltungen ausschalten"
+  },
+  "planBar": {
+    "title": "Plan",
+    "progress": "{{completed}}/{{total}}",
+    "expand": "Plan ausklappen",
+    "collapse": "Plan einklappen"
+  }
 }

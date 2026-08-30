@@ -107,6 +107,10 @@ const MessageAcpToolCall: React.FC<{ message: IMessageAcpToolCall }> = ({ messag
   }
   const { update } = content;
   const { tool_call_id, kind, title, status, rawInput, content: diffContent } = update;
+  const hasOnlyDiffs =
+    Array.isArray(diffContent) &&
+    diffContent.length > 0 &&
+    diffContent.every((contentItem) => contentItem.type === 'diff');
   const imagePath = getAcpImagePath(update);
   const imageAlt = imagePath?.split(/[/\\]/).pop() || t('acp.image.generated_alt');
   const [messageApi, messageContext] = Message.useMessage();
@@ -122,6 +126,16 @@ const MessageAcpToolCall: React.FC<{ message: IMessageAcpToolCall }> = ({ messag
     },
     [messageApi, t]
   );
+
+  if (hasOnlyDiffs) {
+    return (
+      <div className='w-full mb-2 flex flex-col gap-8px'>
+        {diffContent.map((contentItem, index) => (
+          <ContentView key={`${contentItem.path || 'diff'}-${index}`} content={contentItem} />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <Card className='w-full mb-2' size='small' bordered>
@@ -151,7 +165,7 @@ const MessageAcpToolCall: React.FC<{ message: IMessageAcpToolCall }> = ({ messag
               <Tooltip content={t('acp.image.download')}>
                 <Button
                   aria-label={t('acp.image.download_aria')}
-                  className='!absolute right-10px top-10px !h-28px !w-28px !p-0 opacity-0 shadow-sm transition-opacity group-hover:opacity-90 focus:opacity-100'
+                  className='!absolute end-10px top-10px !h-28px !w-28px !p-0 opacity-0 shadow-sm transition-opacity group-hover:opacity-90 focus:opacity-100'
                   type='secondary'
                   size='mini'
                   shape='circle'

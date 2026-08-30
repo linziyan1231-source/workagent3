@@ -2,8 +2,8 @@ import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
 
 export type ResolvedGuidAssistantDefaults = {
   modelId?: string;
-  thoughtLevel?: string;
   permissionMode?: string;
+  thoughtLevel?: string;
   skillIds: string[];
   disabledBuiltinSkillIds: string[];
   mcpIds: string[];
@@ -15,8 +15,8 @@ export const resolveGuidAssistantDefaults = (
   if (!detail) {
     return {
       modelId: undefined,
-      thoughtLevel: undefined,
       permissionMode: undefined,
+      thoughtLevel: undefined,
       skillIds: [],
       disabledBuiltinSkillIds: [],
       mcpIds: [],
@@ -37,11 +37,12 @@ export const resolveGuidAssistantDefaults = (
         ? detail.preferences.last_permission_value
         : undefined;
 
+  const thoughtLevelDefault = detail.defaults.thought_level ?? { mode: 'auto' };
   const thoughtLevel =
-    detail.defaults.thought_level?.mode === 'fixed'
-      ? detail.defaults.thought_level.value
-      : detail.defaults.thought_level?.mode === 'auto'
-        ? detail.preferences.last_thought_level
+    thoughtLevelDefault.mode === 'fixed'
+      ? thoughtLevelDefault.value
+      : thoughtLevelDefault.mode === 'auto'
+        ? detail.preferences.last_thought_level_value
         : undefined;
 
   const skillIds =
@@ -67,8 +68,8 @@ export const resolveGuidAssistantDefaults = (
 
   return {
     modelId: modelId || undefined,
-    thoughtLevel: thoughtLevel || undefined,
     permissionMode: permissionMode || undefined,
+    thoughtLevel: thoughtLevel || undefined,
     skillIds,
     disabledBuiltinSkillIds,
     mcpIds,

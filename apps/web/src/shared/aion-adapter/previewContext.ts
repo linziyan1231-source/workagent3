@@ -5,5 +5,15 @@ export function usePreviewContext() {
     domSnippets: snippets,
     removeDomSnippet: (_id: string) => undefined,
     clearDomSnippets: () => undefined,
+    closePreview: () => undefined,
+    clearPreviewForScope: () => undefined,
+    isOpen: false,
+    isMaximized: false,
   };
+}
+
+export const useOptionalPreviewContext = usePreviewContext;
+
+export function PreviewPanel() {
+  return null;
 }

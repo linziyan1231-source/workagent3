@@ -1,14 +1,10 @@
 {
   "plan": "Modo plan",
   "default": "Predeterminado",
-  "on": "Thinking On",
-  "off": "Thinking Off",
   "acceptEdits": "Aceptar ediciones",
   "autoEdit": "Edición automática",
   "auto_edit": "Edición automática",
   "read-only": "Solo lectura",
-  "agent": "Agente",
-  "agent-full-access": "Agente (acceso completo)",
   "full-access": "Acceso completo",
   "yolo": "YOLO",
   "yoloNoSandbox": "Auto completo (sin sandbox)",
@@ -21,5 +17,6 @@
   "permission": "Permiso",
   "switchMode": "Modo de permiso",
   "switchSuccess": "Modo cambiado correctamente",
+  "switchPendingNextTurn": "Se aplicará en el próximo turno",
   "switchFailed": "Error al cambiar modo"
 }

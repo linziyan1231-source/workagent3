@@ -1,13 +1,7 @@
 {
-  "shared": {
-    "mentionCandidates": "Assistant and members",
-    "assistant": "Assistant",
-    "member": "Member",
-    "files": "Files"
-  },
   "welcome": {
     "title": "안녕하세요, 오늘의 계획은 무엇인가요?",
-    "placeholder": "메시지 전송, 파일 업로드, 폴더 열기 또는 예약 작업 만들기...",
+    "placeholder": "메시지 전송, 파일 업로드, 폴더 열기, 예약 작업 만들기 또는 / 로 명령 호출...",
     "linkFolder": "폴더 열기",
     "newConversation": "새 채팅",
     "selectModel": "모델 선택",
@@ -18,21 +12,14 @@
     "clearWorkspace": "프로젝트 제거",
     "openFolder": "폴더 열기",
     "none": "없음",
-    "quickActionsTitle": "Puxin AI로 무엇을 할 수 있나요?",
+    "quickActionsTitle": "AionUi로 무엇을 할 수 있나요?",
     "quickActionFeedback": "문제 보고",
     "quickActionStar": "마음에 드시나요? 별을 주세요!",
-    "skillsMarket": "Puxin AI Skills Market",
+    "skillsMarket": "AionUi Skills Market",
     "skillsMarketDesc": "커뮤니티 Skills를 필요에 따라 검색하고 활성화. 한 번 설정하면 모든 Agent에서 사용 가능.",
     "skillsMarketDetails": "자세히 >>"
   },
   "history": {
-    "hideSharedConversation": "Hide conversation",
-    "sharedConversationHidden": "Shared conversation hidden",
-    "sharedConversationHideFailed": "Shared conversation could not be hidden",
-    "sharedProjectHidden": "Shared project hidden",
-    "sharedProjectHideFailed": "Shared project could not be hidden",
-    "newPrivateSharedConversation": "New conversation in this shared project",
-    "hideSharedProject": "Hide shared project",
     "recents": "최근",
     "today": "오늘",
     "yesterday": "어제",
@@ -47,6 +34,7 @@
     "saveName": "저장",
     "cancelEdit": "취소",
     "rename": "이름 변경",
+    "createCronTask": "예약 작업 만들기",
     "renameTitle": "채팅 이름 변경",
     "renamePlaceholder": "새 이름을 입력하세요",
     "renameSuccess": "이름이 변경되었습니다",
@@ -59,7 +47,11 @@
     "batchExportConfirm": "Export {{count}} selected topics?",
     "batchDelete": "Batch Delete",
     "batchDeleteConfirm": "Delete {{count}} selected topics?",
+    "batchDeleteConfirm_one": "Delete {{count}} selected topics?",
+    "batchDeleteConfirm_other": "Delete {{count}} selected topics?",
     "batchDeleteSuccess": "{{count}} topics deleted",
+    "batchDeleteSuccess_one": "{{count}} topics deleted",
+    "batchDeleteSuccess_other": "{{count}} topics deleted",
     "batchNoSelection": "Please select topics first",
     "export": "Export",
     "exportDialogTitle": "Export Topics",
@@ -74,36 +66,30 @@
     "exportFailed": "Export failed",
     "pin": "Pin",
     "unpin": "Unpin",
+    "markAsUnread": "읽지 않음으로 표시",
+    "markAsRead": "읽음으로 표시",
     "pinned": "Pinned",
     "pinFailed": "Pin operation failed",
-    "weixinReminder": "WeChat 알림",
-    "weixinReminderEnabled": "알림이 켜졌습니다",
-    "weixinReminderDisabled": "알림이 꺼졌습니다",
-    "weixinReminderUpdateFailed": "WeChat 알림 설정에 실패했습니다",
     "pinnedSection": "Pinned",
     "deleteSuccess": "삭제되었습니다",
     "deleteFailed": "삭제에 실패했습니다",
     "projectsSection": "프로젝트",
     "conversationsSection": "대화",
-    "renameProjectTitle": "프로젝트 이름 변경",
-    "renameProject": "프로젝트 이름 변경",
-    "renameProjectPlaceholder": "새 프로젝트 이름을 입력하세요",
-    "renameProjectSuccess": "프로젝트 이름을 ‘{{name}}’(으)로 변경했습니다",
-    "renameProjectExists": "같은 이름의 프로젝트가 이미 있습니다",
-    "renameProjectInvalid": "프로젝트 이름이 올바르지 않습니다",
-    "renameProjectInUse": "프로젝트가 사용 중입니다. 관련 작업을 중지한 후 다시 시도하세요",
-    "renameProjectForce": "점유 프로그램을 강제 종료한 후 이름 변경",
-    "renameProjectForceRisk": "위험: 이 폴더를 사용 중인 프로그램이 강제 종료되며 저장하지 않은 데이터가 손실될 수 있습니다.",
-    "renameProjectForceConfirmTitle": "점유 프로그램을 강제 종료할까요?",
-    "renameProjectForceConfirmContent": "현재 Windows 사용자가 소유하고 이 프로젝트 파일을 사용 중인 것으로 확인된 프로그램을 종료한 후 폴더 이름을 변경합니다. 저장하지 않은 작업이 손실될 수 있으며 되돌릴 수 없습니다.",
-    "renameProjectForceConfirm": "강제 종료 후 이름 변경",
-    "renameProjectForceFailed": "점유 프로그램을 모두 안전하게 확인하거나 종료할 수 없어 이름을 변경하지 않았습니다",
-    "renameProjectFailed": "프로젝트 이름을 변경하지 못했습니다",
-    "removeProjectTitle": "프로젝트 제거",
-    "removeProject": "프로젝트 제거",
-    "removeProjectConfirm": "\"{{name}}\" 프로젝트를 제거하시겠습니까? 프로젝트의 {{count}}개 대화도 함께 제거됩니다.",
     "newConversationInProject": "이 프로젝트에서 새 대화",
-    "deleting": "삭제 중..."
+    "deleting": "삭제 중...",
+    "reorderPinned": "드래그하여 고정된 대화 순서 변경",
+    "forkedFrom": "“{{name}}”에서 분기됨",
+    "forkedConversation": "분기된 대화",
+    "archive": "보관",
+    "archiveSuccess": "보관됨",
+    "archiveFailed": "보관 실패",
+    "batchArchive": "Batch archive",
+    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
+    "batchArchiveSuccess": "Archived {{count}} topics",
+    "archiveProject": "Archive project",
+    "archiveProjectTitle": "Archive project",
+    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
+    "archiving": "Archiving..."
   },
   "historySearch": {
     "tooltip": "메시지 검색",
@@ -333,7 +319,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -341,11 +327,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -362,10 +348,6 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
-      },
-      "USER_AGENT_RESOURCE_EXHAUSTED": {
-        "title": "사용자 런타임의 메모리가 부족합니다",
-        "body": "미리보기 또는 백그라운드 작업이 너무 많은 리소스를 사용하고 있습니다. Office 미리보기를 닫고 잠시 후 다시 시도하세요."
       }
     }
   },
@@ -449,7 +431,8 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "터미널",
-      "explorer": "파일 탐색기"
+      "explorer": "파일 탐색기",
+      "browser": "브라우저"
     }
   },
   "minimap": {
@@ -457,7 +440,9 @@
     "searchHint": "여기를 클릭해 키워드를 검색하세요",
     "empty": "아직 문답 내용이 없습니다",
     "noMatch": "일치하는 내용이 없습니다",
-    "count": "{{count}} 건"
+    "count": "{{count}} 건",
+    "count_one": "{{count}} 건",
+    "count_other": "{{count}} 건"
   },
   "chat": {
     "noModelSelected": "현재 세션에 선택된 모델이 없어 메시지를 보낼 수 없습니다",
@@ -475,6 +460,7 @@
     "switchAgentFailed": "에이전트 전환 실패",
     "speech": {
       "recordTooltip": "음성 입력 시작",
+      "recordTooltipWithShortcut": "음성 입력 cmd+M",
       "pickFileTooltip": "오디오 파일 선택",
       "stopTooltip": "녹음 중지",
       "processing": "오디오를 전사하는 중...",
@@ -510,8 +496,8 @@
     "error": "보조 질문에 답하지 못했습니다."
   },
   "commandQueue": {
-    "title": "대기 중인 명령",
-    "clear": "대기열 비우기",
+    "title": "임시함",
+    "clear": "임시함 비우기",
     "edit": "편집",
     "editing": "편집 중",
     "editPlaceholder": "실행되기 전에 이 대기 명령을 수정하세요.",
@@ -521,15 +507,44 @@
     "reorder": "드래그하여 대기 명령 순서 변경",
     "remove": "삭제",
     "files": "{{count}}개 파일",
+    "files_one": "{{count}}개 파일",
+    "files_other": "{{count}}개 파일",
     "pausedAfterFailure": "다음 대기 명령을 시작할 수 없습니다. 편집, 재정렬 또는 삭제 후 계속하세요.",
     "emptyInput": "대기 명령은 비워 둘 수 없습니다.",
     "queueFull": "대기열이 가득 찼습니다. 일부 명령을 제거한 뒤 다시 추가하세요.",
     "inputTooLong": "대기열에 넣을 명령이 너무 깁니다. 줄인 뒤 다시 보내세요.",
     "tooManyFiles": "이 대기 명령에는 파일이 너무 많이 첨부되었습니다.",
-    "queueTooLarge": "대기열 데이터가 너무 커서 안전하게 저장할 수 없습니다. 일부 명령을 먼저 제거하세요."
+    "queueTooLarge": "대기열 데이터가 너무 커서 안전하게 저장할 수 없습니다. 일부 명령을 먼저 제거하세요.",
+    "sendNow": "지금 보내기",
+    "modeToggle": "전송 모드 전환",
+    "help": "사용 안내",
+    "helpIntro": "AI가 응답하는 동안 보낸 메시지가 여기에 임시로 보관됩니다.",
+    "helpAuto": ": 각 응답이 끝날 때마다 자동으로 하나씩 전송됩니다.",
+    "helpManual": ": 자동 전송하지 않고 보관하며, 각각 \"지금 보내기\"로 전송합니다.",
+    "clearConfirmTitle": "보내기 임시함을 비울까요?",
+    "clearConfirmContent": "대기 중인 모든 메시지가 삭제되며 되돌릴 수 없습니다.",
+    "mode": {
+      "auto": "자동 전송",
+      "manual": "수동 전송"
+    },
+    "addToQueue": "Draft box에 추가",
+    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
+    "midturnBlocked": "이 에이전트가 응답하는 동안에는 끼어들기를 지원하지 않습니다. Draft box에 추가를 사용하세요.",
+    "enterShortcut": "Enter",
+    "actionMode": "Choose send action",
+    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
+    "addToQueueBusyHint": "Save to Draft box and send it later."
   },
   "contextUsage": {
-    "contextUsed": "사용된 컨텍스트"
+    "contextUsed": "사용된 컨텍스트",
+    "tokensUsed": "{{tokens}} 토큰 사용됨",
+    "windowUnknown": "컨텍스트 창 크기를 알 수 없음",
+    "sessionCost": "세션 비용",
+    "input": "입력",
+    "output": "출력",
+    "thought": "사고",
+    "cachedRead": "캐시 읽기",
+    "cachedWrite": "캐시 쓰기"
   },
   "skill_generator": {
     "title": "스킬/규칙 생성",
@@ -569,18 +584,27 @@
       "loaded": "로드됨",
       "failed": "실패",
       "unsupported": "지원되지 않음"
-    }
+    },
+    "selected": "선택된 MCP"
   },
   "runtimePreparing": {
     "sendboxHint": "실행 환경을 준비하는 중입니다. 첫 시작은 조금 더 오래 걸릴 수 있습니다."
   },
   "sendbox": {
-    "hint": "/ 로 명령, @ 로 파일 참조"
+    "hint": "/ 로 명령, @ 로 파일 참조, ↑/↓ 로 메시지 기록 전환",
+    "mediaPathFallback": "이 에이전트는 이 파일 형식을 기본적으로 지원하지 않으므로 파일 경로로 전송됩니다.",
+    "hintWithSessions": "/ 로 명령, @ 로 파일, @@ 로 대화 참조, ↑/↓ 로 기록"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "이번 요청에서는 표시할 수 있는 응답이 없었습니다."
+      },
+      "ACP_EMPTY_TURN_NEEDS_AUTH": {
+        "body": "이 요청은 표시할 응답을 생성하지 않았습니다. 이미 로그인되어 있다면 백엔드의 일시적인 문제나 연결 문제일 수 있습니다. 다시 시도하거나 새 대화를 시작하세요. 아직 로그인하지 않았다면 로그인할 수 있습니다: {{hint}}."
+      },
+      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
+        "body": "이 요청은 표시할 응답을 생성하지 않았습니다. 현재 대화가 컨텍스트 길이 한도에 가까워졌을 수 있습니다. 다시 시도하거나 새 대화를 시작한 후 다시 시도하세요."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "이번 요청은 표시 가능한 응답이 나오기 전에 모델의 출력 토큰 한도에 도달했습니다."
@@ -590,8 +614,172 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "모델이 표시 가능한 응답을 생성하기 전에 이번 요청을 거부했습니다."
+      },
+      "ANTIGRAVITY_STEPS_FAILED": {
+        "body": "이번 턴에서 {{count}}개의 단계가 실패했으며 적용되지 않았습니다. agy는 이런 턴도 성공으로 종료하므로, 답변이 아닌 실제 결과를 확인하세요."
+      },
+      "CLI_VERSION_OLDER": {
+        "body": "설치된 {{cli}} 이(가) AionUi가 검증한 버전보다 낮아 일부 기능이 없을 수 있습니다. {{cli}} 업그레이드를 권장합니다. (설치됨 {{reported}} / AionUi 검증 {{verified}})"
+      },
+      "CLI_VERSION_NEWER": {
+        "body": "설치된 {{cli}} 이(가) AionUi가 검증한 버전보다 높습니다. 대개 정상 동작하지만 이상이 있으면 알려주세요. (설치됨 {{reported}} / AionUi 검증 {{verified}})"
+      },
+      "CODEX_RETRYING": {
+        "body": "{{detail}} (누적 {{attempts}}번째 재시도, {{elapsed}} 경과 — 에이전트 제공자가 연결을 계속 끊고 있어 AionUi가 재연결을 기다리는 중입니다.)"
       }
     }
   },
-  "notFound": "대화를 찾을 수 없거나 삭제되었습니다"
+  "notFound": "대화를 찾을 수 없거나 삭제되었습니다",
+  "explorer": {
+    "addFolder": "Add folder to project",
+    "removeFolder": "Remove from project",
+    "attachDuplicate": "This folder is already in the project",
+    "attachOverlap": "This folder overlaps a folder already in the project",
+    "attachFailed": "Couldn't add the folder",
+    "removeFailed": "Couldn't remove the folder",
+    "contextMenu": {
+      "rename": "이름 바꾸기",
+      "addToChat": "채팅에 추가",
+      "copyRelativePath": "상대 경로 복사",
+      "copyAbsolutePath": "절대 경로 복사",
+      "refresh": "새로 고침",
+      "newFile": "새 파일",
+      "newDir": "새 폴더"
+    },
+    "namePlaceholder": "이름",
+    "deleteConfirm": "“{{name}}”을(를) 삭제할까요? 이 작업은 취소할 수 없습니다.",
+    "renameFailed": "이름을 바꾸지 못했습니다",
+    "newFileFailed": "파일을 만들지 못했습니다",
+    "newDirFailed": "폴더를 만들지 못했습니다",
+    "tabs": {
+      "files": "파일",
+      "changes": "변경"
+    },
+    "addedToChat": "{{name}}을(를) 채팅에 추가했습니다",
+    "imported": "{{count}}개 파일을 가져왔습니다",
+    "importPartialFailed": "{{copied}}개 복사, {{failed}}개 실패(이름 충돌 또는 미지원)",
+    "importFailed": "파일 가져오기에 실패했습니다",
+    "copyNodeFailed": "복사에 실패했습니다",
+    "moveNodeFailed": "이동에 실패했습니다",
+    "search": {
+      "placeholder": "파일 이름으로 검색",
+      "searching": "검색 중…",
+      "empty": "일치하는 파일이 없습니다",
+      "limitReached": "처음 {{count}}개 표시 — 범위를 좁혀 주세요"
+    },
+    "scm": {
+      "notARepository": "이 폴더는 버전 관리 대상이 아닙니다",
+      "noChanges": "변경 사항 없음",
+      "loading": "변경 사항 불러오는 중…",
+      "loadFailed": "변경 사항을 불러올 수 없습니다",
+      "refresh": "새로 고침",
+      "groups": {
+        "staged": "스테이징된 변경",
+        "unstaged": "변경",
+        "changes": "변경",
+        "blocked": "해결 필요"
+      },
+      "sections": {
+        "repositories": "저장소",
+        "changes": "변경"
+      },
+      "viewAsTree": "트리로 보기",
+      "viewAsList": "목록으로 보기",
+      "worktree": "워크트리",
+      "expandWorktrees": "워크트리 표시",
+      "collapseWorktrees": "워크트리 숨기기",
+      "state": {
+        "created": "추가",
+        "modified": "수정",
+        "deleted": "삭제",
+        "renamed": "이름 변경",
+        "conflicted": "충돌",
+        "unknown": "알 수 없는 상태"
+      },
+      "badge": {
+        "created": "A",
+        "modified": "M",
+        "deleted": "D",
+        "renamed": "R",
+        "conflicted": "!",
+        "unknown": "?"
+      },
+      "conflictedHint": "이 충돌은 AionUi 외부에서 먼저 해결하세요",
+      "opaqueHint": "이 상태는 더 새로운 백엔드에서 왔습니다 — 읽기 전용으로 표시",
+      "degraded": "git 인덱스를 갱신할 수 없어 느린 모드로 새로 고치고 있습니다",
+      "truncated": "변경이 너무 많아 앞부분만 표시합니다",
+      "renamedFrom": "{{from}} → {{to}}",
+      "diff": {
+        "loading": "차이 불러오는 중…",
+        "failed": "차이를 불러올 수 없습니다",
+        "binary": "바이너리 파일 — 텍스트 차이 없음",
+        "truncated": "차이가 잘렸습니다(큰 파일)",
+        "empty": "텍스트 변경 없음",
+        "close": "차이 닫기"
+      },
+      "actions": {
+        "stage": "변경 스테이징",
+        "unstage": "스테이징 취소",
+        "discard": "변경 버리기",
+        "stageAll": "모두 스테이징",
+        "unstageAll": "모두 스테이징 취소",
+        "blockedHint": "스테이징하거나 버리기 전에 AionUi 외부에서 충돌을 해결하세요",
+        "confirmDiscardTitle": "변경을 버릴까요?",
+        "confirmDiscardTracked": "{{count}}개 파일의 편집 내용이 사라지며 되돌릴 수 없습니다.",
+        "confirmDiscardUntracked": "새 파일 {{count}}개가 휴지통으로 이동됩니다.",
+        "confirmDiscardMixed": "{{tracked}}개 파일의 편집 내용은 되돌릴 수 없이 사라지고, 새 파일 {{untracked}}개는 휴지통으로 이동됩니다.",
+        "discardConfirmButton": "버리기",
+        "okStage": "파일 {{count}}개를 스테이징했습니다",
+        "okStage_one": "파일 {{count}}개를 스테이징했습니다",
+        "okStage_other": "파일 {{count}}개를 스테이징했습니다",
+        "okUnstage": "파일 {{count}}개의 스테이징을 취소했습니다",
+        "okUnstage_one": "파일 {{count}}개의 스테이징을 취소했습니다",
+        "okUnstage_other": "파일 {{count}}개의 스테이징을 취소했습니다",
+        "okDiscard": "파일 {{count}}개를 버렸습니다",
+        "okDiscard_one": "파일 {{count}}개를 버렸습니다",
+        "okDiscard_other": "파일 {{count}}개를 버렸습니다",
+        "partial": "{{total}}개 중 {{succeeded}}개 완료 —— {{failed}}개는 완료하지 못했습니다",
+        "partialDetail": "완료되지 않음: {{files}}",
+        "rejectedBlocked": "아무것도 변경되지 않았습니다 —— 먼저 충돌을 해결하세요",
+        "rejectedUnsupported": "이 저장소는 해당 작업을 지원하지 않습니다",
+        "rejectedFailed": "작업을 완료할 수 없습니다",
+        "retry": "다시 시도",
+        "notSent": "요청이 백엔드에 전달되지 않아 아무것도 변경되지 않았습니다. 다시 시도할 수 있습니다.",
+        "outcomeUnknown": "응답이 오기 전에 연결이 재설정되었습니다 — 이 작업은 완료되었을 수도, 되지 않았을 수도 있습니다. 다시 시도하기 전에 새로 고쳐 파일 목록을 확인하세요.",
+        "allFailed": "{{count}}개 파일을 모두 처리하지 못했습니다",
+        "allFailed_one": "{{count}}개 파일을 모두 처리하지 못했습니다",
+        "allFailed_other": "{{count}}개 파일을 모두 처리하지 못했습니다"
+      }
+    },
+    "pathCopied": "경로가 복사되었습니다",
+    "copyFailed": "경로 복사에 실패했습니다"
+  },
+  "terminal": {
+    "running": "실행 중",
+    "stopped": "중지됨",
+    "exited": "종료 코드 {{code}}",
+    "stop": "중지",
+    "truncated": "(이전 출력 잘림)"
+  },
+  "emptyState": {
+    "greeting": "안녕하세요! 필요한 것을 말씀해 주시면 바로 시작하겠습니다."
+  },
+  "crossSession": {
+    "mentionAgain": "입력창에서 대화 {{name}} 멘션",
+    "mentionAgainHint": "클릭하여 이 대화를 입력창에서 멘션",
+    "mentionUnavailable": "해당 대화는 더 이상 멘션할 수 없습니다",
+    "mentionFailed": "해당 대화를 멘션할 수 없습니다",
+    "fromBadge": "대화 \"{{name}}\"에서",
+    "otherWorkspace": "다른 작업 공간",
+    "rateLimitedTitle": "대화 간 메시지가 반복되는 것 같습니다",
+    "rateLimited": "\"{{from}}\"와 \"{{to}}\" 사이의 자동 메시지가 비정상적으로 잦아 반복되는 것 같습니다.",
+    "stopBoth": "두 대화 모두 중지",
+    "disableFeature": "대화 간 메시지 끄기"
+  },
+  "planBar": {
+    "title": "계획",
+    "progress": "{{completed}}/{{total}}",
+    "expand": "계획 펼치기",
+    "collapse": "계획 접기"
+  }
 }

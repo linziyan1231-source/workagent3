@@ -1,8 +1,9 @@
 import type { IProvider } from "@/common/config/storage";
+import type { ManagedAgent } from "@renderer/utils/model/agentTypes";
 import useSWR from "swr";
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
 
-export const useManagedAgentRuntimeCatalog = () => [];
+export const useManagedAgentRuntimeCatalog = (): ManagedAgent[] => [];
 
 export const refreshManagedAgentCatalogAndAssistants = async () => [];
 export const getManagedAgents = async () => [];

@@ -16,7 +16,7 @@ import log from 'electron-log';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
-import { parse } from 'semver';
+import { gt, parse } from 'semver';
 import {
   recordAutoUpdateNativeInstallError,
   recordAutoUpdateNativeInstallReady,
@@ -210,6 +210,22 @@ class AutoUpdaterService extends EventEmitter {
     }
   }
 
+  private moveCwdOutOfInstallDirForWindowsHandoff(): void {
+    if (process.platform !== 'win32') {
+      return;
+    }
+
+    try {
+      const safeCwd = path.join(app.getPath('temp'), 'aionui-updater-cwd');
+      fs.mkdirSync(safeCwd, { recursive: true });
+      process.chdir(safeCwd);
+      log.info('[auto-update] Moved process cwd before Windows installer handoff', { cwd: safeCwd });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn('[auto-update] Failed to move process cwd before Windows installer handoff', { error: message });
+    }
+  }
+
   /**
    * Initialize the service with an optional status broadcast callback.
    * This decouples the service from any specific window implementation.
@@ -310,8 +326,9 @@ class AutoUpdaterService extends EventEmitter {
   }
 
   /**
-   * Set whether to allow prerelease/dev updates
-   * When enabled, also sets allowDowngrade to true
+   * Set whether to allow prerelease/dev updates.
+   * Only tracks the flag; prerelease filtering is handled by the manual GitHub
+   * API check. Does not touch `autoUpdater.allowDowngrade` (see note below).
    */
   setAllowPrerelease(allow: boolean): void {
     this._allowPrerelease = allow;
@@ -620,6 +637,20 @@ class AutoUpdaterService extends EventEmitter {
         });
         return { success: true };
       }
+
+      // Defense-in-depth: never surface a same-or-older feed version as an update.
+      // electron-updater's isUpdateAvailable can be true for a downgrade when a
+      // channel is rolled back or allowDowngrade drifts on; require strict semver
+      // greater-than against the installed version before reporting it.
+      const feedVersion = parse(result.updateInfo.version);
+      const installedVersion = parse(app.getVersion());
+      if (feedVersion && installedVersion && !gt(feedVersion, installedVersion)) {
+        log.debug('[auto-update] feed version not newer than installed; ignoring', {
+          feedVersion: feedVersion.version,
+          installedVersion: installedVersion.version,
+        });
+        return { success: true };
+      }
       log.debug('[auto-update] update available from CDN feed', {
         version: result.updateInfo.version,
         releaseDate: result.updateInfo.releaseDate,
@@ -837,7 +868,11 @@ class AutoUpdaterService extends EventEmitter {
 
     log.info('Quitting and installing update...');
     try {
-      autoUpdater.quitAndInstall(true, true);
+      this.moveCwdOutOfInstallDirForWindowsHandoff();
+      // The first argument maps to electron-updater's silent installer flag.
+      // User-clicked "install now" should show NSIS progress/completion pages;
+      // autoInstallOnAppQuit remains true for background app-quit installs.
+      autoUpdater.quitAndInstall(false, true);
       recordAutoUpdateQuitAndInstall(this.getAutoUpdateDiagnosticOptions());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -852,7 +887,7 @@ class AutoUpdaterService extends EventEmitter {
         status: 'error',
         error: userMessage,
       });
-      throw new Error(userMessage);
+      throw new Error(userMessage, { cause: error });
     }
     // On macOS, autoUpdater.quitAndInstall() closes all windows but the
     // 'window-all-closed' handler does NOT call app.quit() (standard macOS

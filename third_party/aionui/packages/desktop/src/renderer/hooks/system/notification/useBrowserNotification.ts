@@ -10,7 +10,11 @@ import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import { configService } from '@/common/config/configService';
 import { isElectronDesktop } from '@/renderer/utils/platform';
-import { createBrowserNotificationController, type NotificationPermissionState } from './browserNotificationCore';
+import {
+  createBrowserNotificationController,
+  shouldShowNotification,
+  type NotificationPermissionState,
+} from './browserNotificationCore';
 
 /**
  * WebUI-only: show a browser notification when an agent requests a
@@ -35,21 +39,22 @@ export const useBrowserNotification = (): void => {
     // resets if this effect re-runs (e.g. on a language change). Acceptable —
     // worst case is one duplicate notification across a locale switch.
     const controller = createBrowserNotificationController({
-      readGate: () => ({
-        isElectron: isElectronDesktop(),
-        hasNotificationApi: 'Notification' in window,
-        isSecureContext: window.isSecureContext,
-        permission: Notification.permission as NotificationPermissionState,
-        settingEnabled: configService.get('system.notificationEnabled') !== false,
-        documentHidden: document.hidden,
-      }),
+      shouldShow: () =>
+        shouldShowNotification({
+          isElectron: isElectronDesktop(),
+          hasNotificationApi: 'Notification' in window,
+          isSecureContext: window.isSecureContext,
+          permission: Notification.permission as NotificationPermissionState,
+          settingEnabled: configService.get('system.notificationEnabled') !== false,
+          documentHidden: document.hidden,
+        }),
       bodyFor: (kind) =>
         kind === 'confirmation'
           ? t('settings.browserNotification.bodyConfirmation')
           : t('settings.browserNotification.bodyTurnCompleted'),
       show: ({ body, conversationId }) => {
         try {
-          const notification = new Notification('Puxin AI', { body });
+          const notification = new Notification('AionUi', { body });
           notification.onclick = () => {
             window.focus();
             if (conversationId) void navigate(`/conversation/${conversationId}`);

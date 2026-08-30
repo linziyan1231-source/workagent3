@@ -7,6 +7,10 @@
 
 .aionui-markdown {
   color: var(--text-primary);
+  /* Markdown-region font; inherits the app/global font until a Markdown font is chosen. */
+  font-family: var(--md-font-family, inherit);
+  /* Markdown-region weight; inherits the surrounding weight until one is chosen. */
+  font-weight: var(--md-font-weight, inherit);
   /* Comfortable reading size for the rendered preview (source editor is 13px mono). */
   font-size: var(--md-font-size, 15px);
   line-height: 1.7;
@@ -74,8 +78,8 @@
 }
 
 .aionui-markdown :where(blockquote) {
-  border-left: 3px solid var(--bg-3);
-  padding-left: 12px;
+  border-inline-start: 3px solid var(--bg-3);
+  padding-inline-start: 12px;
   color: var(--text-primary);
   margin: 16px 0;
 }
@@ -88,6 +92,7 @@
   border-radius: 4px;
   font-size: 0.875em;
   font-family: var(--font-mono);
+  font-weight: var(--font-mono-weight);
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -104,6 +109,7 @@
 }
 .aionui-markdown :where(pre) :where(code) {
   font-family: var(--font-mono);
+  font-weight: var(--font-mono-weight);
 }
 
 /* Code block scrollbar — blends with surface */
@@ -133,6 +139,11 @@
   border: 1px solid var(--bg-3);
   background-color: var(--bg-1);
   font-weight: bold;
+  /* Without this the UA default (text-align: center) applies and the header row
+     is centred while every body row is start-aligned. GFM alignment markers
+     (:---, :---:, ---:) still win: remark-gfm emits them as an inline style,
+     which outranks this rule. */
+  text-align: start;
 }
 .aionui-markdown :where(td) {
   padding: 8px;
@@ -219,10 +230,42 @@
   padding: 12px 16px;
 }
 
-/* Mermaid diagrams render statically — no pan/zoom/drag. Streamdown attaches an
-   unconditional wheel + pointer pan-zoom handler that its `controls` flag does NOT
-   disable; pointer-events:none (inherited by the inner pan-zoom layer) stops those
-   handlers from receiving events, so the page scrolls normally over the diagram. */
+/* Mermaid diagrams expose Streamdown's pan/zoom controls (zoom in/out, reset,
+   copy, download) enabled via the viewer's `controls` prop; fullscreen is off
+   (its Streamdown overlay ships only unbacked Tailwind classes). The block must
+   receive pointer events so the control buttons are clickable and the diagram
+   can be dragged. Wheel-zoom over a diagram is suppressed in MarkdownViewer
+   (capture-phase listener) so scrolling the doc scrolls the page; use the zoom
+   buttons to scale. */
 .aionui-markdown [data-streamdown='mermaid-block'] {
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+/* Mermaid download dropdown (SVG / PNG / MMD). Streamdown styles the menu with
+   Tailwind classes (`min-w-[120px] border bg-background shadow-lg`, items
+   `w-full px-3 py-2`) that UnoCSS never emits — node_modules isn't scanned — so
+   the menu collapses to ~1ch wide and the labels wrap one character per line.
+   Back the box + items by class name (Streamdown is version-pinned; the menu
+   exposes no data-streamdown hook). */
+.aionui-markdown [class~='min-w-[120px]'] {
+  min-width: 120px;
+  overflow: hidden;
+  border: 1px solid var(--bg-3);
+  border-radius: 6px;
+  background: var(--bg-1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.aionui-markdown [class~='min-w-[120px]'] > button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.aionui-markdown [class~='min-w-[120px]'] > button:hover {
+  background: var(--bg-2);
 }

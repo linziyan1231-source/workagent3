@@ -1,27 +1,15 @@
 {
-  "historyVersions": "Geçmiş Sürümler",
-  "currentFile": "Mevcut Dosya",
   "loading": "Yükleniyor...",
-  "loadHistoryFailed": "Geçmiş yüklenemedi",
-  "noHistory": "Geçmiş sürüm yok",
-  "snapshotSaved": "Anlık görüntü kaydedildi",
-  "snapshotSaveFailed": "Anlık görüntü kaydedilemedi",
-  "historyLoaded": "Geçmiş sürüm yüklendi",
-  "historyLoadFailed": "Geçmiş sürüm yüklenemedi",
-  "tooFrequent": "Çok sık işlem, lütfen daha sonra tekrar deneyin",
-  "saveSnapshot": "Mevcut anlık görüntüyü kaydet",
-  "snapshotNotSupported": "Mevcut içerik anlık görüntüyü desteklemiyor",
-  "history": "Geçmiş",
-  "historyNotSupported": "Mevcut içerik geçmişi desteklemiyor",
   "downloadFile": "Dosyayı İndir",
   "closePreview": "Önizlemeyi Kapat",
   "collapsePanel": "Paneli Daralt",
+  "maximizePanel": "Büyüt",
+  "restorePanel": "Geri Yükle",
   "source": "Kaynak",
   "code": "Kod",
   "preview": "Önizleme",
   "editor": "Editör",
   "previewEffect": "Önizleme",
-  "snapshot": "Anlık Görüntü",
   "downloadMarkdown": "Markdown Dosyasını İndir",
   "downloadCode": "{{language}} Dosyasını İndir",
   "downloadDiff": "Diff Dosyasını İndir",
@@ -36,6 +24,10 @@
   "continueEdit": "Düzenlemeye Devam Et",
   "closeTabTitle": "Sekmeyi Kapat",
   "closeTabMessage": "Mevcut içerik kaydedilmedi. Kapatmadan önce kaydetmek ister misiniz?",
+  "closeTabsTitle": "Sekmeleri Kapat",
+  "closeTabsMessage": "{{count}} sekmede kaydedilmemiş değişiklik var. Kapatmadan önce kaydedilsin mi?",
+  "closeTabsMessage_one": "{{count}} sekmede kaydedilmemiş değişiklik var. Kapatmadan önce kaydedilsin mi?",
+  "closeTabsMessage_other": "{{count}} sekmede kaydedilmemiş değişiklik var. Kapatmadan önce kaydedilsin mi?",
   "saveAndClose": "Kaydet ve Kapat",
   "closeWithoutSave": "Kaydetme",
   "pptTitle": "PowerPoint Sunumu",
@@ -47,10 +39,16 @@
   "openInSystemApp": "Sistem uygulamasında aç",
   "openInSystemSuccess": "Sistem varsayılan uygulamasında açıldı",
   "openInSystemFailed": "Sistem uygulamasıyla açılamadı",
+  "close": "Kapat",
   "closeLeft": "Solu Kapat",
   "closeRight": "Sağı Kapat",
   "closeOthers": "Diğerlerini Kapat",
   "closeAll": "Tümünü Kapat",
+  "closeUnmodified": "Değiştirilmemişleri Kapat",
+  "copyPath": "Yolu Kopyala",
+  "copyRelativePath": "Göreli Yolu Kopyala",
+  "openLocation": "Klasörde göster",
+  "openLocationFailed": "İçeren klasör açılamadı",
   "readOnlyLabel": "Salt okunur önizleme",
   "pathLabel": "Yol",
   "missingFile": {
@@ -60,14 +58,22 @@
   "noTabs": "Açık sekme yok",
   "openInPanelTooltip": "Önizleme panelinde görüntüle",
   "mermaidTitle": "Mermaid Diyagramı",
-  "largeTextTruncatedHint": "Büyük dosya önizleme modu: performans için yalnızca ilk {{count}} karakter gösteriliyor.",
-  "truncatedBanner": "Önizleme içeriği kısaltıldı. Tam dosyayı görmek için indir seçeneğini kullanın.",
+  "wavedromTitle": "WaveDrom Diyagramı",
+  "oversized": {
+    "title": "Dosya önizleme için çok büyük",
+    "detail": "Dosya boyutu {{size}}, {{threshold}} sınırını aşıyor. Lütfen bir sistem düzenleyicisinde açın.",
+    "downloadUnavailable": "Bu dosya burada indirilemeyecek kadar büyük. Bunun yerine “Sistemde aç”ı kullanın."
+  },
+  "unsupported": {
+    "title": "Bu biçim için önizleme desteklenmiyor",
+    "detail": "{{format}} dosyaları burada önizlenemez. Bir sistem uygulamasında açın.",
+    "downloadUnavailable": "Bu dosya burada indirilemez. Bunun yerine “Sistemde aç”ı kullanın."
+  },
   "aiWriting": "Yapay zeka yazıyor…",
   "errors": {
     "missingFilePath": "Dosya yolu eksik",
     "openWithoutPath": "Açılamadı: dosya yolu sağlanmadı",
-    "conversionFailed": "Dönüştürme başarısız",
-    "emptySnapshot": "Anlık görüntü içeriği boş"
+    "conversionFailed": "Dönüştürme başarısız"
   },
   "office": {
     "installLinkText": "officecli kurulum kılavuzunu aç",
@@ -76,14 +82,10 @@
       "installFailed": "officecli otomatik olarak yüklenemedi. Arka uç günlüklerini kontrol edip yeniden deneyin.",
       "portTimeout": "Önizleme servisi başladı ancak zamanında hazır olmadı. Yeniden deneyin.",
       "startFailed": "Office önizleme servisi başlatılamadı.",
-      "outsideSandbox": "Bu dosya geçerli çalışma alanı sandbox'ının dışında.",
-      "fileTooLarge": "Dosya, web önizlemesi için güvenli boyut sınırını aşıyor. İndirin veya yerel Office uygulamasında açın.",
-      "resourceLimit": "Bu dosyayı web'de önizlemek için gereken kaynaklar güvenli sınırı aşıyor. İndirin veya yerel Office uygulamasında açın.",
-      "unsafeArchive": "Bu Office dosyasının arşiv yapısı güvenli değil veya bozuk; web'de önizlenemez. İndirip yerel Office uygulamasında açmayı deneyin.",
-      "busy": "Başka bir Office dosyası önizleniyor veya dönüştürülüyor. Mevcut önizlemeyi kapatıp yeniden deneyin."
+      "outsideSandbox": "Bu dosya geçerli çalışma alanı sandbox'ının dışında."
     },
     "serverInstall": {
-      "hint": "Puxin AI bir sunucuda çalışıyor. Önizleme bileşeni o sunucuya kurulmalıdır. Aşağıdaki komutu sunucuda çalıştırıp yeniden deneyin:",
+      "hint": "AionUi bir sunucuda çalışıyor. Önizleme bileşeni o sunucuya kurulmalıdır. Aşağıdaki komutu sunucuda çalıştırıp yeniden deneyin:",
       "icuNote": "Yine de başlamazsa sunucuya ICU kitaplığını kurun (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -143,5 +145,36 @@
     "installing": "Önizleme bileşeni yükleniyor...",
     "startFailed": "PPT önizlemesi başlatılamadı",
     "installHint": "OfficeCLI'yi resmi iOfficeAI/OfficeCLI releases sayfasından yükleyin"
-  }
+  },
+  "browser": {
+    "newTab": "Yeni sekme",
+    "addressPlaceholder": "Bir URL girin veya arama yapın",
+    "agentActiveTooltip": "Aracı bu sekmeyi kullanıyor",
+    "tabLimitReached": "Sekme sınırına ulaşıldı ({{count}}). En eski sekme yeniden kullanıldı.",
+    "agentFirstUseTitle": "Aracı uygulama içi tarayıcıyı kullanıyor",
+    "agentFirstUseContent": "Bu panelde sayfa açabilir, tıklayabilir ve içerik okuyabilir. Oturum bilgileriniz korunur.",
+    "agentFirstUseAction": "Ayarları aç"
+  },
+  "saveConflict": "Kaydedilemedi: bu dosya siz açtıktan sonra diskte değişti. Diğer değişiklikleri görmek için yeniden yükleyin — düzenlemeleriniz kaydedilmemiş olarak duruyor.",
+  "persistQuotaExceeded": "Yerel depolama dolu, bu proje için açık sekmeler artık hatırlanamıyor. Bazı sekmeleri kapatın veya site verilerini temizleyin.",
+  "save": {
+    "tooltip": "Değişiklikleri kaydet (Ctrl/Cmd+S)",
+    "clean": "Kaydedilmemiş değişiklik yok"
+  },
+  "refresh": {
+    "label": "Yenile",
+    "tooltip": "Diskten yeniden yükle",
+    "hasUpdate": "Bu dosya diskte değişti — yeniden yüklemek için tıklayın",
+    "noSignalSource": "Bu dosya projede değil, bu yüzden değişiklikler bildirilmeyecek",
+    "unavailable": "Bu dosya bulunamıyor",
+    "failed": "Bu dosya yeniden yüklenemedi",
+    "confirmTitle": "Yeniden yükleyip kaydedilmemiş değişiklikler kaybedilsin mi?",
+    "confirmMessage": "Bu sekmede kaydedilmemiş değişiklikler var. Yeniden yükleme onları diskteki içerikle değiştirir.",
+    "discardAndRefresh": "Değişiklikleri sil ve yenile",
+    "officeNotWired": "Office belgelerini yenileme henüz kullanılamıyor — değişiklikleri görmek için dosyayı kapatıp yeniden açın."
+  },
+  "zoomIn": "Yakınlaştır",
+  "zoomOut": "Uzaklaştır",
+  "zoomReset": "Görünümü sıfırla",
+  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın"
 }

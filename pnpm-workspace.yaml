@@ -3,6 +3,9 @@ packages:
   - packages/*
   - harness-bundle
 
+overrides:
+  "@codemirror/lint": 6.9.5
+
 allowBuilds:
   "@deepseek-ai/dsh-subprocess-local": true
   "@google/genai": true

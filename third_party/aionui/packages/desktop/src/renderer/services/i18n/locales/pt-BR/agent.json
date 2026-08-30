@@ -29,7 +29,9 @@
   },
   "model": {
     "switchSuccess": "Modelo alterado com sucesso",
-    "switchFailed": "Falha ao alternar o modelo"
+    "switchFailed": "Falha ao alternar o modelo",
+    "searchPlaceholder": "Buscar modelos",
+    "noResults": "Nenhum modelo correspondente"
   },
   "config": {
     "setting": "Aplicando configuração...",
@@ -42,5 +44,16 @@
     "label": "Nível de raciocínio",
     "switchSuccess": "Nível de raciocínio alterado",
     "switchFailed": "Falha ao alterar o nível de raciocínio"
+  },
+  "warmup": {
+    "clickToWake": "Clique para ativar este membro"
+  },
+  "runtimeRestart": {
+    "tooltip": "Reconectar agente",
+    "confirmContent": "Reinicia o processo do agente para adotar alterações externas de configuração da CLI (como troca de canal). O histórico do chat é mantido e a sessão é retomada quando possível.",
+    "success": "Agente reconectado",
+    "failed": "Falha ao reconectar o agente",
+    "initializingTooltip": "O agente está sendo inicializado. Reconecte quando estiver pronto",
+    "processingTooltip": "Aguarde a resposta atual terminar antes de reconectar"
   }
 }

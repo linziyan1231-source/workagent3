@@ -5,6 +5,7 @@
   "nextRun": "下次执行",
   "lastRun": "上次执行",
   "lastError": "错误信息",
+  "lastErrorWithDetail": "上次错误：{{error}}",
   "message": "执行内容",
   "goToConversation": "跳转到所属会话",
   "status": {
@@ -13,7 +14,7 @@
     "error": "执行出错",
     "unread": "有新执行",
     "unconfigured": "未配置定时任务",
-    "defaultPrompt": "每天早上10点，为我搜索AI最新的新闻动向，汇总并输出洞察报告。"
+    "defaultPrompt": "每天早上10点，为我搜索AI最新的新闻动向，汇总并输出洞察报告。（请使用 /cron 技能在 AionUi 中创建定时任务。）"
   },
   "actions": {
     "goTo": "查看会话",
@@ -54,10 +55,12 @@
     "newTask": "新建任务",
     "createViaChat": "通过对话创建",
     "createManually": "手动创建",
-    "description": "按计划自动运行任务。你也可以在任意对话中直接让 Puxin AI 帮你创建一个定时任务。",
+    "description": "按计划自动运行任务。你也可以在任意对话中直接让 AionUi 帮你创建一个定时任务。",
     "awakeBanner": "定时任务仅在电脑唤醒状态下运行。",
     "keepAwake": "保持唤醒",
-    "keepAwakeTooltip": "开启后，Puxin AI 将阻止电脑进入休眠状态",
+    "keepAwakeTooltip": "开启后，AionUi 将阻止电脑进入休眠状态",
+    "searchPlaceholder": "搜索定时任务...",
+    "noSearchResults": "没有匹配的定时任务。",
     "createTask": "创建定时任务",
     "editTask": "编辑定时任务",
     "createSuccess": "任务创建成功",
@@ -82,6 +85,8 @@
       "prompt": "执行指令",
       "promptRequired": "请输入执行指令",
       "promptPlaceholder": "助手触发时执行的指令",
+      "queue": "队列保护",
+      "queueHint": "开启后，如果上一次定时任务会话仍在执行，本次触发将直接跳过，不打扰正在工作的助手。",
       "frequency": "频率",
       "cronExpr": "Cron 表达式",
       "cronExprRequired": "请输入 Cron 表达式",
@@ -125,6 +130,20 @@
       "dailyAt": "每天 {{time}} 执行",
       "weekdaysAt": "工作日 {{time}} 执行",
       "weeklyAt": "每周{{day}} {{time}} 执行"
+    },
+    "custom": {
+      "modeLabel": "重复方式",
+      "interval": "每隔",
+      "monthly": "每月",
+      "advanced": "高级 Cron 表达式",
+      "every": "每隔",
+      "unit": "单位",
+      "minutes": "分钟",
+      "hours": "小时",
+      "time": "时间",
+      "weekdays": "星期",
+      "monthDay": "每月日期",
+      "preview": "生成的 Cron"
     }
   },
   "trigger": {

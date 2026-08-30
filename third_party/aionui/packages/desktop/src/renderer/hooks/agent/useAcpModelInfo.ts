@@ -7,8 +7,12 @@
 import { ipcBridge } from '@/common';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import type { AcpConfigOptionDto, AcpModelInfo } from '@/common/types/platform/acpTypes';
-import { normalizeManagedKimiModelInfo } from '@/renderer/utils/model/agentRuntimeCatalog';
-import { type AcpConfigSetStatus, type AcpDerivedOption, useAcpConfigOptions } from './useAcpConfigOptions';
+import {
+  type AcpConfigOptionsPort,
+  type AcpConfigSetStatus,
+  type AcpDerivedOption,
+  useAcpConfigOptions,
+} from './useAcpConfigOptions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type UseAcpModelInfoArgs = {
@@ -16,6 +20,8 @@ type UseAcpModelInfoArgs = {
   backend?: string;
   initialModelId?: string;
   prepareRuntime?: () => Promise<void>;
+  prepareSetRuntime?: () => Promise<void>;
+  configOptionsPort?: AcpConfigOptionsPort;
   enabled?: boolean;
   onSelectModelSuccess?: (model_id: string) => void;
   onSelectModelFailed?: (model_id: string, error: unknown) => void;
@@ -23,12 +29,15 @@ type UseAcpModelInfoArgs = {
 
 export type UseAcpModelInfoResult = {
   model_info: AcpModelInfo | null;
+  isRuntimeReady: boolean;
   canSwitch: boolean;
+  isLoading: boolean;
   isSetting: boolean;
   selectModel: (model_id: string) => void;
   thoughtLevel: AcpDerivedOption | null;
   setStatus: AcpConfigSetStatus;
   setConfigOption: (optionId: string, value: string) => Promise<AcpConfigOptionDto[]>;
+  isConfigOptionBlocked: (optionId: string) => boolean;
 };
 
 function sameModelInfo(a: AcpModelInfo | null, b: AcpModelInfo | null): boolean {
@@ -61,15 +70,21 @@ export const useAcpModelInfo = ({
   backend: _backend,
   initialModelId,
   prepareRuntime,
+  prepareSetRuntime,
+  configOptionsPort,
   enabled = true,
   onSelectModelSuccess,
   onSelectModelFailed,
 }: UseAcpModelInfoArgs): UseAcpModelInfoResult => {
-  const { model, thoughtLevel, setStatus, setConfigOption } = useAcpConfigOptions({
+  const runtimeConfig = useAcpConfigOptions({
     conversation_id,
     prepareRuntime,
+    prepareSetRuntime,
+    configOptionsPort,
     enabled,
   });
+  const { model, thoughtLevel, setStatus, setConfigOption, isLoading } = runtimeConfig;
+  const isConfigOptionBlocked = runtimeConfig.isConfigOptionBlocked ?? (() => false);
   const [legacyModelInfo, setLegacyModelInfo] = useState<AcpModelInfo | null>(null);
 
   const configModelInfo = useMemo<AcpModelInfo | null>(() => {
@@ -85,6 +100,14 @@ export const useAcpModelInfo = ({
       })),
     };
   }, [initialModelId, model]);
+  const persistedModelInfo = useMemo<AcpModelInfo | null>(() => {
+    if (!initialModelId) return null;
+    return {
+      current_model_id: initialModelId,
+      current_model_label: initialModelId,
+      available_models: [],
+    };
+  }, [initialModelId]);
 
   useEffect(() => {
     if (!enabled) {
@@ -113,32 +136,41 @@ export const useAcpModelInfo = ({
     return ipcBridge.acpConversation.responseStream.on(handler);
   }, [conversation_id, enabled, initialModelId]);
 
-  const model_info = useMemo(
-    () => normalizeManagedKimiModelInfo(configModelInfo ?? legacyModelInfo),
-    [configModelInfo, legacyModelInfo]
-  );
+  const model_info = configModelInfo ?? legacyModelInfo ?? persistedModelInfo;
 
   const selectModel = useCallback(
     (model_id: string) => {
       if (!enabled || !model) return;
+      // Only the switch itself decides success/failure. The rejection handler is
+      // passed to `then` rather than chained as `catch` so it can ONLY see a
+      // failure from `setConfigOption` — never one from `onSelectModelSuccess`.
+      // Once the runtime has switched, reporting a failure would tell the user
+      // the opposite of what happened.
       void setConfigOption(model.id, model_id)
-        .then(async () => {
-          onSelectModelSuccess?.(model_id);
-        })
-        .catch((error) => {
-          onSelectModelFailed?.(model_id, error);
-        });
+        .then(
+          () => onSelectModelSuccess?.(model_id),
+          (error) => onSelectModelFailed?.(model_id, error)
+        )
+        // Best-effort: swallow anything the callbacks themselves throw. It cannot
+        // change the outcome of a switch that already landed, and letting it
+        // escape would surface as an unhandled rejection.
+        .catch(() => {});
     },
     [enabled, model, onSelectModelFailed, onSelectModelSuccess, setConfigOption]
   );
 
   return {
     model_info,
-    canSwitch: Boolean(configModelInfo && configModelInfo.available_models.length > 0),
+    isRuntimeReady: runtimeConfig.isRuntimeReady,
+    canSwitch: Boolean(
+      configModelInfo && configModelInfo.available_models.length > 0 && model && !isConfigOptionBlocked(model.id)
+    ),
+    isLoading: !model_info && isLoading,
     isSetting: setStatus.state === 'setting' && setStatus.optionId === model?.id,
     selectModel,
     thoughtLevel,
     setStatus,
     setConfigOption,
+    isConfigOptionBlocked,
   };
 };

@@ -1,10 +1,10 @@
 import { ipcBridge } from '@/common';
-import type { PortalSharedMention } from '@/common/adapter/ipcBridge';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { isSideQuestionSupported } from '@/common/chat/sideQuestion';
 import { parseError, uuid } from '@/common/utils';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
+import ContextUsageIndicator from '@/renderer/components/agent/ContextUsageIndicator';
 import CommandQueuePanel from '@/renderer/components/chat/CommandQueuePanel';
 import MobileActionSheet, {
   type MobileActionSheetEntry,
@@ -14,6 +14,7 @@ import MobileActionSheet, {
 import SendBox from '@/renderer/components/chat/SendBox';
 import ThoughtDisplay from '@/renderer/components/chat/ThoughtDisplay';
 import FileAttachButton from '@/renderer/components/media/FileAttachButton';
+import { audioExts, getFileExtension, imageExts } from '@/renderer/services/FileService';
 import FilePreview from '@/renderer/components/media/FilePreview';
 import HorizontalFileList from '@/renderer/components/media/HorizontalFileList';
 import { classifyConfigSetError, useAcpConfigOptions } from '@/renderer/hooks/agent/useAcpConfigOptions';
@@ -27,7 +28,6 @@ import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import { useAddOrUpdateMessage } from '@/renderer/pages/conversation/Messages/hooks';
 import {
-  shouldEnqueueConversationCommand,
   useConversationCommandQueue,
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
@@ -39,22 +39,21 @@ import { useTeamPermission } from '@/renderer/pages/team/hooks/TeamPermissionCon
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 import { allSupportedExts } from '@/renderer/services/FileService';
 import { iconColors } from '@/renderer/styles/colors';
+import type { SessionRef } from '@/common/adapter/ipcBridge';
+import CrossSessionDisabledBanner from '@/renderer/components/chat/CrossSessionDisabledBanner';
+import { useCrossSessionMessageEnabled } from '@/renderer/hooks/chat/useCrossSessionMessageEnabled';
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
-import { mergeFileSelectionItems } from '@/renderer/utils/file/fileSelection';
-import { buildDisplayMessage } from '@/renderer/utils/file/messageFiles';
+import { localSelectionItems, mergeFileSelectionItems } from '@/renderer/utils/file/fileSelection';
+import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/messageFiles';
+import type { ChatFileRef } from '@/common/types/chatFile';
 import { Button, Message, Tag } from '@arco-design/web-react';
-import { Brain, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
 import type { UseAcpMessageReturn } from './useAcpMessage';
-import {
-  activeSharedMentions,
-  makeSharedMentionToken,
-  stripSharedMentionMarkers,
-  type SelectedSharedMention,
-} from './sharedMentionToken';
 
 const configErrorMessageKey = (error: unknown) => {
   const errorKind = classifyConfigSetError(error);
@@ -111,22 +110,20 @@ const AcpSendBox: React.FC<{
   backend: string;
   session_mode?: string;
   agent_name?: string;
-  workspacePath?: string;
   messageState: UseAcpMessageReturn;
-  teamSendMessage?: (payload: { input: string; files: string[] }) => Promise<void>;
+  teamSendMessage?: (payload: { input: string; files: ChatFileRef[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
-}> = ({
-  conversation_id,
-  backend,
-  session_mode,
-  agent_name,
-  workspacePath,
-  messageState,
-  teamSendMessage,
-  teamRuntime,
-}) => {
-  const { aiProcessing, setAiProcessing, resetState, hasThinkingMessage, slashCommands, fetchSlashCommands } =
-    messageState;
+}> = ({ conversation_id, backend, session_mode, agent_name, messageState, teamSendMessage, teamRuntime }) => {
+  const {
+    aiProcessing,
+    setAiProcessing,
+    turnStartedAtMs,
+    resetState,
+    hasThinkingMessage,
+    slashCommands,
+    tokenUsage,
+    context_limit,
+  } = messageState;
   const { t } = useTranslation();
   const teamPermission = useTeamPermission();
   // In team mode, all agents show the permission mode selector (members don't propagate)
@@ -137,9 +134,6 @@ const AcpSendBox: React.FC<{
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
   const conversationContext = useConversationContextSafe();
-  const shared = conversationContext?.shared;
-  const [sharedMembers, setSharedMembers] = useState<Array<{ id: number; display_name: string; role: string }>>([]);
-  const [sharedMentions, setSharedMentions] = useState<SelectedSharedMention[]>([]);
   const loadedSkills = conversationContext?.loadedSkills ?? [];
   const loadedMcpStatuses =
     conversationContext?.loadedMcpStatuses ??
@@ -148,73 +142,35 @@ const AcpSendBox: React.FC<{
       name,
       status: 'loaded',
     }));
-  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
-
-  useEffect(() => {
-    if (!shared) {
-      setSharedMembers([]);
-      setSharedMentions([]);
-      return;
-    }
-    let cancelled = false;
-    void fetch(`/api/portal/shared-members?project_id=${encodeURIComponent(shared.project_id)}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`shared members ${response.status}`);
-        return response.json() as Promise<{
-          data?: { members?: Array<{ id: number; display_name: string; role: string }> };
-        }>;
-      })
-      .then((response) => {
-        if (!cancelled) setSharedMembers(response.data?.members ?? []);
-      })
-      .catch((error) => console.warn('[AcpSendBox] shared member candidates unavailable', error));
-    return () => {
-      cancelled = true;
-    };
-  }, [shared]);
-
-  const sharedAtQuery = useMemo(() => {
-    if (!shared) return null;
-    const match = content.match(/(^|\s)@([^\s@]*)$/u);
-    if (!match || match.index === undefined) return null;
-    return { start: match.index + match[1].length, query: match[2].toLocaleLowerCase() };
-  }, [content, shared]);
-
-  const sharedMentionCandidates = useMemo(() => {
-    if (!sharedAtQuery || !shared) return [];
-    const candidates = [
-      { kind: 'assistant' as const, id: shared.assistant_id, label: agent_name || shared.assistant_id },
-      ...sharedMembers.map((member) => ({
-        kind: 'member' as const,
-        id: String(member.id),
-        label: member.display_name,
-      })),
-    ];
-    return candidates.filter((candidate) => candidate.label.toLocaleLowerCase().includes(sharedAtQuery.query));
-  }, [agent_name, shared, sharedAtQuery, sharedMembers]);
-
-  const selectSharedMention = useCallback(
-    (candidate: { kind: 'assistant' | 'member'; id: string; label: string }) => {
-      if (!sharedAtQuery) return;
-      const token = makeSharedMentionToken(candidate.label, candidate.kind, candidate.id, uuid());
-      setContent(`${content.slice(0, sharedAtQuery.start)}${token} `);
-      setSharedMentions((previous) => [
-        ...previous.filter((mention) => !(mention.kind === candidate.kind && mention.id === candidate.id)),
-        { kind: candidate.kind, id: candidate.id, token },
-      ]);
+  const promptCapability = conversationContext?.promptCapability;
+  // Hint shown on a media chip when the agent takes no native image/audio
+  // blocks — the attachment then reaches it as a file path. SVG is never
+  // sent natively (vision APIs reject it), so it always hints like a path.
+  const mediaPathHintFor = useCallback(
+    (path: string): string | undefined => {
+      const ext = getFileExtension(path).toLowerCase();
+      const isNativeImage = ext !== '.svg' && imageExts.includes(ext);
+      const isNativeAudio = audioExts.includes(ext);
+      if (!isNativeImage && !isNativeAudio) return undefined;
+      const supported = isNativeImage ? promptCapability?.image : promptCapability?.audio;
+      if (supported) return undefined;
+      return t('conversation.sendbox.mediaPathFallback', {
+        defaultValue: 'This agent has no native support for this file type; it will be sent as a file path.',
+      });
     },
-    [content, setContent, sharedAtQuery]
+    [promptCapability, t]
   );
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
   const [currentMode, setCurrentMode] = useState<string | undefined>(session_mode);
   const prepareRuntimeConfig = useCallback(async () => {
-    if (teamPermission) {
-      await teamPermission.warmupSession();
-    }
+    if (teamPermission) return;
   }, [teamPermission]);
   const runtimeConfig = useAcpConfigOptions({
     conversation_id,
     prepareRuntime: prepareRuntimeConfig,
-    enabled: !shared,
+    prepareSetRuntime: teamPermission?.warmupSession,
+    configOptionsPort: teamPermission?.configOptionsPort,
+    enabled: true,
   });
   const runtimeMode = runtimeConfig.mode;
   const runtimeThoughtLevel = runtimeConfig.thoughtLevel;
@@ -232,7 +188,9 @@ const AcpSendBox: React.FC<{
     conversation_id,
     backend,
     prepareRuntime: prepareRuntimeConfig,
-    enabled: isMobile && !shared,
+    prepareSetRuntime: teamPermission?.warmupSession,
+    configOptionsPort: teamPermission?.configOptionsPort,
+    enabled: isMobile,
     onSelectModelSuccess: () => Message.success(t('agent.model.switchSuccess')),
     onSelectModelFailed: (_modelId, error) => Message.error(t(configErrorMessageKey(error))),
   });
@@ -257,23 +215,9 @@ const AcpSendBox: React.FC<{
     [isLeaderInTeam, runtimeConfig, runtimeMode, t, teamPermission]
   );
 
-  // In team mode, warmup the agent then fetch slash commands
-  useEffect(() => {
-    if (!teamPermission) return;
-    void teamPermission
-      .warmupSession()
-      .then(() => {
-        fetchSlashCommands();
-      })
-      .catch((error) => {
-        Message.error(getConversationRuntimeWorkspaceErrorMessage(error, t));
-      });
-  }, [teamPermission?.warmupSession, fetchSlashCommands]);
-
   const handleContentChange = useCallback(
     (val: string) => {
       setContent(val);
-      setSharedMentions((previous) => previous.filter((mention) => val.includes(mention.token)));
     },
     [setContent]
   );
@@ -287,6 +231,7 @@ const AcpSendBox: React.FC<{
   const addOrUpdateMessage = useAddOrUpdateMessage(); // Move this here so it's available in useEffect
   const addOrUpdateMessageRef = useLatestRef(addOrUpdateMessage);
   const runtimeView = useConversationRuntimeView(conversation_id);
+  const { markSendStarted, markSendAccepted, markSendFailed, supportsMidturnDelivery } = runtimeView;
 
   // Shared file handling logic
   const { handleFilesAdded, clearFiles } = useSendBoxFiles({
@@ -327,29 +272,24 @@ const AcpSendBox: React.FC<{
   useAcpInitialMessage({
     conversation_id: conversation_id,
     backend,
-    workspacePath,
     setAiProcessing,
     resetState,
-    markSendStarted: runtimeView.markSendStarted,
-    markSendAccepted: runtimeView.markSendAccepted,
-    markSendFailed: runtimeView.markSendFailed,
+    markSendStarted,
+    markSendAccepted,
+    markSendFailed,
     checkAndUpdateTitle,
     addOrUpdateMessage: addOrUpdateMessageRef.current,
   });
 
   const executeCommand = useCallback(
-    async ({
-      input,
-      files,
-      mentions,
-    }: Pick<ConversationCommandQueueItem, 'input' | 'files'> & { mentions?: PortalSharedMention[] }) => {
-      const displayMessage = buildDisplayMessage(stripSharedMentionMarkers(input), files, workspacePath || '');
-
+    async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
+      // Plain user text; the backend resolves each ChatFileRef and injects the
+      // [[AION_FILES]] marker at the send edge (no front-end path/marker building).
       try {
         if (teamPermission) await teamPermission.warmupSession();
-        if (!shared) void checkAndUpdateTitle(conversation_id, input);
-        if (teamSendMessage && !shared) {
-          await teamSendMessage({ input: displayMessage, files });
+        void checkAndUpdateTitle(conversation_id, input);
+        if (teamSendMessage) {
+          await teamSendMessage({ input, files });
           emitter.emit('chat.history.refresh');
           if (files.length > 0) {
             emitter.emit('acp.workspace.refresh');
@@ -357,23 +297,34 @@ const AcpSendBox: React.FC<{
           return;
         }
 
-        runtimeView.markSendStarted();
+        markSendStarted();
         setAiProcessing(true);
         const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input: displayMessage,
+          input,
           conversation_id,
           files,
-          mentions: shared
-            ? [...(mentions ?? []), ...files.map((file) => ({ kind: 'file' as const, id: file }))]
-            : undefined,
+          // `@@` references. Dropping this here is a silent failure: the agent
+          // simply never receives the session block.
+          sessions,
         });
-        runtimeView.markSendAccepted(result.turn_id, result.runtime, result.msg_id);
-        if (!shared || !result.runtime.is_processing) setAiProcessing(result.runtime.is_processing);
+        markSendAccepted(result.turn_id, result.runtime, result.msg_id);
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
         const errorMsg =
           getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
-        runtimeView.markSendFailed(errorMsg);
+        const busyError = classifyConversationBusyError(error);
+        if (busyError) {
+          markSendFailed({
+            kind: 'busy_conflict',
+            reason: errorMsg,
+            busyKind: busyError.kind,
+            status: busyError.status,
+            code: busyError.code,
+          });
+          throw error;
+        }
+
+        markSendFailed({ kind: 'ordinary', reason: errorMsg });
 
         // Archived conversation (e.g. legacy Gemini). Backend signals this
         // via HTTP 410 + code='CONVERSATION_ARCHIVED' — identified by code,
@@ -442,120 +393,138 @@ Please check your local CLI tool authentication status`,
       backend,
       checkAndUpdateTitle,
       conversation_id,
+      markSendAccepted,
+      markSendFailed,
+      markSendStarted,
       resetState,
-      runtimeView,
       setAiProcessing,
       t,
       teamPermission,
       teamSendMessage,
-      workspacePath,
-      shared,
     ]
   );
 
   const {
     items: queuedCommands,
+    mode: queueMode,
     isInteractionLocked: isQueueInteractionLocked,
-    hasPendingCommands,
     enqueue,
     remove,
+    prioritize,
+    sendNow,
     clear,
     reorder,
+    toggleMode,
     lockInteraction,
     unlockInteraction,
     resetActiveExecution,
   } = useConversationCommandQueue({
     conversation_id: conversation_id,
+    // The queue (panel, runner, auto-send) is always live: backends that can
+    // deliver mid-turn (supports_midturn_delivery) still need a working
+    // enqueue for the explicit "add to queue" entry, and queued items must
+    // keep auto-sending once their turn arrives, same as non-supporting
+    // backends. What changed is who can trigger enqueue implicitly — see
+    // onSendHandler below.
     enabled: true,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
     onExecute: executeCommand,
   });
-  const cancellationObservedRef = useRef(false);
-  const stopRequestInFlightRef = useRef(false);
-  useEffect(() => {
-    if (runtimeView.state === 'cancelling') {
-      cancellationObservedRef.current = true;
-      return;
-    }
-    if (cancellationObservedRef.current && !runtimeView.isProcessing) {
-      cancellationObservedRef.current = false;
-      resetState();
-      resetActiveExecution('stop');
-    }
-  }, [resetActiveExecution, resetState, runtimeView.isProcessing, runtimeView.state]);
 
-  const onSendHandler = async (message: string) => {
-    const atPathFiles = atPath.map((item) => (typeof item === 'string' ? item : item.path));
-    const allFiles = [...uploadFile, ...atPathFiles];
-    const mentions = shared ? activeSharedMentions(message, sharedMentions) : undefined;
+  // `@@` session references the user picked. Declared before the handlers that
+  // read it — every send path has to both forward and release it.
+  const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
+  const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
+  // Supporting agents (mid-turn delivery) send immediately, busy or not.
+  // Non-supporting agents can no longer send while the agent is replying —
+  // that path is hard-blocked with a toast; the only way to queue a message
+  // while busy is the explicit "add to queue" entry (handleAddToQueue below).
+  const onSendHandler = async (message: string): Promise<void | false> => {
+    if (!supportsMidturnDelivery && isBusy) {
+      Message.warning(
+        t('conversation.commandQueue.midturnBlocked', {
+          defaultValue:
+            'This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.',
+        })
+      );
+      return false;
+    }
+
+    const allFiles = collectChatFileRefs(uploadFile, atPath);
+    const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
     clearFiles();
-    if (shared) setSharedMentions([]);
+    setSelectedSessions([]);
     emitter.emit('acp.selected.file.clear');
-
-    if (
-      !shared &&
-      shouldEnqueueConversationCommand({
-        enabled: true,
-        isBusy,
-        hasPendingCommands,
-      })
-    ) {
-      enqueue({ input: message, files: allFiles });
-      return;
-    }
-
-    await executeCommand({ input: message, files: allFiles, mentions });
+    await executeCommand({ input: message, files: allFiles, sessions });
   };
+
+  const [interrupting, setInterrupting] = useState(false);
+  const handleInterruptSend = async () => {
+    if (!teamRuntime?.onInterruptSend || !content.trim() || interrupting) return;
+    const files = collectChatFileRefs(uploadFile, atPath);
+    const input = content;
+    setContent('');
+    clearFiles();
+    // `onInterruptSend` is the TEAM interrupt path, and `@@` is disabled in team
+    // conversations (`isTeamConversation` below), so `selectedSessions` is
+    // always empty here. Cleared anyway so the state cannot leak if that
+    // relationship ever changes.
+    setSelectedSessions([]);
+    emitter.emit('acp.selected.file.clear');
+    setInterrupting(true);
+    try {
+      await teamRuntime.onInterruptSend({ input, files });
+    } finally {
+      setInterrupting(false);
+    }
+  };
+
+  // Explicit "add to queue" entry — visibility is keyed only to the user's
+  // own input (non-empty draft), never to the agent's busy/replying state:
+  // tying it to that racy, async signal made the entry appear/disappear
+  // unpredictably. Clicking while idle is semantically fine — the queue's own
+  // mode governs (auto drains immediately, manual holds). Shown for both
+  // supporting and non-supporting backends. Clears the draft the same way a
+  // send would.
+  const canQueueCurrentDraft = content.trim().length > 0;
+  const handleAddToQueue = useCallback(() => {
+    const allFiles = collectChatFileRefs(uploadFile, atPath);
+    // `@@` references must ride along, and must be released from the send box
+    // the same way the draft text is — otherwise they leak into whatever the
+    // user sends next.
+    enqueue({ input: content, files: allFiles, sessions: selectedSessions.length > 0 ? selectedSessions : undefined });
+    setContent('');
+    clearFiles();
+    setSelectedSessions([]);
+    emitter.emit('acp.selected.file.clear');
+  }, [atPath, clearFiles, content, enqueue, selectedSessions, setContent, uploadFile]);
 
   const handleEditQueuedCommand = useCallback(
     (item: ConversationCommandQueueItem) => {
       remove(item.id);
       setContent(item.input);
-      setUploadFile(Array.from(new Set(item.files)));
-      setAtPath([]);
+      // Restore upload refs → uploadFile paths, project refs → atPath items.
+      const { uploadFiles, atPath: restoredAtPath } = splitChatFileRefs(item.files);
+      setUploadFile(uploadFiles);
+      setAtPath(restoredAtPath);
       emitter.emit('acp.selected.file.clear');
     },
     [remove, setAtPath, setContent, setUploadFile]
   );
-  const [steeringCommandId, setSteeringCommandId] = useState<string | null>(null);
-  const canSteerQueuedCommand =
-    ['codex', 'kimi'].includes(backend) &&
-    !teamSendMessage &&
-    Boolean(runtimeView.activeTurnId) &&
-    runtimeView.isProcessing &&
-    runtimeView.state !== 'cancelling' &&
-    !runtimeView.view.localStopping;
-
-  const handleSteerQueuedCommand = useCallback(
-    async (item: ConversationCommandQueueItem) => {
-      if (!canSteerQueuedCommand || steeringCommandId) return;
-      setSteeringCommandId(item.id);
-      try {
-        const displayMessage = buildDisplayMessage(item.input, item.files, workspacePath || '');
-        await ipcBridge.conversation.steer.invoke({
-          conversation_id,
-          input: displayMessage,
-        });
-        remove(item.id);
-        emitter.emit('chat.history.refresh');
-        Message.success(t('conversation.commandQueue.steerSuccess'));
-      } catch (error) {
-        console.warn('[AcpSendBox] steer request failed', error);
-        Message.error(parseError(error) || t('conversation.commandQueue.steerFailed'));
-      } finally {
-        setSteeringCommandId(null);
-      }
-    },
-    [canSteerQueuedCommand, conversation_id, remove, steeringCommandId, t, workspacePath]
-  );
 
   const appendSelectedFiles = useCallback(
     (files: string[]) => {
-      setUploadFile((prev) => [...prev, ...files]);
+      // "Add files" picks a file from the backend machine's own filesystem
+      // (native dialog / server-fs browse) — an absolute backend path. Send it
+      // as a `local` ref (via the atPath lane, external-owned), NOT an `upload`
+      // ref: the raw path is not under the managed upload dir and would be
+      // rejected. Merge into this box's atPath only (no cross-column emit).
+      const merged = mergeFileSelectionItems(atPathRef.current, localSelectionItems(files));
+      if (merged !== atPathRef.current) setAtPath(merged as Array<string | FileOrFolderItem>);
     },
-    [setUploadFile]
+    [setAtPath]
   );
   const { openFileSelector, onSlashBuiltinCommand } = useOpenFileSelector({
     onFilesSelected: appendSelectedFiles,
@@ -615,21 +584,19 @@ Please check your local CLI tool authentication status`,
     }
 
     if (runtimeThoughtLevel) {
-      const currentThoughtLevel = runtimeThoughtLevel.options.find(
-        (item) => item.value === runtimeThoughtLevel.currentValue
-      );
       entries.push({
         key: 'thought-level',
         icon: <Brain theme='outline' size='16' />,
         label: t('agent.thoughtLevel.label'),
-        meta: currentThoughtLevel
-          ? t(`agentMode.${currentThoughtLevel.value}`, { defaultValue: currentThoughtLevel.label })
-          : runtimeThoughtLevel.currentValue || '',
+        meta:
+          runtimeThoughtLevel.options.find((item) => item.value === runtimeThoughtLevel.currentValue)?.label ||
+          runtimeThoughtLevel.currentValue ||
+          '',
         submenu: {
           title: t('agent.thoughtLevel.label'),
           options: runtimeThoughtLevel.options.map((item) => ({
             key: item.value,
-            label: t(`agentMode.${item.value}`, { defaultValue: item.label }),
+            label: item.label,
             description: item.description ?? undefined,
             active: runtimeThoughtLevel.currentValue === item.value,
           })),
@@ -671,10 +638,10 @@ Please check your local CLI tool authentication status`,
       entries.push({
         key: 'skills',
         icon: <MagicHat theme='outline' size='16' />,
-        label: t('common.skills', { defaultValue: 'Skills' }),
+        label: t('common.selectedSkills', { defaultValue: 'Selected skills' }),
         variant: 'muted',
         submenu: {
-          title: t('common.skills', { defaultValue: 'Skills' }),
+          title: t('common.selectedSkills', { defaultValue: 'Selected skills' }),
           selectable: false,
           options: skillOptions,
           onSelect: (name) => {
@@ -698,10 +665,10 @@ Please check your local CLI tool authentication status`,
       entries.push({
         key: 'mcp',
         icon: <Shield theme='outline' size='16' />,
-        label: t('conversation.mcp.loaded', { defaultValue: 'Loaded MCP' }),
+        label: t('conversation.mcp.selected', { defaultValue: 'Selected MCP' }),
         variant: 'muted',
         submenu: {
-          title: t('conversation.mcp.loaded', { defaultValue: 'Loaded MCP' }),
+          title: t('conversation.mcp.selected', { defaultValue: 'Selected MCP' }),
           selectable: false,
           options: mcpOptions,
           onSelect: () => undefined,
@@ -727,20 +694,33 @@ Please check your local CLI tool authentication status`,
     t,
   ]);
 
-  useAddEventListener('acp.selected.file', setAtPath);
-  useAddEventListener('acp.selected.file.append', (selectedItems: Array<string | FileOrFolderItem>) => {
-    const merged = mergeFileSelectionItems(atPathRef.current, selectedItems);
-    if (merged !== atPathRef.current) {
-      setAtPath(merged as Array<string | FileOrFolderItem>);
-    }
-  });
+  // Accept file-selection events only when targeted at this conversation (or
+  // untargeted); on the multi-column team route this stops same-type peers from
+  // receiving each other's selections. See emitter EventTypes comment.
+  useAddEventListener(
+    'acp.selected.file',
+    (items: Array<string | FileOrFolderItem>, targetConversationId: string | undefined) => {
+      if (targetConversationId === undefined || targetConversationId === conversation_id) setAtPath(items);
+    },
+    [conversation_id, setAtPath]
+  );
+  useAddEventListener(
+    'acp.selected.file.append',
+    (selectedItems: Array<string | FileOrFolderItem>, targetConversationId: string | undefined) => {
+      if (targetConversationId !== undefined && targetConversationId !== conversation_id) return;
+      const merged = mergeFileSelectionItems(atPathRef.current, selectedItems);
+      if (merged !== atPathRef.current) {
+        setAtPath(merged as Array<string | FileOrFolderItem>);
+      }
+    },
+    [conversation_id, setAtPath]
+  );
 
   // Stop conversation handler
   const handleStop = async (): Promise<void> => {
-    if (stopRequestInFlightRef.current) return;
     // Cancelling is best-effort: swallow errors (e.g. backend WS not yet
     // connected → 409) so they don't bubble up as unhandled rejections.
-    // Runtime completion resets local message state after the backend drains.
+    // UI state is still reset via finally.
     const turnId = runtimeView.activeTurnId;
     if (!turnId) {
       resetState();
@@ -748,85 +728,107 @@ Please check your local CLI tool authentication status`,
       return;
     }
     runtimeView.markStopRequested(turnId);
-    stopRequestInFlightRef.current = true;
     try {
       const result = await ipcBridge.conversation.stop.invoke({ conversation_id, turn_id: turnId });
-      if (result.runtime.is_processing && result.runtime.turn_id === turnId) {
-        cancellationObservedRef.current = true;
-      }
       runtimeView.markStopAcknowledged(turnId, result.runtime);
-      if (!result.runtime.is_processing) {
-        cancellationObservedRef.current = false;
-        resetState();
-        resetActiveExecution('stop');
-      }
     } catch (error) {
-      cancellationObservedRef.current = false;
       console.warn('[AcpSendBox] stop request failed', error);
       runtimeView.resetLocalGate('stop_failed');
     } finally {
-      stopRequestInFlightRef.current = false;
+      resetState();
+      resetActiveExecution('stop');
     }
   };
   const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
-  const sendBoxWidthClass = getChatSurfaceWidthClass(Boolean(teamPermission));
+  const handleSendNowQueued = useCallback(
+    async (item: ConversationCommandQueueItem) => {
+      if (supportsMidturnDelivery) {
+        // Supporting agents can deliver directly into the running turn — no
+        // need to stop/restart. Remove the item BEFORE executing (rather than
+        // after success) so the queue's own auto-drain effect can never
+        // double-pick it: send-now can be clicked while the turn is still
+        // busy (isProcessing → canExecute stays false, drain naturally
+        // skips) or while idle (canExecute true, drain WOULD race to dequeue
+        // the same front-of-queue item concurrently with this manual send).
+        // Removing first closes that race in both cases.
+        remove(item.id);
+        try {
+          await executeCommand({ input: item.input, files: item.files, sessions: item.sessions });
+        } catch {
+          // executeCommand already surfaces the failure (busy-conflict toast,
+          // error message card, etc.) via its own catch path — don't show a
+          // second one. Restore the user's content instead of dropping it:
+          // enqueue appends to the end, so promote it back to the front to
+          // match "send now" intent (it was already next in line).
+          const restored = enqueue({ input: item.input, files: item.files, sessions: item.sessions });
+          if (restored) prioritize(restored.id);
+        }
+        return;
+      }
+
+      // Stop the current reply (best-effort), then promote the chosen command
+      // to the front of the queue in auto mode.  The drain effect will fire it
+      // once the execution gate shows canExecute — avoiding the 409 race that
+      // occurs when sendNow() calls onExecute() directly before the backend
+      // has finished processing the stop.
+      await effectiveHandleStop();
+      prioritize(item.id);
+    },
+    [effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
+  );
+  const sendBoxWidthClass = getChatSurfaceWidthClass();
 
   return (
     <div className={`${sendBoxWidthClass} flex flex-col mt-auto mb-16px`}>
       <CommandQueuePanel
         items={queuedCommands}
+        mode={queueMode}
+        isMobile={isMobile}
         interactionLocked={isQueueInteractionLocked}
         onInteractionLock={lockInteraction}
         onInteractionUnlock={unlockInteraction}
         onEdit={handleEditQueuedCommand}
-        onSteer={canSteerQueuedCommand ? handleSteerQueuedCommand : undefined}
-        steeringCommandId={steeringCommandId}
+        onSendNow={handleSendNowQueued}
+        onToggleMode={toggleMode}
         onReorder={reorder}
         onRemove={remove}
         onClear={clear}
       />
       <ThoughtDisplay
         running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
+        statusText={teamRuntime?.statusText}
+        externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
+        startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
         onStop={effectiveHandleStop}
+        onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
-
+      <CrossSessionDisabledBanner />
       <SendBox
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}
         value={content}
         onChange={handleContentChange}
         selectedWorkspaceItems={atPath}
         onSelectedWorkspaceItemsChange={(items) => {
-          emitter.emit('acp.selected.file', items);
+          emitter.emit('acp.selected.file', items, conversation_id);
           setAtPath(items);
         }}
-        atMentionContent={
-          sharedAtQuery && sharedMentionCandidates.length > 0 ? (
-            <div className='max-h-180px overflow-y-auto'>
-              <div className='px-12px py-4px text-11px font-500 text-t-tertiary'>
-                {t('conversation.shared.mentionCandidates', { defaultValue: 'Assistant and members' })}
-              </div>
-              {sharedMentionCandidates.map((candidate) => (
-                <Button
-                  key={`${candidate.kind}:${candidate.id}`}
-                  type='text'
-                  className='!h-auto w-full !justify-start !px-12px !py-7px !text-left text-13px'
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectSharedMention(candidate)}
-                >
-                  <span className='mr-8px text-t-tertiary'>
-                    {candidate.kind === 'assistant'
-                      ? t('conversation.shared.assistant', { defaultValue: 'Assistant' })
-                      : t('conversation.shared.member', { defaultValue: 'Member' })}
-                  </span>
-                  @{candidate.label}
-                </Button>
-              ))}
-            </div>
-          ) : undefined
-        }
-        atMentionFileLabel={shared ? t('conversation.shared.files', { defaultValue: 'Files' }) : undefined}
+        selectedSessions={selectedSessions}
+        onSelectedSessionsChange={setSelectedSessions}
+        crossSessionEnabled={crossSessionEnabled}
+        isTeamConversation={Boolean(teamRuntime)}
         loading={teamRuntime?.loading ?? isBusy}
-        sendDisabled={isCancelling}
+        active={teamRuntime?.isActive}
+        onFocused={teamRuntime?.onFocus}
+        disabled={false}
+        sendDisabled={!supportsMidturnDelivery && isBusy}
+        sendDisabledTooltip={
+          !supportsMidturnDelivery && isBusy
+            ? t('conversation.commandQueue.midturnBlockedSendHint', {
+                defaultValue:
+                  'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
+              })
+            : undefined
+        }
         placeholder={t('acp.sendbox.placeholder', {
           backend: agent_name || backend,
           defaultValue: `Send message to {{backend}}...`,
@@ -860,6 +862,8 @@ Please check your local CLI tool authentication status`,
                 hideCompactLabelPrefixOnMobile
                 onModeChanged={isLeaderInTeam ? teamPermission?.propagateMode : undefined}
                 beforeRuntimeSync={prepareRuntimeConfig}
+                beforeRuntimeSet={teamPermission?.warmupSession}
+                configOptionsPort={teamPermission?.configOptionsPort}
               />
             )}
           </div>
@@ -872,6 +876,7 @@ Please check your local CLI tool authentication status`,
                   <FilePreview
                     key={path}
                     path={path}
+                    hint={mediaPathHintFor(path)}
                     onRemove={() => setUploadFile(uploadFile.filter((v) => v !== path))}
                   />
                 ))}
@@ -889,7 +894,7 @@ Please check your local CLI tool authentication status`,
                         closable
                         onClose={() => {
                           const newAtPath = atPath.filter((v) => (typeof v === 'string' ? true : v.path !== item.path));
-                          emitter.emit('acp.selected.file', newAtPath);
+                          emitter.emit('acp.selected.file', newAtPath, conversation_id);
                           setAtPath(newAtPath);
                         }}
                       >
@@ -908,6 +913,35 @@ Please check your local CLI tool authentication status`,
         onSlashBuiltinCommand={onSlashBuiltinCommand}
         allowSendWhileLoading
         compactActions={false}
+        sendButtonPrefix={
+          // Agents reporting a window size (UsageUpdate.size) get a progress
+          // ring; agents reporting only a token count get a hollow ring whose
+          // popover shows the raw count — never a percentage against a
+          // guessed denominator. No usage report at all → nothing.
+          <>
+            {teamRuntime?.onInterruptSend && content.trim() && (
+              <Button
+                size='mini'
+                type='secondary'
+                icon={<Lightning />}
+                loading={interrupting}
+                onClick={() => void handleInterruptSend()}
+              >
+                {t('team.interruptAndSend')}
+              </Button>
+            )}
+            {tokenUsage ? <ContextUsageIndicator tokenUsage={tokenUsage} context_limit={context_limit} /> : undefined}
+          </>
+        }
+        onAddToDraft={handleAddToQueue}
+        addToDraftDisabled={!canQueueCurrentDraft}
+        addToDraftTooltip={
+          isBusy
+            ? t('conversation.commandQueue.addToQueueBusyHint', {
+                defaultValue: 'Save to Draft box and send it later.',
+              })
+            : t('conversation.commandQueue.addToQueue', { defaultValue: 'Save to Draft box' })
+        }
       ></SendBox>
       {isMobile && (
         <>

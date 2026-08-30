@@ -1,14 +1,10 @@
 {
   "plan": "Plan Mode",
   "default": "Default",
-  "on": "Thinking On",
-  "off": "Thinking Off",
   "acceptEdits": "Accept Edits",
   "autoEdit": "Auto Edit",
   "auto_edit": "Auto Edit",
   "read-only": "Salt okunur",
-  "agent": "Aracı",
-  "agent-full-access": "Aracı (tam erişim)",
   "full-access": "Tam erişim",
   "yolo": "YOLO",
   "yoloNoSandbox": "Tam Otomatik (Sandbox Yok)",
@@ -21,5 +17,6 @@
   "permission": "İzin",
   "switchMode": "İzin Modu",
   "switchSuccess": "Mode switched successfully",
+  "switchPendingNextTurn": "Sonraki turda geçerli olacak",
   "switchFailed": "Failed to switch mode"
 }

@@ -58,14 +58,14 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
   const themeTooltip = theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode');
 
   return (
-    <div className='shrink-0 sider-footer mt-auto pt-8px pb-8px border-t border-solid border-[var(--color-border-2)] border-l-0 border-r-0 border-b-0'>
+    <div className='shrink-0 sider-footer mt-auto pt-8px pb-8px border-t border-solid border-[var(--color-border-2)] border-s-0 border-e-0 border-b-0'>
       <div className={classNames('flex', collapsed ? 'flex-col gap-2px' : 'items-center gap-2px')}>
         <Tooltip {...siderTooltipProps} content={isSettings ? t('common.back') : t('common.settings')} position='right'>
           <div
             onClick={onSettingsClick}
             className={classNames(
               'group h-34px flex items-center rd-0.5rem cursor-pointer transition-colors',
-              collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px pl-10px pr-8px',
+              collapsed ? 'w-full justify-center' : 'flex-1 min-w-0 justify-start gap-8px ps-10px pe-8px',
               isMobile && 'sider-footer-btn-mobile',
               {
                 'bg-fill-3': isSettings,
@@ -109,6 +109,7 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
           <Tooltip {...siderTooltipProps} content={themeTooltip} position='right'>
             <div
               onClick={onThemeToggle}
+              data-testid='theme-toggle'
               className={classNames(
                 'h-32px w-40px shrink-0 flex items-center justify-center cursor-pointer rd-0.5rem transition-colors text-t-secondary hover:bg-fill-2 hover:text-t-primary active:bg-fill-3',
                 isMobile && 'sider-footer-btn-mobile'

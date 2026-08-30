@@ -9,21 +9,22 @@ import type { TMessage } from '@/common/chat/chatLib';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import { parseError, uuid } from '@/common/utils';
 import { emitter } from '@/renderer/utils/emitter';
-import { buildDisplayMessage } from '@/renderer/utils/file/messageFiles';
+import { type ChatFileRef, isChatFileRef, uploadFileRef } from '@/common/types/chatFile';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getConversationRuntimeWorkspaceErrorMessage } from '../../utils/conversationCreateError';
+import type { ConversationRuntimeSendFailure } from '../../runtime/conversationRuntimeViewStore';
+import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
   backend: string;
-  workspacePath?: string;
   setAiProcessing: (value: boolean) => void;
   resetState: () => void;
   markSendStarted?: () => void;
   markSendAccepted?: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
-  markSendFailed?: (reason: string) => void;
+  markSendFailed?: (failure: ConversationRuntimeSendFailure) => void;
   checkAndUpdateTitle: (conversation_id: string, input: string) => void;
   addOrUpdateMessage: (message: TMessage, prepend?: boolean) => void;
 };
@@ -35,7 +36,6 @@ type UseAcpInitialMessageParams = {
 export const useAcpInitialMessage = ({
   conversation_id,
   backend,
-  workspacePath,
   setAiProcessing,
   resetState,
   markSendStarted,
@@ -59,15 +59,23 @@ export const useAcpInitialMessage = ({
       try {
         const initialMessage = JSON.parse(storedMessage);
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
-        const files = Array.isArray(initialMessage.files) ? initialMessage.files : [];
-        const displayMessage = buildDisplayMessage(input, files, workspacePath || '');
+        // Guid-page initial files are source-tagged ChatFileRefs (`local` for
+        // backend-machine picks, `upload` for device uploads). Body stays plain
+        // text; the backend resolves each ref and injects the [[AION_FILES]]
+        // marker at the send edge. Legacy string[] entries (a stale pre-upgrade
+        // session) coerce to upload refs for back-compat.
+        const files: ChatFileRef[] = Array.isArray(initialMessage.files)
+          ? initialMessage.files
+              .map((f: unknown) => (typeof f === 'string' ? uploadFileRef(f) : f))
+              .filter(isChatFileRef)
+          : [];
 
         markSendStarted?.();
         setAiProcessing(true);
 
         void checkAndUpdateTitle(conversation_id, input);
         const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input: displayMessage,
+          input,
           conversation_id: conversation_id,
           files,
         });
@@ -78,7 +86,25 @@ export const useAcpInitialMessage = ({
       } catch (error) {
         const errorMessageText =
           getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
-        markSendFailed?.(errorMessageText);
+        const busyError = classifyConversationBusyError(error);
+        if (busyError) {
+          markSendFailed?.({
+            kind: 'busy_conflict',
+            reason: errorMessageText,
+            busyKind: busyError.kind,
+            status: busyError.status,
+            code: busyError.code,
+          });
+          console.info('[useAcpInitialMessage] Initial send hit conversation busy state:', {
+            conversation_id,
+            busyKind: busyError.kind,
+            status: busyError.status,
+            code: busyError.code,
+          });
+          return;
+        }
+
+        markSendFailed?.({ kind: 'ordinary', reason: errorMessageText });
         console.error('[useAcpInitialMessage] Error sending initial message:', error);
         console.error('[useAcpInitialMessage] Error details:', {
           name: (error as Error)?.name,
@@ -119,6 +145,5 @@ export const useAcpInitialMessage = ({
     resetState,
     setAiProcessing,
     t,
-    workspacePath,
   ]);
 };
