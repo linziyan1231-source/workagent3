@@ -74,6 +74,11 @@ export function apply(ctx: Context): void {
             json(response, 401, { error: "authentication_required" });
             return;
           }
+          if (request.method !== "GET") {
+            response.writeHead(405, { allow: "GET" });
+            response.end();
+            return;
+          }
           json(response, 200, {
             engines: {
               harness: {
@@ -82,6 +87,20 @@ export function apply(ctx: Context): void {
                 steer: false,
                 toolEvents: true,
                 usage: true,
+              },
+              codex: {
+                approval: false,
+                resume: false,
+                steer: false,
+                toolEvents: true,
+                usage: false,
+              },
+              kimi: {
+                approval: false,
+                resume: false,
+                steer: false,
+                toolEvents: true,
+                usage: false,
               },
             },
           });

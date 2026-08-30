@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -8,6 +10,9 @@ const dsh = fileURLToPath(
   new URL("../node_modules/@deepseek-ai/dsh/lib/bin.js", import.meta.url),
 );
 const token = "workagent-profile-smoke-token";
+const nativeHome = join(home, "native-smoke");
+await mkdir(join(nativeHome, "codex"), { recursive: true });
+await mkdir(join(nativeHome, "kimi"), { recursive: true });
 
 const port = await new Promise((resolve, reject) => {
   const server = createServer();
@@ -26,22 +31,28 @@ const child = spawn(process.execPath, [dsh, "--profile", "workagent"], {
   cwd: root,
   env: {
     ...process.env,
+    CODEX_HOME: process.env.CODEX_HOME ?? join(nativeHome, "codex"),
     DSH_HOME: home,
+    KIMI_CODE_HOME: process.env.KIMI_CODE_HOME ?? join(nativeHome, "kimi"),
     WORKAGENT_RUNTIME_PORT: String(port),
     WORKAGENT_RUNTIME_TOKEN: token,
   },
-  stdio: ["ignore", "ignore", "pipe"],
+  stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
 });
 
 let diagnostics = "";
-child.stderr.setEncoding("utf8");
-child.stderr.on("data", (chunk) => {
-  diagnostics = (diagnostics + chunk).slice(-8_000);
-});
+for (const output of [child.stdout, child.stderr]) {
+  output.setEncoding("utf8");
+  output.on("data", (chunk) => {
+    diagnostics = (diagnostics + chunk).slice(-8_000);
+  });
+}
 
 try {
   const deadline = Date.now() + 30_000;
+  let succeeded = false;
+  let lastFailure = "";
   while (Date.now() < deadline) {
     if (child.exitCode !== null)
       throw new Error(`Harness exited with ${child.exitCode}: ${diagnostics}`);
@@ -53,32 +64,47 @@ try {
         const body = await response.json();
         if (body.status !== "healthy")
           throw new Error("unexpected health response");
-        const created = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            engine: "harness",
-            title: "Profile smoke test",
-          }),
-        });
-        if (created.status !== 201) {
-          throw new Error(`session creation failed with ${created.status}`);
+        const engines = [
+          "harness",
+          ...(process.env.WORKAGENT_NATIVE_SMOKE_ENGINES ?? "")
+            .split(",")
+            .filter(Boolean),
+        ];
+        for (const engine of engines) {
+          const created = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              engine,
+              title: `${engine} profile smoke test`,
+              workspace: ".",
+            }),
+          });
+          if (created.status !== 201) {
+            throw new Error(
+              `${engine} session creation failed with ${created.status}: ${await created.text()}`,
+            );
+          }
         }
         process.stdout.write(
           `workagent Harness profile healthy on loopback port ${port}\n`,
         );
+        succeeded = true;
         break;
       }
-    } catch {
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
       // Startup is asynchronous; retry until the bounded deadline.
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  if (Date.now() >= deadline)
-    throw new Error(`Harness health timeout: ${diagnostics}`);
+  if (!succeeded)
+    throw new Error(
+      `Harness health timeout: ${lastFailure}\n${diagnostics}`.trim(),
+    );
 } finally {
   child.kill();
 }

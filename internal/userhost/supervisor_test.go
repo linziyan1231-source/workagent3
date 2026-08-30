@@ -13,13 +13,19 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "must-not-leak")
 	t.Setenv("WORKAGENT_TEST_ALLOWED", "must-not-leak")
 	directories := privateDirectories{dshHome: `C:\data\dsh`, native: `C:\data\native`}
-	environment := runtimeEnvironment(directories, "runtime-token", 43123)
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, `C:\agents\codex.exe`, `C:\agents\kimi.exe`)
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "must-not-leak") {
 		t.Fatal("unrelated service credential inherited")
 	}
 	if !strings.Contains(joined, "WORKAGENT_RUNTIME_TOKEN=runtime-token") {
 		t.Fatal("runtime token missing")
+	}
+	if !strings.Contains(joined, `WORKAGENT_CODEX_BIN=C:\agents\codex.exe`) || !strings.Contains(joined, `WORKAGENT_KIMI_BIN=C:\agents\kimi.exe`) {
+		t.Fatalf("native engine paths missing from runtime environment: %v", environment)
+	}
+	if strings.Contains(joined, "KIMI_HOME=") || !strings.Contains(joined, "KIMI_CODE_HOME=") {
+		t.Fatalf("Kimi private home is not configured correctly: %v", environment)
 	}
 }
 

@@ -54,6 +54,9 @@ importers:
 
   harness-bundle:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 0.18.2
+        version: 0.18.2(zod@4.5.2)
       '@deepseek-ai/cordis':
         specifier: 4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -91,6 +94,11 @@ importers:
         version: 24.3.0
 
 packages:
+
+  '@agentclientprotocol/sdk@0.18.2':
+    resolution: {integrity: sha512-l/o9NKvUc00GPa6RFJ4AccQq2O/PAf83xQ75mThHuL3H571iN4+PEdwnTBez67sS8Nv2aSA373xCZ5CbTXEwzA==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@anthropic-ai/sdk@0.91.1':
     resolution: {integrity: sha512-LAmu761tSN9r66ixvmciswUj/ZC+1Q4iAfpedTfSVLeswRwnY3n2Nb6Tsk+cLPP28aLOPWeMgIuTuCcMC6W/iw==}
@@ -4298,6 +4306,10 @@ packages:
         optional: true
 
 snapshots:
+
+  '@agentclientprotocol/sdk@0.18.2(zod@4.5.2)':
+    dependencies:
+      zod: 4.5.2
 
   '@anthropic-ai/sdk@0.91.1(zod@4.5.2)':
     dependencies:

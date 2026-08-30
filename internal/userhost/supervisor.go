@@ -23,6 +23,8 @@ type Config struct {
 	SID            string
 	DataRoot       string
 	Command        string
+	CodexCommand   string
+	KimiCommand    string
 	Arguments      []string
 	Profile        string
 	Limits         winutil.JobLimits
@@ -43,6 +45,10 @@ func New(config Config) (*Supervisor, error) {
 	}
 	if !filepath.IsAbs(config.DataRoot) {
 		return nil, errors.New("data root must be absolute")
+	}
+	if (config.CodexCommand != "" && !filepath.IsAbs(config.CodexCommand)) ||
+		(config.KimiCommand != "" && !filepath.IsAbs(config.KimiCommand)) {
+		return nil, errors.New("native engine commands must be absolute")
 	}
 	if config.StartupTimeout <= 0 {
 		config.StartupTimeout = 45 * time.Second
@@ -83,7 +89,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	arguments = append(arguments, "--profile", s.config.Profile)
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
-	command.Env = runtimeEnvironment(directories, token, port)
+	command.Env = runtimeEnvironment(directories, token, port, s.config.CodexCommand, s.config.KimiCommand)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	if err := command.Start(); err != nil {
@@ -157,7 +163,7 @@ func reserveLoopbackPort() (int, error) {
 	return port, nil
 }
 
-func runtimeEnvironment(directories privateDirectories, token string, port int) []string {
+func runtimeEnvironment(directories privateDirectories, token string, port int, codexCommand, kimiCommand string) []string {
 	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
@@ -169,13 +175,20 @@ func runtimeEnvironment(directories privateDirectories, token string, port int) 
 			}
 		}
 	}
-	return append(environment,
+	environment = append(environment,
 		"DSH_HOME="+directories.dshHome,
 		"CODEX_HOME="+filepath.Join(directories.native, "codex"),
-		"KIMI_HOME="+filepath.Join(directories.native, "kimi"),
+		"KIMI_CODE_HOME="+filepath.Join(directories.native, "kimi"),
 		"WORKAGENT_RUNTIME_TOKEN="+token,
 		"WORKAGENT_RUNTIME_PORT="+strconv.Itoa(port),
 	)
+	if codexCommand != "" {
+		environment = append(environment, "WORKAGENT_CODEX_BIN="+codexCommand)
+	}
+	if kimiCommand != "" {
+		environment = append(environment, "WORKAGENT_KIMI_BIN="+kimiCommand)
+	}
+	return environment
 }
 
 func waitForHealth(ctx context.Context, endpoint, token string, done <-chan error, timeout time.Duration) error {

@@ -11,11 +11,22 @@ import {
   type Session,
   type SessionEvent,
 } from "@deepseek-ai/dsh-session";
+import { CodexBridge } from "./engines/codex.js";
+import { KimiBridge } from "./engines/kimi.js";
+import type {
+  BridgeEvent,
+  BridgeSession,
+  EngineBridge,
+} from "./engines/types.js";
 import { authorized } from "./index.js";
 
 type SessionRecord = {
   createdAt: string;
-  handle: AgentHandle;
+  engine: "harness" | "codex" | "kimi";
+  events: PublicEvent[];
+  handle: AgentHandle | undefined;
+  native: BridgeSession | undefined;
+  nextEventSequence: number;
   title: string;
   updatedAt: string;
 };
@@ -144,10 +155,13 @@ export class RuntimeController {
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
+  readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
 
   constructor(ctx: Context, token: string) {
     this.#ctx = ctx;
     this.#token = token;
+    this.#bridges.set("codex", new CodexBridge());
+    this.#bridges.set("kimi", new KimiBridge());
   }
 
   mount(): void {
@@ -165,12 +179,8 @@ export class RuntimeController {
         this.#ctx.on("session/event", (session, event) => {
           const normalized = normalizeEvent(session, event);
           if (normalized === undefined) return;
-          for (const response of this.#subscribers.get(String(session.id)) ??
-            []) {
-            response.write(
-              `id: ${normalized.eventId}\ndata: ${JSON.stringify(normalized)}\n\n`,
-            );
-          }
+          const record = this.#sessions.get(String(session.id));
+          if (record !== undefined) this.#publish(record, normalized);
         }),
       "workagent-runtime-api: normalized session events",
     );
@@ -191,7 +201,7 @@ export class RuntimeController {
         200,
         [...this.#sessions.entries()].map(([id, value]) => ({
           id,
-          engine: "harness",
+          engine: value.engine,
           title: value.title,
           createdAt: value.createdAt,
           updatedAt: value.updatedAt,
@@ -221,17 +231,35 @@ export class RuntimeController {
         return;
       }
       record.updatedAt = new Date().toISOString();
-      record.handle.agent.followup(
-        createUserMessage({
-          content: [{ type: "text", text: input.content }],
-          source: { kind: "user" },
-        }),
-      );
+      if (record.handle !== undefined) {
+        record.handle.agent.followup(
+          createUserMessage({
+            content: [{ type: "text", text: input.content }],
+            source: { kind: "user" },
+          }),
+        );
+      } else {
+        try {
+          await record.native!.send(input.content);
+        } catch {
+          writeJson(response, 409, { error: "engine_turn_rejected" });
+          return;
+        }
+      }
       writeJson(response, 202, { accepted: true });
       return;
     }
     if (match[2] === "cancel" && request.method === "POST") {
-      record.handle.agent.cancel({ kind: "user" });
+      if (record.handle !== undefined)
+        record.handle.agent.cancel({ kind: "user" });
+      else {
+        try {
+          await record.native!.cancel();
+        } catch {
+          writeJson(response, 503, { error: "engine_cancel_failed" });
+          return;
+        }
+      }
       response.writeHead(204);
       response.end();
       return;
@@ -249,36 +277,64 @@ export class RuntimeController {
   ): Promise<void> {
     const input = await readJson(request);
     if (
-      input.engine !== "harness" ||
+      (input.engine !== "harness" &&
+        input.engine !== "codex" &&
+        input.engine !== "kimi") ||
       typeof input.title !== "string" ||
-      input.title.trim() === ""
+      input.title.trim() === "" ||
+      input.title.length > 200
     ) {
       writeJson(response, 400, { error: "invalid_session" });
       return;
     }
-    const sessionId = SessionId(`session-${randomUUID()}`);
-    const selection = this.#ctx.agentDefaultModel.currentSelection();
-    const handle = await this.#ctx.agents.create({
-      sessionId,
-      meta: { cwd: process.cwd() },
-      agentOptions: { provider: selection.provider, model: selection.model },
-      setup: (agentContext) => {
-        installModelSelection(agentContext, {
-          current: selection,
-          assembled: undefined,
-        });
-      },
-    });
+    const publicId = `session-${randomUUID()}`;
     const now = new Date().toISOString();
-    this.#sessions.set(String(sessionId), {
-      handle,
+    const record: SessionRecord = {
+      engine: input.engine,
+      events: [],
+      handle: undefined,
+      native: undefined,
+      nextEventSequence: 1,
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    try {
+      if (input.engine === "harness") {
+        const sessionId = SessionId(publicId);
+        const selection = this.#ctx.agentDefaultModel.currentSelection();
+        record.handle = await this.#ctx.agents.create({
+          sessionId,
+          meta: { cwd: process.cwd() },
+          agentOptions: {
+            provider: selection.provider,
+            model: selection.model,
+          },
+          setup: (agentContext) => {
+            installModelSelection(agentContext, {
+              current: selection,
+              assembled: undefined,
+            });
+          },
+        });
+      } else {
+        const bridge = this.#bridges.get(input.engine);
+        if (bridge === undefined) {
+          writeJson(response, 503, { error: "engine_unavailable" });
+          return;
+        }
+        record.native = await bridge.create(process.cwd(), (event) => {
+          this.#publish(record, this.#nativeEvent(publicId, record, event));
+        });
+      }
+    } catch {
+      writeJson(response, 503, { error: "engine_start_failed" });
+      return;
+    }
+    this.#sessions.set(publicId, record);
     writeJson(response, 201, {
-      id: String(sessionId),
-      engine: "harness",
+      id: publicId,
+      engine: input.engine,
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
@@ -297,15 +353,9 @@ export class RuntimeController {
       "content-type": "text/event-stream",
     });
     response.write(": connected\n\n");
-    const normalizedEvents = record.handle.agent.session.events.flatMap(
-      (event) => {
-        const normalized = normalizeEvent(record.handle.agent.session, event);
-        return normalized === undefined ? [] : [normalized];
-      },
-    );
     const lastEventId = request.headers["last-event-id"];
     for (const normalized of eventsAfterLastId(
-      normalizedEvents,
+      record.events,
       typeof lastEventId === "string" ? lastEventId : undefined,
     )) {
       response.write(
@@ -319,5 +369,28 @@ export class RuntimeController {
       subscribers.delete(response);
       if (subscribers.size === 0) this.#subscribers.delete(id);
     });
+  }
+
+  #nativeEvent(
+    sessionId: string,
+    record: SessionRecord,
+    event: BridgeEvent,
+  ): PublicEvent {
+    return {
+      ...event,
+      eventId: `${sessionId}-${record.nextEventSequence++}`,
+      occurredAt: new Date().toISOString(),
+      sessionId,
+    };
+  }
+
+  #publish(record: SessionRecord, event: PublicEvent): void {
+    record.events.push(event);
+    if (record.events.length > 2_000) record.events.shift();
+    for (const response of this.#subscribers.get(event.sessionId) ?? []) {
+      response.write(
+        `id: ${event.eventId}\ndata: ${JSON.stringify(event)}\n\n`,
+      );
+    }
   }
 }
