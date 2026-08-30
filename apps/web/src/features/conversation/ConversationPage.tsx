@@ -7,7 +7,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  type NavigateFunction,
+} from "react-router-dom";
 import type {
   EngineEvent,
   EngineId,
@@ -24,7 +32,8 @@ import type {
 import type { AuthUser } from "../../shared/types/auth.js";
 import { conversationPort, type ConversationPort } from "./conversationPort.js";
 import { AionSendBox } from "../../shared/ui/aionui/AionSendBox.js";
-import { AionSettingsModal } from "../../shared/ui/aionui/AionSettingsModal.js";
+import { AionSettingsSider } from "../../shared/ui/aionui/AionSettingsSider.js";
+import { AionExtensionSettingsPage } from "../../shared/ui/aionui/AionExtensionSettingsPage.js";
 import { AionSider } from "../../shared/ui/aionui/AionSider.js";
 import type { AutomationUiPort } from "../../shared/ui/aionui/AionAutomationPage.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
@@ -47,6 +56,43 @@ const AionAutomationPage = lazy(() =>
     default: module.AionAutomationPage,
   })),
 );
+
+const ModeSettings = lazy(
+  () => import("@renderer/pages/settings/ModeSettings"),
+);
+const CapabilitiesSettings = lazy(
+  () => import("@renderer/pages/settings/CapabilitiesSettings"),
+);
+const AppearanceSettings = lazy(
+  () => import("@renderer/pages/settings/AppearanceSettings"),
+);
+const SystemSettings = lazy(
+  () => import("@renderer/pages/settings/SystemSettings"),
+);
+
+function NavigationCapture({
+  navigationRef,
+}: {
+  navigationRef: { current?: NavigateFunction };
+}) {
+  navigationRef.current = useNavigate();
+  return null;
+}
+
+function RouteAwareSider({
+  conversationSider,
+  onLogout,
+}: {
+  conversationSider: ReactNode;
+  onLogout: () => Promise<void>;
+}) {
+  const location = useLocation();
+  return location.pathname.startsWith("/settings") ? (
+    <AionSettingsSider onLogout={onLogout} />
+  ) : (
+    conversationSider
+  );
+}
 
 export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;
 
@@ -153,10 +199,10 @@ export function ConversationPage({
     () => typeof window !== "undefined" && window.innerWidth > 1080,
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [assistantsOpen, setAssistantsOpen] = useState(false);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const navigationRef = useRef<NavigateFunction | undefined>(undefined);
   const active = sessions.find((session) => session.id === activeId);
   const activeMessages = useMemo(
     () => (activeId ? (messages[activeId] ?? []) : []),
@@ -508,7 +554,7 @@ export function ConversationPage({
       onBatchDelete={(items) => void deleteSessions(items)}
       onSettings={() => {
         setSidebarOpen(false);
-        setSettingsOpen(true);
+        navigationRef.current?.("/settings/model");
       }}
       onAssistants={() => {
         setSidebarOpen(false);
@@ -529,8 +575,73 @@ export function ConversationPage({
 
   return (
     <MemoryRouter initialEntries={["/conversation/workagent"]}>
+      <NavigationCapture navigationRef={navigationRef} />
       <Routes>
-        <Route element={<RendererLayout sider={sider} />}>
+        <Route
+          element={
+            <RendererLayout
+              sider={
+                <RouteAwareSider
+                  conversationSider={sider}
+                  onLogout={onLogout}
+                />
+              }
+            />
+          }
+        >
+          <Route
+            path="/settings/model"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <ModeSettings />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings/agent"
+            element={<Navigate to="/settings/model" replace />}
+          />
+          <Route
+            path="/settings/capabilities/*"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <CapabilitiesSettings />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings/appearance"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <AppearanceSettings />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings/webui"
+            element={<Navigate to="/settings/system" replace />}
+          />
+          <Route
+            path="/settings/system"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <SystemSettings />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings/about"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <SystemSettings />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/settings/ext/:tabId"
+            element={<AionExtensionSettingsPage />}
+          />
+          <Route path="/settings" element={<Navigate to="/settings/model" replace />} />
           <Route
             path="*"
             element={
@@ -708,10 +819,6 @@ export function ConversationPage({
                   />
                 )}
                 {!assistantsOpen && !scheduledOpen && workspacePanel}
-                <AionSettingsModal
-                  visible={settingsOpen}
-                  onClose={() => setSettingsOpen(false)}
-                />
               </main>
             }
           />
