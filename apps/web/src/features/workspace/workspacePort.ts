@@ -52,6 +52,23 @@ export const workspacePort = {
       },
     );
   },
+  async move(
+    workspaceId: string,
+    source: string,
+    destination: string,
+  ): Promise<void> {
+    await requestJson(`${base}/${encodeURIComponent(workspaceId)}/move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source, destination }),
+    });
+  },
+  async remove(workspaceId: string, path: string): Promise<void> {
+    await requestJson(
+      `${base}/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    );
+  },
   async assets(
     workspaceId: string,
     sessionId: string,
@@ -74,6 +91,23 @@ export const workspacePort = {
           method: "PUT",
           headers: { "content-type": file.type || "application/octet-stream" },
           body: file,
+        },
+      ),
+    );
+  },
+  async registerArtifact(
+    workspaceId: string,
+    sessionId: string,
+    path: string,
+    name?: string,
+  ): Promise<WorkspaceAsset> {
+    return workspaceApiSchemas.asset.parse(
+      await requestJson<unknown>(
+        `${base}/${encodeURIComponent(workspaceId)}/assets?sessionId=${encodeURIComponent(sessionId)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path, name }),
         },
       ),
     );

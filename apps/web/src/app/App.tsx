@@ -60,9 +60,18 @@ function AuthenticatedApp() {
       presetPort={presetPort}
       capabilityPort={capabilities}
       automationPort={automationPort}
-      workspacePanel={
-        <WorkspacePanel selectedId={workspaceId} onSelect={setWorkspaceId} />
-      }
+      workspacePanel={({
+        workspaceId: selectedWorkspaceId,
+        sessionId,
+        onAssetAdded,
+      }) => (
+        <WorkspacePanel
+          selectedId={selectedWorkspaceId}
+          sessionId={sessionId}
+          onSelect={setWorkspaceId}
+          onAssetAdded={onAssetAdded}
+        />
+      )}
       onLogout={async () => {
         await authPort.logout();
         setUser(null);

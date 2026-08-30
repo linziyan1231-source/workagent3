@@ -7,6 +7,15 @@ import { mcpPort } from "../../features/mcp/mcpPort.js";
 import { credentialPort } from "../../features/credentials/credentialPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
 
+export interface IDirOrFile {
+  name: string;
+  fullPath: string;
+  relativePath: string;
+  isDir: boolean;
+  isFile: boolean;
+  children?: IDirOrFile[];
+}
+
 export type IExtensionSettingsTab = {
   id: string;
   title?: string;

@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -137,7 +138,11 @@ type Props = {
   onLogout: () => Promise<void>;
   port?: ConversationPort;
   workspaceId?: string;
-  workspacePanel?: ReactNode;
+  workspacePanel?: (context: {
+    workspaceId?: string;
+    sessionId?: string;
+    onAssetAdded: (asset: WorkspaceAsset) => void;
+  }) => ReactNode;
   onWorkspaceSelect?: (workspaceId: string) => void;
   assetPort?: {
     list(workspaceId: string, sessionId: string): Promise<WorkspaceAsset[]>;
@@ -213,6 +218,23 @@ export function ConversationPage({
   const activeInteractions = activeId ? (interactions[activeId] ?? []) : [];
   const activeAssets = activeId ? (assets[activeId] ?? []) : [];
   const activeStaged = activeId ? (stagedAssets[activeId] ?? []) : [];
+  const addWorkspaceAsset = useCallback((asset: WorkspaceAsset) => {
+    setAssets((current) => ({
+      ...current,
+      [asset.sessionId]: [
+        ...(current[asset.sessionId] ?? []).filter(
+          (candidate) => candidate.id !== asset.id,
+        ),
+        asset,
+      ],
+    }));
+    setStagedAssets((current) => ({
+      ...current,
+      [asset.sessionId]: Array.from(
+        new Set([...(current[asset.sessionId] ?? []), asset.id]),
+      ),
+    }));
+  }, []);
   const selectedEngine = engineStatuses.find((item) => item.id === engine);
   const engineBlocked =
     selectedEngine?.state === "needs_auth" ||
@@ -796,7 +818,13 @@ export function ConversationPage({
                     onClick={() => setWorkspaceOpen(false)}
                   />
                 )}
-                {!assistantsOpen && !scheduledOpen && workspacePanel}
+                {!assistantsOpen &&
+                  !scheduledOpen &&
+                  workspacePanel?.({
+                    workspaceId: active?.workspaceId ?? workspaceId,
+                    sessionId: active?.id,
+                    onAssetAdded: addWorkspaceAsset,
+                  })}
               </main>
             }
           />
