@@ -1,6 +1,6 @@
 {
-  "pageTitle": "AionUi - Entrar",
-  "brand": "AionUi",
+  "pageTitle": "CLIENTNAME - Entrar",
+  "brand": "CLIENTNAME",
   "subtitle": "Bem-vindo de volta, por favor entre na sua conta",
   "username": "Nome de usuário",
   "usernamePlaceholder": "Digite seu nome de usuário",
@@ -15,6 +15,34 @@
   "languageToggle": "Mudar idioma",
   "footerPrimary": "Transforme sua IA de linha de comando",
   "footerSecondary": "Moderno e Eficiente",
+  "changePassword": {
+    "link": "Alterar senha",
+    "pageTitle": "CLIENTNAME - Alterar senha",
+    "title": "Alterar senha",
+    "subtitle": "Confirme sua senha atual e escolha uma nova",
+    "currentPassword": "Senha atual",
+    "currentPasswordPlaceholder": "Digite sua senha atual",
+    "newPassword": "Nova senha",
+    "newPasswordPlaceholder": "Digite sua nova senha",
+    "confirmPassword": "Confirmar nova senha",
+    "confirmPasswordPlaceholder": "Digite sua nova senha novamente",
+    "requirement": "Use pelo menos 12 caracteres e uma senha diferente da atual.",
+    "submit": "Alterar senha",
+    "success": "Senha alterada. Entre com sua nova senha.",
+    "backToLogin": "Voltar para o login",
+    "errors": {
+      "required": "Preencha todos os campos obrigatórios",
+      "mismatch": "As novas senhas não coincidem",
+      "invalidCurrentPassword": "O nome de usuário ou a senha atual está incorreto",
+      "passwordPolicy": "A nova senha deve ter pelo menos 12 caracteres",
+      "passwordReused": "A nova senha deve ser diferente da atual",
+      "tooManyAttempts": "Muitas tentativas. Tente novamente mais tarde",
+      "networkError": "Falha na conexão. Tente novamente",
+      "serverError": "Erro no servidor. Tente novamente mais tarde",
+      "securityError": "Falha na verificação de segurança. Atualize a página e tente novamente",
+      "unknown": "Não foi possível alterar a senha. Tente novamente mais tarde"
+    }
+  },
   "errors": {
     "empty": "Por favor, insira nome de usuário e senha",
     "invalidCredentials": "Nome de usuário ou senha inválidos",

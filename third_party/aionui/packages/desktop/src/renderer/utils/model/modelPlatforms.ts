@@ -48,30 +48,14 @@ export interface PlatformConfig {
  * Model Platform options list
  *
  * 顺序：
- * 1. 自定义（需要用户输入 base url）
- * 2. Moonshot/Kimi（战略合作，置顶展示）
- * 3. New API / Gemini 官方平台
+ * 1. Gemini (官方)
+ * 2. Gemini Vertex AI
+ * 3. 自定义（需要用户输入 base url）
  * 4+ 预设供应商
  */
 export const MODEL_PLATFORMS: PlatformConfig[] = [
   // 自定义选项（需要用户输入 base url）/ Custom option (requires user to input base url)
   { name: 'Custom', value: 'custom', logo: null, platform: 'custom', i18nKey: 'settings.platformCustom' },
-
-  // Moonshot/Kimi 战略合作伙伴，紧随 Custom 置顶 / Strategic partner pinned right after Custom
-  {
-    name: 'Moonshot (China)',
-    value: 'Moonshot',
-    logo: buildLogoAssetUrl('ai-china/kimi.svg'),
-    platform: 'custom',
-    base_url: 'https://api.moonshot.cn/v1',
-  },
-  {
-    name: 'Moonshot (Global)',
-    value: 'Moonshot-Global',
-    logo: buildLogoAssetUrl('ai-china/kimi.svg'),
-    platform: 'custom',
-    base_url: 'https://api.moonshot.ai/v1',
-  },
 
   // New API 多模型网关 / New API multi-model gateway
   {
@@ -159,9 +143,7 @@ export const MODEL_PLATFORMS: PlatformConfig[] = [
     value: 'Dashscope-Coding',
     logo: buildLogoAssetUrl('ai-china/qwen.svg'),
     platform: 'custom',
-    // Base URL intentionally left unset — users must supply their own coding-plan
-    // endpoint, so the add-model form should not pre-fill a default.
-    base_url: '',
+    base_url: 'https://coding.dashscope.aliyuncs.com/v1',
   },
   {
     name: 'SiliconFlow-CN',
@@ -183,6 +165,20 @@ export const MODEL_PLATFORMS: PlatformConfig[] = [
     logo: buildLogoAssetUrl('ai-china/zhipu.svg'),
     platform: 'custom',
     base_url: 'https://open.bigmodel.cn/api/paas/v4',
+  },
+  {
+    name: 'Moonshot (China)',
+    value: 'Moonshot',
+    logo: buildLogoAssetUrl('ai-china/kimi.svg'),
+    platform: 'custom',
+    base_url: 'https://api.moonshot.cn/v1',
+  },
+  {
+    name: 'Moonshot (Global)',
+    value: 'Moonshot-Global',
+    logo: buildLogoAssetUrl('ai-china/kimi.svg'),
+    platform: 'custom',
+    base_url: 'https://api.moonshot.ai/v1',
   },
   {
     name: 'xAI',
@@ -285,12 +281,6 @@ export const detectNewApiProtocol = (modelName: string): string => {
   return 'openai';
 };
 
-/**
- * 添加模型弹窗的默认平台——始终跟随列表第一位
- * Default platform for the add-model modal — always the first list entry
- */
-export const DEFAULT_PLATFORM_VALUE = MODEL_PLATFORMS[0].value;
-
 // ============ 工具函数 / Utility Functions ============
 
 /**
@@ -385,3 +375,17 @@ export const searchPlatformsByName = (keyword: string): PlatformConfig[] => {
   const lowerKeyword = keyword.toLowerCase();
   return MODEL_PLATFORMS.filter((p) => p.name.toLowerCase().includes(lowerKeyword));
 };
+
+export type ManagedProviderPresentation = {
+  displayName: string;
+  hideCredentials: true;
+  lockModelList: true;
+};
+
+const MANAGED_PROVIDER_PRESENTATIONS: Record<string, ManagedProviderPresentation> = {
+  'managed-cliproxy-chatgpt': { displayName: 'ChatGPT', hideCredentials: true, lockModelList: true },
+  'managed-cliproxy-kimi': { displayName: 'KIMI', hideCredentials: true, lockModelList: true },
+};
+
+export const getManagedProviderPresentation = (providerId: string): ManagedProviderPresentation | undefined =>
+  MANAGED_PROVIDER_PRESENTATIONS[providerId];

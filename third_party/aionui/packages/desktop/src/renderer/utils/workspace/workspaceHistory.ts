@@ -36,3 +36,17 @@ export const updateWorkspaceTime = (workspace: string): void => {
     console.error('[WorkspaceHistory] Failed to update workspace time:', error);
   }
 };
+
+export const replaceWorkspaceTime = (oldWorkspace: string, newWorkspace: string): void => {
+  try {
+    const stored = localStorage.getItem(WORKSPACE_UPDATE_TIME_KEY);
+    if (!stored) return;
+    const times = JSON.parse(stored) as Record<string, number>;
+    if (!(oldWorkspace in times)) return;
+    times[newWorkspace] = times[oldWorkspace];
+    delete times[oldWorkspace];
+    localStorage.setItem(WORKSPACE_UPDATE_TIME_KEY, JSON.stringify(times));
+  } catch (error) {
+    console.error('[WorkspaceHistory] Failed to replace workspace time:', error);
+  }
+};

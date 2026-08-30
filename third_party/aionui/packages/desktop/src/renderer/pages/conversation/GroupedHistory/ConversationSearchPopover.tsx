@@ -7,16 +7,12 @@
 import { ipcBridge } from '@/common';
 import type { IMessageSearchItem } from '@/common/types/team/database';
 import AionModal from '@/renderer/components/base/AionModal';
-import { AionSearchInput } from '@/renderer/components/base';
-import { formatDateTime } from '@/renderer/services/i18n/format';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { useAgentLogos } from '@/renderer/utils/model/agentLogo';
-import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import { resolveConversationLeadingMark } from '@/renderer/pages/conversation/utils/conversationAssistantIdentity';
 import { blockMobileInputFocus, blurActiveElement } from '@/renderer/utils/ui/focus';
-import { isPrimaryApplicationShortcut } from '@/renderer/utils/ui/keyboardShortcuts';
 import { Empty, Spin, Typography } from '@arco-design/web-react';
-import { Close, MessageOne, Robot, Search } from '@icon-park/react';
+import { Close, CloseSmall, MessageOne, Robot, Search } from '@icon-park/react';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -82,14 +78,14 @@ const renderHighlightedText = (text: string, keyword: string) => {
   });
 };
 
-const formatTime = (timestamp: number, locale: string): string => {
+const formatTime = (timestamp: number): string => {
   if (!timestamp) return '';
-  return formatDateTime(timestamp, locale, {
+  return new Intl.DateTimeFormat(undefined, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  }).format(timestamp);
 };
 
 interface ConversationSearchPopoverProps {
@@ -115,7 +111,7 @@ const ConversationAgentMark: React.FC<{ conversation: IMessageSearchItem['conver
   }
   if (leadingMark.kind === 'image') {
     return (
-      <ThemedLogo
+      <img
         src={leadingMark.value}
         alt={leadingMark.label}
         title={leadingMark.label}
@@ -139,7 +135,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
   fullWidth = false,
   renderTrigger,
 }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [visible, setVisible] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -305,18 +301,13 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
 
   useEffect(() => {
     const handleGlobalSearchShortcut = (event: KeyboardEvent) => {
-      if (
-        !isPrimaryApplicationShortcut(event, {
-          key: 'f',
-          shiftKey: true,
-          targetGuard: 'embedded-editor',
-        })
-      ) {
-        return;
-      }
+      if (event.defaultPrevented) return;
+      if ((event as unknown as { isComposing?: boolean }).isComposing) return;
+      const key = event.key.toLowerCase();
+      const isCmdOrCtrl = event.metaKey || event.ctrlKey;
+      if (!isCmdOrCtrl || !event.shiftKey || key !== 'f' || event.altKey) return;
       // Preserve browser behavior in WebUI; only intercept in the desktop runtime.
       if (typeof window !== 'undefined' && !window.electronAPI) return;
-      if (disabled) return;
       event.preventDefault();
       handleOpen();
     };
@@ -325,7 +316,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
     return () => {
       document.removeEventListener('keydown', handleGlobalSearchShortcut, true);
     };
-  }, [disabled, handleOpen]);
+  }, [handleOpen]);
 
   const triggerAriaLabel = t('conversation.historySearch.tooltip');
 
@@ -372,7 +363,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
 
     return (
       <div
-        className='h-full min-h-0 overflow-y-auto overflow-x-hidden pe-4px'
+        className='h-full min-h-0 overflow-y-auto overflow-x-hidden pr-4px'
         onScroll={(event) => {
           const target = event.currentTarget;
           if (target.scrollHeight - target.scrollTop - target.clientHeight < 48) {
@@ -388,7 +379,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
                 key={`${item.message_id}-${item.message_created_at}`}
                 type='button'
                 className={classNames(
-                  'conversation-search-modal__result w-full text-start cursor-pointer transition-all duration-150',
+                  'conversation-search-modal__result w-full text-left cursor-pointer transition-all duration-150',
                   'focus:outline-none'
                 )}
                 onClick={() => {
@@ -404,9 +395,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
                       </div>
                     </div>
                   </div>
-                  <span className='shrink-0 text-11px text-t-secondary'>
-                    {formatTime(item.message_created_at, i18n.language)}
-                  </span>
+                  <span className='shrink-0 text-11px text-t-secondary'>{formatTime(item.message_created_at)}</span>
                 </div>
                 <div className='conversation-search-modal__snippet text-13px leading-22px text-t-primary/92 break-words'>
                   {renderHighlightedText(snippet, debouncedKeyword)}
@@ -429,7 +418,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
   const hasSearchResults = items.length > 0;
   const useCompactHeight = !debouncedKeyword || (!loading && !hasSearchResults);
   const triggerClassName = fullWidth
-    ? 'conversation-search-trigger-full h-34px w-full p-0 bg-transparent border-none outline-none flex items-center justify-start gap-8px ps-10px pe-8px rd-0.5rem cursor-pointer shrink-0 transition-all group text-t-primary focus:outline-none focus-visible:outline-none'
+    ? 'conversation-search-trigger-full h-34px w-full p-0 bg-transparent border-none outline-none flex items-center justify-start gap-8px pl-10px pr-8px rd-0.5rem cursor-pointer shrink-0 transition-all group text-t-primary focus:outline-none focus-visible:outline-none'
     : 'h-34px w-34px p-0 bg-transparent rd-0.5rem flex items-center justify-center cursor-pointer shrink-0 transition-all border border-solid border-transparent text-t-secondary hover:text-t-primary';
 
   return (
@@ -529,14 +518,26 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
           </div>
 
           <div className='mb-14px conversation-search-modal__input-wrap'>
-            <AionSearchInput
-              className='w-full'
-              autoFocus={visible}
-              value={keyword}
-              placeholder={t('conversation.historySearch.placeholder')}
-              onChange={setKeyword}
-              onClear={handleClearKeyword}
-            />
+            <div className='conversation-search-modal__searchbar'>
+              <Search theme='outline' size='16' className='conversation-search-modal__search-icon' />
+              <input
+                autoFocus={visible}
+                value={keyword}
+                placeholder={t('conversation.historySearch.placeholder')}
+                onChange={(event) => setKeyword(event.target.value)}
+                className='conversation-search-modal__search-input'
+              />
+              {keyword ? (
+                <button
+                  type='button'
+                  className='conversation-search-modal__clear-btn'
+                  onClick={handleClearKeyword}
+                  aria-label='Clear search'
+                >
+                  <CloseSmall theme='outline' size='14' />
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className='flex-1 min-h-0'>{resultContent}</div>

@@ -11,6 +11,7 @@ export type WorkspaceGroup = {
   workspace: string;
   display_name: string;
   conversations: TChatConversation[];
+  shared?: boolean;
 };
 
 export type TimelineItem = {
@@ -44,9 +45,7 @@ export type ExportTask =
 export type ConversationRowProps = {
   conversation: TChatConversation;
   isGenerating: boolean;
-  hasUnread: boolean;
-  /** Whether the user manually marked this conversation as unread (persisted). */
-  isManualUnread: boolean;
+  hasCompletionUnread: boolean;
   collapsed: boolean;
   tooltipEnabled: boolean;
   batchMode: boolean;
@@ -58,18 +57,14 @@ export type ConversationRowProps = {
   onOpenMenu: (conversation: TChatConversation) => void;
   onMenuVisibleChange: (conversation_id: string, visible: boolean) => void;
   onEditStart: (conversation: TChatConversation) => void;
-  onCreateCronTask: (conversation: TChatConversation) => void;
-  onArchive: (conversation: TChatConversation) => void;
+  onDelete?: (conversation_id: string) => void;
+  onHide?: (conversation: TChatConversation) => void;
   onExport?: (conversation: TChatConversation) => void;
   onTogglePin: (conversation: TChatConversation) => void;
-  onToggleManualUnread: (conversation: TChatConversation) => void;
+  onToggleWeixinReminder: (conversation: TChatConversation) => void;
   getJobStatus: (conversation_id: string) => 'none' | 'active' | 'paused' | 'error' | 'unread';
-  /** Resolve a loaded conversation's name by id (fork-lineage badge tooltip). */
-  resolveConversationName?: (conversation_id: string) => string | undefined;
   /** When true, the agent icon is dimmed by default and only shows full color on hover. Used inside project folders to reduce visual weight. */
   dimIcon?: boolean;
-  /** Hover-reveal drag handle overlaying the leading icon; supplied by the sortable wrapper for reorderable (pinned) rows. */
-  dragHandle?: ReactNode;
 };
 
 export type WorkspaceGroupedHistoryProps = {

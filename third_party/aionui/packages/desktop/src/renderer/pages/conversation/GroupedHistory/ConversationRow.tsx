@@ -5,7 +5,6 @@
  */
 
 import { useAgentLogos } from '@/renderer/utils/model/agentLogo';
-import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import FlexFullContainer from '@/renderer/components/layout/FlexFullContainer';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { CronJobIndicator } from '@/renderer/pages/cron';
@@ -13,8 +12,7 @@ import { resolveConversationLeadingMark } from '@/renderer/pages/conversation/ut
 import { cleanupSiderTooltips, getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { Checkbox, Dropdown, Menu, Spin, Tooltip } from '@arco-design/web-react';
-import { EditOne, Export, FolderClose, Inbox, MessageOne, MoreOne, Pushpin, Robot, Timer } from '@icon-park/react';
-import ForkBranchIcon from '@renderer/components/base/ForkBranchIcon';
+import { CheckSmall, DeleteOne, EditOne, Export, MessageOne, MoreOne, Pushpin, Robot, Wechat } from '@icon-park/react';
 import classNames from 'classnames';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +24,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
   const {
     conversation,
     isGenerating,
-    hasUnread,
+    hasCompletionUnread,
     collapsed,
     tooltipEnabled,
     batchMode,
@@ -34,7 +32,6 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
     selected,
     menuVisible,
     dimIcon = false,
-    dragHandle,
   } = props;
   const logos = useAgentLogos();
   const layout = useLayoutContext();
@@ -45,36 +42,30 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
     onOpenMenu,
     onMenuVisibleChange,
     onEditStart,
-    onCreateCronTask,
-    onArchive,
+    onDelete,
+    onHide,
     onExport,
     onTogglePin,
-    onToggleManualUnread,
-    isManualUnread,
+    onToggleWeixinReminder,
     getJobStatus,
   } = props;
   const { t } = useTranslation();
   const { info: assistantInfo } = usePresetAssistantInfo(conversation);
   const isPinned = isConversationPinned(conversation);
-  // Fork-lineage badge: present only on forked conversations (extra.fork is
-  // server-minted by the fork API). Parent name resolves from the loaded
-  // sidebar list; a deleted/unloaded parent degrades to the generic tip.
-  const forkLineage = (conversation.extra as { fork?: { parent_conversation_id?: string } } | undefined)?.fork;
-  const forkParentName = forkLineage?.parent_conversation_id
-    ? props.resolveConversationName?.(forkLineage.parent_conversation_id)
-    : undefined;
+  const isWeixinReminderEnabled =
+    (conversation.extra as Record<string, unknown> | undefined)?.weixinReminderEnabled === true;
   const cronStatus = getJobStatus(conversation.id);
   const siderTooltipProps = getSiderTooltipProps(tooltipEnabled);
   const inlineNameTooltipEnabled = !collapsed && !isMobile && !!conversation.name;
+  const isShared = Boolean((conversation.extra as { shared?: unknown } | undefined)?.shared);
 
   const renderLeadingIcon = () => {
     if (cronStatus !== 'none') {
       return <CronJobIndicator status={cronStatus} size={16} className='flex-shrink-0' />;
     }
 
-    // When the row is pinned, hovering reveals an overlay on the leading icon —
-    // the drag handle when the row is sortable, otherwise a pushpin marker.
-    // We dim the resting icon on hover so the overlay reads cleanly.
+    // When the row is pinned, hovering reveals a pushpin marker that overlays
+    // the leading icon. We dim the resting icon on hover so the pin reads cleanly.
     const pinnedHoverFade = isPinned ? 'group-hover:opacity-0 transition-opacity' : '';
     const composedClass = classNames(pinnedHoverFade);
 
@@ -86,7 +77,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
     }
     if (leadingMark.kind === 'image') {
       return (
-        <ThemedLogo
+        <img
           src={leadingMark.value}
           alt={leadingMark.label}
           className={classNames('w-16px h-16px rounded-50% flex-shrink-0', composedClass)}
@@ -132,12 +123,12 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
   };
 
   const renderCompletionUnreadDot = () => {
-    if (batchMode || !hasUnread || isGenerating) {
+    if (batchMode || !hasCompletionUnread || isGenerating) {
       return null;
     }
 
     return (
-      <span className='absolute end-8px top-1/2 -translate-y-1/2 flex items-center justify-center group-hover:hidden'>
+      <span className='absolute right-8px top-1/2 -translate-y-1/2 flex items-center justify-center group-hover:hidden'>
         <span className='h-8px w-8px rounded-full bg-#2C7FFF shadow-[0_0_0_2px_rgba(44,127,255,0.18)]' />
       </span>
     );
@@ -154,9 +145,9 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
         id={'c-' + conversation.id}
         className={classNames(
           'chat-history__item h-34px rd-8px flex items-center group cursor-pointer relative overflow-hidden shrink-0 conversation-item [&.conversation-item+&.conversation-item]:mt-2px min-w-0 transition-colors',
-          collapsed ? 'justify-center px-0' : 'justify-start gap-8px pe-16px',
+          collapsed ? 'justify-center px-0' : 'justify-start gap-8px pr-16px',
           // dimIcon means this row sits inside a project/cron parent — visually indent the row content while keeping the bg full-width
-          !collapsed && (dimIcon ? 'ps-34px' : 'ps-10px'),
+          !collapsed && (dimIcon ? 'pl-34px' : 'pl-10px'),
           {
             'hover:bg-fill-3': !batchMode && !selected,
             '!bg-fill-3': selected,
@@ -168,7 +159,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
       >
         {batchMode && (
           <span
-            className='me-8px flex-center'
+            className='mr-8px flex-center'
             onClick={(event) => {
               event.stopPropagation();
               onToggleChecked(conversation);
@@ -179,19 +170,15 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
         )}
         <span className='size-22px flex items-center justify-center shrink-0 relative'>
           {isGenerating && !batchMode ? <Spin size={16} /> : renderLeadingIcon()}
-          {/* Hover overlay on the leading icon: drag handle for sortable pinned rows, pushpin marker otherwise */}
-          {!batchMode &&
-            isPinned &&
-            !isMobile &&
-            !isGenerating &&
-            (dragHandle ?? (
-              <span
-                className='absolute inset-0 flex-center text-t-secondary pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity'
-                style={{ lineHeight: 0 }}
-              >
-                <Pushpin theme='outline' size='14' />
-              </span>
-            ))}
+          {/* Pinned indicator: only visible when row is hovered, overlays leading icon */}
+          {!batchMode && isPinned && !isMobile && !isGenerating && (
+            <span
+              className='absolute inset-0 flex-center text-t-secondary pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity'
+              style={{ lineHeight: 0 }}
+            >
+              <Pushpin theme='outline' size='14' />
+            </span>
+          )}
         </span>
         <FlexFullContainer className='h-24px min-w-0 flex-1 collapsed-hidden'>
           <Tooltip
@@ -203,22 +190,8 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
             popupHoverStay={false}
             position='top'
           >
-            <div className='chat-history__item-name overflow-hidden text-ellipsis flex items-center gap-4px w-full text-14px font-[500] lh-24px whitespace-nowrap min-w-0 text-t-primary'>
-              <span className='block overflow-hidden text-ellipsis whitespace-nowrap min-w-0'>{conversation.name}</span>
-              {forkLineage && (
-                <Tooltip
-                  content={
-                    forkParentName
-                      ? t('conversation.history.forkedFrom', { name: forkParentName })
-                      : t('conversation.history.forkedConversation')
-                  }
-                  position='top'
-                >
-                  <span className='flex-shrink-0 line-height-0 text-t-tertiary' data-testid='conversation-fork-badge'>
-                    <ForkBranchIcon size={12} />
-                  </span>
-                </Tooltip>
-              )}
+            <div className='chat-history__item-name overflow-hidden text-ellipsis block w-full text-14px font-[500] lh-24px whitespace-nowrap min-w-0 text-t-primary'>
+              <span className='block overflow-hidden text-ellipsis whitespace-nowrap'>{conversation.name}</span>
             </div>
           </Tooltip>
         </FlexFullContainer>
@@ -227,7 +200,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
         {!batchMode && (
           <div
             className={classNames(
-              'absolute end-8px top-1/2 -translate-y-1/2 items-center justify-end !collapsed-hidden',
+              'absolute right-8px top-1/2 -translate-y-1/2 items-center justify-end !collapsed-hidden',
               {
                 flex: isMobile || menuVisible,
                 'hidden group-hover:flex': !isMobile && !menuVisible,
@@ -245,24 +218,24 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
                       onTogglePin(conversation);
                       return;
                     }
-                    if (key === 'toggleManualUnread') {
-                      onToggleManualUnread(conversation);
-                      return;
-                    }
                     if (key === 'rename') {
                       onEditStart(conversation);
                       return;
                     }
-                    if (key === 'createCronTask') {
-                      onCreateCronTask(conversation);
+                    if (key === 'weixin-reminder') {
+                      onToggleWeixinReminder(conversation);
                       return;
                     }
                     if (key === 'export') {
                       onExport?.(conversation);
                       return;
                     }
-                    if (key === 'archive') {
-                      onArchive(conversation);
+                    if (key === 'delete') {
+                      onDelete?.(conversation.id);
+                      return;
+                    }
+                    if (key === 'hide') {
+                      onHide?.(conversation);
                     }
                   }}
                 >
@@ -272,26 +245,21 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
                       <span>{isPinned ? t('conversation.history.unpin') : t('conversation.history.pin')}</span>
                     </div>
                   </Menu.Item>
-                  <Menu.Item key='toggleManualUnread'>
-                    <div className='flex items-center gap-8px'>
-                      <Inbox theme='outline' size='14' />
-                      <span>
-                        {isManualUnread ? t('conversation.history.markAsRead') : t('conversation.history.markAsUnread')}
-                      </span>
-                    </div>
-                  </Menu.Item>
                   <Menu.Item key='rename'>
                     <div className='flex items-center gap-8px'>
                       <EditOne theme='outline' size='14' />
                       <span>{t('conversation.history.rename')}</span>
                     </div>
                   </Menu.Item>
-                  <Menu.Item key='createCronTask'>
-                    <div className='flex items-center gap-8px'>
-                      <Timer theme='outline' size='14' />
-                      <span>{t('conversation.history.createCronTask')}</span>
-                    </div>
-                  </Menu.Item>
+                  {!isShared && (
+                    <Menu.Item key='weixin-reminder'>
+                      <div className='flex items-center gap-8px min-w-140px'>
+                        <Wechat theme='outline' size='14' />
+                        <span>{t('conversation.history.weixinReminder')}</span>
+                        {isWeixinReminderEnabled && <CheckSmall theme='outline' size='14' className='ml-auto' />}
+                      </div>
+                    </Menu.Item>
+                  )}
                   {onExport && (
                     <Menu.Item key='export'>
                       <div className='flex items-center gap-8px'>
@@ -300,12 +268,24 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
                       </div>
                     </Menu.Item>
                   )}
-                  <Menu.Item key='archive'>
-                    <div className='flex items-center gap-8px'>
-                      <FolderClose theme='outline' size='14' />
-                      <span>{t('conversation.history.archive')}</span>
-                    </div>
-                  </Menu.Item>
+                  {!isShared && onDelete && (
+                    <Menu.Item key='delete'>
+                      <div className='flex items-center gap-8px text-[rgb(var(--warning-6))]'>
+                        <DeleteOne theme='outline' size='14' />
+                        <span>{t('conversation.history.deleteTitle')}</span>
+                      </div>
+                    </Menu.Item>
+                  )}
+                  {isShared && onHide && (
+                    <Menu.Item key='hide'>
+                      <div className='flex items-center gap-8px text-t-secondary'>
+                        <DeleteOne theme='outline' size='14' />
+                        <span>
+                          {t('conversation.history.hideSharedConversation', { defaultValue: 'Hide conversation' })}
+                        </span>
+                      </div>
+                    </Menu.Item>
+                  )}
                 </Menu>
               }
               trigger='click'

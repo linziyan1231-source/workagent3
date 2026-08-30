@@ -11,12 +11,10 @@ import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import {
   buildAgentRuntimeModeState,
   buildAgentRuntimeModelInfo,
-  buildAgentRuntimeSlashCommands,
-  buildAgentRuntimeThoughtLevelOption,
+  buildAgentRuntimeThoughtLevel,
   type AgentRuntimeCatalog,
-  type AgentRuntimeDerivedOption,
+  type AgentRuntimeSelectState,
 } from '@/renderer/utils/model/agentRuntimeCatalog';
-import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManagedAgents';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCustomAgentsLoader } from './useCustomAgentsLoader';
@@ -24,7 +22,7 @@ import { useCustomAgentsLoader } from './useCustomAgentsLoader';
 export {
   buildAgentRuntimeModeState,
   buildAgentRuntimeModelInfo,
-  buildAgentRuntimeSlashCommands,
+  buildAgentRuntimeThoughtLevel,
   type AgentRuntimeCatalog,
 };
 
@@ -40,15 +38,11 @@ export type GuidAssistantSelectionResult = {
   setSelectedMode: (mode: React.SetStateAction<string>, options?: { persistPreference?: boolean }) => void;
   selectedAcpModel: string | null;
   setSelectedAcpModel: (model: React.SetStateAction<string | null>, options?: { persistPreference?: boolean }) => void;
+  selectedAcpThoughtLevel: string | null;
+  setSelectedAcpThoughtLevel: (value: React.SetStateAction<string | null>) => void;
   currentAcpCachedModelInfo: AcpModelInfo | null;
-  currentAgentAvailableCommands: SlashCommandItem[];
   currentAgentModeOptions: AgentModeOption[];
-  currentThoughtLevelOption: AgentRuntimeDerivedOption | null;
-  selectedThoughtLevelValue: string;
-  setSelectedThoughtLevelValue: (
-    value: React.SetStateAction<string>,
-    options?: { persistPreference?: boolean }
-  ) => void;
+  currentAgentThoughtLevel: AgentRuntimeSelectState | null;
 };
 
 export function resolveInitialAssistantModel(models: string[]): string | null {
@@ -124,7 +118,7 @@ export const useGuidAssistantSelection = ({
   const [selectedAssistantIdState, _setSelectedAssistantId] = useState<string | null>(null);
   const [selectedMode, _setSelectedMode] = useState<string>('default');
   const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
-  const [selectedThoughtLevelValue, _setSelectedThoughtLevelValue] = useState<string>('');
+  const [selectedAcpThoughtLevel, setSelectedAcpThoughtLevel] = useState<string | null>(null);
   const { assistants } = useCustomAgentsLoader();
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
 
@@ -143,16 +137,6 @@ export const useGuidAssistantSelection = ({
       _setSelectedAcpModel((prev) => {
         const nextModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
         return nextModelId;
-      });
-    },
-    []
-  );
-
-  const setSelectedThoughtLevelValue = useCallback(
-    (value: React.SetStateAction<string>, _options?: { persistPreference?: boolean }) => {
-      _setSelectedThoughtLevelValue((prev) => {
-        const nextValue = typeof value === 'function' ? value(prev) : value;
-        return nextValue;
       });
     },
     []
@@ -214,36 +198,26 @@ export const useGuidAssistantSelection = ({
   const selectedAssistantId = selectedAssistant?.id ?? null;
   const selectedAssistantBackend = assistantRuntimeKey(selectedAssistant);
   const selectedAssistantModels = selectedAssistant?.models ?? [];
-  const selectedManagedAgentRuntimeCatalog = useMemo(
-    () =>
-      selectedAssistant?.agent_id
-        ? managedAgentRuntimeCatalog.find((agent) => agent.id === selectedAssistant.agent_id)
-        : undefined,
-    [managedAgentRuntimeCatalog, selectedAssistant?.agent_id]
-  );
+  const selectedManagedAgentRuntimeCatalog = useMemo(() => {
+    const exact = selectedAssistant?.agent_id
+      ? managedAgentRuntimeCatalog.find((agent) => agent.id === selectedAssistant.agent_id)
+      : undefined;
+    if (exact) return exact;
+    const backendMatches = managedAgentRuntimeCatalog.filter((agent) => agent.backend === selectedAssistantBackend);
+    return backendMatches.length === 1 ? backendMatches[0] : undefined;
+  }, [managedAgentRuntimeCatalog, selectedAssistant?.agent_id, selectedAssistantBackend]);
   const selectedAgentRuntimeModelInfo = useMemo(
     () => buildAgentRuntimeModelInfo(selectedManagedAgentRuntimeCatalog),
-    [selectedManagedAgentRuntimeCatalog]
-  );
-  const currentAgentAvailableCommands = useMemo(
-    () => buildAgentRuntimeSlashCommands(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
   const selectedAgentRuntimeModeState = useMemo(
     () => buildAgentRuntimeModeState(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
-  const selectedAgentRuntimeThoughtLevelOption = useMemo(
-    () => buildAgentRuntimeThoughtLevelOption(selectedManagedAgentRuntimeCatalog),
+  const currentAgentThoughtLevel = useMemo(
+    () => buildAgentRuntimeThoughtLevel(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
-  const currentThoughtLevelOption = useMemo<AgentRuntimeDerivedOption | null>(() => {
-    if (!selectedAgentRuntimeThoughtLevelOption) return null;
-    return {
-      ...selectedAgentRuntimeThoughtLevelOption,
-      currentValue: selectedThoughtLevelValue || selectedAgentRuntimeThoughtLevelOption.currentValue,
-    };
-  }, [selectedAgentRuntimeThoughtLevelOption, selectedThoughtLevelValue]);
   const currentAgentModeOptions = selectedAgentRuntimeModeState.options;
 
   const selectedAssistantAvailable = useMemo(() => {
@@ -252,25 +226,11 @@ export const useGuidAssistantSelection = ({
 
   const modelSelectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
-    // A CLI agent's runtime catalog must NOT seed a selection. `current_model_id` there is
-    // whatever the LAST session of this agent wrote back — not this user's intent — and
-    // `available_models[0]` is the agent's own "Default" row, which for claude is a REAL
-    // choice (it pins the account default, overriding the user's ANTHROPIC_MODEL). Seeding
-    // either one turned "I have not picked a model" into a silent pick, so a fresh
-    // conversation could never start on the model `claude` itself would have used.
-    //
-    // `null` is the meaningful value: `useGuidSend` omits the model override entirely, and
-    // the agent then resolves it from the user's own config, exactly as its CLI does. The
-    // picker renders this as no checkmark + the generic "default model" label, and once a
-    // session exists the backend reports the model it actually resolved to.
-    //
-    // Assistants backed by an API provider have no runtime catalog; they keep seeding from
-    // their own `models` list, which is a real per-assistant configuration.
-    const fallbackModelId = selectedAgentRuntimeModelInfo
-      ? null
-      : selectedAssistantModels.length > 0
-        ? resolveInitialAssistantModel(selectedAssistantModels)
-        : null;
+    const runtimeModelId =
+      selectedAgentRuntimeModelInfo?.current_model_id || selectedAgentRuntimeModelInfo?.available_models[0]?.id;
+    const fallbackModelId =
+      runtimeModelId ||
+      (selectedAssistantModels.length > 0 ? resolveInitialAssistantModel(selectedAssistantModels) : null);
     const availableModelIds = new Set(
       selectedAgentRuntimeModelInfo?.available_models.map((model) => model.id) ?? selectedAssistantModels
     );
@@ -300,28 +260,20 @@ export const useGuidAssistantSelection = ({
 
   const thoughtLevelSelectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
-    const optionValues = new Set(selectedAgentRuntimeThoughtLevelOption?.options.map((option) => option.value) ?? []);
-    const fallbackThoughtLevel =
-      selectedAgentRuntimeThoughtLevelOption?.currentValue ||
-      selectedAgentRuntimeThoughtLevelOption?.options[0]?.value ||
-      '';
-    const selectionScope = selectedAssistantId ?? '';
-
-    _setSelectedThoughtLevelValue((previousValue) => {
+    const availableValues = new Set(currentAgentThoughtLevel?.options.map((option) => option.value) ?? []);
+    setSelectedAcpThoughtLevel((previousValue) => {
+      const selectionScope = selectedAssistantId ?? '';
       const scopeChanged = thoughtLevelSelectionScopeRef.current !== selectionScope;
       thoughtLevelSelectionScopeRef.current = selectionScope;
-
-      if (!selectedAgentRuntimeThoughtLevelOption) {
-        return '';
-      }
-
-      if (!scopeChanged && previousValue && optionValues.has(previousValue)) {
-        return previousValue;
-      }
-
-      return fallbackThoughtLevel;
+      if (!scopeChanged && previousValue && availableValues.has(previousValue)) return previousValue;
+      // Codex reports the value last written to its shared config, which may
+      // belong to an older conversation. New Portal conversations must start
+      // from the managed low-reasoning default instead of inheriting that
+      // transient runtime value.
+      if (selectedAssistantBackend === 'codex' && availableValues.has('low')) return 'low';
+      return currentAgentThoughtLevel?.currentValue || currentAgentThoughtLevel?.options[0]?.value || null;
     });
-  }, [selectedAgentRuntimeThoughtLevelOption, selectedAssistantId]);
+  }, [currentAgentThoughtLevel, selectedAssistantBackend, selectedAssistantId]);
 
   const currentAcpCachedModelInfo = useMemo(() => {
     if (selectedAgentRuntimeModelInfo) {
@@ -345,11 +297,10 @@ export const useGuidAssistantSelection = ({
     setSelectedMode,
     selectedAcpModel,
     setSelectedAcpModel,
+    selectedAcpThoughtLevel,
+    setSelectedAcpThoughtLevel,
     currentAcpCachedModelInfo,
-    currentAgentAvailableCommands,
     currentAgentModeOptions,
-    currentThoughtLevelOption,
-    selectedThoughtLevelValue,
-    setSelectedThoughtLevelValue,
+    currentAgentThoughtLevel,
   };
 };

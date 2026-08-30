@@ -1,7 +1,13 @@
 {
+  "shared": {
+    "mentionCandidates": "Assistant and members",
+    "assistant": "Assistant",
+    "member": "Member",
+    "files": "Files"
+  },
   "welcome": {
     "title": "Hi, what's your plan for today?",
-    "placeholder": "Send a message, upload files, open a folder, create a scheduled task, or type / for commands...",
+    "placeholder": "Send a message, upload files, open a folder, or create a scheduled task...",
     "linkFolder": "Open Folder",
     "newConversation": "New Chat",
     "selectModel": "Select Model",
@@ -12,14 +18,21 @@
     "clearWorkspace": "Remove project",
     "openFolder": "Open Folder",
     "none": "None",
-    "quickActionsTitle": "What can AionUi do?",
+    "quickActionsTitle": "What can CLIENTNAME do?",
     "quickActionFeedback": "Report Issue",
     "quickActionStar": "Like us? Give us a star!",
-    "skillsMarket": "AionUi Skills Market",
+    "skillsMarket": "CLIENTNAME Skills Market",
     "skillsMarketDesc": "Search and activate community Skills on demand. Configure once, available for all agents.",
     "skillsMarketDetails": "View More >>"
   },
   "history": {
+    "hideSharedConversation": "Hide conversation",
+    "sharedConversationHidden": "Shared conversation hidden",
+    "sharedConversationHideFailed": "Shared conversation could not be hidden",
+    "sharedProjectHidden": "Shared project hidden",
+    "sharedProjectHideFailed": "Shared project could not be hidden",
+    "newPrivateSharedConversation": "New conversation in this shared project",
+    "hideSharedProject": "Hide shared project",
     "recents": "Recents",
     "noHistory": "No chat history",
     "deleteTitle": "Delete",
@@ -30,7 +43,6 @@
     "saveName": "Save",
     "cancelEdit": "Cancel",
     "rename": "Rename",
-    "createCronTask": "Create scheduled task",
     "renameTitle": "Rename Chat",
     "renamePlaceholder": "Please enter a new name",
     "renameSuccess": "Renamed successfully",
@@ -43,11 +55,7 @@
     "batchExportConfirm": "Export {{count}} selected topics?",
     "batchDelete": "Batch Delete",
     "batchDeleteConfirm": "Delete {{count}} selected topics?",
-    "batchDeleteConfirm_one": "Delete {{count}} selected topic?",
-    "batchDeleteConfirm_other": "Delete {{count}} selected topics?",
     "batchDeleteSuccess": "{{count}} topics deleted",
-    "batchDeleteSuccess_one": "{{count}} topic deleted",
-    "batchDeleteSuccess_other": "{{count}} topics deleted",
     "batchNoSelection": "Please select topics first",
     "export": "Export",
     "exportDialogTitle": "Export Topics",
@@ -62,10 +70,12 @@
     "exportFailed": "Export failed",
     "pin": "Pin",
     "unpin": "Unpin",
-    "markAsUnread": "Mark as unread",
-    "markAsRead": "Mark as read",
     "pinned": "Pinned",
     "pinFailed": "Pin operation failed",
+    "weixinReminder": "WeChat reminder",
+    "weixinReminderEnabled": "Reminder enabled",
+    "weixinReminderDisabled": "Reminder disabled",
+    "weixinReminderUpdateFailed": "Failed to update WeChat reminder",
     "pinnedSection": "Pinned",
     "deleteSuccess": "Deleted successfully",
     "deleteFailed": "Delete failed",
@@ -75,21 +85,25 @@
     "earlier": "Earlier",
     "projectsSection": "Projects",
     "conversationsSection": "Conversations",
+    "renameProjectTitle": "Rename project",
+    "renameProject": "Rename project",
+    "renameProjectPlaceholder": "Enter a new project name",
+    "renameProjectSuccess": "Project renamed to “{{name}}”",
+    "renameProjectExists": "A project with this name already exists",
+    "renameProjectInvalid": "The project name is invalid",
+    "renameProjectInUse": "The project is in use. Stop related tasks and try again",
+    "renameProjectForce": "Force-stop locking programs before renaming",
+    "renameProjectForceRisk": "Risk: programs using this folder will be forcibly terminated and unsaved data may be lost.",
+    "renameProjectForceConfirmTitle": "Force-stop programs using this project?",
+    "renameProjectForceConfirmContent": "Programs owned by the current Windows user that are confirmed to be using this project's files will be terminated before the folder is renamed. Unsaved work in editors, terminals, or other programs may be lost. This cannot be undone.",
+    "renameProjectForceConfirm": "Force stop and rename",
+    "renameProjectForceFailed": "Not all locking programs could be safely identified or stopped; the folder was not renamed",
+    "renameProjectFailed": "Failed to rename project",
+    "removeProjectTitle": "Remove project",
+    "removeProject": "Remove project",
+    "removeProjectConfirm": "Remove project \"{{name}}\"? Its {{count}} conversation(s) will be removed too.",
     "newConversationInProject": "New chat in this project",
-    "deleting": "Deleting...",
-    "reorderPinned": "Drag to reorder pinned conversation",
-    "forkedFrom": "Forked from “{{name}}”",
-    "forkedConversation": "Forked conversation",
-    "archive": "Archive",
-    "archiveSuccess": "Archived",
-    "archiveFailed": "Archive failed",
-    "batchArchive": "Batch archive",
-    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
-    "batchArchiveSuccess": "Archived {{count}} topics",
-    "archiveProject": "Archive project",
-    "archiveProjectTitle": "Archive project",
-    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
-    "archiving": "Archiving..."
+    "deleting": "Deleting..."
   },
   "historySearch": {
     "tooltip": "Search messages",
@@ -319,7 +333,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "CLIENTNAME could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -327,11 +341,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "CLIENTNAME received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "CLIENTNAME could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -348,6 +362,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_RESOURCE_EXHAUSTED": {
+        "title": "User runtime is low on memory",
+        "body": "A preview or background task is using too many resources. Close Office previews, wait briefly, and retry."
       }
     }
   },
@@ -431,8 +449,7 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "Terminal",
-      "explorer": "File Explorer",
-      "browser": "Browser"
+      "explorer": "File Explorer"
     }
   },
   "minimap": {
@@ -440,9 +457,7 @@
     "searchHint": "Click here to search keywords",
     "empty": "No Q&A turns yet",
     "noMatch": "No matching content found",
-    "count": "{{count}} turns",
-    "count_one": "{{count}} turn",
-    "count_other": "{{count}} turns"
+    "count": "{{count}} turns"
   },
   "chat": {
     "noModelSelected": "No model selected for current session, cannot send message",
@@ -460,7 +475,6 @@
     "switchAgentFailed": "Failed to switch agent",
     "speech": {
       "recordTooltip": "Start voice input",
-      "recordTooltipWithShortcut": "Voice input cmd+M",
       "pickFileTooltip": "Select an audio file",
       "stopTooltip": "Stop recording",
       "processing": "Transcribing audio...",
@@ -496,8 +510,8 @@
     "error": "Failed to answer the side question."
   },
   "commandQueue": {
-    "title": "Draft box",
-    "clear": "Clear draft box",
+    "title": "Queued Commands",
+    "clear": "Clear Queue",
     "edit": "Edit",
     "editing": "Editing",
     "editPlaceholder": "Update the queued command before it runs.",
@@ -506,45 +520,19 @@
     "moreActions": "More actions",
     "reorder": "Drag to reorder queued command",
     "remove": "Remove",
+    "steer": "Steer response",
+    "steerSuccess": "The queued prompt is now steering the current response",
+    "steerFailed": "Failed to steer the current response; the prompt remains queued",
     "files": "{{count}} files",
-    "files_one": "{{count}} file",
-    "files_other": "{{count}} files",
     "pausedAfterFailure": "The next queued command could not start. Edit, reorder, or remove it to continue.",
     "emptyInput": "Queued commands cannot be empty.",
     "queueFull": "Queue is full. Remove a command before adding more.",
     "inputTooLong": "This queued command is too long. Shorten it before sending.",
     "tooManyFiles": "Too many files are attached to this queued command.",
-    "queueTooLarge": "Queue data is too large to persist safely. Remove some queued commands first.",
-    "sendNow": "Send now",
-    "modeToggle": "Toggle send mode",
-    "help": "Help",
-    "helpIntro": "Messages you send while the AI is replying wait here.",
-    "helpAuto": ": sent automatically one by one after each reply finishes.",
-    "helpManual": ": kept here without sending; send each with Send now.",
-    "clearConfirmTitle": "Clear the send draft box?",
-    "clearConfirmContent": "All pending messages will be removed. This cannot be undone.",
-    "mode": {
-      "auto": "Auto send",
-      "manual": "Manual send"
-    },
-    "addToQueue": "Save to Draft box",
-    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
-    "midturnBlocked": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
-    "enterShortcut": "Enter",
-    "actionMode": "Choose send action",
-    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
-    "addToQueueBusyHint": "Save to Draft box and send it later."
+    "queueTooLarge": "Queue data is too large to persist safely. Remove some queued commands first."
   },
   "contextUsage": {
-    "contextUsed": "context used",
-    "tokensUsed": "{{tokens}} tokens used",
-    "windowUnknown": "Context window size unknown",
-    "sessionCost": "Session cost",
-    "input": "Input",
-    "output": "Output",
-    "thought": "Thinking",
-    "cachedRead": "Cache read",
-    "cachedWrite": "Cache write"
+    "contextUsed": "context used"
   },
   "skill_generator": {
     "title": "Generate Skill/Rule",
@@ -584,27 +572,18 @@
       "loaded": "Loaded",
       "failed": "Failed",
       "unsupported": "Unsupported"
-    },
-    "selected": "Selected MCP"
+    }
   },
   "runtimePreparing": {
     "sendboxHint": "Preparing the runtime environment. First startup can take a little longer."
   },
   "sendbox": {
-    "hint": "Type / for commands, @ to reference files, ↑/↓ for message history",
-    "mediaPathFallback": "This agent has no native support for this file type; it will be sent as a file path.",
-    "hintWithSessions": "Type / for commands, @ for files, @@ for conversations, ↑/↓ for history"
+    "hint": "Type / for commands, @ to reference files"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "This request produced no visible reply."
-      },
-      "ACP_EMPTY_TURN_NEEDS_AUTH": {
-        "body": "This request produced no visible reply. If you're already signed in, this may be a transient backend or connection issue — try again or start a new conversation. If you're not signed in yet, you can sign in — {{hint}}."
-      },
-      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
-        "body": "This request produced no visible reply. The current conversation may be approaching the context length limit — try again, or start a new conversation and retry."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "This request hit the model's output token limit before any visible reply was produced."
@@ -614,172 +593,8 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "The model refused this request before producing any visible reply."
-      },
-      "ANTIGRAVITY_STEPS_FAILED": {
-        "body": "{{count}} step(s) failed and did NOT take effect. agy ends such turns as successful, so check the result rather than the reply."
-      },
-      "CLI_VERSION_OLDER": {
-        "body": "The installed {{cli}} is older than the version AionUi verified; some features may be missing. Consider upgrading {{cli}}. (installed {{reported}} / verified by AionUi: {{verified}})"
-      },
-      "CLI_VERSION_NEWER": {
-        "body": "The installed {{cli}} is newer than the version AionUi verified. It should still work; report anything that behaves oddly. (installed {{reported}} / verified by AionUi: {{verified}})"
-      },
-      "CODEX_RETRYING": {
-        "body": "{{detail}} (attempt {{attempts}}, {{elapsed}} so far — the agent's provider keeps dropping the connection; AionUi is waiting it out.)"
       }
     }
   },
-  "notFound": "Conversation not found or has been deleted",
-  "explorer": {
-    "addFolder": "Add folder to project",
-    "removeFolder": "Remove from project",
-    "attachDuplicate": "This folder is already in the project",
-    "attachOverlap": "This folder overlaps a folder already in the project",
-    "attachFailed": "Couldn't add the folder",
-    "removeFailed": "Couldn't remove the folder",
-    "contextMenu": {
-      "rename": "Rename",
-      "newFile": "New file",
-      "newDir": "New folder",
-      "addToChat": "Add to chat",
-      "copyRelativePath": "Copy relative path",
-      "copyAbsolutePath": "Copy absolute path",
-      "refresh": "Refresh"
-    },
-    "namePlaceholder": "Name",
-    "deleteConfirm": "Delete “{{name}}”? This can’t be undone.",
-    "renameFailed": "Couldn't rename",
-    "newFileFailed": "Couldn't create file",
-    "newDirFailed": "Couldn't create folder",
-    "tabs": {
-      "files": "Files",
-      "changes": "Changes"
-    },
-    "addedToChat": "Added {{name}} to chat",
-    "imported": "Imported {{count}} file(s)",
-    "importPartialFailed": "{{copied}} copied, {{failed}} failed (name conflicts or unsupported)",
-    "importFailed": "Failed to import files",
-    "copyNodeFailed": "Failed to copy",
-    "moveNodeFailed": "Failed to move",
-    "search": {
-      "placeholder": "Search files by name",
-      "searching": "Searching…",
-      "empty": "No files match",
-      "limitReached": "Showing first {{count}} — refine to narrow"
-    },
-    "scm": {
-      "notARepository": "Not a version-controlled folder",
-      "noChanges": "No changes",
-      "loading": "Loading changes…",
-      "loadFailed": "Couldn't load changes",
-      "refresh": "Refresh",
-      "groups": {
-        "staged": "Staged changes",
-        "unstaged": "Changes",
-        "changes": "Changes",
-        "blocked": "Needs resolving"
-      },
-      "sections": {
-        "repositories": "Repositories",
-        "changes": "Changes"
-      },
-      "viewAsTree": "View as tree",
-      "viewAsList": "View as list",
-      "worktree": "Worktree",
-      "expandWorktrees": "Show worktrees",
-      "collapseWorktrees": "Hide worktrees",
-      "state": {
-        "created": "Added",
-        "modified": "Modified",
-        "deleted": "Deleted",
-        "renamed": "Renamed",
-        "conflicted": "Conflict",
-        "unknown": "Unrecognized state"
-      },
-      "badge": {
-        "created": "A",
-        "modified": "M",
-        "deleted": "D",
-        "renamed": "R",
-        "conflicted": "!",
-        "unknown": "?"
-      },
-      "conflictedHint": "Resolve this conflict outside AionUi first",
-      "opaqueHint": "This state comes from a newer backend — shown read-only",
-      "degraded": "Refresh is running in a slower mode because git's index can't be updated",
-      "truncated": "Too many changes to list — showing the first part only",
-      "renamedFrom": "{{from}} → {{to}}",
-      "diff": {
-        "loading": "Loading diff…",
-        "failed": "Couldn't load the diff",
-        "binary": "Binary file — no text diff",
-        "truncated": "Diff truncated (large file)",
-        "empty": "No textual changes",
-        "close": "Close diff"
-      },
-      "actions": {
-        "stage": "Stage changes",
-        "unstage": "Unstage changes",
-        "discard": "Discard changes",
-        "stageAll": "Stage all",
-        "unstageAll": "Unstage all",
-        "blockedHint": "Resolve the conflict outside AionUi before staging or discarding",
-        "confirmDiscardTitle": "Discard changes?",
-        "confirmDiscardTracked": "Edits to {{count}} files will be lost. This can’t be undone.",
-        "confirmDiscardUntracked": "{{count}} new files will be moved to the trash.",
-        "confirmDiscardMixed": "Edits to {{tracked}} file(s) will be lost and can’t be undone; {{untracked}} new file(s) go to the trash.",
-        "discardConfirmButton": "Discard",
-        "okStage": "Staged {{count}} files",
-        "okStage_one": "Staged {{count}} file",
-        "okStage_other": "Staged {{count}} files",
-        "okUnstage": "Unstaged {{count}} files",
-        "okUnstage_one": "Unstaged {{count}} file",
-        "okUnstage_other": "Unstaged {{count}} files",
-        "okDiscard": "Discarded {{count}} files",
-        "okDiscard_one": "Discarded {{count}} file",
-        "okDiscard_other": "Discarded {{count}} files",
-        "partial": "{{succeeded}} of {{total}} done — {{failed}} couldn’t be completed",
-        "partialDetail": "Not completed: {{files}}",
-        "rejectedBlocked": "Nothing was changed — resolve the conflict first",
-        "rejectedUnsupported": "This repository doesn’t support that action",
-        "rejectedFailed": "The action couldn’t be completed",
-        "retry": "Retry",
-        "notSent": "The request didn't reach the backend — nothing was changed. You can try again.",
-        "outcomeUnknown": "The connection reset before a reply arrived — this action may or may not have completed. Refresh and check the file list before retrying.",
-        "allFailed": "None of the {{count}} file(s) could be processed",
-        "allFailed_one": "{{count}} file could not be processed",
-        "allFailed_other": "None of the {{count}} files could be processed"
-      }
-    },
-    "pathCopied": "Path copied",
-    "copyFailed": "Failed to copy path"
-  },
-  "terminal": {
-    "running": "Running",
-    "stopped": "Stopped",
-    "exited": "Exit {{code}}",
-    "stop": "Stop",
-    "truncated": "(earlier output truncated)"
-  },
-  "emptyState": {
-    "greeting": "Hi! Tell me what you need and I'll get started."
-  },
-  "crossSession": {
-    "mentionAgain": "Mention conversation {{name}} in the message box",
-    "mentionAgainHint": "Click to mention this conversation in the message box",
-    "mentionUnavailable": "That conversation can no longer be mentioned.",
-    "mentionFailed": "Could not mention that conversation.",
-    "fromBadge": "From conversation {{name}}",
-    "otherWorkspace": "different workspace",
-    "rateLimitedTitle": "Cross-conversation messages may be looping",
-    "rateLimited": "Automatic messages between \"{{from}}\" and \"{{to}}\" are unusually frequent and may be looping.",
-    "stopBoth": "Stop both conversations",
-    "disableFeature": "Turn off cross-conversation messages"
-  },
-  "planBar": {
-    "title": "Plan",
-    "progress": "{{completed}}/{{total}}",
-    "expand": "Expand plan",
-    "collapse": "Collapse plan"
-  }
+  "notFound": "Conversation not found or has been deleted"
 }

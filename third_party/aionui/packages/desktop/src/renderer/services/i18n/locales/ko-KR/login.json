@@ -1,6 +1,6 @@
 {
-  "pageTitle": "AionUi - 로그인",
-  "brand": "AionUi",
+  "pageTitle": "CLIENTNAME - 로그인",
+  "brand": "CLIENTNAME",
   "subtitle": "다시 오신 것을 환영합니다. 계정에 로그인하세요",
   "username": "사용자 이름",
   "usernamePlaceholder": "사용자 이름을 입력하세요",
@@ -15,6 +15,34 @@
   "languageToggle": "언어 변경",
   "footerPrimary": "명령줄 AI의 혁신",
   "footerSecondary": "현대적이고 효율적인",
+  "changePassword": {
+    "link": "비밀번호 변경",
+    "pageTitle": "CLIENTNAME - 비밀번호 변경",
+    "title": "비밀번호 변경",
+    "subtitle": "현재 비밀번호를 확인한 후 새 비밀번호를 설정하세요",
+    "currentPassword": "현재 비밀번호",
+    "currentPasswordPlaceholder": "현재 비밀번호를 입력하세요",
+    "newPassword": "새 비밀번호",
+    "newPasswordPlaceholder": "새 비밀번호를 입력하세요",
+    "confirmPassword": "새 비밀번호 확인",
+    "confirmPasswordPlaceholder": "새 비밀번호를 다시 입력하세요",
+    "requirement": "12자 이상이며 현재 비밀번호와 다른 비밀번호를 사용하세요.",
+    "submit": "비밀번호 변경",
+    "success": "비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.",
+    "backToLogin": "로그인으로 돌아가기",
+    "errors": {
+      "required": "필수 항목을 모두 입력하세요",
+      "mismatch": "새 비밀번호가 일치하지 않습니다",
+      "invalidCurrentPassword": "사용자 이름 또는 현재 비밀번호가 올바르지 않습니다",
+      "passwordPolicy": "새 비밀번호는 12자 이상이어야 합니다",
+      "passwordReused": "현재 비밀번호와 다른 비밀번호를 사용하세요",
+      "tooManyAttempts": "시도 횟수가 너무 많습니다. 나중에 다시 시도하세요",
+      "networkError": "연결에 실패했습니다. 다시 시도하세요",
+      "serverError": "서버 오류입니다. 나중에 다시 시도하세요",
+      "securityError": "보안 확인에 실패했습니다. 페이지를 새로 고친 후 다시 시도하세요",
+      "unknown": "비밀번호 변경에 실패했습니다. 나중에 다시 시도하세요"
+    }
+  },
   "errors": {
     "empty": "사용자 이름과 비밀번호를 입력하세요",
     "invalidCredentials": "잘못된 사용자 이름 또는 비밀번호",

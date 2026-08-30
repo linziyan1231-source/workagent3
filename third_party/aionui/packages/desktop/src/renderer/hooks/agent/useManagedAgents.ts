@@ -20,7 +20,11 @@ export type UseManagedAgentsResult = {
 };
 
 export async function refreshManagedAgentCatalogAndAssistants(): Promise<ManagedAgent[] | undefined> {
-  const [agents] = await Promise.all([mutate<ManagedAgent[]>(MANAGED_AGENTS_SWR_KEY), mutate('assistants.list')]);
+  const [agents] = await Promise.all([
+    mutate<ManagedAgent[]>(MANAGED_AGENTS_SWR_KEY),
+    mutate('assistants.list'),
+    mutate('assistants'),
+  ]);
   return agents;
 }
 

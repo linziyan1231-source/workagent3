@@ -7,8 +7,6 @@
 import type {
   BackendTeammateStatus,
   TeamAssistant,
-  TeamContextResetAvailability,
-  TeamContextResetCapability,
   TeammateRole,
   TeammateStatus,
   TTeam,
@@ -29,7 +27,7 @@ export type ICreateTeamParams = {
   name: string;
   workspace: string;
   workspace_mode: WorkspaceMode;
-  agents: TeamAssistantInput[];
+  assistants: TeamAssistantInput[];
 };
 
 export type IAddTeamAssistantParams = {
@@ -41,17 +39,6 @@ export type IAddTeamAssistantParams = {
 
 const VALID_ROLES = new Set<TeammateRole>(['leader', 'teammate']);
 const VALID_WORKSPACE_MODES = new Set<WorkspaceMode>(['shared', 'isolated']);
-const VALID_CONTEXT_RESET_AVAILABILITY = new Set<TeamContextResetAvailability>([
-  'ready',
-  'initializing',
-  'busy',
-  'dormant',
-  'failed',
-  'removing',
-  'session_stopped',
-  'unsupported',
-  'leader_not_targetable',
-]);
 
 function toRole(raw: string | undefined): TeammateRole {
   if (raw === 'lead') return 'leader';
@@ -67,32 +54,12 @@ export function normalizeTeamStatus(raw: BackendTeammateStatus | undefined): Tea
     tool_use: 'active',
     completed: 'completed',
     error: 'failed',
-    // Dormant (leader-only warmup): pass through so the badge can render an
-    // asleep state distinct from idle, instead of collapsing to idle.
-    dormant: 'dormant',
   };
   return statusMap[raw ?? ''] ?? 'idle';
 }
 
 function toWorkspaceMode(raw: string | undefined): WorkspaceMode {
   return VALID_WORKSPACE_MODES.has(raw as WorkspaceMode) ? (raw as WorkspaceMode) : 'shared';
-}
-
-function toContextResetCapability(raw: unknown): TeamContextResetCapability {
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error('Invalid team context-reset capability');
-  }
-  const capability = raw as Record<string, unknown>;
-  if (
-    typeof capability.supported !== 'boolean' ||
-    !VALID_CONTEXT_RESET_AVAILABILITY.has(capability.availability as TeamContextResetAvailability)
-  ) {
-    throw new Error('Invalid team context-reset capability');
-  }
-  return {
-    supported: capability.supported,
-    availability: capability.availability as TeamContextResetAvailability,
-  };
 }
 
 export function fromBackendAssistant(raw: unknown): TeamAssistant {
@@ -115,7 +82,6 @@ export function fromBackendAssistant(raw: unknown): TeamAssistant {
     assistant_id: r.assistant_id as string | undefined,
     model: r.model as string | undefined,
     pending_confirmations: (r.pending_confirmations ?? r.pendingConfirmations ?? 0) as number,
-    context_reset: toContextResetCapability(r.context_reset),
   };
 }
 

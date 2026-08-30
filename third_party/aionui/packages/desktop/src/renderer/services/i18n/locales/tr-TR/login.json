@@ -1,6 +1,6 @@
 {
-  "pageTitle": "AionUi - Giriş Yap",
-  "brand": "AionUi",
+  "pageTitle": "CLIENTNAME - Giriş Yap",
+  "brand": "CLIENTNAME",
   "subtitle": "Tekrar hoş geldiniz, lütfen hesabınıza giriş yapın",
   "username": "Kullanıcı Adı",
   "usernamePlaceholder": "Kullanıcı adınızı girin",
@@ -15,6 +15,34 @@
   "languageToggle": "Dili değiştir",
   "footerPrimary": "Komut satırı AI'nızı dönüştürün",
   "footerSecondary": "Modern ve Verimli",
+  "changePassword": {
+    "link": "Şifreyi değiştir",
+    "pageTitle": "CLIENTNAME - Şifreyi Değiştir",
+    "title": "Şifreyi Değiştir",
+    "subtitle": "Mevcut şifrenizi doğrulayın ve yeni bir şifre belirleyin",
+    "currentPassword": "Mevcut şifre",
+    "currentPasswordPlaceholder": "Mevcut şifrenizi girin",
+    "newPassword": "Yeni şifre",
+    "newPasswordPlaceholder": "Yeni şifrenizi girin",
+    "confirmPassword": "Yeni şifreyi doğrulayın",
+    "confirmPasswordPlaceholder": "Yeni şifrenizi tekrar girin",
+    "requirement": "En az 12 karakter ve mevcut şifrenizden farklı bir şifre kullanın.",
+    "submit": "Şifreyi değiştir",
+    "success": "Şifre değiştirildi. Yeni şifrenizle giriş yapın.",
+    "backToLogin": "Girişe dön",
+    "errors": {
+      "required": "Tüm zorunlu alanları doldurun",
+      "mismatch": "Yeni şifreler eşleşmiyor",
+      "invalidCurrentPassword": "Kullanıcı adı veya mevcut şifre yanlış",
+      "passwordPolicy": "Yeni şifre en az 12 karakter olmalıdır",
+      "passwordReused": "Yeni şifre mevcut şifreden farklı olmalıdır",
+      "tooManyAttempts": "Çok fazla deneme. Lütfen daha sonra tekrar deneyin",
+      "networkError": "Bağlantı başarısız. Lütfen tekrar deneyin",
+      "serverError": "Sunucu hatası. Lütfen daha sonra tekrar deneyin",
+      "securityError": "Güvenlik doğrulaması başarısız. Sayfayı yenileyip tekrar deneyin",
+      "unknown": "Şifre değiştirilemedi. Lütfen daha sonra tekrar deneyin"
+    }
+  },
   "errors": {
     "empty": "Lütfen kullanıcı adı ve şifre girin",
     "invalidCredentials": "Geçersiz kullanıcı adı veya şifre",

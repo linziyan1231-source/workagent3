@@ -1,5 +1,5 @@
 import { ApiKeyManager } from './ApiKeyManager';
-import type { AuthType } from '@/common/types/provider/authType';
+import type { AuthType } from '@office-ai/aioncli-core';
 
 // Unified interface for chat completion across different providers
 export interface UnifiedChatCompletionParams {

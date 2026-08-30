@@ -192,14 +192,7 @@ export interface AcpSessionConfigOption {
 
 export type AcpConfigOptionType = 'select' | 'boolean' | 'string';
 
-/**
- * - `observed` — the agent applied it; the next tool approval already uses it.
- * - `pending_next_turn` — accepted, but the agent applies it only from the NEXT turn
- *   (codex always; claude/agy when raised mid-turn). NOT a failure: the picker shows it
- *   as pending and the real confirmation arrives later on an `acp_config_option` frame.
- * - `command_ack` — accepted, but nothing could be confirmed either way.
- */
-export type AcpConfigOptionConfirmation = 'observed' | 'pending_next_turn' | 'command_ack';
+export type AcpConfigOptionConfirmation = 'observed' | 'command_ack';
 
 export type AcpConfigSelectOptionDto = {
   value: string;
@@ -224,10 +217,6 @@ export type EnsureConversationRuntimeResponse = {
   recovered: boolean;
   config_options: AcpConfigOptionDto[];
   runtime: TConversationRuntimeSummary;
-};
-
-export type GetConfigOptionsResponse = {
-  config_options: AcpConfigOptionDto[];
 };
 
 export type SetConfigOptionRequest = {

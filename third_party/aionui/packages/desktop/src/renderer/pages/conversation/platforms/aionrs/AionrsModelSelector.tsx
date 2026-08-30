@@ -8,12 +8,9 @@ import type { AionrsModelSelection } from './useAionrsModelSelection';
 import type { AcpConfigSetStatus, AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import {
   composeRuntimeSelectorLabel,
-  getCurrentThoughtLevelLabel,
-  RUNTIME_SUBMENU_TRIGGER_PROPS,
   RuntimeSelectorCheckedItem,
-  RuntimeSelectorModelList,
-  type RuntimeSelectorModelGroup,
-  RuntimeSelectorSubMenuTitle,
+  RuntimeSelectorMenuDivider,
+  renderThoughtLevelMenuGroup,
 } from '@/renderer/components/agent/runtimeSelectorOptions';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
@@ -25,17 +22,13 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
 
-/** Composite id for a provider+model pair, so the shared flat model list can track selection. */
-const compositeId = (providerId: string, modelName: string) => `${providerId}::${modelName}`;
-
 const AionrsModelSelector: React.FC<{
   selection?: AionrsModelSelection;
   disabled?: boolean;
   thoughtLevel?: AcpDerivedOption | null;
-  /** Kept for call-site compatibility; the two-level submenu no longer gates on set status here. */
   setStatus?: AcpConfigSetStatus;
   onSetThoughtLevel?: (optionId: string, value: string) => Promise<unknown>;
-}> = ({ selection, disabled = false, thoughtLevel = null, onSetThoughtLevel }) => {
+}> = ({ selection, disabled = false, thoughtLevel = null, setStatus, onSetThoughtLevel }) => {
   const { t } = useTranslation();
   const { isOpen: isPreviewOpen } = usePreviewContext();
   const layout = useLayoutContext();
@@ -83,33 +76,6 @@ const AionrsModelSelector: React.FC<{
     void onSetThoughtLevel(thoughtLevel.id, value);
   };
 
-  // aionrs models are grouped by provider. Use a composite id (see compositeId)
-  // so the shared model list can track selection, and map it back on select.
-  const modelGroups: RuntimeSelectorModelGroup[] = [];
-  const modelLookup = new Map<string, { provider: (typeof providers)[number]; modelName: string }>();
-  for (const provider of providers) {
-    const models = getAvailableModels(provider);
-    if (!models.length) continue;
-    modelGroups.push({
-      key: provider.id,
-      title: provider.name,
-      models: models.map((modelName) => {
-        const id = compositeId(provider.id, modelName);
-        modelLookup.set(id, { provider, modelName });
-        return { id, label: modelName };
-      }),
-    });
-  }
-  const currentCompositeId = current_model ? compositeId(current_model.id, current_model.use_model || '') : null;
-  const handleModelSelect = (id: string) => {
-    const entry = modelLookup.get(id);
-    if (entry) void handleSelectModel(entry.provider, entry.modelName);
-  };
-
-  const modelListNode = (
-    <RuntimeSelectorModelList groups={modelGroups} currentModelId={currentCompositeId} onSelect={handleModelSelect} />
-  );
-
   return (
     <Dropdown
       trigger='click'
@@ -117,47 +83,37 @@ const AionrsModelSelector: React.FC<{
       // Desktop: leave default container so click events reach Menu.Item normally.
       {...(isMobileHeaderCompact ? { getPopupContainer: () => document.body } : {})}
       droplist={
-        <Menu>
-          {thoughtLevel ? (
-            <>
-              <Menu.SubMenu
-                key='model'
-                triggerProps={RUNTIME_SUBMENU_TRIGGER_PROPS}
-                title={
-                  <RuntimeSelectorSubMenuTitle label={t('common.model', { defaultValue: 'Model' })} value={label} />
-                }
-              >
-                {modelListNode}
-              </Menu.SubMenu>
-              <Menu.SubMenu
-                key='thought-level'
-                triggerProps={RUNTIME_SUBMENU_TRIGGER_PROPS}
-                title={
-                  <RuntimeSelectorSubMenuTitle
-                    label={t('agent.thoughtLevel.label')}
-                    value={getCurrentThoughtLevelLabel(thoughtLevel)}
-                  />
-                }
-              >
-                {thoughtLevel.options.map((item) => (
+        <Menu className='aion-model-menu--sticky-group'>
+          {renderThoughtLevelMenuGroup({
+            thoughtLevel,
+            setStatus,
+            title: t('agent.thoughtLevel.label'),
+            onSelect: handleThoughtLevelSelect,
+          })}
+          {thoughtLevel && <RuntimeSelectorMenuDivider />}
+          {providers.map((provider) => {
+            const models = getAvailableModels(provider);
+            if (!models.length) return null;
+
+            return (
+              <Menu.ItemGroup title={provider.name} key={provider.id}>
+                {models.map((modelName) => (
                   <Menu.Item
-                    key={item.value}
-                    className={item.value === thoughtLevel.currentValue ? '!bg-2' : ''}
-                    onClick={() => handleThoughtLevelSelect(item.value)}
+                    key={`${provider.id}-${modelName}`}
+                    data-testid={`aionrs-model-option-${modelName}`}
+                    className={current_model?.id + current_model?.use_model === provider.id + modelName ? '!bg-2' : ''}
+                    onClick={() => void handleSelectModel(provider, modelName)}
                   >
                     <RuntimeSelectorCheckedItem
-                      selected={item.value === thoughtLevel.currentValue}
-                      description={item.description}
+                      selected={current_model?.id + current_model?.use_model === provider.id + modelName}
                     >
-                      {item.label}
+                      {modelName}
                     </RuntimeSelectorCheckedItem>
                   </Menu.Item>
                 ))}
-              </Menu.SubMenu>
-            </>
-          ) : (
-            modelListNode
-          )}
+              </Menu.ItemGroup>
+            );
+          })}
         </Menu>
       }
     >

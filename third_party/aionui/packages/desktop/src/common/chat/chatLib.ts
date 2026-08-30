@@ -64,12 +64,10 @@ type TMessageType =
   | 'agent_status'
   | 'permission'
   | 'acp_permission'
-  | 'ask'
   | 'acp_tool_call'
   | 'plan'
   | 'thinking'
-  | 'available_commands'
-  | 'acp_terminal_output';
+  | 'available_commands';
 
 interface IMessage<T extends TMessageType, Content extends Record<string, any>> {
   /**
@@ -107,13 +105,6 @@ interface IMessage<T extends TMessageType, Content extends Record<string, any>> 
    * Hidden from UI display but persisted to DB and sent to agent.
    */
   hidden?: boolean;
-  /**
-   * Backend turn anchor (codex `Turn.id`) stamped on rows persisted while that
-   * turn streamed. Presence means a mid-history fork can anchor at (or after)
-   * this message; absent on legacy/copied rows, live-streamed frames (until
-   * reload), and backends without turn-anchored forks.
-   */
-  backend_turn_id?: string;
 }
 
 export type CronMessageMeta = {
@@ -132,6 +123,8 @@ export type IMessageText = IMessage<
     cronMeta?: CronMessageMeta;
     teammateMessage?: boolean;
     senderName?: string;
+    /** Stable Portal user id for a human collaboration participant. */
+    senderUserId?: string;
     senderAgentType?: string;
     /** Sender teammate's conversation id — lets the renderer resolve preset avatars via their conversation extras. */
     senderConversationId?: string;
@@ -197,9 +190,6 @@ export type IMessageTips = IMessage<
     code?: string;
     params?: Record<string, unknown>;
     error?: AgentStreamErrorInfo;
-    /** Stable identity for a tip that supersedes its predecessor — see the
-     *  `supersedes_key` handling in `transformMessage`. */
-    supersedes_key?: string;
   }
 >;
 
@@ -300,46 +290,9 @@ export type IMessageAgentStatus = IMessage<
 
 export type IMessageAcpPermission = IMessage<'acp_permission', AcpPermissionRequest>;
 
-/** One structured question inside an `ask` frame (claude AskUserQuestion shape;
- *  qwen/grok converged on the same layout — cross-vendor contract). */
-export interface IAskQuestion {
-  question: string;
-  header?: string;
-  /** The ws relay snake_cases every key (normalize_keys_to_snake_case), so the
-   *  wire spelling is multi_select; multiSelect kept for direct payloads. */
-  multiSelect?: boolean;
-  multi_select?: boolean;
-  options: Array<{ label: string; description?: string }>;
-}
-
-/** Structured question card (AgentStreamEvent::Ask, wire tag `ask`). Answered via
- *  confirmMessage with `{answers:[{question, labels[]}]}` or `{ask_decline:true}`;
- *  call_id = request_id (the claude control correlation key). */
-export type IMessageAsk = IMessage<
-  'ask',
-  {
-    session_id: string;
-    request_id: string;
-    questions: IAskQuestion[];
-  }
->;
-
 export type IMessagePermission = IMessage<'permission', IConfirmation>;
 
 export type IMessageAcpToolCall = IMessage<'acp_tool_call', ToolCallUpdate>;
-
-/** Live snapshot of a client-hosted terminal (ACP terminal/*). Stream-only —
- * never persisted; the card disappears on conversation reload. */
-export interface AcpTerminalOutputContent {
-  terminal_id: string;
-  command: string;
-  /** Cumulative output (backend sends the full buffer each frame). */
-  output: string;
-  truncated: boolean;
-  exit_status?: { exit_code?: number | null; signaled?: boolean } | null;
-}
-
-export type IMessageAcpTerminalOutput = IMessage<'acp_terminal_output', AcpTerminalOutputContent>;
 
 export const mergeAcpToolCallContent = (
   existing: IMessageAcpToolCall['content'],
@@ -387,12 +340,6 @@ export type IMessagePlan = IMessage<
   {
     session_id: string;
     entries: PlanUpdate['update']['entries'];
-    /**
-     * The turn this snapshot belongs to. The plan bar only renders while that
-     * turn is still running, so a finished turn's checklist cannot linger over
-     * the next one. Absent on rows written before this field existed.
-     */
-    turn_id?: string;
   }
 >;
 
@@ -425,12 +372,10 @@ export type TMessage =
   | IMessageAgentStatus
   | IMessagePermission
   | IMessageAcpPermission
-  | IMessageAsk
   | IMessageAcpToolCall
   | IMessagePlan
   | IMessageThinking
-  | IMessageAvailableCommands
-  | IMessageAcpTerminalOutput;
+  | IMessageAvailableCommands;
 
 // 统一所有需要用户交互的用户类型
 export interface IConfirmation<Option extends any = any> {
@@ -444,9 +389,6 @@ export interface IConfirmation<Option extends any = any> {
     value: Option;
     params?: Record<string, string>; // Translation interpolation parameters
   }>;
-  /** AskUserQuestion recovery: the bare questions[] payload — when present the
-   *  recovery path rebuilds the real question card instead of a permission card. */
-  questions?: IAskQuestion[];
   /**
    * Command type for exec confirmations (e.g., 'curl', 'npm', 'git')
    * Used for "always allow" permission memory
@@ -466,6 +408,8 @@ type RawTextMessageContent = {
   senderName?: unknown;
   sender_name?: unknown;
   from_name?: unknown;
+  senderUserId?: unknown;
+  sender_user_id?: unknown;
   senderAgentType?: unknown;
   sender_backend?: unknown;
   senderBackend?: unknown;
@@ -505,6 +449,7 @@ const normalizeTextMessageContentObject = (
   const content = typeof data.content === 'string' ? data.content : String(data.content ?? '');
   const senderName = firstStringField(data, ['senderName', 'sender_name', 'from_name']);
   const senderAgentType = firstStringField(data, ['senderAgentType', 'sender_backend', 'senderBackend']);
+  const senderUserId = firstStringField(data, ['senderUserId', 'sender_user_id']);
   const senderConversationId = firstStringField(data, [
     'senderConversationId',
     'sender_conversation_id',
@@ -520,6 +465,7 @@ const normalizeTextMessageContentObject = (
     ...(cronMeta ? { cronMeta } : {}),
     ...(teammateMessage ? { teammateMessage: true } : {}),
     ...(senderName ? { senderName } : {}),
+    ...(senderUserId ? { senderUserId } : {}),
     ...(senderAgentType ? { senderAgentType } : {}),
     ...(senderConversationId ? { senderConversationId } : {}),
   };
@@ -686,7 +632,7 @@ const isChatMessagePosition = (value: unknown): value is NonNullable<TMessage['p
 const isChatMessageStatus = (value: unknown): value is NonNullable<TMessage['status']> =>
   value === 'finish' || value === 'pending' || value === 'error' || value === 'work';
 
-const transformMessageInner = (message: IResponseMessage): TMessage | undefined => {
+export const transformMessage = (message: IResponseMessage): TMessage | undefined => {
   const created_at = message.created_at ?? Date.now();
   switch (message.type) {
     case 'error': {
@@ -717,25 +663,16 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
         code?: unknown;
         params?: unknown;
         error?: unknown;
-        supersedes_key?: unknown;
       };
       const tipType = data.type ?? 'warning';
       const tipCode = typeof data.code === 'string' ? data.code : undefined;
       const tipParams = isObject(data.params) ? data.params : undefined;
-      // A progress-style tip restates the same fact with a new number (codex
-      // retries: "Reconnecting... 1/5", then 2/5 …). Deriving the message id
-      // from the key makes each update REPLACE its predecessor in the list
-      // instead of appending, so the user watches one card count up rather
-      // than collecting ten near-identical ones. Tips without a key keep a
-      // fresh uuid and are appended as before.
-      const supersedesKey =
-        typeof data.supersedes_key === 'string' && data.supersedes_key ? data.supersedes_key : undefined;
       const structuredError =
         tipType === 'error'
           ? (normalizeAgentStreamError(data.error) ?? normalizeAgentStreamError({ ...data, message: data.content }))
           : undefined;
       return {
-        id: supersedesKey ? `tip:${supersedesKey}` : uuid(),
+        id: uuid(),
         type: 'tips',
         msg_id: message.msg_id,
         position: 'center',
@@ -747,7 +684,6 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
           ...(tipCode ? { code: tipCode } : {}),
           ...(tipParams ? { params: tipParams } : {}),
           ...(structuredError ? { error: structuredError } : {}),
-          ...(supersedesKey ? { supersedes_key: supersedesKey } : {}),
         },
       };
     }
@@ -818,17 +754,6 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
         content: message.data as any,
       };
     }
-    case 'ask': {
-      return {
-        id: uuid(),
-        type: 'ask',
-        msg_id: message.msg_id,
-        position: 'left',
-        conversation_id: message.conversation_id,
-        created_at,
-        content: message.data as any,
-      };
-    }
     case 'acp_permission': {
       return {
         id: uuid(),
@@ -838,21 +763,6 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
         conversation_id: message.conversation_id,
         created_at,
         content: message.data as any,
-      };
-    }
-    case 'acp_terminal_output': {
-      const terminal = message.data as any;
-      return {
-        // Deterministic id per terminal: every frame of a turn shares one
-        // msg_id, so a uuid per frame would stack cards and the msg_id
-        // fallback merge would collapse two terminals into one.
-        id: `term:${message.msg_id}:${terminal?.terminal_id ?? ''}`,
-        type: 'acp_terminal_output',
-        msg_id: message.msg_id,
-        position: 'left',
-        conversation_id: message.conversation_id,
-        created_at,
-        content: terminal,
       };
     }
     case 'acp_tool_call': {
@@ -868,23 +778,13 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
     }
     case 'plan': {
       return {
-        // Deterministic and matching the persisted row's primary key
-        // (`plan:{msg_id}`): a uuid per frame remounted the card on every
-        // update, and made the live frame impossible to dedupe against the
-        // history row on reload.
-        id: `plan:${message.msg_id}`,
+        id: uuid(),
         type: 'plan',
         msg_id: message.msg_id,
         position: 'left',
         conversation_id: message.conversation_id,
         created_at,
-        content: {
-          ...(message.data as Record<string, unknown>),
-          // The envelope carries the turn id; the persisted row carries it inside
-          // content. Copying it here makes the live frame and the DB row agree,
-          // so the plan bar can gate on the running turn either way.
-          ...(message.turn_id ? { turn_id: message.turn_id } : {}),
-        } as IMessagePlan['content'],
+        content: message.data as any,
       };
     }
     case 'thinking': {
@@ -921,7 +821,6 @@ const transformMessageInner = (message: IResponseMessage): TMessage | undefined 
     case 'info': // Stream retry notifications and similar transient agent updates
     case 'system': // Cron system responses, ignored
     case 'acp_model_info': // Model info updates, handled by AcpModelSelector
-    case 'acp_config_option': // Config-options catalog updates, handled by useAcpConfigOptions
     case 'codex_model_info': // Legacy Codex model info updates
     case 'acp_context_usage': // Context usage updates, handled by AcpSendBox
     case 'request_trace': // Request trace events, logged to F12 console (not persisted)
@@ -965,18 +864,6 @@ export const composeMessage = (
     messageHandler('insert', message);
     return list.slice();
   };
-
-  // A superseding tip replaces its predecessor wherever it already sits in the
-  // list, rather than being appended: codex reports a stalled turn as a series
-  // of attempts ("Reconnecting... 1/5", then 2/5 …), and appending each one
-  // buried the conversation under near-identical cards. Matching on the key —
-  // not on list position — keeps working when other messages arrive in between.
-  if (message.type === 'tips' && message.content?.supersedes_key) {
-    const key = message.content.supersedes_key;
-    const existing = list.findIndex((item) => item.type === 'tips' && item.content?.supersedes_key === key);
-    if (existing >= 0) return updateMessage(existing, message);
-    return pushMessage(message);
-  }
 
   if (message.type === 'tool_group') {
     const remainingToolsMap = new Map(message.content.map((t) => [t.call_id, t] as const));
@@ -1049,6 +936,19 @@ export const composeMessage = (
     return pushMessage(normalizedMessage);
   }
 
+  if (message.type === 'plan') {
+    for (let i = 0, len = list.length; i < len; i++) {
+      const msg = list[i];
+      if (msg.type === 'plan' && msg.content.session_id === message.content.session_id) {
+        // Create new object instead of mutating original
+        const merged = { ...msg.content, ...message.content };
+        return updateMessage(i, { ...msg, content: merged });
+      }
+    }
+    return pushMessage(message);
+    // If no existing plan found, add new one
+  }
+
   // Handle thinking message merging — only merge contiguous streaming chunks
   if (message.type === 'thinking') {
     if (message.content.status === 'done') {
@@ -1118,14 +1018,4 @@ export const handleImageGenerationWithWorkspace = (message: TMessage, workspace:
   };
 
   return processedMessage;
-};
-
-export const transformMessage = (message: IResponseMessage): TMessage | undefined => {
-  const transformed = transformMessageInner(message);
-  // Stamp the backend turn anchor so live-streamed messages gate the fork
-  // entry exactly like history-loaded rows (see isForkEnabled).
-  if (transformed && message.backend_turn_id) {
-    transformed.backend_turn_id = message.backend_turn_id;
-  }
-  return transformed;
 };

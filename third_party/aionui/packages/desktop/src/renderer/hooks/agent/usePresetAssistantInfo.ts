@@ -10,7 +10,6 @@ import type { TChatConversation } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
 import { assistantRuntimeKey, type Assistant } from '@/common/types/agent/assistantTypes';
 import { resolveLocaleKey } from '@/common/utils';
-import type { AgentLogoMap } from '@/renderer/utils/model/agentLogo';
 import { resolveAgentLogo, useAgentLogos } from '@/renderer/utils/model/agentLogo';
 import { isLikelyLocalFilePath, resolveAssistantAvatar } from '@/renderer/utils/model/assistantAvatar';
 import useSWR from 'swr';
@@ -281,8 +280,8 @@ export function usePresetAssistantInfo(conversation: TChatConversation | undefin
   const logos = useAgentLogos();
 
   // Merged assistant catalog (builtin + user) from backend
-  const { data: assistantsList, isLoading: isLoadingAssistants } = useSWR('assistants.list', () =>
-    ipcBridge.assistants.list.invoke().catch(() => [] as Assistant[])
+  const { data: assistantsList, isLoading: isLoadingAssistants } = useSWR<Assistant[]>('assistants.list', () =>
+    ipcBridge.assistants.list.invoke()
   );
 
   // Extension-contributed ACP adapters (for ext:{extensionName}:{adapterId} conversations)

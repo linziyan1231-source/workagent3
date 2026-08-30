@@ -5,28 +5,18 @@ import type { TeamAssistantInput } from '@/common/adapter/teamMapper';
 import type {
   ITeamAgentRemovedEvent,
   ITeamAgentRenamedEvent,
-  ITeamAgentRuntimeStatusEvent,
   ITeamAgentSpawnedEvent,
   ITeamAgentStatusEvent,
+  ITeamMcpStatusEvent,
   ITeamSessionChangedEvent,
-  ITeamSessionStatusChangedEvent,
   ITeamTaskChangedEvent,
-  TeamAssistant,
   TeammateStatus,
   TTeam,
 } from '@/common/types/team/teamTypes';
 import { useCallback, useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { revalidateAcpConfigOptions } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { removeTeamAssistantWithCronCleanup } from '../utils/removeTeamAssistantWithCronCleanup';
-import {
-  applyTeamRuntimeStatusToMembershipMutationState,
-  applyTeamSessionStatusToMembershipMutationState,
-  createTeamMembershipMutationState,
-  isTeamMembershipMutationBusy,
-} from './teamMembershipMutationBusy';
-import type { TeamWarmupPhase } from './useTeamWarmup';
 
 type AgentStatusInfo = {
   slot_id: string;
@@ -34,7 +24,7 @@ type AgentStatusInfo = {
   last_message?: string;
 };
 
-export function useTeamSession(team: TTeam, warmupPhase?: TeamWarmupPhase) {
+export function useTeamSession(team: TTeam) {
   const { mutate: mutateTeam } = useSWR(team.id ? `team/${team.id}` : null, () =>
     ipcBridge.team.get.invoke({ id: team.id })
   );
@@ -42,14 +32,6 @@ export function useTeamSession(team: TTeam, warmupPhase?: TeamWarmupPhase) {
   const [statusMap, setStatusMap] = useState<Map<string, AgentStatusInfo>>(() => {
     return new Map(team.assistants.map((a) => [a.slot_id, { slot_id: a.slot_id, status: a.status }]));
   });
-  const [membershipMutationState, setMembershipMutationState] = useState(createTeamMembershipMutationState);
-  const membershipMutationBusy = isTeamMembershipMutationBusy(membershipMutationState);
-
-  useEffect(() => {
-    if (warmupPhase === 'ready' || warmupPhase === 'error') {
-      setMembershipMutationState(createTeamMembershipMutationState());
-    }
-  }, [team.id, warmupPhase]);
 
   useEffect(() => {
     const unsubStatus = ipcBridge.team.agentStatusChanged.on((event: ITeamAgentStatusEvent) => {
@@ -80,29 +62,8 @@ export function useTeamSession(team: TTeam, warmupPhase?: TeamWarmupPhase) {
       void mutateTeam();
     });
 
-    const unsubRuntimeStatus = ipcBridge.team.agentRuntimeStatusChanged.on((event: ITeamAgentRuntimeStatusEvent) => {
+    const unsubMcpStatus = ipcBridge.team.mcpStatus.on((event: ITeamMcpStatusEvent) => {
       if (event.team_id !== team.id) return;
-      setMembershipMutationState((prev) =>
-        applyTeamRuntimeStatusToMembershipMutationState(prev, event.slot_id, event.status)
-      );
-      // Dormant is the only runtime state with no other status source, so
-      // surface it on the badge directly. pending/ready/failed stay driven by
-      // agentStatusChanged plus the send-box runtime gate as before.
-      if (event.status === 'dormant') {
-        setStatusMap((prev) => {
-          const next = new Map(prev);
-          next.set(event.slot_id, { slot_id: event.slot_id, status: normalizeTeamStatus('dormant') });
-          return next;
-        });
-        return;
-      }
-      if (event.status !== 'ready') return;
-      void revalidateAcpConfigOptions(event.conversation_id);
-    });
-
-    const unsubSessionStatus = ipcBridge.team.sessionStatusChanged.on((event: ITeamSessionStatusChangedEvent) => {
-      if (event.team_id !== team.id) return;
-      setMembershipMutationState((prev) => applyTeamSessionStatusToMembershipMutationState(prev, event.status));
     });
 
     const unsubTaskChanged = ipcBridge.team.taskChanged.on((event: ITeamTaskChangedEvent) => {
@@ -120,18 +81,16 @@ export function useTeamSession(team: TTeam, warmupPhase?: TeamWarmupPhase) {
       unsubSpawned();
       unsubRemoved();
       unsubRenamed();
-      unsubRuntimeStatus();
-      unsubSessionStatus();
+      unsubMcpStatus();
       unsubTaskChanged();
       unsubSessionChanged();
     };
   }, [team.id, mutateTeam]);
 
   const addAssistant = useCallback(
-    async (assistant: TeamAssistantInput): Promise<TeamAssistant> => {
-      const created = await ipcBridge.team.addAgent.invoke({ team_id: team.id, assistant });
+    async (assistant: TeamAssistantInput) => {
+      await ipcBridge.team.addAgent.invoke({ team_id: team.id, assistant });
       await mutateTeam();
-      return created;
     },
     [team.id, mutateTeam]
   );
@@ -158,5 +117,5 @@ export function useTeamSession(team: TTeam, warmupPhase?: TeamWarmupPhase) {
     [team, mutateTeam]
   );
 
-  return { statusMap, membershipMutationBusy, addAssistant, renameAssistant, removeAssistant, mutateTeam };
+  return { statusMap, addAssistant, renameAssistant, removeAssistant, mutateTeam };
 }

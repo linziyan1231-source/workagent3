@@ -1,4 +1,7 @@
 {
+  "accept": "接受",
+  "decline": "拒绝",
+  "restore": "恢复",
   "send": "发送",
   "cancel": "取消",
   "save": "保存",
@@ -24,8 +27,6 @@
   "loading": "请稍候...",
   "copy": "复制",
   "reply": "引用",
-  "openInBuiltinBrowser": "内置浏览器打开",
-  "openInSystemBrowser": "系统浏览器打开",
   "copySuccess": "已复制",
   "copyFailed": "Copy failed",
   "download": "下载",
@@ -39,8 +40,6 @@
   "expandMore": "展开更多",
   "collapse": "收起",
   "viewMoreLines": "查看更多 ({{count}} 行)",
-  "viewMoreLines_one": "查看更多 ({{count}} 行)",
-  "viewMoreLines_other": "查看更多 ({{count}} 行)",
   "success": "成功",
   "error": "错误",
   "saveSuccess": "保存成功",
@@ -65,10 +64,10 @@
   "more": "更多",
   "refresh": "刷新",
   "readOnly": "只读",
-  "tray.showWindow": "显示 AionUi",
+  "tray.showWindow": "显示 CLIENTNAME",
   "tray.newChat": "新建对话",
   "tray.closeToTray": "隐藏到托盘",
-  "tray.about": "关于 AionUi",
+  "tray.about": "关于 CLIENTNAME",
   "tray.restart": "重启应用",
   "tray.quit": "退出",
   "tray.runningTasks": "运行中的任务",
@@ -79,105 +78,49 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "当前系统不支持内置后端",
-      "description": "AionUi 已打开，但本地 AionCore 后端无法在当前 Linux 版本上运行。请升级到受支持的 Linux 发行版后重启 AionUi。",
+      "description": "CLIENTNAME 已打开，但本地 AionCore 后端无法在当前 Linux 版本上运行。请升级到受支持的 Linux 发行版后重启 CLIENTNAME。",
       "requiredVersions": "需要的运行时符号：{{versions}}"
     },
     "incompleteInstallation": {
-      "title": "AionUi 安装不完整",
-      "description": "当前安装缺少必要的本地资源，AionCore 无法启动。请下载并重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionCore。",
+      "title": "CLIENTNAME 安装不完整",
+      "description": "当前安装缺少必要的本地资源，AionCore 无法启动。请下载并重新安装最新版 CLIENTNAME；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionCore。",
       "downloadLatest": "下载最新版",
       "sendDiagnostics": "发送诊断报告",
       "diagnosticsSent": "诊断报告已发送",
       "diagnosticsReportSuccess": "诊断报告已发送",
       "diagnosticsReportFailed": "诊断报告发送失败",
-      "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionUi 组件。"
+      "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 CLIENTNAME；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 CLIENTNAME 组件。"
     },
     "packageArchitectureMismatch": {
-      "title": "AionUi 安装包架构不匹配",
-      "description": "当前 AionUi 安装包是 {{packageArch}}，但这台 Mac 是 {{deviceArch}}。你可能下载了错误的安装包，请重新下载并安装 {{expectedArch}} 版本。"
+      "title": "CLIENTNAME 安装包架构不匹配",
+      "description": "当前 CLIENTNAME 安装包是 {{packageArch}}，但这台 Mac 是 {{deviceArch}}。你可能下载了错误的安装包，请重新下载并安装 {{expectedArch}} 版本。"
     },
     "dataMigration": {
       "title": "本地数据迁移失败",
-      "description": "AionUi 已打开，但 AionCore 在初始化本地数据时停止。重复安装 AionUi 未必能解决此问题。请发送诊断报告或联系支持，以便检查本地数据库迁移状态。",
+      "description": "CLIENTNAME 已打开，但 AionCore 在初始化本地数据时停止。重复安装 CLIENTNAME 未必能解决此问题。请发送诊断报告或联系支持，以便检查本地数据库迁移状态。",
       "sendDiagnostics": "发送诊断报告",
       "diagnosticsSent": "诊断报告已发送",
       "diagnosticsReportSuccess": "诊断报告已发送",
       "diagnosticsReportFailed": "诊断报告发送失败"
     },
-    "databaseNewerThanApp": {
-      "title": "需要更新 AionUi",
-      "description": "本地数据由更高版本的 AionUi 创建，当前版本无法打开。请将 AionUi 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。",
-      "descriptionWithVersion": "本地数据由比当前版本 v{{currentVersion}} 更新的 AionUi 创建，当前版本无法打开。请将 AionUi 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。"
-    },
     "localDataRepair": {
       "title": "本地数据修复失败",
-      "description": "AionUi 已打开，但 AionCore 在准备本地启动数据时停止，例如 assistant 或智能体记录。重新安装 AionUi 可能无法解决此问题。请发送诊断报告或联系支持，以便检查本地数据库。",
+      "description": "CLIENTNAME 已打开，但 AionCore 在修复本地智能体缓存数据时停止。重新安装 CLIENTNAME 可能无法解决此问题。请发送诊断报告或联系支持，以便检查本地数据库。",
       "sendDiagnostics": "发送诊断",
       "diagnosticsSent": "诊断已发送",
       "diagnosticsReportSuccess": "诊断报告已发送",
       "diagnosticsReportFailed": "诊断报告发送失败"
     },
-    "startupDirectory": {
-      "title": "启动目录不可用",
-      "description": "AionUi 已打开，但由于配置的工作目录或日志目录不存在、不可访问或权限受限，AionCore 无法启动。请确认这些目录存在且可写，然后重启 AionUi。",
-      "sendDiagnostics": "发送诊断报告",
-      "diagnosticsSent": "诊断报告已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败"
-    },
     "recoverableDatabaseCorruption": {
       "title": "本地数据已损坏",
-      "description": "检测到本地数据库损坏，AionUi 无法继续启动。确认后将备份旧数据库，并创建新的本地数据库继续启动。历史会话将不再显示，旧数据库会保留为备份文件。",
+      "description": "检测到本地数据库损坏，CLIENTNAME 无法继续启动。确认后将备份旧数据库，并创建新的本地数据库继续启动。历史本地数据暂时不会显示，旧数据库会保留为备份。",
       "confirmRebuild": "备份旧库并重建新库",
       "sendDiagnostics": "发送诊断报告",
       "diagnosticsHint": "发送诊断报告不会修改本地数据库。",
       "diagnosticsSent": "诊断报告已发送",
       "diagnosticsReportSuccess": "诊断报告已发送",
       "diagnosticsReportFailed": "诊断报告发送失败",
-      "rebuildFailed": "备份旧库并重建新库失败",
-      "confirmDialog": {
-        "title": "确认重建数据库？",
-        "content": "此操作会备份当前损坏的数据库并创建一个全新空库。历史会话将不再显示（旧库会保留为备份文件）。确定继续吗？",
-        "okText": "确认重建",
-        "cancelText": "取消"
-      }
-    },
-    "transientConcurrentStartup": {
-      "title": "AionUi 正在启动",
-      "description": "此窗口打开时，另一个 AionUi 启动进程仍在使用本地数据。这是暂时的，您的数据是安全的——无需重新安装。请稍候片刻后重试，或重启 AionUi。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败",
-      "diagnosticsHint": "如果该问题反复出现，您可以发送诊断报告。"
-    },
-    "pendingSlow": {
-      "title": "正在启动",
-      "description": "AionCore 正在启动，请稍候。若长时间无响应，可退出应用后重试。"
-    },
-    "exited": {
-      "title": "启动未完成",
-      "description": "AionCore 未能完成启动并已退出。请重启应用；若反复出现，请上报诊断信息。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
-    },
-    "portReportTimeout": {
-      "title": "启动超时",
-      "description": "AionCore 未在预期时间内完成启动。请重启应用；若反复出现，请发送诊断。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
-    },
-    "startupFailed": {
-      "title": "启动失败",
-      "description": "AionCore 启动失败。请重启应用；若反复出现，请发送诊断。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
+      "rebuildFailed": "备份旧库并重建新库失败"
     }
   },
   "fileAttach.addFiles": "添加文件",
@@ -199,8 +142,5 @@
   "unit": {
     "minute_short": "分",
     "second_short": "秒"
-  },
-  "selectedCount": "已选 {{count}}",
-  "selectedSkills": "已选技能",
-  "aiAssistant": "AI 助手"
+  }
 }

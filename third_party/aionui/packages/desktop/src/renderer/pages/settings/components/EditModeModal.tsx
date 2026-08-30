@@ -4,10 +4,21 @@ import { Form, Input, Message, Select, Tag } from '@arco-design/web-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AionModal from '@/renderer/components/base/AionModal';
+import { LinkCloud } from '@icon-park/react';
 import { ipcBridge } from '@/common';
 import useModeModeList from '@renderer/hooks/agent/useModeModeList';
 import { getProviderLogo } from '@/renderer/utils/model/modelPlatforms';
-import { ProviderLogo } from '@/renderer/components/agent/ThemedLogo';
+
+/**
+ * 供应商 Logo 组件
+ * Provider Logo Component
+ */
+const ProviderLogo: React.FC<{ logo: string | null; name: string; size?: number }> = ({ logo, name, size = 20 }) => {
+  if (logo) {
+    return <img src={logo} alt={name} className='object-contain shrink-0' style={{ width: size, height: size }} />;
+  }
+  return <LinkCloud theme='outline' size={size} className='text-t-secondary flex shrink-0' />;
+};
 
 const EditModeModal = ModalHOC<{ data?: IProvider; onChange(data: IProvider): void }>(
   ({ modalProps, modalCtrl, ...props }) => {
@@ -131,11 +142,16 @@ const EditModeModal = ModalHOC<{ data?: IProvider; onChange(data: IProvider): vo
 
     return (
       <AionModal
-        variant='standard'
         visible={modalProps.visible}
         onCancel={modalCtrl.close}
         header={{ title: t('settings.editModel'), showClose: true }}
-        style={{ minHeight: '400px' }}
+        style={{ minHeight: '400px', maxHeight: '90vh', borderRadius: 16 }}
+        contentStyle={{
+          background: 'var(--dialog-fill-0)',
+          borderRadius: 16,
+          padding: '20px 24px 16px',
+          overflow: 'auto',
+        }}
         onOk={async () => {
           try {
             const values = await form.validate();
@@ -172,15 +188,15 @@ const EditModeModal = ModalHOC<{ data?: IProvider; onChange(data: IProvider): vo
         cancelText={t('common.cancel')}
       >
         {messageContext}
-        <div>
+        <div className='py-20px'>
           <Form form={form} layout='vertical'>
             {/* 模型供应商名称（可编辑，带 Logo）/ Model Provider name (editable, with Logo) */}
             <Form.Item
               label={
-                <span className='inline-flex items-center gap-6px'>
+                <div className='flex items-center gap-6px'>
                   <ProviderLogo logo={providerLogo} name={data?.name || ''} size={16} />
                   <span>{t('settings.modelProvider')}</span>
-                </span>
+                </div>
               }
               field='name'
               required

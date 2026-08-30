@@ -1,11 +1,13 @@
 import { ipcBridge } from '@/common';
 import { resolveLocaleKey } from '@/common/utils';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
-import { reorderAssistantList } from '@/renderer/pages/settings/AssistantSettings/assistantUtils';
-import { selectableAssistants } from '@/renderer/utils/model/assistantSelection';
+import {
+  applyAssistantSortOrders,
+  buildAssistantSortUpdates,
+  reorderAssistantList,
+} from '@/renderer/pages/settings/AssistantSettings/assistantUtils';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAssistantOrder } from './useAssistantOrder';
 
 /**
  * Manages the assistant list: loading from backend, sorting, and tracking the
@@ -18,7 +20,6 @@ export const useAssistantList = () => {
   const [activeAssistantId, setActiveAssistantId] = useState<string | null>(null);
   const localeKey = resolveLocaleKey(i18n.language);
   const previousLocaleKeyRef = useRef(localeKey);
-  const { assistantOrder, setAssistantOrder } = useAssistantOrder();
 
   const loadAssistants = useCallback(async () => {
     try {
@@ -33,20 +34,31 @@ export const useAssistantList = () => {
     }
   }, []);
 
-  const reorderEnabledAssistants = useCallback(
+  const reorderAssistants = useCallback(
     async (activeId: string, overId: string) => {
-      const enabledAssistants = selectableAssistants(assistants, assistantOrder);
-      const reorderedAssistants = reorderAssistantList(enabledAssistants, activeId, overId);
-      if (reorderedAssistants === enabledAssistants) return;
+      const reorderedAssistants = reorderAssistantList(assistants, activeId, overId);
+      if (reorderedAssistants === assistants) {
+        return;
+      }
+
+      const normalizedAssistants = applyAssistantSortOrders(reorderedAssistants);
+      const sortUpdates = buildAssistantSortUpdates(assistants, normalizedAssistants);
+      if (sortUpdates.length === 0) {
+        setAssistants(normalizedAssistants);
+        return;
+      }
+
+      const previousAssistants = assistants;
+      setAssistants(normalizedAssistants);
 
       try {
-        await setAssistantOrder(reorderedAssistants.map((assistant) => assistant.id));
+        await Promise.all(sortUpdates.map((update) => ipcBridge.assistants.setState.invoke(update)));
       } catch (error) {
-        console.error('Failed to reorder enabled assistants:', error);
-        throw error;
+        console.error('Failed to reorder assistants:', error);
+        setAssistants(previousAssistants);
       }
     },
-    [assistantOrder, assistants, setAssistantOrder]
+    [assistants]
   );
 
   useEffect(() => {
@@ -73,9 +85,7 @@ export const useAssistantList = () => {
     setActiveAssistantId,
     activeAssistant,
     loadAssistants,
-    reorderEnabledAssistants,
-    assistantOrder,
-    setAssistantOrder,
+    reorderAssistants,
     localeKey,
   };
 };

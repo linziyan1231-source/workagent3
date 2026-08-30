@@ -9,13 +9,11 @@ import UploadProgressBar from '@/renderer/components/media/UploadProgressBar';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useCompositionInput } from '@/renderer/hooks/chat/useCompositionInput';
 import { Input } from '@arco-design/web-react';
-import type { RefTextAreaType } from '@arco-design/web-react/es/Input';
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import styles from '../index.module.css';
 import GuidWorkspaceFootnote from './GuidWorkspaceFootnote';
 
 type GuidInputCardProps = {
-  focusRequestKey?: string;
   // Input state
   input: string;
   onInputChange: (value: string) => void;
@@ -39,7 +37,6 @@ type GuidInputCardProps = {
 
   // Action row
   actionRow: React.ReactNode;
-  slashCommandMenu?: React.ReactNode;
 
   // Workspace
   workspaceDir: string;
@@ -48,7 +45,6 @@ type GuidInputCardProps = {
 };
 
 const GuidInputCard: React.FC<GuidInputCardProps> = ({
-  focusRequestKey,
   input,
   onInputChange,
   onKeyDown,
@@ -65,7 +61,6 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   files,
   onRemoveFile,
   actionRow,
-  slashCommandMenu,
   workspaceDir,
   onSelectWorkspace,
   onClearWorkspace,
@@ -73,14 +68,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
   const { compositionHandlers, isComposing } = useCompositionInput();
-  const inputRef = useRef<RefTextAreaType | null>(null);
   const textareaAutoSize = isMobile ? { minRows: 2, maxRows: 8 } : { minRows: 2, maxRows: 20 };
-
-  useEffect(() => {
-    if (!focusRequestKey || isMobile) return;
-    inputRef.current?.focus();
-    inputRef.current?.dom.setSelectionRange(input.length, input.length);
-  }, [focusRequestKey, input, isMobile]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (isComposing.current) return;
@@ -95,7 +83,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
 
   return (
     <div
-      className={`${styles.guidInputCardWrap} guid-input-card-shell relative rd-24px flex flex-col ${slashCommandMenu ? 'overflow-visible' : 'overflow-hidden'} transition-all duration-200 ${isFileDragging ? 'b b-solid border-dashed guid-input-card-shell--dragging' : ''}`}
+      className={`${styles.guidInputCardWrap} guid-input-card-shell relative rd-24px flex flex-col overflow-hidden transition-all duration-200 ${isFileDragging ? 'b b-solid border-dashed guid-input-card-shell--dragging' : ''}`}
       style={{
         zIndex: 1,
         transition: 'box-shadow 0.25s ease',
@@ -116,7 +104,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
     >
       {/* inner white card — narrower than outer wrap */}
       <div
-        className={`${styles.guidInputInner} relative p-12px flex flex-col bg-dialog-fill-0`}
+        className={`${styles.guidInputInner} p-12px flex flex-col bg-dialog-fill-0`}
         style={{
           transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
           borderColor: isFileDragging ? 'rgb(var(--primary-3))' : borderColor,
@@ -124,11 +112,10 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
         }}
       >
         <Input.TextArea
-          ref={inputRef}
           autoSize={textareaAutoSize}
           placeholder={placeholder}
           spellCheck={false}
-          className={`text-14px focus:b-none rounded-xl !bg-transparent !b-none !resize-none !py-0 !pe-0 !ps-7px ${styles.lightPlaceholder}`}
+          className={`text-14px focus:b-none rounded-xl !bg-transparent !b-none !resize-none !py-0 !pr-0 !pl-7px ${styles.lightPlaceholder}`}
           value={input}
           onChange={onInputChange}
           onPaste={onPaste}
@@ -148,7 +135,6 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
         )}
         <UploadProgressBar source='sendbox' />
         {actionRow}
-        {slashCommandMenu && <div className='absolute start-0 end-0 top-[calc(100%+4px)] z-70'>{slashCommandMenu}</div>}
       </div>
       <GuidWorkspaceFootnote
         workspaceDir={workspaceDir}

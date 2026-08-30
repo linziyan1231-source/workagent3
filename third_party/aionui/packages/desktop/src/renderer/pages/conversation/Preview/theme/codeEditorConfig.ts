@@ -11,7 +11,6 @@
  */
 type CodeEditorConfig = {
   fontFamily: string;
-  fontWeight: string;
   fontSize: string;
   lineHeight: string;
   tabSize: number;
@@ -20,7 +19,6 @@ type CodeEditorConfig = {
 
 const DEFAULT_CODE_EDITOR_CONFIG: CodeEditorConfig = {
   fontFamily: 'var(--font-mono)',
-  fontWeight: 'var(--font-mono-weight)',
   fontSize: 'var(--code-font-size, 13px)',
   lineHeight: '1.5',
   tabSize: 2,

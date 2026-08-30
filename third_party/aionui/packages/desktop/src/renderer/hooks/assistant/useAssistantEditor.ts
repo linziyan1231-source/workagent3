@@ -9,9 +9,8 @@ import type {
   SkillInfo,
 } from '@/renderer/pages/settings/AssistantSettings/types';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
-import { getSkillImportErrorMessage } from '@/renderer/pages/settings/SkillsSettings/skillImportMessages';
+import { getSkillImportErrorMessage } from '@/renderer/pages/settings/skillImportMessages';
 import { emitter } from '@/renderer/utils/emitter';
-import { assistantOrderAfterToggle, selectableAssistants } from '@/renderer/utils/model/assistantSelection';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { mutate as swrMutate } from 'swr';
@@ -21,9 +20,6 @@ type UseAssistantEditorParams = {
   activeAssistant: AssistantListItem | null;
   setActiveAssistantId: (id: string | null) => void;
   loadAssistants: () => Promise<void>;
-  assistants: AssistantListItem[];
-  assistantOrder: readonly string[];
-  setAssistantOrder: (nextOrder: readonly string[]) => Promise<void>;
   message: ReturnType<typeof Message.useMessage>[0];
 };
 
@@ -70,9 +66,6 @@ export const useAssistantEditor = ({
   activeAssistant,
   setActiveAssistantId,
   loadAssistants,
-  assistants,
-  assistantOrder,
-  setAssistantOrder,
   message,
 }: UseAssistantEditorParams) => {
   const { t } = useTranslation();
@@ -88,10 +81,10 @@ export const useAssistantEditor = ({
   const [editRecommendedPromptsText, setEditRecommendedPromptsText] = useState('');
   const [defaultModelMode, setDefaultModelMode] = useState<AssistantScalarDefaultMode>('auto');
   const [defaultModelValue, setDefaultModelValue] = useState('');
-  const [defaultPermissionMode, setDefaultPermissionMode] = useState<AssistantScalarDefaultMode>('auto');
-  const [defaultPermissionValue, setDefaultPermissionValue] = useState('');
   const [defaultThoughtLevelMode, setDefaultThoughtLevelMode] = useState<AssistantScalarDefaultMode>('auto');
   const [defaultThoughtLevelValue, setDefaultThoughtLevelValue] = useState('');
+  const [defaultPermissionMode, setDefaultPermissionMode] = useState<AssistantScalarDefaultMode>('auto');
+  const [defaultPermissionValue, setDefaultPermissionValue] = useState('');
   const [defaultSkillsMode, setDefaultSkillsMode] = useState<AssistantSkillsDefaultMode>('fixed');
   const [defaultMcpMode, setDefaultMcpMode] = useState<AssistantMcpDefaultMode>('auto');
   const [availableMcpServers, setAvailableMcpServers] = useState<IMcpServer[]>([]);
@@ -116,7 +109,7 @@ export const useAssistantEditor = ({
   );
 
   const refreshAssistantCatalog = useCallback(async () => {
-    await Promise.all([loadAssistants(), swrMutate('assistants.list')]);
+    await Promise.all([loadAssistants(), swrMutate('assistants.list'), swrMutate('assistants')]);
   }, [loadAssistants]);
 
   const refreshAssistantDetailCaches = useCallback(
@@ -194,10 +187,10 @@ export const useAssistantEditor = ({
     setEditRecommendedPromptsText('');
     setDefaultModelMode('auto');
     setDefaultModelValue('');
-    setDefaultPermissionMode('auto');
-    setDefaultPermissionValue('');
     setDefaultThoughtLevelMode('auto');
     setDefaultThoughtLevelValue('');
+    setDefaultPermissionMode('auto');
+    setDefaultPermissionValue('');
     setDefaultSkillsMode('fixed');
     setDefaultMcpMode('auto');
     setSelectedMcpIds([]);
@@ -206,10 +199,10 @@ export const useAssistantEditor = ({
   const resetModelAndPermissionDefaults = useCallback(() => {
     setDefaultModelMode('auto');
     setDefaultModelValue('');
-    setDefaultPermissionMode('auto');
-    setDefaultPermissionValue('');
     setDefaultThoughtLevelMode('auto');
     setDefaultThoughtLevelValue('');
+    setDefaultPermissionMode('auto');
+    setDefaultPermissionValue('');
   }, []);
 
   const setEditAgent = useCallback(
@@ -257,10 +250,10 @@ export const useAssistantEditor = ({
       setEditRecommendedPromptsText(resolveLocalizedRecommendedPrompts(detail, localeKey).join('\n'));
       setDefaultModelMode(detail.defaults.model.mode === 'fixed' ? 'fixed' : 'auto');
       setDefaultModelValue(detail.defaults.model.value || '');
+      setDefaultThoughtLevelMode(detail.defaults.thought_level?.mode === 'fixed' ? 'fixed' : 'auto');
+      setDefaultThoughtLevelValue(detail.defaults.thought_level?.value || '');
       setDefaultPermissionMode(detail.defaults.permission.mode === 'fixed' ? 'fixed' : 'auto');
       setDefaultPermissionValue(detail.defaults.permission.value || '');
-      setDefaultThoughtLevelMode(detail.defaults.thought_level.mode === 'fixed' ? 'fixed' : 'auto');
-      setDefaultThoughtLevelValue(detail.defaults.thought_level.value || '');
       setDefaultSkillsMode(detail.defaults.skills.mode === 'auto' ? 'auto' : 'fixed');
       setDefaultMcpMode(detail.defaults.mcps.mode === 'fixed' ? 'fixed' : 'auto');
       setSelectedMcpIds(detail.defaults.mcps.value ?? []);
@@ -330,10 +323,10 @@ export const useAssistantEditor = ({
       setEditRecommendedPromptsText(resolveLocalizedRecommendedPrompts(detail, localeKey).join('\n'));
       setDefaultModelMode(detail.defaults.model.mode === 'fixed' ? 'fixed' : 'auto');
       setDefaultModelValue(detail.defaults.model.value || '');
+      setDefaultThoughtLevelMode(detail.defaults.thought_level?.mode === 'fixed' ? 'fixed' : 'auto');
+      setDefaultThoughtLevelValue(detail.defaults.thought_level?.value || '');
       setDefaultPermissionMode(detail.defaults.permission.mode === 'fixed' ? 'fixed' : 'auto');
       setDefaultPermissionValue(detail.defaults.permission.value || '');
-      setDefaultThoughtLevelMode(detail.defaults.thought_level.mode === 'fixed' ? 'fixed' : 'auto');
-      setDefaultThoughtLevelValue(detail.defaults.thought_level.value || '');
       setDefaultSkillsMode(detail.defaults.skills.mode === 'auto' ? 'auto' : 'fixed');
       setDefaultMcpMode(detail.defaults.mcps.mode === 'fixed' ? 'fixed' : 'auto');
       setSelectedMcpIds(detail.defaults.mcps.value ?? []);
@@ -396,15 +389,6 @@ export const useAssistantEditor = ({
         return;
       }
 
-      if (defaultThoughtLevelMode === 'fixed' && !defaultThoughtLevelValue.trim()) {
-        message.error(
-          t('settings.assistantDefaultThoughtLevelRequired', {
-            defaultValue: 'Please choose a default thought level when using a fixed value.',
-          })
-        );
-        return;
-      }
-
       if (pendingSkills.length > 0) {
         const skillsToImport = pendingSkills.filter(
           (pending) => !availableSkills.some((available) => available.name === pending.name)
@@ -437,14 +421,14 @@ export const useAssistantEditor = ({
           defaultModelMode === 'fixed'
             ? { mode: 'fixed', value: defaultModelValue.trim() }
             : { mode: defaultModelMode },
-        permission:
-          defaultPermissionMode === 'fixed'
-            ? { mode: 'fixed', value: defaultPermissionValue.trim() }
-            : { mode: defaultPermissionMode },
         thought_level:
           defaultThoughtLevelMode === 'fixed'
             ? { mode: 'fixed', value: defaultThoughtLevelValue.trim() }
             : { mode: defaultThoughtLevelMode },
+        permission:
+          defaultPermissionMode === 'fixed'
+            ? { mode: 'fixed', value: defaultPermissionValue.trim() }
+            : { mode: defaultPermissionMode },
         skills: { mode: defaultSkillsMode, value: selectedSkills },
         mcps: { mode: defaultMcpMode, value: selectedMcpIds },
       };
@@ -480,14 +464,14 @@ export const useAssistantEditor = ({
                 defaultModelMode === 'fixed'
                   ? { mode: 'fixed', value: defaultModelValue.trim() }
                   : { mode: defaultModelMode },
-              permission:
-                defaultPermissionMode === 'fixed'
-                  ? { mode: 'fixed', value: defaultPermissionValue.trim() }
-                  : { mode: defaultPermissionMode },
               thought_level:
                 defaultThoughtLevelMode === 'fixed'
                   ? { mode: 'fixed', value: defaultThoughtLevelValue.trim() }
                   : { mode: defaultThoughtLevelMode },
+              permission:
+                defaultPermissionMode === 'fixed'
+                  ? { mode: 'fixed', value: defaultPermissionValue.trim() }
+                  : { mode: defaultPermissionMode },
             },
           };
         } else if (isGeneratedAssistant(activeAssistant)) {
@@ -572,10 +556,6 @@ export const useAssistantEditor = ({
   };
 
   const handleToggleEnabled = async (assistant: AssistantListItem, enabled: boolean) => {
-    const previousOrder = selectableAssistants(assistants, assistantOrder).map((item) => item.id);
-    const nextOrder = assistantOrderAfterToggle(assistants, assistantOrder, assistant.id, enabled);
-    let orderPersisted = false;
-
     try {
       await swrMutate(
         'assistants.list',
@@ -585,21 +565,12 @@ export const useAssistantEditor = ({
           ),
         { revalidate: false }
       );
-      await setAssistantOrder(nextOrder);
-      orderPersisted = true;
       await ipcBridge.assistants.setState.invoke({ id: assistant.id, enabled });
       await refreshAssistantCatalog();
       await refreshAssistantDetailCaches(assistant.id);
     } catch (error) {
       console.error('Failed to toggle assistant:', error);
-      if (orderPersisted) {
-        try {
-          await setAssistantOrder(previousOrder);
-        } catch (rollbackError) {
-          console.error('Failed to restore assistant order after toggle failure:', rollbackError);
-        }
-      }
-      await swrMutate('assistants.list');
+      await Promise.all([swrMutate('assistants.list'), swrMutate('assistants')]);
       message.error(t('common.failed', { defaultValue: 'Failed' }));
     }
   };
@@ -625,14 +596,14 @@ export const useAssistantEditor = ({
     setDefaultModelMode,
     defaultModelValue,
     setDefaultModelValue,
-    defaultPermissionMode,
-    setDefaultPermissionMode,
-    defaultPermissionValue,
-    setDefaultPermissionValue,
     defaultThoughtLevelMode,
     setDefaultThoughtLevelMode,
     defaultThoughtLevelValue,
     setDefaultThoughtLevelValue,
+    defaultPermissionMode,
+    setDefaultPermissionMode,
+    defaultPermissionValue,
+    setDefaultPermissionValue,
     defaultSkillsMode,
     setDefaultSkillsMode,
     defaultMcpMode,

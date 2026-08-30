@@ -5,7 +5,7 @@
  */
 
 import Anthropic, { type ClientOptions as AnthropicClientOptions_ } from '@anthropic-ai/sdk';
-import { AuthType } from '@/common/types/provider/authType';
+import { AuthType } from '@office-ai/aioncli-core';
 import type { RotatingApiClientOptions } from './RotatingApiClient';
 import { RotatingApiClient } from './RotatingApiClient';
 import {

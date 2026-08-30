@@ -1,24 +1,18 @@
 import type { IProvider } from '@/common/config/storage';
-import {
-  type ModelImageInputChoice,
-  type ModelOpenAiApiModeChoice,
-  supportsOpenAiApiMode,
-  updateModelSettings,
-} from '@/common/utils/modelCapabilities';
 import type { ProtocolDetectionResponse, ProtocolType } from '@/common/utils/protocolDetector';
 import { ipcBridge } from '@/common';
 import { uuid } from '@/common/utils';
 import { isGoogleApisHost } from '@/common/utils/urlValidation';
 import ModalHOC from '@/renderer/utils/ui/ModalHOC';
 import { Form, Input, Message, Select, Switch } from '@arco-design/web-react';
-import { Loading, PreviewOpen, Refresh, Search } from '@icon-park/react';
+import { LinkCloud, Edit, Search, Loading } from '@icon-park/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useModeModeList from '@renderer/hooks/agent/useModeModeList';
 import useProtocolDetection from '@renderer/hooks/system/useProtocolDetection';
 import AionModal from '@/renderer/components/base/AionModal';
+import ApiKeyEditorModal from './ApiKeyEditorModal';
 import {
-  DEFAULT_PLATFORM_VALUE,
   MODEL_PLATFORMS,
   NEW_API_PROTOCOL_OPTIONS,
   detectNewApiProtocol,
@@ -28,7 +22,6 @@ import {
   isNewApiPlatform,
   type PlatformConfig,
 } from '@/renderer/utils/model/modelPlatforms';
-import { ProviderLogo } from '@/renderer/components/agent/ThemedLogo';
 import type { DeepLinkAddProviderDetail } from '@/renderer/hooks/system/useDeepLink';
 
 /**
@@ -150,7 +143,7 @@ const ProtocolDetectionStatus: React.FC<ProtocolDetectionStatusProps> = ({
 
         {/* Multi-key test result */}
         {multiKeyResult && multiKeyResult.total > 1 && (
-          <div className='flex items-center gap-6px text-11px text-t-tertiary ps-22px'>
+          <div className='flex items-center gap-6px text-11px text-t-tertiary pl-22px'>
             <span>
               {multiKeyResult.invalid === 0
                 ? t('settings.multiKeyAllValid', { total: String(multiKeyResult.total) })
@@ -183,6 +176,17 @@ const ProtocolDetectionStatus: React.FC<ProtocolDetectionStatusProps> = ({
 };
 
 /**
+ * 供应商 Logo 组件
+ * Provider Logo Component
+ */
+const ProviderLogo: React.FC<{ logo: string | null; name: string; size?: number }> = ({ logo, name, size = 20 }) => {
+  if (logo) {
+    return <img src={logo} alt={name} className='object-contain shrink-0' style={{ width: size, height: size }} />;
+  }
+  return <LinkCloud theme='outline' size={size} className='text-t-secondary flex shrink-0' />;
+};
+
+/**
  * 平台下拉选项渲染（第一层）
  * Platform dropdown option renderer (first level)
  *
@@ -208,6 +212,7 @@ const AddPlatformModal = ModalHOC<{
   const [message, messageContext] = Message.useMessage();
   const { t } = useTranslation();
   const [form] = Form.useForm();
+  const [api_keyEditorVisible, setApiKeyEditorVisible] = useState(false);
   // 用于追踪上次检测时的输入值，避免重复检测
   // Track last detection input to avoid redundant detection
   const [lastDetectionInput, setLastDetectionInput] = useState<{ base_url: string; api_key: string } | null>(null);
@@ -231,10 +236,7 @@ const AddPlatformModal = ModalHOC<{
 
   // new-api 每模型协议选择状态 / new-api per-model protocol selection state
   const [modelProtocol, setModelProtocol] = useState<string>('openai');
-  const [imageInput, setImageInput] = useState<ModelImageInputChoice>('auto');
-  const [openAiApiMode, setOpenAiApiMode] = useState<ModelOpenAiApiModeChoice>('auto');
   const [isFullUrl, setIsFullUrl] = useState(false);
-  const showOpenAiApiMode = supportsOpenAiApiMode(platform, modelProtocol);
 
   // Auto-detect protocol when model changes (for new-api platforms). The model
   // field is multi-select, so detect from the most recently added model.
@@ -307,8 +309,6 @@ const AddPlatformModal = ModalHOC<{
       protocolDetection.reset();
       setLastDetectionInput(null); // 重置检测记录 / Reset detection record
       setModelProtocol('openai'); // 重置协议选择 / Reset protocol selection
-      setImageInput('auto');
-      setOpenAiApiMode('auto');
       setIsFullUrl(false);
 
       // Pre-fill from deep link data (aionui:// protocol)
@@ -318,7 +318,7 @@ const AddPlatformModal = ModalHOC<{
         if (deepLinkData.base_url) form.setFieldValue('base_url', deepLinkData.base_url);
         if (deepLinkData.api_key) form.setFieldValue('api_key', deepLinkData.api_key);
       } else {
-        form.setFieldValue('platform', DEFAULT_PLATFORM_VALUE);
+        form.setFieldValue('platform', 'gemini');
       }
     }
   }, [modalProps.visible, deepLinkData]);
@@ -385,14 +385,6 @@ const AddPlatformModal = ModalHOC<{
           provider.model_protocols = Object.fromEntries(selectedModels.filter(Boolean).map((m) => [m, modelProtocol]));
         }
 
-        const selectedModels: string[] = Array.isArray(values.model) ? values.model : [values.model];
-        provider.model_settings = updateModelSettings(
-          undefined,
-          selectedModels.filter(Boolean),
-          imageInput,
-          showOpenAiApiMode ? openAiApiMode : 'auto'
-        );
-
         onSubmit(provider);
         modalCtrl.close();
       })
@@ -403,22 +395,27 @@ const AddPlatformModal = ModalHOC<{
 
   return (
     <AionModal
-      variant='standard'
       visible={modalProps.visible}
       onCancel={modalCtrl.close}
       header={{ title: t('settings.addModel'), showClose: true }}
-      style={{ maxWidth: '92vw' }}
+      style={{ maxWidth: '92vw', borderRadius: 16 }}
+      contentStyle={{
+        background: 'var(--dialog-fill-0)',
+        borderRadius: 16,
+        padding: '20px 24px 16px',
+        overflow: 'auto',
+      }}
       onOk={handleSubmit}
       confirmLoading={modalProps.confirmLoading}
       okText={t('common.confirm')}
       cancelText={t('common.cancel')}
     >
       {messageContext}
-      <div>
+      <div className='pt-4px pb-12px'>
         <Form form={form} layout='vertical' className='[&_.arco-form-item]:mb-12px [&_.arco-form-item:last-child]:mb-0'>
           {/* 模型平台选择（第一层）/ Model Platform Selection (first level) */}
           <Form.Item
-            initialValue={DEFAULT_PLATFORM_VALUE}
+            initialValue='gemini'
             label={t('settings.modelPlatform')}
             field={'platform'}
             required
@@ -437,10 +434,6 @@ const AddPlatformModal = ModalHOC<{
                   // model is a multi-select field — reset to an empty array, not
                   // '' (which would surface as a stray empty tag).
                   form.setFieldValue('model', []);
-                  // Prefill the platform's default Base URL so users can see and
-                  // edit it. Custom / New API have no preset — clear the field so
-                  // it doesn't carry over the previously selected platform's URL.
-                  form.setFieldValue('base_url', plat.base_url ?? '');
                 }
               }}
               renderFormat={(option) => {
@@ -458,30 +451,10 @@ const AddPlatformModal = ModalHOC<{
             </Select>
           </Form.Item>
 
-          {/* Base URL - shown for every platform (except Bedrock) so users can
-              see and edit the endpoint. Preset platforms are prefilled with their
-              default URL and offer a reset button to restore it. */}
+          {/* Base URL - 自定义选项、标准 Gemini 和 New API 显示 / Base URL - for Custom, standard Gemini and New API */}
           <Form.Item
-            hidden={isBedrock}
-            label={
-              <span className='inline-flex items-center gap-4px'>
-                {t('settings.apiEndpoint', 'API 请求地址')}
-                {selectedPlatform?.base_url && !isFullUrl && (
-                  <button
-                    type='button'
-                    aria-label={t('settings.baseUrlResetToDefault', 'Reset to default')}
-                    title={t('settings.baseUrlResetToDefault', 'Reset to default')}
-                    className='inline-flex items-center justify-center border-none bg-transparent p-0 cursor-pointer text-t-tertiary hover:text-primary-6'
-                    onClick={() => {
-                      form.setFieldValue('base_url', selectedPlatform.base_url ?? '');
-                      void modelListState.mutate();
-                    }}
-                  >
-                    <Refresh theme='outline' size={14} />
-                  </button>
-                )}
-              </span>
-            }
+            hidden={isBedrock || (!isCustom && !isNewApi && platformValue !== 'gemini')}
+            label={t('settings.apiEndpoint', 'API 请求地址')}
             field={'base_url'}
             required={isCustom || isNewApi}
             rules={[{ required: isCustom || isNewApi }]}
@@ -544,6 +517,14 @@ const AddPlatformModal = ModalHOC<{
               onBlur={() => {
                 void modelListState.mutate();
               }}
+              suffix={
+                <Edit
+                  theme='outline'
+                  size={16}
+                  className='cursor-pointer text-t-secondary hover:text-t-primary flex'
+                  onClick={() => setApiKeyEditorVisible(true)}
+                />
+              }
             />
           </Form.Item>
 
@@ -725,42 +706,31 @@ const AddPlatformModal = ModalHOC<{
               <Select value={modelProtocol} onChange={setModelProtocol} options={NEW_API_PROTOCOL_OPTIONS} />
             </Form.Item>
           )}
-
-          <Form.Item
-            label={
-              <span className='inline-flex items-center gap-5px'>
-                <PreviewOpen theme='outline' size='14' />
-                <span>{t('settings.imageInput')}</span>
-              </span>
-            }
-            extra={t('settings.imageInputTip')}
-          >
-            <Select
-              value={imageInput}
-              onChange={(value) => setImageInput(value as ModelImageInputChoice)}
-              options={[
-                { label: t('settings.imageInputAuto'), value: 'auto' },
-                { label: t('settings.imageInputSupported'), value: 'supported' },
-                { label: t('settings.imageInputUnsupported'), value: 'unsupported' },
-              ]}
-            />
-          </Form.Item>
-
-          {showOpenAiApiMode && (
-            <Form.Item label={t('settings.openAiApiMode')} extra={t('settings.openAiApiModeTip')}>
-              <Select
-                value={openAiApiMode}
-                onChange={(value) => setOpenAiApiMode(value as ModelOpenAiApiModeChoice)}
-                options={[
-                  { label: t('settings.modelSettingAuto'), value: 'auto' },
-                  { label: t('settings.openAiApiModeChatCompletions'), value: 'chat_completions' },
-                  { label: t('settings.openAiApiModeResponses'), value: 'responses' },
-                ]}
-              />
-            </Form.Item>
-          )}
         </Form>
       </div>
+
+      {/* API Key 编辑器弹窗 / API Key Editor Modal */}
+      <ApiKeyEditorModal
+        visible={api_keyEditorVisible}
+        api_keys={api_key || ''}
+        onClose={() => setApiKeyEditorVisible(false)}
+        onSave={(keys) => {
+          form.setFieldValue('api_key', keys);
+          void modelListState.mutate();
+        }}
+        onTestKey={async (key) => {
+          try {
+            const res = await ipcBridge.mode.fetchModelList.invoke({
+              base_url: actualBaseUrl,
+              api_key: key,
+              platform: selectedPlatform?.platform ?? 'custom',
+            });
+            return Array.isArray(res?.models) && res.models.length > 0;
+          } catch {
+            return false;
+          }
+        }}
+      />
     </AionModal>
   );
 });

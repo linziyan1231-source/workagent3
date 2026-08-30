@@ -10,13 +10,9 @@ import React, { createContext, useCallback, useContext } from 'react';
 import type { Theme, ThemeAppearance } from '@/common/theme/types';
 import useTheme from '@renderer/hooks/system/useTheme';
 import { LIGHT_THEME_ID, DARK_THEME_ID } from '@/common/theme/constants';
-import useFontScale from '@renderer/hooks/ui/font/useFontScale';
-import useFontSizes from '@renderer/hooks/ui/font/useFontSizes';
-import useFontFamilies from '@renderer/hooks/ui/font/useFontFamilies';
-import useFontWeights from '@renderer/hooks/ui/font/useFontWeights';
+import useFontScale from '@renderer/hooks/ui/useFontScale';
+import useFontSizes from '@renderer/hooks/ui/useFontSizes';
 import type { FontSizeKey, FontSizes } from '@/common/config/fontSizes';
-import type { FontFamilyKey, FontFamilies } from '@/common/config/fontFamilies';
-import type { FontWeightKey, FontWeights } from '@/common/config/fontWeights';
 
 interface ThemeContextValue {
   // Light/Dark appearance of the active theme (back-compat for existing consumers)
@@ -34,12 +30,6 @@ interface ThemeContextValue {
   // Per-region font sizes (px)
   fontSizes: FontSizes;
   setFontSize: (key: FontSizeKey, px: number) => Promise<void>;
-  // Per-region font families ('' means "no override — use the built-in default stack")
-  fontFamilies: FontFamilies;
-  setFontFamily: (key: FontFamilyKey, family: string) => Promise<void>;
-  // Per-region font weights ('' means "no override — inherit the surrounding weight")
-  fontWeights: FontWeights;
-  setFontWeight: (key: FontWeightKey, weight: string) => Promise<void>;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -48,8 +38,6 @@ export const ThemeProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [activeTheme, selectTheme, activeId] = useTheme();
   const [fontScale, setFontScale] = useFontScale();
   const { fontSizes, setFontSize } = useFontSizes();
-  const { fontFamilies, setFontFamily } = useFontFamilies();
-  const { fontWeights, setFontWeight } = useFontWeights();
   const theme: ThemeAppearance = activeTheme?.appearance ?? 'light';
   const setTheme = useCallback(
     (appearance: ThemeAppearance) => selectTheme(appearance === 'dark' ? DARK_THEME_ID : LIGHT_THEME_ID),
@@ -58,21 +46,7 @@ export const ThemeProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
   return (
     <ThemeContext.Provider
-      value={{
-        theme,
-        setTheme,
-        activeTheme,
-        activeId,
-        selectTheme,
-        fontScale,
-        setFontScale,
-        fontSizes,
-        setFontSize,
-        fontFamilies,
-        setFontFamily,
-        fontWeights,
-        setFontWeight,
-      }}
+      value={{ theme, setTheme, activeTheme, activeId, selectTheme, fontScale, setFontScale, fontSizes, setFontSize }}
     >
       {children}
     </ThemeContext.Provider>

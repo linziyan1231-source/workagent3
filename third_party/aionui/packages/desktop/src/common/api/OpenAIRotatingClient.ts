@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { AuthType } from '@/common/types/provider/authType';
+import { AuthType } from '@office-ai/aioncli-core';
 import type { RotatingApiClientOptions } from './RotatingApiClient';
 import { RotatingApiClient } from './RotatingApiClient';
 
@@ -18,7 +18,7 @@ export class OpenAIRotatingClient extends RotatingApiClient<OpenAI> {
       const cleanedApiKey = api_key.replace(/[\s\r\n\t]/g, '').trim();
       const openaiConfig: any = {
         baseURL: config.baseURL,
-        apiKey: cleanedApiKey,
+        api_key: cleanedApiKey,
         defaultHeaders: config.defaultHeaders,
       };
 

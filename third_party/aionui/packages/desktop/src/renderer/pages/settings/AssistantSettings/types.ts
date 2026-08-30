@@ -54,10 +54,6 @@ export type AvailableBackend = {
   name: string;
   runtimeKey: string;
   isExtension?: boolean;
-  /** Agent icon/avatar (raw value from the backend catalog), for the dropdown. */
-  icon?: string;
-  /** Custom agent id (e.g. `ext:name:adapter`), used to resolve extension logos. */
-  customAgentId?: string;
   modelOptions: AvailableBackendModelOption[];
 };
 
@@ -90,13 +86,13 @@ export type AssistantEditorViewModel = {
       value: string;
       setValue: (value: string) => void;
     };
-    permission: {
+    thoughtLevel: {
       mode: 'auto' | 'fixed';
       setMode: (value: 'auto' | 'fixed') => void;
       value: string;
       setValue: (value: string) => void;
     };
-    thoughtLevel: {
+    permission: {
       mode: 'auto' | 'fixed';
       setMode: (value: 'auto' | 'fixed') => void;
       value: string;

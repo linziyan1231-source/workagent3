@@ -5,9 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
-import type { ChatFileRef } from '@/common/types/chatFile';
 import { buildPdfSrc } from '../../previewUrls';
-import { registerTabReloader } from '../../context/tabReloaderRegistry';
 import { usePreviewToolbarExtras } from '../../context/PreviewToolbarExtrasContext';
 import { Button, Message } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -15,21 +13,8 @@ import { useTranslation } from 'react-i18next';
 
 interface PDFPreviewProps {
   /**
-   * Tab this viewer belongs to. When given, the viewer registers how to reload
-   * itself, because a pdf cannot be refreshed by re-reading content: its stream URL
-   * is derived from the file identity and has no timestamp, so the address never
-   * changes and only the webview itself can fetch fresh bytes.
-   */
-  tabId?: string;
-  /**
-   * ChatFileRef identity — rendered via the backend stream URL (no absolute path
-   * exposed to the renderer). Project ref for explorer files, Local otherwise.
-   * PDF 的 ChatFileRef 身份 —— 通过后端 stream URL 渲染（不向渲染进程暴露绝对路径）
-   */
-  fileRef?: ChatFileRef;
-  /**
-   * PDF file path (absolute path on disk) — retained for "open in system app".
-   * PDF 文件路径（磁盘上的绝对路径），仅用于"用系统应用打开"
+   * PDF file path (absolute path on disk)
+   * PDF 文件路径（磁盘上的绝对路径）
    */
   file_path?: string;
   /**
@@ -43,30 +28,15 @@ interface PDFPreviewProps {
 // Electron webview 元素的类型定义 / Type definition for Electron webview element
 interface ElectronWebView extends HTMLElement {
   src: string;
-  /**
-   * Re-fetch the current address. Needed because the stream URL is derived from the
-   * file's identity and carries no timestamp, so re-assigning `src` after the file
-   * changes is a no-op — the address is identical and the stale document stays.
-   */
-  reload: () => void;
 }
 
-const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, content, hideToolbar = false }) => {
+const PDFPreview: React.FC<PDFPreviewProps> = ({ file_path, content, hideToolbar = false }) => {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const webviewRef = useRef<ElectronWebView>(null);
   const [messageApi, messageContextHolder] = Message.useMessage();
   const toolbarExtrasContext = usePreviewToolbarExtras();
-
-  // Expose "reload this document" to the refresh control. Registered from an effect
-  // and removed on unmount, so a closed tab cannot be reloaded through a stale entry.
-  useEffect(() => {
-    if (!tabId) return;
-    return registerTabReloader(tabId, () => {
-      webviewRef.current?.reload();
-    });
-  }, [tabId]);
   const usePortalToolbar = Boolean(toolbarExtrasContext) && !hideToolbar;
 
   const handleOpenInSystem = useCallback(async () => {
@@ -88,7 +58,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
       setLoading(true);
       setError(null);
 
-      if (!fileRef && !file_path && !content) {
+      if (!file_path && !content) {
         setError(t('preview.pdf.pathMissing'));
         setLoading(false);
         return;
@@ -120,7 +90,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
       setError(`${t('preview.pdf.loadFailed')}: ${err instanceof Error ? err.message : String(err)}`);
       setLoading(false);
     }
-  }, [fileRef, file_path, content, t]);
+  }, [file_path, content, t]);
 
   // 设置工具栏扩展（必须在所有条件返回之前调用）
   // Set toolbar extras (must be called before any conditional returns)
@@ -140,7 +110,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
 
   // 使用 Electron webview 加载本地 PDF 文件
   // Use Electron webview to load local PDF files
-  const pdfSrc = buildPdfSrc(fileRef, content);
+  const pdfSrc = buildPdfSrc(file_path, content);
 
   if (error) {
     return (

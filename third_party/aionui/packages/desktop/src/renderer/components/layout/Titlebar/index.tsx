@@ -14,15 +14,25 @@ import type { WorkspaceStateDetail } from '@renderer/utils/workspace/workspaceEv
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useNavigationHistory } from '@/renderer/hooks/context/NavigationHistoryContext';
 import { useFeedback } from '@/renderer/hooks/context/FeedbackContext';
-import { resolveFeedbackModule } from '@/renderer/services/feedback/resolveFeedbackModule';
+import { useOptionalAuth } from '@/renderer/hooks/context/AuthContext';
 import { isElectronDesktop, isMacOS } from '@/renderer/utils/platform';
-import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
-import MigrationInviteCapsule from './MigrationInviteCapsule';
+import { shouldShowUserCollaboration } from '../Sider/userCollaborationVisibility';
 import './titlebar.css';
+import SharedInviteNotifications from './SharedInviteNotifications';
 
 interface TitlebarProps {
   workspaceAvailable: boolean;
 }
+
+// Map the current route to a feedback module tag (must match FEEDBACK_MODULES in
+// feedbackModules.ts), so the report modal pre-selects the relevant module.
+// Unknown routes (e.g. the home page) return undefined, letting the user pick.
+const resolveFeedbackModule = (pathname: string): string | undefined => {
+  if (pathname.startsWith('/conversation')) return 'conversation-session';
+  if (pathname.startsWith('/team')) return 'agent-team';
+  if (pathname.startsWith('/settings')) return 'system-settings';
+  return undefined;
+};
 
 // Bug-report icon: a speech bubble with a centred "?" mark, reading as "report an
 // issue". Drawn on a 48-unit viewBox with icon-park-like padding and taking the same
@@ -98,13 +108,14 @@ const SidebarIcon: React.FC<{ size?: number; strokeWidth?: number }> = ({ size =
 
 const Titlebar: React.FC<TitlebarProps> = ({ workspaceAvailable }) => {
   const { t } = useTranslation();
-  const appTitle = useMemo(() => 'AionUi', []);
+  const appTitle = t('settings.productName');
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
   const [mobileCenterTitle, setMobileCenterTitle] = useState(appTitle);
   const [mobileCenterOffset, setMobileCenterOffset] = useState(0);
   const layout = useLayoutContext();
   const navigationHistory = useNavigationHistory();
   const { openFeedback } = useFeedback();
+  const auth = useOptionalAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -130,11 +141,13 @@ const Titlebar: React.FC<TitlebarProps> = ({ workspaceAvailable }) => {
   }, []);
 
   const isDesktopRuntime = isElectronDesktop();
+  const showSharedInviteNotifications =
+    !auth?.user?.admin && shouldShowUserCollaboration(auth?.user?.collaboration_enabled, isDesktopRuntime);
   const isMacRuntime = isDesktopRuntime && isMacOS();
   // Windows/Linux 显示自定义窗口按钮；macOS 在标题栏给工作区一个切换入口
   const showWindowControls = isDesktopRuntime && !isMacRuntime;
-  // Keep the workspace entry in the titlebar on every platform.
-  const showWorkspaceButton = workspaceAvailable;
+  // WebUI 和 macOS 桌面都需要在标题栏放工作区开关
+  const showWorkspaceButton = workspaceAvailable && (!isDesktopRuntime || isMacRuntime);
 
   const workspaceTooltip = workspaceCollapsed
     ? t('common.expandMore', { defaultValue: 'Expand workspace' })
@@ -409,7 +422,11 @@ const Titlebar: React.FC<TitlebarProps> = ({ workspaceAvailable }) => {
       </div>
       <div ref={toolbarRef} className='app-titlebar__toolbar'>
         {layout?.isMobile && <div id='app-titlebar-actions-slot' className='app-titlebar__actions-slot' />}
-        {IS_DISCONTINUED_BUILD && <MigrationInviteCapsule />}
+        <SharedInviteNotifications
+          enabled={showSharedInviteNotifications}
+          iconSize={iconSize}
+          mobile={layout?.isMobile}
+        />
         <button
           type='button'
           className={classNames('app-titlebar__button', layout?.isMobile && 'app-titlebar__button--mobile')}

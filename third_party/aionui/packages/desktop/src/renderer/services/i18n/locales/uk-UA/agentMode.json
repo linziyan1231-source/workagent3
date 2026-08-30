@@ -1,10 +1,14 @@
 {
   "plan": "Режим планування",
   "default": "За замовчуванням",
+  "on": "Thinking On",
+  "off": "Thinking Off",
   "acceptEdits": "Приймати правки",
   "autoEdit": "Авторедагування",
   "auto_edit": "Авторедагування",
   "read-only": "Лише читання",
+  "agent": "Агент",
+  "agent-full-access": "Агент (повний доступ)",
   "full-access": "Повний доступ",
   "yolo": "YOLO",
   "yoloNoSandbox": "Повний автопілот (без пісочниці)",
@@ -17,6 +21,5 @@
   "permission": "Дозвіл",
   "switchMode": "Режим дозволів",
   "switchSuccess": "Режим успішно змінено",
-  "switchPendingNextTurn": "Набуде чинності з наступного ходу",
   "switchFailed": "Не вдалося змінити режим"
 }

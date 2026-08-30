@@ -101,13 +101,28 @@ export function fromApiConversation<T>(raw: T): T {
   }
 
   const extra = r.extra;
-  if (extra && typeof extra === 'object' && !('custom_workspace' in extra)) {
-    const workspace = typeof extra.workspace === 'string' ? extra.workspace : '';
+  if (extra && typeof extra === 'object') {
+    const workspace = typeof extra.workspace === 'string' ? extra.workspace.trim() : '';
+    const hasProjectClassification = typeof extra.is_project_workspace === 'boolean';
     const isTemporary = extra.is_temporary_workspace === true;
-    next.extra = {
-      ...extra,
-      custom_workspace: workspace.length > 0 && !isTemporary,
-    };
+
+    // Workspace classification returned by Core is authoritative. Temporary
+    // wins on contradictory data so stale cached `custom_workspace: true`
+    // can never promote an auto-created conversation into the project list.
+    if (isTemporary || hasProjectClassification) {
+      next.extra = {
+        ...extra,
+        custom_workspace: workspace.length > 0 && !isTemporary && extra.is_project_workspace === true,
+      };
+    } else if (!('custom_workspace' in extra)) {
+      // Missing classification is intentionally fail-closed. Explicit legacy
+      // custom_workspace values remain supported, but an arbitrary non-empty
+      // workspace alone is not enough to make a project.
+      next.extra = {
+        ...extra,
+        custom_workspace: false,
+      };
+    }
   }
 
   return next;

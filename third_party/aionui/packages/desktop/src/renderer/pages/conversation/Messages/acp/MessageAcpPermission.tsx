@@ -6,93 +6,160 @@
 
 import type { IMessageAcpPermission } from '@/common/chat/chatLib';
 import { conversation } from '@/common/adapter/ipcBridge';
-import {
-  classifyAcpPermission,
-  normalizePermissionOperationKind,
-  PermissionRequestPanel,
-} from '../components/MessagePermission';
-import React, { useCallback, useMemo } from 'react';
+import { Button, Card, Radio, Typography } from '@arco-design/web-react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-type MessageAcpPermissionProps = {
+const { Text } = Typography;
+
+interface MessageAcpPermissionProps {
   message: IMessageAcpPermission;
+}
+
+const permissionOptionTranslationKeys: Record<string, string> = {
+  allow_once: 'messages.confirmation.allowOnce',
+  allow_permissions_turn: 'messages.confirmation.allowOnce',
+  allow_session: 'messages.confirmation.allowSession',
+  allow_permissions_session: 'messages.confirmation.allowSession',
+  accept_execpolicy_amendment: 'messages.confirmation.allowRememberCommandPattern',
+  reject_once: 'messages.confirmation.decline',
+  reject_permissions: 'messages.confirmation.decline',
+  decline: 'messages.confirmation.decline',
 };
 
 const MessageAcpPermission: React.FC<MessageAcpPermissionProps> = React.memo(({ message }) => {
-  const content = message.content || ({} as IMessageAcpPermission['content']);
-  const { tool_call } = content;
-  const options = Array.isArray(content.options) ? content.options : [];
+  const { options = [], tool_call } = message.content || {};
   const { t } = useTranslation();
-  const toolCallId = tool_call?.tool_call_id;
 
-  const panelOptions = useMemo(
-    () =>
-      options.map((option, index) => {
-        const fallbackId = `option_${index}`;
-        const value = option?.option_id || fallbackId;
-        return {
-          id: `${value}:${index}`,
-          value,
-          label: option?.name || `${t('messages.option')} ${index + 1}`,
-          intent: classifyAcpPermission(option?.kind || ''),
-          testId: `message-acp-permission-option-${value}`,
-        };
-      }),
-    [options, t]
-  );
+  // 基于实际数据生成显示信息
+  const getToolInfo = () => {
+    if (!tool_call) {
+      return {
+        title: t('messages.permissionRequest'),
+        description: t('messages.agentRequestingPermission'),
+        icon: '🔐',
+      };
+    }
 
-  const handleConfirm = useCallback(
-    async (selectedValue: string) => {
-      await conversation.confirmMessage.invoke({
-        confirm_key: selectedValue,
+    const displayTitle = tool_call.title || tool_call.raw_input?.description || t('messages.permissionRequest');
+
+    // 简单的图标映射
+    const kindIcons: Record<string, string> = {
+      edit: '✏️',
+      read: '📖',
+      fetch: '🌐',
+      execute: '⚡',
+    };
+
+    return {
+      title: displayTitle,
+      icon: kindIcons[tool_call.kind || 'execute'] || '⚡',
+    };
+  };
+  const { title, icon } = getToolInfo();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [isResponding, setIsResponding] = useState(false);
+  const [hasResponded, setHasResponded] = useState(false);
+
+  const handleConfirm = async () => {
+    if (hasResponded || !selected) return;
+
+    setIsResponding(true);
+    try {
+      const invokeData = {
+        confirm_key: selected,
         msg_id: message.id,
         conversation_id: message.conversation_id,
-        call_id: toolCallId || message.id,
-      });
-    },
-    [message.conversation_id, message.id, toolCallId]
-  );
+        call_id: tool_call?.tool_call_id || message.id,
+      };
+
+      await conversation.confirmMessage.invoke(invokeData);
+      setHasResponded(true);
+    } catch (error) {
+      // Handle error case - could add error logging here
+      console.error('Error confirming permission:', error);
+    } finally {
+      setIsResponding(false);
+    }
+  };
 
   if (!tool_call) {
     return null;
   }
 
-  const title = tool_call.title || tool_call.raw_input?.description || t('messages.permissionRequest');
-  const description = tool_call.raw_input?.description;
-  // Fallback A (2026-08-04 spec): when raw_input carries no `command`, render the
-  // raw_input itself as readable JSON instead of echoing the title (the old echo
-  // produced cards like「命令: AskUserQuestion」with the actual question text —
-  // the only user-readable content — silently dropped). No per-agent sniffing:
-  // whatever the agent sent, the user can at least read it.
-  const command =
-    typeof tool_call.raw_input?.command === 'string' && tool_call.raw_input.command
-      ? tool_call.raw_input.command
-      : undefined;
-  let rawDump: string | undefined;
-  if (!command && tool_call.raw_input && typeof tool_call.raw_input === 'object') {
-    const rest = Object.fromEntries(Object.entries(tool_call.raw_input).filter(([key]) => key !== 'description'));
-    if (Object.keys(rest).length > 0) {
-      try {
-        rawDump = JSON.stringify(rest, null, 2);
-      } catch {
-        rawDump = undefined;
-      }
-    }
-  }
-  const detail = command ?? rawDump;
-
   return (
-    <PermissionRequestPanel
-      requestKey={`${message.id}:${tool_call.tool_call_id}`}
-      testIdPrefix='message-acp-permission'
-      title={title}
-      description={description && description !== title ? description : undefined}
-      operationKind={normalizePermissionOperationKind(tool_call.kind)}
-      detail={detail}
-      detailLabelKey={command ? undefined : 'messages.requestDetails'}
-      options={panelOptions}
-      onConfirm={handleConfirm}
-    />
+    <Card
+      className='mb-4'
+      bordered={false}
+      style={{ background: 'var(--bg-1)' }}
+      data-testid='message-acp-permission-card'
+    >
+      <div className='space-y-4'>
+        {/* Header with icon and title */}
+        <div className='flex items-center space-x-2'>
+          <span className='text-2xl'>{icon}</span>
+          <Text className='block'>{title}</Text>
+        </div>
+        {(tool_call.raw_input?.command || tool_call.title) && (
+          <div>
+            <Text className='text-xs text-t-secondary mb-1'>{t('messages.command')}</Text>
+            <code className='text-xs bg-1 p-2 rounded block text-t-primary break-all'>
+              {tool_call.raw_input?.command || tool_call.title}
+            </code>
+          </div>
+        )}
+        {!hasResponded && (
+          <>
+            <div className='mt-10px'>{t('messages.chooseAction')}</div>
+            <Radio.Group direction='vertical' size='mini' value={selected} onChange={setSelected}>
+              {options && options.length > 0 ? (
+                options.map((option, index) => {
+                  const optionName = option?.name || `${t('messages.option')} ${index + 1}`;
+                  const option_id = option?.option_id || `option_${index}`;
+                  const translationKey =
+                    option_id === 'allow_always'
+                      ? optionName === "Allow and Don't Ask Again"
+                        ? 'messages.confirmation.allowAlways'
+                        : 'messages.confirmation.allowSession'
+                      : permissionOptionTranslationKeys[option_id];
+                  return (
+                    <div key={option_id} data-testid={`message-acp-permission-option-${option_id}`}>
+                      <Radio value={option_id}>
+                        {translationKey ? t(translationKey, { defaultValue: optionName }) : optionName}
+                      </Radio>
+                    </div>
+                  );
+                })
+              ) : (
+                <Text type='secondary'>{t('messages.noOptionsAvailable')}</Text>
+              )}
+            </Radio.Group>
+            <div className='flex justify-start pl-20px'>
+              <Button
+                type='primary'
+                size='mini'
+                disabled={!selected || isResponding}
+                onClick={handleConfirm}
+                data-testid='message-acp-permission-confirm'
+              >
+                {isResponding ? t('messages.processing') : t('messages.confirm')}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {hasResponded && (
+          <div
+            className='mt-10px p-2 rounded-md border'
+            style={{ backgroundColor: 'var(--color-success-light-1)', borderColor: 'rgb(var(--success-3))' }}
+          >
+            <Text className='text-sm' style={{ color: 'rgb(var(--success-6))' }}>
+              ✓ {t('messages.responseSentSuccessfully')}
+            </Text>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 });
 

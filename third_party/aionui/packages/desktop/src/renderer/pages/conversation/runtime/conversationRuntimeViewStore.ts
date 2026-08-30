@@ -17,10 +17,6 @@ export type ConversationRuntimeView = {
   localSubmitting: boolean;
   hydrated: boolean;
   localStopping: boolean;
-  /** Mirrors the backend runtime's `supports_midturn_delivery` bit. Lets UI
-   * (e.g. the command queue) bypass client-side queuing for backends that can
-   * accept a message while a turn is already running. */
-  supportsMidturnDelivery: boolean;
 };
 
 export type ConversationRuntimeViewLogEvent =
@@ -28,17 +24,13 @@ export type ConversationRuntimeViewLogEvent =
   | 'runtime_hydrate_missing_summary'
   | 'turn_completed_applied'
   | 'turn_completed_missing_runtime'
-  | 'turn_completed_ignored_for_other_turn'
   | 'runtime_release_confirmed'
+  | 'runtime_changed_applied'
   | 'local_send_started'
   | 'local_send_accepted'
   | 'local_send_failed'
-  | 'local_send_busy'
   | 'local_stop_requested'
   | 'local_stop_acknowledged'
-  | 'local_restart_started'
-  | 'local_restart_succeeded'
-  | 'local_restart_failed'
   | 'runtime_view_cleaned';
 
 export type ConversationRuntimeViewLogLevel = 'info' | 'warn';
@@ -53,16 +45,6 @@ type ConversationRuntimeSnapshot = {
   view: ConversationRuntimeView;
   logs: ConversationRuntimeViewLogEntry[];
 };
-
-export type ConversationRuntimeSendFailure =
-  | { kind: 'ordinary'; reason: string }
-  | {
-      kind: 'busy_conflict';
-      reason: string;
-      busyKind: 'active_turn' | 'runtime_unavailable';
-      status?: number;
-      code?: string;
-    };
 
 type ConversationRuntimeViewListener = () => void;
 type ConversationRuntimeMetadata = {
@@ -104,7 +86,6 @@ export const createDefaultConversationRuntimeView = (conversation_id: string): C
   localSubmitting: false,
   hydrated: false,
   localStopping: false,
-  supportsMidturnDelivery: false,
 });
 
 const summarizeView = (view: ConversationRuntimeView): Record<string, unknown> => ({
@@ -153,17 +134,12 @@ const viewFromRuntimeSummary = (
     activeTurnId,
     state: pendingLocalSend && runtime.state === 'idle' ? 'starting' : runtime.state,
     isProcessing: pendingLocalSend || isCancelling || runtime.is_processing,
-    canSendMessage:
-      !pendingLocalSend &&
-      !isCancelling &&
-      (runtime.can_send_message ||
-        (runtime.supports_midturn_delivery === true && runtime.state !== 'waiting_confirmation')),
+    canSendMessage: !pendingLocalSend && !isCancelling && runtime.can_send_message,
     pendingConfirmations: runtime.pending_confirmations,
     hasBackendRuntime: true,
     hydrated: true,
     localSubmitting: pendingLocalSend,
     localStopping,
-    supportsMidturnDelivery: runtime.supports_midturn_delivery === true,
   };
 };
 
@@ -320,29 +296,9 @@ const staleRuntimeSummaryConversationRuntimeView = (
 export const localSendFailedConversationRuntimeView = (
   previous: ConversationRuntimeView | undefined,
   conversation_id: string,
-  failure: ConversationRuntimeSendFailure
+  reason: string
 ): ConversationRuntimeSnapshot => {
   const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
-  if (failure.kind === 'busy_conflict') {
-    const shouldPreserveBusyGate = base.activeTurnId !== null || base.isProcessing || !base.canSendMessage;
-    const view: ConversationRuntimeView = {
-      ...base,
-      state: shouldPreserveBusyGate ? base.state : 'starting',
-      isProcessing: shouldPreserveBusyGate ? base.isProcessing || !base.canSendMessage : true,
-      canSendMessage: false,
-      localSubmitting: false,
-      hydrated: true,
-    };
-    return withLogs(view, [
-      createLog('info', 'local_send_busy', view, {
-        reason: failure.reason,
-        busyKind: failure.busyKind,
-        status: failure.status,
-        code: failure.code,
-      }),
-    ]);
-  }
-
   const view: ConversationRuntimeView = {
     ...base,
     state: 'idle',
@@ -351,7 +307,33 @@ export const localSendFailedConversationRuntimeView = (
     localSubmitting: false,
     hydrated: true,
   };
-  return withLogs(view, [createLog('info', 'local_send_failed', view, { reason: failure.reason })]);
+  return withLogs(view, [createLog('info', 'local_send_failed', view, { reason })]);
+};
+
+export const runtimeChangedConversationRuntimeView = (
+  previous: ConversationRuntimeView | undefined,
+  conversation_id: string,
+  event: {
+    turn_id: string;
+    state: 'starting' | 'running' | 'waiting_confirmation' | 'cancelling' | 'completed';
+    is_processing: boolean;
+    can_send_message: boolean;
+  }
+): ConversationRuntimeSnapshot => {
+  const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
+  const view: ConversationRuntimeView = {
+    ...base,
+    activeTurnId: event.state === 'completed' ? null : event.turn_id,
+    state: event.state,
+    isProcessing: event.is_processing,
+    canSendMessage: event.can_send_message,
+    pendingConfirmations: event.state === 'waiting_confirmation' ? Math.max(1, base.pendingConfirmations) : 0,
+    hasBackendRuntime: true,
+    localSubmitting: false,
+    hydrated: true,
+    localStopping: event.state === 'cancelling',
+  };
+  return withLogs(view, [createLog('info', 'runtime_changed_applied', view, { turn_id: event.turn_id })]);
 };
 
 export const localStopRequestedConversationRuntimeView = (
@@ -378,54 +360,6 @@ export const localStopAcknowledgedConversationRuntimeView = (
   const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
   const view = viewFromRuntimeSummary(base, runtime, metadata, { preservePendingLocalSend: false });
   return withLogs(view, [createLog('info', 'local_stop_acknowledged', view, { turn_id })]);
-};
-
-export const localRestartStartedConversationRuntimeView = (
-  previous: ConversationRuntimeView | undefined,
-  conversation_id: string
-): ConversationRuntimeSnapshot => {
-  const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
-  const view: ConversationRuntimeView = {
-    ...base,
-    state: 'restarting',
-    isProcessing: true,
-    canSendMessage: false,
-    localSubmitting: false,
-    localStopping: false,
-    hydrated: true,
-  };
-  return withLogs(view, [createLog('info', 'local_restart_started', view)]);
-};
-
-export const localRestartSucceededConversationRuntimeView = (
-  previous: ConversationRuntimeView | undefined,
-  conversation_id: string,
-  runtime: TConversationRuntimeSummary
-): ConversationRuntimeSnapshot => {
-  const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
-  const view = viewFromRuntimeSummary(base, runtime, createRuntimeMetadata(), { preservePendingLocalSend: false });
-  return withLogs(view, [createLog('info', 'local_restart_succeeded', view)]);
-};
-
-export const localRestartFailedConversationRuntimeView = (
-  previous: ConversationRuntimeView | undefined,
-  conversation_id: string,
-  runtime: TConversationRuntimeSummary | null,
-  reason: string
-): ConversationRuntimeSnapshot => {
-  const base = previous ?? createDefaultConversationRuntimeView(conversation_id);
-  const view = runtime
-    ? viewFromRuntimeSummary(base, runtime, createRuntimeMetadata(), { preservePendingLocalSend: false })
-    : {
-        ...base,
-        state: 'idle' as const,
-        isProcessing: false,
-        canSendMessage: true,
-        localSubmitting: false,
-        localStopping: false,
-        hydrated: true,
-      };
-  return withLogs(view, [createLog('warn', 'local_restart_failed', view, { reason })]);
 };
 
 export const resetLocalGateConversationRuntimeView = (
@@ -510,26 +444,26 @@ export const hydrateFailed = (conversation_id: string, reason: string): Conversa
     hydrateFailedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, reason)
   );
 
+export const reconcileSucceeded = (
+  conversation_id: string,
+  runtime: TConversationRuntimeSummary | null
+): ConversationRuntimeViewLogEntry[] => {
+  const metadata = getRuntimeMetadata(conversation_id);
+  metadata.pendingLocalSendSeq = null;
+  metadata.pendingStopTurnId = null;
+  return setConversationRuntimeSnapshot(
+    conversation_id,
+    hydrateSucceededConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, runtime, metadata, {
+      preservePendingLocalSend: false,
+    })
+  );
+};
+
 export const turnCompleted = (
   conversation_id: string,
   turn_id: string,
   runtime: TConversationRuntimeSummary | null
 ): ConversationRuntimeViewLogEntry[] => {
-  const current = runtimeViews.get(conversation_id);
-  // A completion for a turn that is NOT the one currently running must not
-  // touch the view: codex keeps streaming after ending its prompt turn (unified
-  // exec leaves the command running in a background PTY), so the trailing
-  // CLI-initiated turn's completion can land AFTER the user's next turn has
-  // already started — clearing that new turn's pending-send gate and resetting
-  // its state from a stale summary.
-  if (current?.activeTurnId && turn_id && current.activeTurnId !== turn_id) {
-    return [
-      createLog('warn', 'turn_completed_ignored_for_other_turn', current, {
-        turn_id,
-        active_turn_id: current.activeTurnId,
-      }),
-    ];
-  }
   const metadata = getRuntimeMetadata(conversation_id);
   metadata.pendingLocalSendSeq = null;
   if (metadata.pendingStopTurnId === turn_id) {
@@ -600,17 +534,28 @@ export const localSendAccepted = (
   );
 };
 
-export const localSendFailed = (
-  conversation_id: string,
-  failure: ConversationRuntimeSendFailure
-): ConversationRuntimeViewLogEntry[] => {
+export const localSendFailed = (conversation_id: string, reason: string): ConversationRuntimeViewLogEntry[] => {
   const metadata = getRuntimeMetadata(conversation_id);
   metadata.pendingLocalSendSeq = null;
   return setConversationRuntimeSnapshot(
     conversation_id,
-    localSendFailedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, failure)
+    localSendFailedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, reason)
   );
 };
+
+export const runtimeChanged = (
+  conversation_id: string,
+  event: {
+    turn_id: string;
+    state: 'starting' | 'running' | 'waiting_confirmation' | 'cancelling' | 'completed';
+    is_processing: boolean;
+    can_send_message: boolean;
+  }
+): ConversationRuntimeViewLogEntry[] =>
+  setConversationRuntimeSnapshot(
+    conversation_id,
+    runtimeChangedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, event)
+  );
 
 export const localStopRequested = (conversation_id: string, turn_id: string): ConversationRuntimeViewLogEntry[] => {
   const metadata = getRuntimeMetadata(conversation_id);
@@ -651,31 +596,6 @@ export const localStopAcknowledged = (
         )
   );
 };
-
-export const localRestartStarted = (conversation_id: string): ConversationRuntimeViewLogEntry[] =>
-  setConversationRuntimeSnapshot(
-    conversation_id,
-    localRestartStartedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id)
-  );
-
-export const localRestartSucceeded = (
-  conversation_id: string,
-  runtime: TConversationRuntimeSummary
-): ConversationRuntimeViewLogEntry[] =>
-  setConversationRuntimeSnapshot(
-    conversation_id,
-    localRestartSucceededConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, runtime)
-  );
-
-export const localRestartFailed = (
-  conversation_id: string,
-  runtime: TConversationRuntimeSummary | null,
-  reason: string
-): ConversationRuntimeViewLogEntry[] =>
-  setConversationRuntimeSnapshot(
-    conversation_id,
-    localRestartFailedConversationRuntimeView(runtimeViews.get(conversation_id), conversation_id, runtime, reason)
-  );
 
 export const resetLocalGate = (conversation_id: string, reason: string): ConversationRuntimeViewLogEntry[] =>
   setConversationRuntimeSnapshot(

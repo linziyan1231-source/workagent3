@@ -6,7 +6,6 @@
 
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { getWorkspacePathFromErrorDetails, normalizeWorkspacePathErrorCode } from '../../utils/conversationCreateError';
-import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildRawErrorSummary } from './errorDiagnostics';
 import type { AgentStreamErrorInfo } from '@/common/chat/chatLib';
 
@@ -23,6 +22,12 @@ const TEAM_ASSISTANT_ERROR_CODES = new Set([
   'TEAM_ASSISTANT_NOT_FOUND',
   'TEAM_ASSISTANT_FIELD_UNSUPPORTED',
 ]);
+
+const isConversationBusyError = (error: unknown): boolean => {
+  if (!isBackendHttpError(error)) return false;
+  if (error.status !== 409 || error.code !== 'CONFLICT') return false;
+  return error.backendMessage.toLowerCase().includes('already processing');
+};
 
 const isAgentDisconnectedError = (error: unknown): boolean => {
   if (!isBackendHttpError(error)) return false;
@@ -92,8 +97,7 @@ export const buildSendFailureError = (error: unknown, message: string): AgentStr
     };
   }
 
-  const busyError = classifyConversationBusyError(error);
-  if (busyError) {
+  if (isConversationBusyError(error)) {
     return {
       message,
       code: 'AIONUI_CONVERSATION_BUSY',
@@ -101,7 +105,7 @@ export const buildSendFailureError = (error: unknown, message: string): AgentStr
       detail: message,
       retryable: false,
       feedback_recommended: false,
-      ...(busyError.kind === 'active_turn' ? { resolution: { kind: 'wait_for_current_response' as const } } : {}),
+      resolution: { kind: 'wait_for_current_response' },
     };
   }
 

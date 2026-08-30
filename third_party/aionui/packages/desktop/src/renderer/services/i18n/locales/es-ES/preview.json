@@ -1,15 +1,27 @@
 {
+  "historyVersions": "Versiones del historial",
+  "currentFile": "Archivo actual",
   "loading": "Cargando...",
+  "loadHistoryFailed": "Error al cargar el historial",
+  "noHistory": "Sin versiones en el historial",
+  "snapshotSaved": "Instantánea guardada",
+  "snapshotSaveFailed": "Error al guardar la instantánea",
+  "historyLoaded": "Versión del historial cargada",
+  "historyLoadFailed": "Error al cargar la versión del historial",
+  "tooFrequent": "Demasiado frecuente, intenta más tarde",
+  "saveSnapshot": "Guardar instantánea actual",
+  "snapshotNotSupported": "El contenido actual no admite instantáneas",
+  "history": "Historial",
+  "historyNotSupported": "El contenido actual no admite historial",
   "downloadFile": "Descargar archivo",
   "closePreview": "Cerrar vista previa",
   "collapsePanel": "Contraer panel",
-  "maximizePanel": "Maximizar",
-  "restorePanel": "Restaurar",
   "source": "Fuente",
   "code": "Código",
   "preview": "Vista previa",
   "editor": "Editor",
   "previewEffect": "Vista previa",
+  "snapshot": "Instantánea",
   "downloadMarkdown": "Descargar archivo Markdown",
   "downloadCode": "Descargar archivo {{language}}",
   "downloadDiff": "Descargar archivo Diff",
@@ -24,10 +36,6 @@
   "continueEdit": "Continuar editando",
   "closeTabTitle": "Cerrar pestaña",
   "closeTabMessage": "El contenido actual no se ha guardado. ¿Deseas guardarlo antes de cerrar?",
-  "closeTabsTitle": "Cerrar pestañas",
-  "closeTabsMessage": "{{count}} pestañas tienen cambios sin guardar. ¿Guardar antes de cerrar?",
-  "closeTabsMessage_one": "{{count}} pestaña tiene cambios sin guardar. ¿Guardar antes de cerrar?",
-  "closeTabsMessage_other": "{{count}} pestañas tienen cambios sin guardar. ¿Guardar antes de cerrar?",
   "saveAndClose": "Guardar y cerrar",
   "closeWithoutSave": "No guardar",
   "pptTitle": "Presentación de PowerPoint",
@@ -39,16 +47,10 @@
   "openInSystemApp": "Abrir en aplicación del sistema",
   "openInSystemSuccess": "Abierto en la aplicación predeterminada del sistema",
   "openInSystemFailed": "Error al abrir con la aplicación del sistema",
-  "close": "Cerrar",
   "closeLeft": "Cerrar izquierda",
   "closeRight": "Cerrar derecha",
   "closeOthers": "Cerrar otros",
   "closeAll": "Cerrar todo",
-  "closeUnmodified": "Cerrar sin modificar",
-  "copyPath": "Copiar ruta",
-  "copyRelativePath": "Copiar ruta relativa",
-  "openLocation": "Mostrar en carpeta",
-  "openLocationFailed": "Error al abrir la carpeta contenedora",
   "readOnlyLabel": "Vista previa de solo lectura",
   "pathLabel": "Ruta",
   "missingFile": {
@@ -58,34 +60,30 @@
   "noTabs": "Sin pestañas abiertas",
   "openInPanelTooltip": "Ver en panel de vista previa",
   "mermaidTitle": "Diagrama Mermaid",
-  "wavedromTitle": "Diagrama WaveDrom",
-  "oversized": {
-    "title": "El archivo es demasiado grande para previsualizarlo",
-    "detail": "El tamaño del archivo {{size}} supera el límite de {{threshold}}. Ábrelo en un editor del sistema.",
-    "downloadUnavailable": "Este archivo es demasiado grande para descargarlo aquí. Usa “Abrir en el sistema”."
-  },
-  "unsupported": {
-    "title": "La vista previa no admite este formato",
-    "detail": "Los archivos {{format}} no se pueden previsualizar aquí. Ábrelos en una aplicación del sistema.",
-    "downloadUnavailable": "Este archivo no se puede descargar aquí. Usa “Abrir en el sistema”."
-  },
+  "largeTextTruncatedHint": "Modo de vista previa de archivo grande: mostrando los primeros {{count}} caracteres por rendimiento.",
+  "truncatedBanner": "El contenido de la vista previa fue truncado. Haz clic en descargar para ver el archivo completo.",
   "aiWriting": "La IA está escribiendo...",
   "errors": {
     "missingFilePath": "Falta la ruta del archivo",
     "openWithoutPath": "No se puede abrir: no se proporcionó la ruta del archivo",
-    "conversionFailed": "Error de conversión"
+    "conversionFailed": "Error de conversión",
+    "emptySnapshot": "El contenido de la instantánea está vacío"
   },
   "office": {
     "installLinkText": "Abrir guía de instalación de officecli",
     "errors": {
       "officecliNotFound": "officecli no está instalado.",
-      "installFailed": "Error al instalar officecli automáticamente. Revisa los registros del backend y reintenta.",
+      "officecliIncompatible": "El officecli instalado no es compatible. Sigue la guía pública, comprueba la versión y vuelve a intentarlo.",
       "portTimeout": "El servicio de vista previa inició pero no estuvo listo a tiempo. Reintenta.",
       "startFailed": "Error al iniciar el servicio de vista previa de Office.",
-      "outsideSandbox": "Este archivo está fuera del sandbox del proyecto actual."
+      "outsideSandbox": "Este archivo está fuera del sandbox del proyecto actual.",
+      "fileTooLarge": "El tamaño del archivo supera el límite seguro de vista previa web. Descárgalo o ábrelo en Office local.",
+      "resourceLimit": "La vista previa web de este archivo superaría el límite seguro de recursos. Descárgalo o ábrelo en Office local.",
+      "unsafeArchive": "La estructura del archivo de Office es insegura o no válida y no puede previsualizarse en la web. Descárgalo e intenta abrirlo en Office local.",
+      "busy": "Otro archivo de Office se está previsualizando o convirtiendo. Cierra la vista previa actual y reintenta."
     },
     "serverInstall": {
-      "hint": "AionUi se está ejecutando en un servidor. Instala el componente de vista previa en ese servidor y reintenta:",
+      "hint": "CLIENTNAME se está ejecutando en un servidor. Instala el componente de vista previa en ese servidor y reintenta:",
       "icuNote": "Si sigue sin iniciar, instala la biblioteca ICU en el servidor (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -98,7 +96,7 @@
       "loading": "Cargando documento Word...",
       "installing": "Instalando officecli...",
       "startFailed": "Error al iniciar la vista previa de Word",
-      "installHint": "Requiere officecli. Se instalará automáticamente."
+      "installHint": "Instala OfficeCLI desde la página oficial de versiones de iOfficeAI/OfficeCLI"
     }
   },
   "excel": {
@@ -115,7 +113,7 @@
       "loading": "Cargando archivo Excel...",
       "installing": "Instalando officecli...",
       "startFailed": "Error al iniciar la vista previa de Excel",
-      "installHint": "Requiere officecli. Se instalará automáticamente."
+      "installHint": "Instala OfficeCLI desde la página oficial de versiones de iOfficeAI/OfficeCLI"
     }
   },
   "pdf": {
@@ -145,36 +143,5 @@
     "installing": "Instalando componente de vista previa...",
     "startFailed": "Error al iniciar la vista previa de PPT",
     "installHint": "Instala OfficeCLI desde la página oficial de versiones de iOfficeAI/OfficeCLI"
-  },
-  "browser": {
-    "newTab": "Nueva pestaña",
-    "addressPlaceholder": "Escribe una URL o busca",
-    "agentActiveTooltip": "El agente está operando esta pestaña",
-    "tabLimitReached": "Se alcanzó el límite de pestañas ({{count}}). Se reutilizó la pestaña más antigua.",
-    "agentFirstUseTitle": "El agente está usando el navegador integrado",
-    "agentFirstUseContent": "Puede abrir páginas, hacer clic y leer contenido en este panel. Tu sesión se conserva.",
-    "agentFirstUseAction": "Abrir ajustes"
-  },
-  "saveConflict": "No se pudo guardar: este archivo cambió en el disco después de que lo abrieras. Vuelve a cargarlo para ver los otros cambios; tus ediciones siguen aquí, sin guardar.",
-  "persistQuotaExceeded": "El almacenamiento local está lleno, así que ya no se pueden recordar las pestañas abiertas de este proyecto. Cierra algunas pestañas o borra los datos del sitio.",
-  "save": {
-    "tooltip": "Guardar cambios (Ctrl/Cmd+S)",
-    "clean": "No hay cambios sin guardar"
-  },
-  "refresh": {
-    "label": "Actualizar",
-    "tooltip": "Volver a cargar desde el disco",
-    "hasUpdate": "Este archivo cambió en el disco: haz clic para recargarlo",
-    "noSignalSource": "Este archivo no está en el proyecto, así que no se anunciarán los cambios",
-    "unavailable": "No se puede localizar este archivo",
-    "failed": "No se pudo recargar este archivo",
-    "confirmTitle": "¿Recargar y perder los cambios sin guardar?",
-    "confirmMessage": "Esta pestaña tiene cambios sin guardar. Recargar los reemplaza por el contenido del disco.",
-    "discardAndRefresh": "Descartar cambios y actualizar",
-    "officeNotWired": "Actualizar documentos de Office todavía no está disponible: cierra y vuelve a abrir el archivo para ver los cambios."
-  },
-  "zoomIn": "Acercar",
-  "zoomOut": "Alejar",
-  "zoomReset": "Restablecer vista",
-  "diagramZoomHint": "Desplazarse para ampliar • Arrastrar para mover • ESC para cerrar"
+  }
 }

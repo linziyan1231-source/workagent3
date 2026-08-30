@@ -6,25 +6,17 @@
 
 import { ipcBridge } from '@/common';
 import { parseError } from '@/common/utils';
-import {
-  formatManagedAgentDiagnosticMessage,
-  managedAgentSearchText,
-  type ManagedAgent,
-} from '@/renderer/utils/model/agentTypes';
+import { formatManagedAgentDiagnosticMessage, type ManagedAgent } from '@/renderer/utils/model/agentTypes';
 import AionModal from '@/renderer/components/base/AionModal';
-import { AionSearchInput } from '@/renderer/components/base';
-import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useManagedAgents } from '@/renderer/hooks/agent/useManagedAgents';
-import { openExternalUrl } from '@/renderer/utils/platform';
-import { Button, Message, Typography } from '@arco-design/web-react';
+import { Message, Radio, Typography } from '@arco-design/web-react';
 import TalkToButlerButton from '@/renderer/components/base/TalkToButlerButton';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AgentCard from './AgentCard';
 import { isDeprecatedRuntimeAgentType } from '@/renderer/utils/model/agentTypeSupportPolicy';
 import InlineAgentEditor, { type CustomAgentDraft } from './InlineAgentEditor';
 import { getBoundAssistants, useAssistantsForAgents } from './BoundAssistants';
-import SettingsPageHeader from '../components/SettingsPageHeader';
 import { useNavigate } from 'react-router-dom';
 import {
   filterAgentsByAvailability,
@@ -32,16 +24,11 @@ import {
   type AgentAvailabilityFilter,
 } from './agentFilters';
 
-const LOCAL_AGENT_SETUP_GUIDE_URL = 'https://github.com/iOfficeAI/AionUi/wiki/ACP-Setup';
-
 const LocalAgents: React.FC = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
-  const layout = useLayoutContext();
-  const isMobile = layout?.isMobile ?? false;
   const [testingAgentId, setTestingAgentId] = useState<string | null>(null);
   const [agentFilter, setAgentFilter] = useState<AgentAvailabilityFilter>('all');
-  const [searchQuery, setSearchQuery] = useState('');
   const { assistants } = useAssistantsForAgents();
 
   // Management view: includes user-disabled custom agents so they stay
@@ -114,39 +101,16 @@ const LocalAgents: React.FC = () => {
     [refreshCatalog]
   );
 
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const matchesAgentSearch = useCallback(
-    (agent: ManagedAgent) => {
-      if (!normalizedSearchQuery) return true;
-      return managedAgentSearchText(agent, i18n.language).includes(normalizedSearchQuery);
-    },
-    [i18n.language, normalizedSearchQuery]
-  );
-
-  const sortedOfficialAgents = useMemo(
-    () =>
-      officialAgents.toSorted((left, right) => {
-        const leftIsAionrs = left.agent_type === 'aionrs' || left.backend === 'aionrs';
-        const rightIsAionrs = right.agent_type === 'aionrs' || right.backend === 'aionrs';
-        if (leftIsAionrs !== rightIsAionrs) {
-          return leftIsAionrs ? -1 : 1;
-        }
-        // Strategic partner: pin Kimi right after the builtin aionrs agent.
-        const leftIsKimi = left.backend === 'kimi';
-        const rightIsKimi = right.backend === 'kimi';
-        if (leftIsKimi !== rightIsKimi) {
-          return leftIsKimi ? -1 : 1;
-        }
-        return left.name.localeCompare(right.name);
-      }),
-    [officialAgents]
-  );
+  const sortedOfficialAgents = [...officialAgents].toSorted((left, right) => {
+    const leftIsAionrs = left.agent_type === 'aionrs' || left.backend === 'aionrs';
+    const rightIsAionrs = right.agent_type === 'aionrs' || right.backend === 'aionrs';
+    if (leftIsAionrs !== rightIsAionrs) {
+      return leftIsAionrs ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
   const officialFilterStats = getAgentAvailabilityFilterStats(sortedOfficialAgents);
-  const visibleOfficialAgents = filterAgentsByAvailability(
-    sortedOfficialAgents.filter(matchesAgentSearch),
-    agentFilter
-  );
-  const visibleCustomAgents = customAgents.filter(matchesAgentSearch);
+  const visibleOfficialAgents = filterAgentsByAvailability(sortedOfficialAgents, agentFilter);
 
   const openCustomAgentEditor = useCallback(() => {
     setEditingAgent(null);
@@ -201,75 +165,47 @@ const LocalAgents: React.FC = () => {
   );
 
   return (
-    <div data-testid='agent-management-page' className='flex flex-col gap-16px'>
-      <SettingsPageHeader
-        data-testid='agent-management-header'
-        title={t('settings.agents', { defaultValue: 'Agents' })}
-        description={
-          <>
-            <span>{t('settings.agentManagement.localAgentsDescription')} </span>
-            <Button
-              type='text'
-              size='mini'
-              className='!h-auto !p-0 !align-baseline !text-13px !font-normal !text-primary-6 hover:!text-primary-7 hover:!underline underline-offset-2'
-              onClick={() => {
-                void openExternalUrl(LOCAL_AGENT_SETUP_GUIDE_URL).catch(console.error);
-              }}
-            >
-              {t('settings.agentManagement.localAgentsSetupLink')}
-            </Button>
-          </>
-        }
-        actions={
-          <>
-            {!isMobile && (
-              <AionSearchInput
-                className='shrink-0 w-[200px] hidden md:flex'
-                data-testid='input-search-agents'
-                placeholder={t('settings.agentManagement.searchPlaceholder', { defaultValue: 'Search agents...' })}
-                value={searchQuery}
-                onChange={setSearchQuery}
-              />
-            )}
-            <TalkToButlerButton
-              label={t('settings.agentManagement.addCustomAgent', { defaultValue: 'Add custom Agent' })}
-              chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
-              onManual={openCustomAgentEditor}
-              manualLabel={t('settings.talkToButler.addManually', { defaultValue: 'Add manually' })}
-              prompt={t('settings.talkToButler.prompt.addCustomAgent', {
-                defaultValue: 'Help me add a custom Agent.',
-              })}
-              data-testid='btn-add-custom-agent'
-            />
-          </>
-        }
-        tabs={[
-          {
-            key: 'all',
-            label: t('settings.agentManagement.filterAll', { defaultValue: 'All' }),
-            count: officialFilterStats.all,
-          },
-          {
-            key: 'available',
-            label: t('settings.agentManagement.filterAvailable', { defaultValue: 'Available' }),
-            count: officialFilterStats.available,
-          },
-          {
-            key: 'unavailable',
-            label: t('settings.agentManagement.filterUnavailable', { defaultValue: 'Unavailable' }),
-            count: officialFilterStats.unavailable,
-          },
-        ]}
-        activeTab={agentFilter}
-        onTabChange={(key) => setAgentFilter(key as AgentAvailabilityFilter)}
-      />
-
+    <div data-testid='agent-management-page' className='flex flex-col gap-8px py-16px'>
+      {/* Page title header, mirroring the assistant settings page. */}
+      <div className='px-16px'>
+        <h2 className='m-0 text-16px font-600 leading-[1.2] text-t-primary'>
+          {t('settings.agents', { defaultValue: 'Agents' })}
+        </h2>
+        <p className='mt-4px text-12px text-t-tertiary'>{t('settings.agentManagement.localAgentsDescription')}</p>
+      </div>
       {isRefreshing ? (
-        <div className='text-11px text-t-tertiary'>{t('settings.agentManagement.refreshingStatuses')}</div>
+        <div className='px-16px text-11px text-t-tertiary'>{t('settings.agentManagement.refreshingStatuses')}</div>
       ) : null}
 
-      {/* Detected Agents section */}
-      <div data-testid='agent-management-official-section'>
+      {/* Detected Agents section — row list, mirroring the assistant list style */}
+      <div data-testid='agent-management-official-section' className='px-16px mt-8px'>
+        <Radio.Group
+          type='button'
+          size='small'
+          value={agentFilter}
+          onChange={(value) => setAgentFilter(value as AgentAvailabilityFilter)}
+          className='mb-8px'
+          data-testid='agent-availability-filter'
+        >
+          <Radio value='all'>
+            {t('settings.agentManagement.filterAll', {
+              defaultValue: 'All ({{count}})',
+              count: officialFilterStats.all,
+            })}
+          </Radio>
+          <Radio value='available'>
+            {t('settings.agentManagement.filterAvailable', {
+              defaultValue: 'Available ({{count}})',
+              count: officialFilterStats.available,
+            })}
+          </Radio>
+          <Radio value='unavailable'>
+            {t('settings.agentManagement.filterUnavailable', {
+              defaultValue: 'Unavailable ({{count}})',
+              count: officialFilterStats.unavailable,
+            })}
+          </Radio>
+        </Radio.Group>
         <div className='flex flex-col gap-8px rounded-12px border border-border-2 bg-2 p-8px md:rounded-16px md:p-10px'>
           {visibleOfficialAgents.map((agent) => (
             <AgentCard
@@ -284,22 +220,34 @@ const LocalAgents: React.FC = () => {
           ))}
           {visibleOfficialAgents.length === 0 && (
             <Typography.Text type='secondary' className='block py-16px text-center text-12px'>
-              {normalizedSearchQuery
-                ? t('settings.agentManagement.noSearchResults', { defaultValue: 'No matching agents.' })
-                : t('settings.agentManagement.localAgentsEmpty')}
+              {t('settings.agentManagement.localAgentsEmpty')}
             </Typography.Text>
           )}
         </div>
       </div>
 
-      {/* Custom Agents section */}
-      <div data-testid='agent-management-custom-header' className='flex flex-col gap-2px'>
-        <Typography.Text className='text-13px font-medium text-t-secondary block'>
-          {t('settings.agentManagement.customAgents', { defaultValue: 'Custom Agents' })}
-        </Typography.Text>
-        <Typography.Text className='block text-12px text-t-tertiary'>
-          {t('settings.agentManagement.customEmptyDescription')}
-        </Typography.Text>
+      {/* Custom Agents section — header carries the "add custom agent" action */}
+      <div
+        data-testid='agent-management-custom-header'
+        className='px-16px mt-16px flex items-start justify-between gap-12px'
+      >
+        <div className='min-w-0 flex flex-col gap-2px'>
+          <Typography.Text className='text-12px font-medium text-t-secondary block'>
+            {t('settings.agentManagement.customAgents', { defaultValue: 'Custom Agents' })}
+          </Typography.Text>
+          <Typography.Text className='block text-11px text-t-tertiary'>
+            {t('settings.agentManagement.customEmptyDescription')}
+          </Typography.Text>
+        </div>
+        <TalkToButlerButton
+          label={t('common.add', { defaultValue: 'Add' })}
+          chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
+          onManual={openCustomAgentEditor}
+          manualLabel={t('settings.talkToButler.addManually', { defaultValue: 'Add manually' })}
+          prompt={t('settings.talkToButler.prompt.addCustomAgent', {
+            defaultValue: 'Help me add a custom Agent.',
+          })}
+        />
       </div>
 
       <AionModal
@@ -341,9 +289,9 @@ const LocalAgents: React.FC = () => {
         )}
       </AionModal>
 
-      <div data-testid='agent-management-custom-section'>
+      <div data-testid='agent-management-custom-section' className='px-16px'>
         <div className='flex flex-col gap-8px rounded-12px border border-border-2 bg-2 p-8px md:rounded-16px md:p-10px'>
-          {visibleCustomAgents?.map((agent) => (
+          {customAgents?.map((agent) => (
             <AgentCard
               key={agent.id}
               type='custom'
@@ -360,11 +308,9 @@ const LocalAgents: React.FC = () => {
               onToggle={(enabled) => void handleToggleCustomAgent(agent.id, enabled)}
             />
           ))}
-          {visibleCustomAgents.length === 0 ? (
+          {customAgents.length === 0 ? (
             <Typography.Text type='secondary' className='block py-12px text-center text-12px'>
-              {normalizedSearchQuery
-                ? t('settings.agentManagement.noSearchResults', { defaultValue: 'No matching agents.' })
-                : t('settings.agentManagement.customEmpty')}
+              {t('settings.agentManagement.customEmpty')}
             </Typography.Text>
           ) : null}
         </div>

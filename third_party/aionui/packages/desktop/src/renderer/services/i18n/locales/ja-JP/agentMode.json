@@ -1,10 +1,14 @@
 {
   "plan": "プランモード",
   "default": "デフォルト",
+  "on": "Thinking On",
+  "off": "Thinking Off",
   "acceptEdits": "編集を自動承認",
   "autoEdit": "自動編集",
   "auto_edit": "自動編集",
   "read-only": "読み取り専用",
+  "agent": "エージェント",
+  "agent-full-access": "エージェント（フルアクセス）",
   "full-access": "フルアクセス",
   "yolo": "全自動",
   "yoloNoSandbox": "全自動（サンドボックスなし）",
@@ -17,6 +21,5 @@
   "permission": "権限",
   "switchMode": "権限モード",
   "switchSuccess": "モードを切り替えました",
-  "switchPendingNextTurn": "次のターンから有効になります",
   "switchFailed": "モードの切り替えに失敗しました"
 }

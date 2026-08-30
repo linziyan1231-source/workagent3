@@ -29,9 +29,7 @@
   },
   "model": {
     "switchSuccess": "Model switched successfully",
-    "switchFailed": "Failed to switch model",
-    "searchPlaceholder": "Model ara",
-    "noResults": "Eşleşen model yok"
+    "switchFailed": "Failed to switch model"
   },
   "config": {
     "setting": "Ayar uygulanıyor...",
@@ -44,16 +42,5 @@
     "label": "Düşünme düzeyi",
     "switchSuccess": "Düşünme düzeyi değiştirildi",
     "switchFailed": "Düşünme düzeyi değiştirilemedi"
-  },
-  "warmup": {
-    "clickToWake": "Bu üyeyi uyandırmak için tıklayın"
-  },
-  "runtimeRestart": {
-    "tooltip": "Aracıyı yeniden bağla",
-    "confirmContent": "Harici CLI yapılandırma değişikliklerini (kanal değiştirme gibi) alması için aracı sürecini yeniden başlatır. Sohbet geçmişi korunur ve mümkün olduğunda oturum sürdürülür.",
-    "success": "Aracı yeniden bağlandı",
-    "failed": "Aracı yeniden bağlanamadı",
-    "initializingTooltip": "Aracı başlatılıyor. Hazır olduğunda yeniden bağlanın",
-    "processingTooltip": "Yeniden bağlanmadan önce mevcut yanıtın bitmesini bekleyin"
   }
 }

@@ -15,6 +15,12 @@
     "clearWorkspace": "Limpiar",
     "specifyWorkspace": "Seleccionar carpeta del proyecto",
     "searchPlaceholder": "Buscar proyectos...",
+    "createProject": "Crear nuevo proyecto",
+    "projectNamePlaceholder": "Introduce el nombre de la carpeta del proyecto",
+    "createProjectSuccess": "Proyecto “{{name}}” creado",
+    "projectExists": "Ya existe un proyecto con este nombre",
+    "projectNameInvalid": "El nombre del proyecto no es válido",
+    "createProjectFailed": "No se pudo crear el proyecto",
     "noProject": "Sin proyecto"
   },
   "scanning": {
@@ -28,8 +34,8 @@
     "statusAvailable": "Disponible"
   },
   "defaultPrompts": {
-    "understand": "Familiarízate con este proyecto y explícame con palabras sencillas qué hace y por dónde empezar",
-    "cleanup": "Encuentra archivos duplicados e inútiles en esta carpeta y lístalos para que los confirme",
-    "create": "Créame una página personal bonita y ábrela cuando esté lista"
+    "capabilities": "What can you do for me?",
+    "skills": "What skills do you have?",
+    "tools": "What tools do you have?"
   }
 }

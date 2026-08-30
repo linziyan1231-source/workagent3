@@ -1,7 +1,13 @@
 {
+  "shared": {
+    "mentionCandidates": "Assistant and members",
+    "assistant": "Assistant",
+    "member": "Member",
+    "files": "Files"
+  },
   "welcome": {
     "title": "Привет! Каковы ваши планы на сегодня?",
-    "placeholder": "Отправьте сообщение, загрузите файлы, откройте папку, создайте запланированную задачу или введите / для команд...",
+    "placeholder": "Отправьте сообщение, загрузите файлы, откройте папку или создайте запланированную задачу...",
     "linkFolder": "Открыть папку",
     "newConversation": "Новый чат",
     "selectModel": "Выбрать модель",
@@ -12,14 +18,21 @@
     "clearWorkspace": "Удалить проект",
     "openFolder": "Открыть папку",
     "none": "Нет",
-    "quickActionsTitle": "Что умеет AionUi?",
+    "quickActionsTitle": "Что умеет CLIENTNAME?",
     "quickActionFeedback": "Сообщить о проблеме",
     "quickActionStar": "Нравится? Поставьте нам звезду!",
-    "skillsMarket": "Маркет навыков AionUi",
+    "skillsMarket": "Маркет навыков CLIENTNAME",
     "skillsMarketDesc": "Находите и активируйте навыки сообщества по запросу. Настройте один раз — доступно для всех агентов.",
     "skillsMarketDetails": "Подробнее >>"
   },
   "history": {
+    "hideSharedConversation": "Hide conversation",
+    "sharedConversationHidden": "Shared conversation hidden",
+    "sharedConversationHideFailed": "Shared conversation could not be hidden",
+    "sharedProjectHidden": "Shared project hidden",
+    "sharedProjectHideFailed": "Shared project could not be hidden",
+    "newPrivateSharedConversation": "New conversation in this shared project",
+    "hideSharedProject": "Hide shared project",
     "recents": "Недавние",
     "noHistory": "Нет истории чатов",
     "deleteTitle": "Удалить",
@@ -30,28 +43,19 @@
     "saveName": "Сохранить",
     "cancelEdit": "Отмена",
     "rename": "Переименовать",
-    "createCronTask": "Создать запланированную задачу",
     "renameTitle": "Переименовать чат",
     "renamePlaceholder": "Введите новое имя",
     "renameSuccess": "Успешно переименовано",
     "renameFailed": "Не удалось переименовать",
     "batchManage": "Массовое управление",
-    "batchModeExit": "Выйти из массового режима",
+    "batchModeExit": "Выйти из режима массового управления",
     "selectAll": "Выбрать все",
     "selectedCount": "Выбрано: {{count}}",
     "batchExport": "Массовый экспорт",
     "batchExportConfirm": "Экспортировать {{count}} выбранных тем?",
     "batchDelete": "Массовое удаление",
     "batchDeleteConfirm": "Удалить {{count}} выбранных тем?",
-    "batchDeleteConfirm_one": "Удалить {{count}} выбранную тему?",
-    "batchDeleteConfirm_other": "Удалить {{count}} выбранных тем?",
-    "batchDeleteConfirm_few": "Удалить {{count}} выбранные темы?",
-    "batchDeleteConfirm_many": "Удалить {{count}} выбранных тем?",
     "batchDeleteSuccess": "Удалено {{count}} тем",
-    "batchDeleteSuccess_one": "Удалена {{count}} тема",
-    "batchDeleteSuccess_other": "Удалено {{count}} тем",
-    "batchDeleteSuccess_few": "Удалено {{count}} темы",
-    "batchDeleteSuccess_many": "Удалено {{count}} тем",
     "batchNoSelection": "Сначала выберите темы",
     "export": "Экспортировать",
     "exportDialogTitle": "Экспорт тем",
@@ -66,10 +70,12 @@
     "exportFailed": "Ошибка экспорта",
     "pin": "Закрепить",
     "unpin": "Открепить",
-    "markAsUnread": "Пометить как непрочитанное",
-    "markAsRead": "Пометить как прочитанное",
     "pinned": "Закреплено",
     "pinFailed": "Не удалось закрепить",
+    "weixinReminder": "Напоминание WeChat",
+    "weixinReminderEnabled": "Напоминание включено",
+    "weixinReminderDisabled": "Напоминание выключено",
+    "weixinReminderUpdateFailed": "Не удалось обновить напоминание WeChat",
     "pinnedSection": "Закреплённые",
     "deleteSuccess": "Успешно удалено",
     "deleteFailed": "Не удалось удалить",
@@ -79,21 +85,25 @@
     "earlier": "Ранее",
     "projectsSection": "Проекты",
     "conversationsSection": "Беседы",
+    "renameProjectTitle": "Переименовать проект",
+    "renameProject": "Переименовать проект",
+    "renameProjectPlaceholder": "Введите новое имя проекта",
+    "renameProjectSuccess": "Проект переименован в «{{name}}»",
+    "renameProjectExists": "Проект с таким именем уже существует",
+    "renameProjectInvalid": "Недопустимое имя проекта",
+    "renameProjectInUse": "Проект используется. Остановите связанные задачи и повторите попытку",
+    "renameProjectForce": "Принудительно завершить программы и переименовать",
+    "renameProjectForceRisk": "Риск: программы, использующие эту папку, будут принудительно завершены, а несохранённые данные могут быть потеряны.",
+    "renameProjectForceConfirmTitle": "Принудительно завершить программы?",
+    "renameProjectForceConfirmContent": "Программы текущего пользователя Windows, которые используют файлы этого проекта, будут завершены перед переименованием папки. Несохранённая работа может быть потеряна. Это действие нельзя отменить.",
+    "renameProjectForceConfirm": "Завершить и переименовать",
+    "renameProjectForceFailed": "Не удалось безопасно определить или завершить все программы; папка не была переименована",
+    "renameProjectFailed": "Не удалось переименовать проект",
+    "removeProjectTitle": "Удалить проект",
+    "removeProject": "Удалить проект",
+    "removeProjectConfirm": "Удалить проект «{{name}}»? Будет также удалено {{count}} бесед(ы) в нём.",
     "newConversationInProject": "Новая беседа в этом проекте",
-    "deleting": "Удаление...",
-    "reorderPinned": "Перетащите, чтобы изменить порядок закреплённых бесед",
-    "forkedFrom": "Ответвление от «{{name}}»",
-    "forkedConversation": "Ответвлённая беседа",
-    "archive": "Архивировать",
-    "archiveSuccess": "Архивировано",
-    "archiveFailed": "Не удалось архивировать",
-    "batchArchive": "Batch archive",
-    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
-    "batchArchiveSuccess": "Archived {{count}} topics",
-    "archiveProject": "Archive project",
-    "archiveProjectTitle": "Archive project",
-    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
-    "archiving": "Archiving..."
+    "deleting": "Удаление..."
   },
   "historySearch": {
     "tooltip": "Поиск сообщений",
@@ -118,9 +128,9 @@
       "WORKSPACE_PATH_UNAVAILABLE": "Выбранный путь рабочей области недоступен. Убедитесь, что путь рабочей области \"{{workspacePath}}\" действительно существует и доступен."
     },
     "codes": {
-      "TEAM_ASSISTANT_ID_REQUIRED": "Перед созданием команды выберите ассистента.",
-      "TEAM_ASSISTANT_NOT_FOUND": "Ассистент {{assistantId}} больше недоступен. Обновите список ассистентов и выберите другого.",
-      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Используйте assistant_id вместо {{field}}."
+      "TEAM_ASSISTANT_ID_REQUIRED": "Please select an assistant before creating the team.",
+      "TEAM_ASSISTANT_NOT_FOUND": "Assistant {{assistantId}} is no longer available. Refresh the assistant list and choose another one.",
+      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Use assistant_id instead of {{field}}."
     }
   },
   "agentError": {
@@ -205,7 +215,7 @@
         "body": "Агент сообщил, что параметры запроса недействительны."
       },
       "USER_AGENT_HANDSHAKE_FAILED": {
-        "title": "Не удалось согласовать соединение с агентом",
+        "title": "Не удалось выполнить рукопожатие с агентом",
         "body": "Выбранный агент не смог завершить стартовое рукопожатие. Перезапустите или переподключите агента, затем повторите попытку."
       },
       "USER_AGENT_HANDSHAKE_TIMEOUT": {
@@ -217,20 +227,20 @@
         "body": "Приложение не смогло инициализировать сессию Agent Client Protocol с этим агентом."
       },
       "USER_AGENT_PROTOCOL_PARSE_ERROR": {
-        "title": "Агент сообщил об ошибке разбора протокола",
-        "body": "Выбранный агент сообщил, что сообщение ACP/JSON-RPC не удалось разобрать."
+        "title": "Agent сообщил об ошибке разбора протокола",
+        "body": "Выбранный Agent сообщил, что сообщение ACP/JSON-RPC не удалось разобрать."
       },
       "USER_AGENT_INVALID_REQUEST": {
-        "title": "Агент сообщил о недействительном протокольном запросе",
-        "body": "Выбранный агент сообщил, что объект запроса ACP/JSON-RPC недействителен."
+        "title": "Agent сообщил о недействительном протокольном запросе",
+        "body": "Выбранный Agent сообщил, что объект запроса ACP/JSON-RPC недействителен."
       },
       "USER_AGENT_RESOURCE_NOT_FOUND": {
-        "title": "Агент не нашёл нужный ресурс",
-        "body": "Выбранный агент сообщил, что нужный ресурс, например файл, не найден."
+        "title": "Agent не нашел нужный ресурс",
+        "body": "Выбранный Agent сообщил, что нужный ресурс, например файл, не найден."
       },
       "USER_AGENT_PROTOCOL_ERROR": {
-        "title": "Агент вернул ошибку протокола",
-        "body": "Выбранный агент вернул нестандартный ACP-код ошибки."
+        "title": "Agent вернул ошибку протокола",
+        "body": "Выбранный Agent вернул нестандартный ACP-код ошибки."
       },
       "USER_AGENT_PROTOCOL_MISMATCH": {
         "title": "Версии протокола агента несовместимы",
@@ -322,36 +332,40 @@
         "body": "Приложение получило внешнюю ошибку, но не смогло определить, пришла ли она от агента, поставщика, сети или локальной среды."
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
-        "title": "Не удалось прочитать ответ командного помощника",
-        "body": "AionUi не смог прочитать ответ локального командного помощника. Повторите попытку один раз; если ошибка повторится, перезапустите приложение."
+        "title": "Failed to read the team helper response",
+        "body": "CLIENTNAME could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
-        "title": "Локальный командный помощник отклонил запрос",
-        "body": "Локальный командный помощник вернул ошибку при обработке запроса. Проверьте подробности ниже, измените командное действие и повторите попытку."
+        "title": "The local team helper rejected the request",
+        "body": "The local team helper returned an error while processing this request. Review the details below and retry after adjusting the team action."
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
-        "title": "Командный помощник вернул неожиданный ответ",
-        "body": "AionUi получил неожиданный ответ от локального командного помощника. Повторите попытку один раз; если проблема сохранится, отправьте отчёт."
+        "title": "The team helper returned an unexpected response",
+        "body": "CLIENTNAME received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
-        "title": "Не удалось прочитать данные локального командного помощника",
-        "body": "AionUi не смог прочитать TCP-ответ локального командного помощника. Повторите попытку один раз; если ошибка повторится, перезапустите приложение."
+        "title": "Failed to read from the local team helper",
+        "body": "CLIENTNAME could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
-        "title": "Командный сервис ещё не готов",
-        "body": "Локальная командная сессия ещё запускается или была прервана. Подождите немного и повторите попытку."
+        "title": "Team service is not ready yet",
+        "body": "The local team session is still starting or has been interrupted. Wait a moment and retry."
       },
       "TEAM_ASSISTANT_ID_REQUIRED": {
-        "title": "Выберите ассистента для участника команды",
-        "body": "Перед созданием или запуском участника команды выберите доступного ассистента из каталога."
+        "title": "A teammate assistant must be selected",
+        "body": "Choose a real assistant from the available assistant catalog before creating or spawning a teammate."
       },
       "TEAM_ASSISTANT_NOT_FOUND": {
-        "title": "Выбранный ассистент больше недоступен",
-        "body": "Обновите каталог ассистентов и выберите другого ассистента для этого участника команды."
+        "title": "The selected assistant is no longer available",
+        "body": "Refresh the assistant catalog, then choose another assistant for this teammate."
       },
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
-        "title": "В запросе использовано устаревшее поле идентификации команды",
-        "body": "Это командное действие должно использовать assistant_id вместо устаревших полей backend или agent."
+        "title": "The request used a legacy team identity field",
+        "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_RESOURCE_EXHAUSTED": {
+        "title": "Недостаточно памяти в среде пользователя",
+        "body": "Предпросмотр или фоновая задача использует слишком много ресурсов. Закройте предпросмотр Office, немного подождите и повторите попытку."
       }
     }
   },
@@ -435,8 +449,7 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "Терминал",
-      "explorer": "Проводник",
-      "browser": "Браузер"
+      "explorer": "Проводник"
     }
   },
   "minimap": {
@@ -444,11 +457,7 @@
     "searchHint": "Нажмите здесь для поиска по ключевым словам",
     "empty": "Пока нет вопросов и ответов",
     "noMatch": "Соответствующий контент не найден",
-    "count": "{{count}} ходов",
-    "count_one": "{{count}} ход",
-    "count_other": "{{count}} ходов",
-    "count_few": "{{count}} хода",
-    "count_many": "{{count}} ходов"
+    "count": "{{count}} ходов"
   },
   "chat": {
     "noModelSelected": "Модель для текущей сессии не выбрана, невозможно отправить сообщение",
@@ -466,7 +475,6 @@
     "switchAgentFailed": "Не удалось переключить агента",
     "speech": {
       "recordTooltip": "Начать голосовой ввод",
-      "recordTooltipWithShortcut": "Голосовой ввод cmd+M",
       "pickFileTooltip": "Выбрать аудиофайл",
       "stopTooltip": "Остановить запись",
       "processing": "Транскрибирование аудио...",
@@ -502,8 +510,8 @@
     "error": "Не удалось ответить на боковой вопрос."
   },
   "commandQueue": {
-    "title": "Черновики",
-    "clear": "Очистить черновики",
+    "title": "Очередь команд",
+    "clear": "Очистить очередь",
     "edit": "Редактировать",
     "editing": "Редактирование",
     "editPlaceholder": "Обновите команду в очереди перед выполнением.",
@@ -513,46 +521,15 @@
     "reorder": "Перетащите для изменения порядка",
     "remove": "Удалить",
     "files": "{{count}} файлов",
-    "files_one": "{{count}} файл",
-    "files_other": "{{count}} файлов",
-    "files_few": "{{count}} файла",
-    "files_many": "{{count}} файлов",
     "pausedAfterFailure": "Следующая команда в очереди не может запуститься. Отредактируйте, измените порядок или удалите для продолжения.",
     "emptyInput": "Команды в очереди не могут быть пустыми.",
     "queueFull": "Очередь заполнена. Удалите команду перед добавлением.",
     "inputTooLong": "Эта команда в очереди слишком длинная. Сократите перед отправкой.",
     "tooManyFiles": "Слишком много файлов прикреплено к этой команде.",
-    "queueTooLarge": "Данные очереди слишком большие для безопасного сохранения. Сначала удалите несколько команд.",
-    "sendNow": "Отправить сейчас",
-    "modeToggle": "Переключить режим отправки",
-    "help": "Справка",
-    "helpIntro": "Сообщения, отправленные во время ответа ИИ, ждут здесь.",
-    "helpAuto": ": отправляются автоматически по очереди после каждого ответа.",
-    "helpManual": ": хранятся без отправки; отправьте каждое кнопкой «Отправить сейчас».",
-    "clearConfirmTitle": "Очистить черновики отправки?",
-    "clearConfirmContent": "Все ожидающие сообщения будут удалены. Это действие необратимо.",
-    "mode": {
-      "auto": "Авто-отправка",
-      "manual": "Ручная отправка"
-    },
-    "addToQueue": "Добавить в черновики",
-    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
-    "midturnBlocked": "Вставка сообщений не поддерживается, пока этот агент отвечает. Используйте «Добавить в черновики».",
-    "enterShortcut": "Enter",
-    "actionMode": "Choose send action",
-    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
-    "addToQueueBusyHint": "Save to Draft box and send it later."
+    "queueTooLarge": "Данные очереди слишком большие для безопасного сохранения. Сначала удалите несколько команд."
   },
   "contextUsage": {
-    "contextUsed": "контекст использован",
-    "tokensUsed": "Использовано токенов: {{tokens}}",
-    "windowUnknown": "Размер контекстного окна неизвестен",
-    "sessionCost": "Стоимость сессии",
-    "input": "Ввод",
-    "output": "Вывод",
-    "thought": "Размышление",
-    "cachedRead": "Чтение кэша",
-    "cachedWrite": "Запись кэша"
+    "contextUsed": "контекст использован"
   },
   "skill_generator": {
     "title": "Создать навык/правило",
@@ -592,27 +569,18 @@
       "loaded": "Загружен",
       "failed": "Ошибка",
       "unsupported": "Не поддерживается"
-    },
-    "selected": "Выбранные MCP"
+    }
   },
   "runtimePreparing": {
     "sendboxHint": "Подготавливается среда выполнения. Первый запуск может занять немного больше времени."
   },
   "sendbox": {
-    "hint": "Введите / для команд, @ для ссылок на файлы, ↑/↓ для истории сообщений",
-    "mediaPathFallback": "Этот агент не поддерживает данный тип файла нативно; он будет отправлен в виде пути к файлу.",
-    "hintWithSessions": "/ — команды, @ — файлы, @@ — беседы, ↑/↓ — история"
+    "hint": "Введите / для команд, @ для ссылок на файлы"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Этот запрос завершился без видимого ответа."
-      },
-      "ACP_EMPTY_TURN_NEEDS_AUTH": {
-        "body": "Этот запрос не дал видимого ответа. Если вы уже вошли в систему, возможно, это временная проблема бэкенда или соединения — повторите попытку или начните новый разговор. Если вы ещё не вошли, вы можете войти: {{hint}}."
-      },
-      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
-        "body": "Этот запрос не дал видимого ответа. Возможно, текущий разговор приближается к пределу длины контекста — повторите попытку или начните новый разговор и попробуйте снова."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "В этом запросе модель достигла лимита выходных токенов до того, как появился видимый ответ."
@@ -622,180 +590,8 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "Модель отклонила этот запрос до того, как появился видимый ответ."
-      },
-      "ANTIGRAVITY_STEPS_FAILED": {
-        "body": "Шагов завершилось неудачей: {{count}}; они НЕ были выполнены. agy всё равно помечает такие ходы как успешные — проверяйте фактический результат, а не ответ."
-      },
-      "CLI_VERSION_OLDER": {
-        "body": "Установленная версия {{cli}} старее проверенной AionUi; часть возможностей может отсутствовать. Рекомендуется обновить {{cli}}. (установлено: {{reported}} / проверено AionUi: {{verified}})"
-      },
-      "CLI_VERSION_NEWER": {
-        "body": "Установленная версия {{cli}} новее проверенной AionUi. Обычно всё работает; сообщите о странном поведении. (установлено: {{reported}} / проверено AionUi: {{verified}})"
-      },
-      "CODEX_RETRYING": {
-        "body": "{{detail}} (попытка {{attempts}}, прошло {{elapsed}} — провайдер агента постоянно обрывает соединение, AionUi ждёт восстановления.)"
       }
     }
   },
-  "notFound": "Беседа не найдена или была удалена",
-  "explorer": {
-    "addFolder": "Add folder to project",
-    "removeFolder": "Remove from project",
-    "attachDuplicate": "This folder is already in the project",
-    "attachOverlap": "This folder overlaps a folder already in the project",
-    "attachFailed": "Couldn't add the folder",
-    "removeFailed": "Couldn't remove the folder",
-    "contextMenu": {
-      "rename": "Переименовать",
-      "addToChat": "Добавить в чат",
-      "copyRelativePath": "Копировать относительный путь",
-      "copyAbsolutePath": "Копировать абсолютный путь",
-      "refresh": "Обновить",
-      "newFile": "Новый файл",
-      "newDir": "Новая папка"
-    },
-    "namePlaceholder": "Имя",
-    "deleteConfirm": "Удалить «{{name}}»? Это действие нельзя отменить.",
-    "renameFailed": "Не удалось переименовать",
-    "newFileFailed": "Не удалось создать файл",
-    "newDirFailed": "Не удалось создать папку",
-    "tabs": {
-      "files": "Файлы",
-      "changes": "Изменения"
-    },
-    "addedToChat": "{{name}} добавлен в чат",
-    "imported": "Импортировано файлов: {{count}}",
-    "importPartialFailed": "Скопировано: {{copied}}, с ошибкой: {{failed}} (конфликты имён или не поддерживается)",
-    "importFailed": "Не удалось импортировать файлы",
-    "copyNodeFailed": "Не удалось скопировать",
-    "moveNodeFailed": "Не удалось переместить",
-    "search": {
-      "placeholder": "Поиск файлов по имени",
-      "searching": "Поиск…",
-      "empty": "Нет совпадающих файлов",
-      "limitReached": "Показаны первые {{count}} — уточните запрос"
-    },
-    "scm": {
-      "notARepository": "Эта папка не под контролем версий",
-      "noChanges": "Нет изменений",
-      "loading": "Загрузка изменений…",
-      "loadFailed": "Не удалось загрузить изменения",
-      "refresh": "Обновить",
-      "groups": {
-        "staged": "Проиндексированные изменения",
-        "unstaged": "Изменения",
-        "changes": "Изменения",
-        "blocked": "Требует решения"
-      },
-      "sections": {
-        "repositories": "Репозитории",
-        "changes": "Изменения"
-      },
-      "viewAsTree": "В виде дерева",
-      "viewAsList": "В виде списка",
-      "worktree": "Рабочее дерево",
-      "expandWorktrees": "Показать рабочие деревья",
-      "collapseWorktrees": "Скрыть рабочие деревья",
-      "state": {
-        "created": "Добавлен",
-        "modified": "Изменён",
-        "deleted": "Удалён",
-        "renamed": "Переименован",
-        "conflicted": "Конфликт",
-        "unknown": "Неизвестное состояние"
-      },
-      "badge": {
-        "created": "A",
-        "modified": "M",
-        "deleted": "D",
-        "renamed": "R",
-        "conflicted": "!",
-        "unknown": "?"
-      },
-      "conflictedHint": "Сначала устраните конфликт вне AionUi",
-      "opaqueHint": "Это состояние пришло от более новой версии сервера — только для просмотра",
-      "degraded": "Обновление идёт в замедленном режиме: не удаётся записать индекс git",
-      "truncated": "Слишком много изменений — показана только первая часть",
-      "renamedFrom": "{{from}} → {{to}}",
-      "diff": {
-        "loading": "Загрузка различий…",
-        "failed": "Не удалось загрузить различия",
-        "binary": "Двоичный файл — текстовых различий нет",
-        "truncated": "Различия усечены (большой файл)",
-        "empty": "Нет текстовых изменений",
-        "close": "Закрыть различия"
-      },
-      "actions": {
-        "stage": "Проиндексировать изменения",
-        "unstage": "Убрать из индекса",
-        "discard": "Отменить изменения",
-        "stageAll": "Проиндексировать всё",
-        "unstageAll": "Убрать всё из индекса",
-        "blockedHint": "Сначала устраните конфликт вне AionUi, затем индексируйте или отменяйте",
-        "confirmDiscardTitle": "Отменить изменения?",
-        "confirmDiscardTracked": "Правки в {{count}} файлах будут потеряны. Это нельзя отменить.",
-        "confirmDiscardUntracked": "{{count}} новых файлов будут перемещены в корзину.",
-        "confirmDiscardMixed": "Правки в {{tracked}} файле(ах) будут безвозвратно потеряны; {{untracked}} новых файла(ов) попадут в корзину.",
-        "discardConfirmButton": "Отменить",
-        "okStage": "Проиндексировано файлов: {{count}}",
-        "okStage_one": "Проиндексировано файлов: {{count}}",
-        "okStage_other": "Проиндексировано файлов: {{count}}",
-        "okStage_few": "Проиндексировано файлов: {{count}}",
-        "okStage_many": "Проиндексировано файлов: {{count}}",
-        "okUnstage": "Убрано из индекса файлов: {{count}}",
-        "okUnstage_one": "Убрано из индекса файлов: {{count}}",
-        "okUnstage_other": "Убрано из индекса файлов: {{count}}",
-        "okUnstage_few": "Убрано из индекса файлов: {{count}}",
-        "okUnstage_many": "Убрано из индекса файлов: {{count}}",
-        "okDiscard": "Отменены изменения в {{count}} файлах",
-        "okDiscard_one": "Отменены изменения в {{count}} файле",
-        "okDiscard_other": "Отменены изменения в {{count}} файлах",
-        "okDiscard_few": "Отменены изменения в {{count}} файлах",
-        "okDiscard_many": "Отменены изменения в {{count}} файлах",
-        "partial": "Выполнено {{succeeded}} из {{total}} —— не удалось: {{failed}}",
-        "partialDetail": "Не выполнено: {{files}}",
-        "rejectedBlocked": "Ничего не изменено —— сначала устраните конфликт",
-        "rejectedUnsupported": "Этот репозиторий не поддерживает такое действие",
-        "rejectedFailed": "Не удалось выполнить действие",
-        "retry": "Повторить",
-        "notSent": "Запрос не дошёл до сервера, ничего не изменено. Можно повторить.",
-        "outcomeUnknown": "Соединение сброшено до получения ответа — операция могла завершиться, а могла и нет. Обновите и проверьте список файлов, прежде чем повторять.",
-        "allFailed": "Ни один из {{count}} файл(ов) не удалось обработать",
-        "allFailed_one": "Не удалось обработать {{count}} файл",
-        "allFailed_other": "Не удалось обработать ни один из {{count}} файлов",
-        "allFailed_few": "Не удалось обработать ни один из {{count}} файлов",
-        "allFailed_many": "Не удалось обработать ни один из {{count}} файлов"
-      }
-    },
-    "pathCopied": "Путь скопирован",
-    "copyFailed": "Не удалось скопировать путь"
-  },
-  "terminal": {
-    "running": "Выполняется",
-    "stopped": "Остановлено",
-    "exited": "Код {{code}}",
-    "stop": "Остановить",
-    "truncated": "(ранний вывод усечён)"
-  },
-  "emptyState": {
-    "greeting": "Здравствуйте! Расскажите, что нужно, и я начну."
-  },
-  "crossSession": {
-    "mentionAgain": "Упомянуть беседу {{name}} в поле ввода",
-    "mentionAgainHint": "Нажмите, чтобы упомянуть эту беседу в поле ввода",
-    "mentionUnavailable": "Эту беседу больше нельзя упомянуть.",
-    "mentionFailed": "Не удалось упомянуть эту беседу.",
-    "fromBadge": "Из беседы «{{name}}»",
-    "otherWorkspace": "другая рабочая папка",
-    "rateLimitedTitle": "Сообщения между беседами, возможно, зациклились",
-    "rateLimited": "Автоматические сообщения между «{{from}}» и «{{to}}» приходят необычно часто — возможно, они зациклились.",
-    "stopBoth": "Остановить обе беседы",
-    "disableFeature": "Отключить сообщения между беседами"
-  },
-  "planBar": {
-    "title": "План",
-    "progress": "{{completed}}/{{total}}",
-    "expand": "Развернуть план",
-    "collapse": "Свернуть план"
-  }
+  "notFound": "Беседа не найдена или была удалена"
 }

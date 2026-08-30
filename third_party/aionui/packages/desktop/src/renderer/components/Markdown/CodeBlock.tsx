@@ -13,7 +13,6 @@ import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs, vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { copyText } from '@/renderer/utils/ui/clipboard';
 import MermaidBlock from './MermaidBlock';
-import WavedromBlock from './WavedromBlock';
 import { formatCode, getDiffLineStyle } from './markdownUtils';
 
 const PREVIEW_LINES = 3;
@@ -29,10 +28,6 @@ type CodeBlockProps = {
   node?: unknown;
   hiddenCodeCopyButton?: boolean;
   codeStyle?: React.CSSProperties;
-  // Enable drag-to-pan + zoom on rendered diagrams (Mermaid, WaveDrom). Chat
-  // messages and the preview panel both opt in; other surfaces keep diagrams
-  // static.
-  diagramPanZoom?: boolean;
   [key: string]: unknown;
 };
 
@@ -63,15 +58,7 @@ function CodeBlock(props: CodeBlockProps) {
     }
   };
 
-  const {
-    children,
-    className,
-    node: _node,
-    hiddenCodeCopyButton: _h,
-    codeStyle: _c,
-    diagramPanZoom: _dpz,
-    ...rest
-  } = props;
+  const { children, className, node: _node, hiddenCodeCopyButton: _h, codeStyle: _c, ...rest } = props;
   const match = /language-(\w+)/.exec(className || '');
   const language = match?.[1] || 'text';
 
@@ -90,11 +77,7 @@ function CodeBlock(props: CodeBlockProps) {
   }
 
   if (language === 'mermaid') {
-    return <MermaidBlock code={formatCode(children)} style={props.codeStyle} enablePanZoom={props.diagramPanZoom} />;
-  }
-
-  if (language === 'wavedrom' || language === 'wavejson') {
-    return <WavedromBlock code={formatCode(children)} style={props.codeStyle} enablePanZoom={props.diagramPanZoom} />;
+    return <MermaidBlock code={formatCode(children)} style={props.codeStyle} />;
   }
 
   // Inline code (single line)
@@ -140,8 +123,6 @@ function CodeBlock(props: CodeBlockProps) {
   return (
     <div
       ref={containerRef}
-      // Code is inherently left-to-right; keep it that way under an RTL document.
-      dir='ltr'
       style={{ width: '100%', minWidth: 0, maxWidth: '100%', ...props.codeStyle }}
       className='group'
     >

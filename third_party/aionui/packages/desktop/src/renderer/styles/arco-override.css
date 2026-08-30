@@ -1,71 +1,13 @@
 /* Arco Design custom overrides - non-theme related */
 
-/*
- * Arco Spin 垂直居中修正。
- *
- * 现象：「思考过程」「执行步骤」这类标题栏，加载中显示 <Spin size={12} />，完成后换成
- * icon-park 的静态图标。实测加载中的转圈圈比相邻文字、以及完成后的静态图标低 3.5px，
- * 看起来整体偏下、切换状态时还会跳一下。
- *
- * 成因有三层叠加（数值均为 Chromium 实测）：
- *   1. Arco 给所有 `.arco-icon` 设了 `vertical-align: -2px`，SVG 被强行下移；
- *   2. `.arco-spin-icon` 是 inline-block，SVG 按文字基线排布，行盒被撑到 23px
- *      （只为容纳 12px 的图标），底部留下大段基线间隙；
- *   3. `.arco-spin` 自身也是 inline-block，行盒 13.58px 容纳 12px 图标，再贡献 0.78px。
- *
- * 修正：让这两层都变成居中的 inline-flex 并清掉基线偏移 —— 与 base.css 里的 `.i-icon`
- * 修正同一思路。实测偏移由 3.5px 精确归零，与静态图标像素级对齐。
- *
- * 为何改 `.arco-spin` 是安全的（已实测验证）：
- *   - 包裹式用法 `<Spin loading>内容</Spin>`：display 由 inline-block 变 inline-flex，
- *     但被包裹内容尺寸、遮罩层圈圈的居中、后续兄弟元素位置均零变化（`.arco-spin-children`
- *     是唯一的流内子元素，遮罩层为绝对定位）。
- *   - 传了自定义 flex 类的用法（如 `<Spin loading className='flex flex-1 …'/>`）：
- *     行内/工具类 display 优先级更高，不受影响。
- *   - 图标只匹配 `.arco-spin` 的直接子级，包裹式用法的图标嵌在
- *     `.arco-spin-loading-layer-inner` 内，不会被这条规则命中。
- */
-.arco-spin,
-.arco-spin > .arco-spin-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  vertical-align: middle;
-}
-
-.arco-spin > .arco-spin-icon > .arco-icon {
-  display: block;
-  vertical-align: middle;
-}
-
 /* Centralized font tokens. --font-mono is inherited (custom properties cross
    the shadow DOM boundary), so Markdown rendered in shadow roots can reference it.
    集中的字体 token。--font-mono 会被继承（自定义属性可穿透 Shadow DOM 边界），
    因此 Shadow DOM 内渲染的 Markdown 也能引用它。 */
 :root {
-  /* Code-region font. applyFontFamilies sets --code-font-family only when the
-     user picks a code font (empty otherwise), so --font-mono resolves to the
-     chosen font or falls back to the built-in stack. Every existing
-     var(--font-mono) site (markdown code, editors, chat shadow) follows the
-     selection for free — no need to touch those call sites. */
-  --font-mono: var(
-    --code-font-family,
-    ui-monospace,
-    'SF Mono',
-    SFMono-Regular,
-    Menlo,
-    'Cascadia Code',
-    'Roboto Mono',
-    Consolas,
-    'Liberation Mono',
-    monospace
-  );
-  /* Code-region font weight, mirroring --font-mono. applyFontWeights sets
-     --code-font-weight only when the user picks a code weight (empty otherwise),
-     so this falls back to `inherit`, keeping the built-in weight. Every
-     var(--font-mono) site declares font-weight: var(--font-mono-weight) next to
-     it, so the code-region weight follows the selection for free. */
-  --font-mono-weight: var(--code-font-weight, inherit);
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, 'Cascadia Code', 'Roboto Mono', Consolas, 'Liberation Mono',
+    monospace;
   --code-font-size: 13px;
   --aion-overlay-bg: #ffffff;
   --aion-overlay-text: #1d2129;
@@ -85,39 +27,9 @@ body[arco-theme='dark'] {
    text on systems that have Inter installed. Override to use system fonts. */
 html,
 body {
-  /* Global ("app") region font. --app-font-family is set by applyFontFamilies
-     when a global font is chosen (empty otherwise), so this falls back to the
-     built-in system stack — keeping default rendering unchanged. Regions that
-     pick no font of their own inherit this global font. */
-  font-family: var(
-    --app-font-family,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    'Noto Sans',
-    'PingFang SC',
-    'Hiragino Sans GB',
-    'Microsoft YaHei',
-    sans-serif
-  );
-  /* Global ("app") region font size. --app-font-size defaults to 14px (Arco's
-     base), so the whole app scales with the global size, while regions with
-     their own size var (chat/markdown/code) still override within their scope. */
-  font-size: var(--app-font-size, 14px);
-  /* Global ("app") region font weight. --app-font-weight is set by
-     applyFontWeights when a global weight is chosen (empty otherwise), so this
-     falls back to `normal`, keeping default rendering unchanged. Only text that
-     sets no weight of its own inherits it (headings/strong/buttons keep theirs). */
-  font-weight: var(--app-font-weight, normal);
-  /* 根元素必须自己铺底色。Electron 窗口底色是固定的白色，html/body 若保持透明，
-     任何布局缝隙都会漏出白色 —— 深色模式下就是刺眼的白边。
-     The root must paint its own background. The Electron window's own background
-     is a fixed white, so if html/body stay transparent any layout gap leaks white
-     through — glaringly so in dark mode. */
-  background-color: var(--bg-1);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
 html body .arco-tooltip-content,
@@ -248,38 +160,6 @@ body[arco-theme='dark'] .arco-tag-checked.arco-tag-gray {
   background: var(--dialog-fill-0) !important;
   border: 1px solid var(--border-base) !important;
   border-radius: 16px !important;
-}
-
-/* standard 变体：清除 Arco content 默认内边距，让三段（标题/内容/按钮）铺满到弹窗边框，
-   分隔线得以贯穿全宽，三段背景统一、无“盒子”割裂感。
-   注意：内边距清零后不能在此处 overflow:hidden —— Select/下拉等 popup 会挂在
-   .arco-modal-content 下（在内层 wrapper 之外），一旦这里裁剪就会遮住下拉。
-   圆角裁剪改到内层 .aionui-modal-wrapper 上（见下），popup 作为其兄弟节点不受影响。 */
-.aionui-modal-standard .arco-modal-content {
-  padding: 0 !important;
-}
-
-/* 圆角裁剪落在内层 wrapper：只裁三段（标题/内容/按钮），让它们的直角贴合弹窗圆角；
-   下拉 popup 挂在 wrapper 之外，因此不会被裁掉、能正常浮出弹窗。
-   同时给内层 wrapper 设视口上限并裁掉溢出：内容过多时，标题区/按钮区固定，
-   中间内容区（flex-1 + overflow-y:auto）自动缩短并滚动，整窗不会超出屏幕。
-   弹窗自身不设固定高度时按内容自适应，因此短内容不会留白、长内容会滚动。 */
-.aionui-modal-standard .aionui-modal-wrapper {
-  overflow: hidden !important;
-  border-radius: 16px !important;
-  max-height: calc(100vh - 64px);
-}
-
-/* 三段只保留一条分隔线：标题区仅下边线、按钮区仅上边线，其余边框一律清零，
-   避免外部样式给这些容器叠加多余边框而形成“盒子”。 */
-.aionui-modal-standard .aionui-modal-wrapper > * {
-  border: 0 !important;
-}
-.aionui-modal-standard .aionui-modal-std-header {
-  border-bottom: 1px solid var(--bg-3) !important;
-}
-.aionui-modal-standard .aionui-modal-std-footer {
-  border-top: 1px solid var(--bg-3) !important;
 }
 
 body[arco-theme='dark'] .arco-modal-content {
@@ -469,20 +349,6 @@ body[arco-theme='dark'] .arco-message-error {
   transition: background-color 0.12s ease;
 }
 
-/* 对齐基准线（与 ExplorerContainer.tsx / SearchPanel.tsx 保持一致）：
-   节点行外框从 12px 起，行内首个元素（展开箭头）从 20px 起。
-   arco 把所有层级的节点都渲染成 .arco-tree 的直接子元素，靠行内的缩进块表示层级，
-   所以这 8px 对每一层是同一个常量偏移，不会随深度累加。
-
-   Alignment baseline (kept in sync with ExplorerContainer.tsx / SearchPanel.tsx):
-   the node row's outer box starts at 12px and its first inner element (the expand
-   arrow) at 20px. arco renders nodes at every depth as direct children of .arco-tree
-   and expresses nesting with in-row indent blocks, so these 8px are a single constant
-   offset per level rather than something that accumulates with depth. */
-.workspace-tree .arco-tree-node {
-  padding-inline-start: 8px;
-}
-
 .workspace-tree .arco-tree-node:hover {
   background-color: var(--color-fill-2);
 }
@@ -523,7 +389,7 @@ body[arco-theme='dark'] .arco-message-error {
   }
 
   .arco-tabs-nav-tab:first-child {
-    margin-inline-start: 0;
+    margin-left: 0;
   }
 
   .arco-tabs-nav-tab-active {
@@ -603,53 +469,51 @@ body[arco-theme='dark'] .arco-message-error {
  * ~12px each side, leaving a visible ~24px chasm even with gap:0. */
 [data-mobile='true'] [data-testid='guid-model-selector'].arco-btn-shape-round,
 [data-mobile='true'] [data-testid='mode-selector'] .arco-btn-shape-round {
-  padding-inline-start: 4px !important;
-  padding-inline-end: 4px !important;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
 }
 
-/* Searchable dropdown lists (RuntimeSelectorModelList, DropdownSearchList) own
- * their own scroll container (`.dropdown-search-scroll`), with the search box
- * fixed above it outside the scroll area. Any Arco popup that hosts such a list
- * — top-level dropdown OR a flyout submenu, grouped or flat — must therefore
- * NOT scroll or cap its own height, or there'd be a second scrollbar and the
- * search box would scroll away. Keyed off `:has(.dropdown-search-scroll)` so it
- * applies wherever the list is, and never touches other menus. */
-.arco-dropdown-menu:has(.dropdown-search-scroll) {
-  max-height: none;
-  overflow: visible;
-}
-
-/* Explorer file-tree right-click menu: show every item, no height cap / scroll.
-   Arco caps .arco-dropdown-menu at 200px (overflow:auto), so a 6+ item menu
-   (add-to-chat / reveal / copy rel / copy abs / rename / delete) grows a
-   scrollbar. This menu has few, fixed items and the user wants them all
-   visible. Scoped by the `explorer-context-menu` class on <Menu> so other
-   200px-capped dropdowns keep their scroll. Higher specificity than the base
-   rule, so no !important is needed. */
-.arco-dropdown-menu.explorer-context-menu {
-  max-height: none;
-  overflow: visible;
-}
-
-/* Divider between the menu's action sections (add-to-chat | locate/copy |
-   create/rename/delete). A plain <div role='separator'> emitted by ExplorerPanel
-   between two non-empty sections; theme-aware border token so it adapts to dark
-   mode. Vertical margin gives the sections breathing room without item padding. */
-.arco-dropdown-menu.explorer-context-menu .explorer-context-menu-divider {
-  height: 1px;
-  margin: 4px 8px;
-  background-color: var(--color-border-2);
-}
-
-/* Provider group titles pin to the top of the inner scroll container. It has no
- * top padding, so top:0 hugs the edge with no gap for items to peek through.
- * Only relevant for the grouped (aionrs) list; harmless for flat lists. */
-.dropdown-search-scroll .arco-dropdown-menu-group-title {
+/* Model selectors that group their models by platform (aionCLI / Gemini):
+ * pin the current platform's group title to the top of the scrolling dropdown,
+ * contacts-list style, so a long model list never hides which platform you're
+ * scrolling through. Each Arco menu group is its own containing block, so the
+ * sticky title sticks while its group is in view and is pushed up by the next
+ * group's title. An opaque popup background prevents the scrolling items from
+ * bleeding through; z-index keeps it above them.
+ *
+ * Note: when a <Menu> is passed as a Dropdown `droplist`, Arco renders it with
+ * the `.arco-dropdown-menu-*` class family (the scoping class lands on the
+ * `.arco-dropdown-menu` root, which is also the `overflow:auto` scroll box),
+ * not the `.arco-menu-*` one — so we target the dropdown variant here.
+ *
+ * Scoped to `.aion-model-menu--sticky-group` so it never affects other menus
+ * that group items (e.g. the agent mode switcher). */
+.aion-model-menu--sticky-group .arco-dropdown-menu-group-title {
   position: sticky;
-  top: 0;
+  /* `.arco-dropdown-menu` has `padding: 4px 0`, so `top: 0` pins the title 4px
+   * below the scroll-box edge, leaving a strip where the previous item shows
+   * through above it. Pin at -4px so the title hugs the very top, then restore
+   * the lost top padding below so the first title isn't flush against the edge. */
+  top: -4px;
+  /* Arco gives `.arco-dropdown-menu-item` `z-index: 1`, so a same-z-index
+   * sticky title loses the stacking contest to items scrolling under it —
+   * their text, and the selected item's highlight background, bleed over the
+   * pinned title. Sit the title one level above the items so it stays on top. */
   z-index: 2;
+  /* Arco's `margin-top` (4px first group, 8px otherwise) leaves a transparent
+   * strip above the pinned title through which the scrolling item shows. Drop
+   * it to 0 so the opaque title box hugs the container's top edge with no gap;
+   * add equivalent padding-top so groups keep their visual separation. */
   margin-top: 0;
-  padding-top: 6px;
-  padding-bottom: 2px;
+  padding-top: 8px;
   background-color: var(--color-bg-popup);
+}
+
+/* Arco's own `.arco-dropdown-menu-group:first-child .arco-dropdown-menu-group-title`
+ * rule (3 classes) out-specifies the 2-class reset above, so the first group's
+ * 4px margin-top survives and leaves a transparent strip at the very top. Match
+ * its specificity to override it; shift the separation into padding instead. */
+.aion-model-menu--sticky-group .arco-dropdown-menu-group:first-child .arco-dropdown-menu-group-title {
+  margin-top: 0;
+  padding-top: 4px;
 }

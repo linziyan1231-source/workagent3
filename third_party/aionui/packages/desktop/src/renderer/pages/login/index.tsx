@@ -2,7 +2,8 @@ import loginLogo from '@renderer/assets/logos/brand/app.png';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { changeLanguage } from '@/renderer/services/i18n';
-import { useNavigate } from 'react-router-dom';
+import { Link } from '@arco-design/web-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import AppLoader from '@renderer/components/layout/AppLoader';
 import { useAuth } from '../../hooks/context/AuthContext';
 import './LoginPage.css';
@@ -34,6 +35,7 @@ const deobfuscate = (text: string): string => {
 const LoginPage: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { status, login } = useAuth();
 
   const [username, setUsername] = useState('');
@@ -58,10 +60,20 @@ const LoginPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    document.title = t('login.pageTitle');
+  }, [t]);
+
+  useEffect(() => {
     document.documentElement.lang = i18n.language;
   }, [i18n.language]);
 
   useEffect(() => {
+    const routeUsername = (location.state as { username?: unknown } | null)?.username;
+    if (typeof routeUsername === 'string' && routeUsername.trim()) {
+      setUsername(routeUsername.trim());
+      return;
+    }
+
     const isRememberMe = localStorage.getItem(REMEMBER_ME_KEY) === 'true';
     if (isRememberMe) {
       const storedUsername = localStorage.getItem(REMEMBERED_USERNAME_KEY);
@@ -79,7 +91,7 @@ const LoginPage: React.FC = () => {
         window.clearTimeout(messageTimer.current);
       }
     };
-  }, []);
+  }, [location.state]);
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -160,7 +172,10 @@ const LoginPage: React.FC = () => {
         showMessage({ type: 'success', text: successText });
 
         window.setTimeout(() => {
-          void navigate('/guid', { replace: true });
+          const returnTo = (location.state as { returnTo?: unknown } | null)?.returnTo;
+          void navigate(typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/guid', {
+            replace: true,
+          });
         }, 600);
       } else {
         const errorText = (() => {
@@ -184,7 +199,7 @@ const LoginPage: React.FC = () => {
 
       setLoading(false);
     },
-    [login, navigate, password, rememberMe, showMessage, t, username]
+    [location.state, login, navigate, password, rememberMe, showMessage, t, username]
   );
 
   if (status === 'checking') {
@@ -305,14 +320,22 @@ const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <div className='login-page__checkbox'>
-            <input
-              type='checkbox'
-              id='remember-me'
-              checked={rememberMe}
-              onChange={(event) => setRememberMe(event.target.checked)}
-            />
-            <label htmlFor='remember-me'>{t('login.rememberMe')}</label>
+          <div className='login-page__options'>
+            <div className='login-page__checkbox'>
+              <input
+                type='checkbox'
+                id='remember-me'
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+              />
+              <label htmlFor='remember-me'>{t('login.rememberMe')}</label>
+            </div>
+            <Link
+              className='login-page__change-password-link'
+              onClick={() => void navigate('/change-password', { state: { username: username.trim() } })}
+            >
+              {t('login.changePassword.link')}
+            </Link>
           </div>
 
           <button type='submit' className='login-page__submit' disabled={loading}>

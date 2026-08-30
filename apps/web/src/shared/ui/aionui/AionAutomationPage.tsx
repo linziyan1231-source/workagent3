@@ -26,8 +26,6 @@ import type {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import AionModal from "@renderer/components/base/AionModal";
-import { AionSearchInput } from "@renderer/components/base";
-import SettingsPageHeader from "@renderer/pages/settings/components/SettingsPageHeader";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
 
 export type AutomationUiPort = {
@@ -149,14 +147,16 @@ export function AionAutomationPage({ port, presets, workspaceId }: Props) {
         }
       >
         <div className="mx-auto w-full max-w-800px box-border">
-          <SettingsPageHeader
-            sticky={false}
-            title={t("cron.scheduledTasks")}
-            description={t("cron.page.description")}
-            actions={
-              <>
+          <div className="flex w-full flex-col gap-8px">
+            <div className="flex w-full items-start justify-between gap-12px sm:gap-16px max-[520px]:flex-wrap">
+              <h1
+                className={`m-0 min-w-0 flex-1 font-bold text-t-primary ${isMobile ? "text-24px leading-[1.2]" : "text-28px leading-[1.15]"}`}
+              >
+                {t("cron.scheduledTasks")}
+              </h1>
+              <div className="flex items-center gap-8px">
                 {!isMobile && (
-                  <AionSearchInput
+                  <Input.Search
                     className="shrink-0 w-[200px] hidden md:flex"
                     placeholder={t("cron.page.searchPlaceholder")}
                     value={searchQuery}
@@ -174,9 +174,14 @@ export function AionAutomationPage({ port, presets, workspaceId }: Props) {
                 >
                   {t("cron.page.newTask")}
                 </Button>
-              </>
-            }
-          />
+              </div>
+            </div>
+            <p
+              className={`m-0 w-full text-t-secondary ${isMobile ? "text-13px leading-20px" : "text-14px leading-22px"}`}
+            >
+              {t("cron.page.description")}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -306,7 +311,6 @@ export function AionAutomationPage({ port, presets, workspaceId }: Props) {
       </div>
 
       <AionModal
-        variant="standard"
         header={{ title: t("cron.page.createTask"), showClose: true }}
         visible={dialogVisible}
         onCancel={() => setDialogVisible(false)}

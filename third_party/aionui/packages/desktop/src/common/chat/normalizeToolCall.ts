@@ -157,7 +157,6 @@ export function normalizeAcpToolCall(message: IMessageAcpToolCall): NormalizedTo
   if (Array.isArray(update.content) && update.content.length) {
     output = update.content
       .map((item) => {
-        if (typeof item !== 'object' || item === null) return '';
         if (item.type === 'content' && item.content?.text) return item.content.text;
         if (item.type === 'diff' && 'path' in item) return `[diff] ${item.path}`;
         return '';
@@ -192,8 +191,6 @@ function normalizeToolCallStatus(status?: string): NormalizedToolStatus {
       return 'error';
     case 'running':
       return 'running';
-    case 'canceled':
-      return 'canceled';
     default:
       return 'pending';
   }

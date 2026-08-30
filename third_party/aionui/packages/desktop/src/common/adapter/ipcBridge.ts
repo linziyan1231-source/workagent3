@@ -14,8 +14,7 @@
 
 import type { IConfirmation } from '@/common/chat/chatLib';
 import type { AcpSlashCommandApiItem } from '@/common/chat/slash/types';
-import { bridge } from '@/common/platform/bridge';
-import { buildListTasksPath } from './teamTaskPath';
+import { bridge } from '@office-ai/platform';
 import type { OpenDialogOptions } from 'electron';
 import type {
   ICssTheme,
@@ -35,9 +34,9 @@ import type {
   SetAssistantStateRequest,
   UpdateAssistantRequest,
 } from '../types/agent/assistantTypes';
+import type { PreviewHistoryTarget, PreviewSnapshotInfo } from '../types/office/preview';
 import type {
   EnsureConversationRuntimeResponse,
-  GetConfigOptionsResponse,
   SetConfigOptionRequest,
   SetConfigOptionResponse,
 } from '../types/platform/acpTypes';
@@ -52,41 +51,31 @@ import type {
 import type {
   ITeamAgentRemovedEvent,
   ITeamAgentRenamedEvent,
-  ITeamAgentRuntimeStatusEvent,
   ITeamAgentSpawnedEvent,
   ITeamAgentStatusEvent,
-  ITeamActivityPage,
   ITeamChildTurnEvent,
   ITeamCreatedEvent,
   ITeamListChangedEvent,
-  ITeamMailboxChangedEvent,
-  ITeamMailboxMessage,
+  ITeamMcpStatusEvent,
   ITeamRemovedEvent,
   ITeamRenamedEvent,
   ITeamRunAck,
   ITeamRunEvent,
   ITeamRunStateResponse,
   ITeamSessionChangedEvent,
-  ITeamSessionStatusChangedEvent,
-  ITeamSlotWorkChangedEvent,
   ITeamTaskChangedEvent,
-  ITeamTaskItem,
   ICancelTeamChildTurnParams,
   ICancelTeamRunParams,
-  IInterruptTeamAgentParams,
   IPauseTeamSlotParams,
   ISendTeamAgentMessageParams,
   ISendTeamMessageParams,
   ITeamTeammateMessageEvent,
-  ITeamInterruptAgentResponse,
   TTeam,
   TeamAssistant,
-  TeamContextResetResponse,
 } from '../types/team/teamTypes';
 import type {
   AutoUpdateReadyResult,
   AutoUpdateStatus,
-  InstallerLastFailureMarker,
   UpdateCheckRequest,
   UpdateCheckResult,
   UpdateDownloadCancelRequest,
@@ -96,8 +85,6 @@ import type {
 } from '../update/updateTypes';
 import type { AgentMetadata } from '@/renderer/utils/model/agentTypes';
 import type { Theme } from '@/common/theme/types';
-import type { AttachFolderRequest, ProjectDetailDto, ProjectEntryDto } from '@/common/types/project';
-import type { ChatFileRef, ContentEncoding } from '@/common/types/chatFile';
 import type { ProtocolDetectionRequest, ProtocolDetectionResponse } from '../utils/protocolDetector';
 import {
   buildCreateConversationBody,
@@ -112,13 +99,13 @@ import {
   httpPost,
   httpPut,
   httpRequest,
+  isBackendHttpError,
   stubProvider,
   withResponseMap,
   wsEmitter,
   wsMappedEmitter,
 } from './httpBridge';
 import { fromApiSearchResult, type ApiMessageSearchItem } from './searchMapper';
-import { fromApiSidebar, fromApiSidebarItems } from './sidebarMapper';
 import type { IAddTeamAssistantParams, ICreateTeamParams } from './teamMapper';
 import {
   fromBackendAssistant,
@@ -127,14 +114,11 @@ import {
   fromBackendTeamOptional,
   toBackendAssistant,
 } from './teamMapper';
+import { fromBackendCompareResult, type RawCompareResult } from './fileSnapshotMapper';
 import {
   absoluteToRelativePath,
-  fromBackendSkillFileNodes,
   fromBackendWorkspaceFlatFiles,
   fromBackendWorkspaceList,
-  resolveWebSkillFile,
-  resolveWebSkillRoot,
-  type RawSkillFileNode,
   type RawWorkspaceFlatFile,
 } from './workspaceMapper';
 
@@ -152,6 +136,7 @@ const httpGetClientSetting = <T>(key: string) => ({
 // ---------------------------------------------------------------------------
 // Shell — routed to POST /api/shell/*
 // ---------------------------------------------------------------------------
+
 export const shell = {
   openFile: httpPost<void, string>('/api/shell/open-file', (file_path) => ({ file_path })),
   showItemInFolder: httpPost<void, string>('/api/shell/show-item-in-folder', (file_path) => ({ file_path })),
@@ -186,87 +171,151 @@ export const assistants = {
 };
 
 // ---------------------------------------------------------------------------
-// Cross-session mentions — the `@@` picker's data source.
-// ---------------------------------------------------------------------------
-
-/** A conversation the user referenced with `@@`. Id only, deliberately: the
- *  name is mutable (an agent can rename a conversation), so a client-supplied
- *  name may already be stale. The backend resolves it from the id. */
-export type SessionRef = { id: string };
-
-export type SessionMentionTarget = {
-  id: string;
-  name: string;
-  /** Project name, for the picker's secondary line. Absent when unbound. */
-  project?: string;
-  modified_at: number;
-};
-
-export type SessionMentionableParams = {
-  /** Excluded from the results — you cannot `@@` the conversation you are in. */
-  current_conversation_id: string;
-  q?: string;
-  project_id?: string;
-  limit?: number;
-  cursor?: string;
-  /** Narrow to one conversation, to ask "is this id still mentionable?" and to
-   *  read back its CURRENT name. Used when mentioning a conversation off an
-   *  earlier message, where the chip's name may be stale and the target may have
-   *  become ineligible since. */
-  id?: string;
-};
-
-export type SessionMessageRateLimitedPayload = {
-  /** REQUIRED for filtering: the event bus fans out to every connection, so
-   *  dropping this would show one user's conversation names to everyone. */
-  user_id: string;
-  from_conversation_id: string;
-  from_name: string;
-  to_conversation_id: string;
-  to_name: string;
-  window_count: number;
-  gate: 'outbound' | 'pair';
-};
-
-export const sessionMessage = {
-  rateLimited: wsEmitter<SessionMessageRateLimitedPayload>('sessionMessage.rateLimited'),
-};
-
-export const sessionMention = {
-  list: httpGet<{ items: SessionMentionTarget[]; next_cursor?: string }, SessionMentionableParams>((p) => {
-    const params = new URLSearchParams({ current_conversation_id: p.current_conversation_id });
-    if (p.q) params.set('q', p.q);
-    if (p.project_id) params.set('project_id', p.project_id);
-    if (p.limit) params.set('limit', String(p.limit));
-    if (p.cursor) params.set('cursor', p.cursor);
-    if (p.id) params.set('id', p.id);
-    return `/api/session-messages/mentionable?${params.toString()}`;
-  }),
-};
-
-// ---------------------------------------------------------------------------
-// Auth — identity of the current client
-// ---------------------------------------------------------------------------
-
-export const auth = {
-  /**
-   * Which user id the backend attributes THIS client's requests to.
-   *
-   * Deliberately not `GET /api/auth/user`: the auth router builds its own
-   * `AuthState` whose identity mode is only ever `AionPro` or `UserSession`, so
-   * in local identity mode that endpoint answers 401 while every ordinary route
-   * is happily serving an injected default user. `/api/system/current-user`
-   * sits behind the ORDINARY auth middleware, so it reports the same identity
-   * the rest of the API scopes data by — in every identity mode.
-   *
-   * Desktop needs this at all because `AuthContext` keeps `user` null there.
-   */
-  currentUser: httpGet<{ id: string; username: string }>('/api/system/current-user'),
-};
-
-// ---------------------------------------------------------------------------
 // Conversation — REST + WS
 // ---------------------------------------------------------------------------
+
+export type PortalSharedConversation = {
+  id: string;
+  project_id: string;
+  project_name: string;
+  role: 'owner' | 'member';
+  name: string;
+  assistant_id: string;
+  assistant_backend: 'codex' | 'kimi';
+  model_id: string;
+  thinking_effort: string;
+  state: 'idle' | 'running' | 'recovering' | 'frozen';
+  last_ai_message_seq: number;
+  pinned: boolean;
+  pinned_at?: string | null;
+  hidden: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PortalSharedRuntimeOptions = {
+  backend: 'codex' | 'kimi';
+  models: string[];
+  thinking_efforts: string[];
+  default_model_id: string;
+  default_thinking_effort: string;
+  model_defaults: Record<string, string>;
+};
+
+export type PortalPrivateProject = { project_id: string; name: string };
+export type PortalSharedProject = {
+  id: string;
+  name: string;
+  source_kind: 'new' | 'copy' | 'migrate';
+  state: string;
+  role: 'owner' | 'member';
+  owner_name: string;
+  member_count: number;
+  hidden: boolean;
+  created_at: string;
+  updated_at: string;
+};
+export type PortalSharedUser = { id: number; username: string; display_name: string };
+export type PortalSharedMember = PortalSharedUser & { role: 'owner' | 'member' };
+export type PortalSharedInvite = {
+  id: string;
+  project_id: string;
+  project_name: string;
+  inviter_name: string;
+  status: 'pending';
+  created_at: string;
+  expires_at: string;
+};
+
+export type PortalSharedMention = { kind: 'assistant' | 'member' | 'file'; id: string };
+
+export type PortalSharedMessage = {
+  seq: number;
+  id: string;
+  conversation_id: string;
+  author_user_id?: number;
+  author_name: string;
+  kind: 'user' | 'assistant' | 'system';
+  body: string;
+  mentions: PortalSharedMention[];
+  attachments: string[];
+  created_at: string;
+  is_current_user: boolean;
+};
+
+const SHARED_CONVERSATION_PREFIX = 'shared:';
+const isSharedConversationID = (id: string) => id.startsWith(SHARED_CONVERSATION_PREFIX);
+const rawSharedConversationID = (id: string) => id.slice(SHARED_CONVERSATION_PREFIX.length);
+const sharedProjectIDFromPath = (value?: string): string | null => {
+  const match = value?.match(/^shared:\/\/([^/]+)(?:\/|$)/);
+  return match?.[1] ?? null;
+};
+const sharedRelativePath = (projectID: string, value?: string): string | undefined => {
+  if (value === undefined) return undefined;
+  const normalized = value.replaceAll('\\', '/');
+  const prefix = `shared://${projectID}`;
+  if (normalized === prefix) return '';
+  if (normalized.startsWith(`${prefix}/`)) return normalized.slice(prefix.length + 1);
+  return normalized;
+};
+const sharedFileRequest = <T>(
+  projectID: string,
+  operation: string,
+  fields: { path?: string; data?: string; new_name?: string } = {}
+) =>
+  httpRequest<T>('POST', '/api/portal/shared-files', {
+    project_id: projectID,
+    operation,
+    ...fields,
+    ...(fields.path !== undefined ? { path: sharedRelativePath(projectID, fields.path) } : {}),
+  });
+
+const fromPortalSharedConversation = (item: PortalSharedConversation): TChatConversation => ({
+  id: `${SHARED_CONVERSATION_PREFIX}${item.id}`,
+  name: item.name,
+  type: 'acp',
+  created_at: Date.parse(item.created_at),
+  modified_at: Date.parse(item.updated_at),
+  status: item.state === 'running' ? 'running' : 'finished',
+  runtime: {
+    state: item.state === 'running' ? 'running' : 'idle',
+    can_send_message: true,
+    has_task: item.state === 'running',
+    is_processing: item.state === 'running',
+    pending_confirmations: 0,
+    turn_id: null,
+  },
+  extra: {
+    backend: item.assistant_backend,
+    preset_assistant_id: item.assistant_id,
+    current_model_id: item.model_id,
+    thought_level: item.thinking_effort,
+    custom_workspace: true,
+    is_project_workspace: true,
+    workspace: `shared://${item.project_id}`,
+    shared_workspace: `shared://${item.project_id}`,
+    pinned: item.pinned,
+    pinned_at: item.pinned_at ? Date.parse(item.pinned_at) : undefined,
+    shared: {
+      conversation_id: item.id,
+      project_id: item.project_id,
+      project_name: item.project_name,
+      role: item.role,
+      assistant_id: item.assistant_id,
+      assistant_backend: item.assistant_backend,
+      model_id: item.model_id,
+      thinking_effort: item.thinking_effort,
+    },
+  },
+});
+
+const getSharedConversation = async (id: string): Promise<TChatConversation> => {
+  const result = await httpRequest<{ conversation: PortalSharedConversation }>(
+    'GET',
+    `/api/portal/shared-conversations?id=${encodeURIComponent(rawSharedConversationID(id))}`
+  );
+  return fromPortalSharedConversation(result.conversation);
+};
 
 export const conversation = {
   create: withResponseMap(
@@ -290,10 +339,16 @@ export const conversation = {
     }),
     fromApiConversation
   ),
-  get: withResponseMap(
-    httpGet<TChatConversation, { id: string }>((p) => `/api/conversations/${p.id}`, { silentStatuses: [404] }),
-    fromApiConversation
-  ),
+  get: {
+    provider: () => {},
+    invoke: (async (p: { id: string }) => {
+      if (isSharedConversationID(p.id)) return getSharedConversation(p.id);
+      const raw = await httpRequest<TChatConversation>('GET', `/api/conversations/${p.id}`, undefined, {
+        silentStatuses: [404],
+      });
+      return fromApiConversation(raw);
+    }) as (p: { id: string }) => Promise<TChatConversation>,
+  },
   getAssociateConversation: withResponseMap(
     httpGet<TChatConversation[], { conversation_id: string }>(
       (p) => `/api/conversations/${p.conversation_id}/associated`
@@ -305,95 +360,137 @@ export const conversation = {
     (list) => list.map(fromApiConversation)
   ),
   remove: httpDelete<boolean, { id: string }>((p) => `/api/conversations/${p.id}`),
-  // `name_source` qualifies a `name` change: 'user' = explicit rename (backend
-  // locks the name against agent-generated titles; also the default when absent),
-  // 'auto' = frontend-derived default title (stays agent-overwritable).
-  update: httpPatch<
-    boolean,
-    { id: string; updates: Partial<TChatConversation> & { name_source?: 'user' | 'auto' }; merge_extra?: boolean }
-  >(
-    (p) => `/api/conversations/${p.id}`,
-    (p) => {
+  update: {
+    provider: () => {},
+    invoke: (async (p: { id: string; updates: Partial<TChatConversation>; merge_extra?: boolean }) => {
+      if (isSharedConversationID(p.id)) {
+        const extra = p.updates.extra as Record<string, unknown> | undefined;
+        const body: Record<string, unknown> = { conversation_id: rawSharedConversationID(p.id) };
+        if (typeof p.updates.name === 'string') body.name = p.updates.name;
+        if (typeof extra?.pinned === 'boolean') body.pinned = extra.pinned;
+        await httpRequest<{ conversation: PortalSharedConversation }>(
+          'PATCH',
+          '/api/portal/shared-conversations',
+          body
+        );
+        return true;
+      }
       const updates = p.updates as Record<string, unknown>;
       const { model: rawModel, ...rest } = updates;
       const model = toApiModelOptional(rawModel as TProviderWithModel | undefined);
-      return {
+      return httpRequest<boolean>('PATCH', `/api/conversations/${p.id}`, {
         ...rest,
         ...(model ? { model } : {}),
         merge_extra: p.merge_extra,
-      };
-    }
-  ),
+      });
+    }) as (p: { id: string; updates: Partial<TChatConversation>; merge_extra?: boolean }) => Promise<boolean>,
+  },
   reset: httpPost<void, IResetConversationParams>((p) => `/api/conversations/${p.id}/reset`),
-  /**
-   * Fork the conversation at a message (inclusive) into a new conversation.
-   * The backend session materializes on the fork's first open — callers should
-   * follow up with `ensureRuntime` on the returned id to surface failures
-   * eagerly. Error reasons carry stable `FORK_*` prefixes for i18n mapping.
-   */
   fork: withResponseMap(
-    httpPost<TChatConversation, { conversation_id: string; message_id: string }>(
+    httpPost<IForkConversationResult, IForkConversationParams>(
       (p) => `/api/conversations/${p.conversation_id}/fork`,
-      (p) => ({ message_id: p.message_id })
+      (p) => ({
+        message_id: p.message_id,
+        replacement_content: p.replacement_content,
+      })
     ),
-    fromApiConversation
+    (result) => ({ ...result, conversation: fromApiConversation(result.conversation) })
+  ),
+  steer: httpPost<ISteerConversationResult, ISteerConversationParams>(
+    (p) => `/api/conversations/${p.conversation_id}/steer`,
+    (p) => ({ content: p.input })
   ),
   ensureRuntime: httpPost<EnsureConversationRuntimeResponse, { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/runtime/ensure`,
-    () => undefined
-  ),
-  /**
-   * Restart the conversation's agent runtime: tears down the cached CLI agent
-   * process (cancelling any active turn) and respawns it, resuming the session
-   * when possible. Chat history is preserved. Used after external CLI config
-   * changes (e.g. a ccswitch channel switch) that a running process cannot
-   * pick up on its own.
-   */
-  restartRuntime: httpPost<EnsureConversationRuntimeResponse, { conversation_id: string }>(
-    (p) => `/api/conversations/${p.conversation_id}/runtime/restart`,
     () => undefined
   ),
   activeLease: httpPost<void, { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/active-lease`,
     () => undefined
   ),
-  stop: httpPost<{ runtime: TConversationRuntimeSummary }, { conversation_id: string; turn_id: string }>(
-    (p) => `/api/conversations/${p.conversation_id}/cancel`,
-    (p) => ({ turn_id: p.turn_id })
-  ),
-  killTerminal: httpPost<void, { conversation_id: string; terminal_id: string }>(
-    (p) => `/api/conversations/${p.conversation_id}/terminals/${encodeURIComponent(p.terminal_id)}/kill`,
-    () => undefined
-  ),
+  stop: {
+    provider: () => {},
+    invoke: (async (p: { conversation_id: string; turn_id: string }) => {
+      if (isSharedConversationID(p.conversation_id)) {
+        const result = await httpRequest<{ conversation: PortalSharedConversation }>(
+          'PATCH',
+          '/api/portal/shared-conversations',
+          { conversation_id: rawSharedConversationID(p.conversation_id), stop: true }
+        );
+        return { runtime: fromPortalSharedConversation(result.conversation).runtime! };
+      }
+      return httpRequest<{ runtime: TConversationRuntimeSummary }>(
+        'POST',
+        `/api/conversations/${p.conversation_id}/cancel`,
+        { turn_id: p.turn_id }
+      );
+    }) as (p: { conversation_id: string; turn_id: string }) => Promise<{ runtime: TConversationRuntimeSummary }>,
+  },
   activeCount: httpGet<{ count: number }>('/api/conversations/active-count'),
-  sendMessage: httpPost<ISendMessageResult, ISendMessageParams>(
-    (p) => `/api/conversations/${p.conversation_id}/messages`,
-    (p) => ({
-      content: p.input,
-      files: p.files,
-      // `@@` session references. Omitting this silently breaks the feature end
-      // to end: the backend's send-boundary resolver would always see an empty
-      // list and neither side would report an error.
-      sessions: p.sessions,
-      loading_id: p.loading_id,
-      inject_skills: p.inject_skills,
-    })
-  ),
+  sendMessage: {
+    provider: () => {},
+    invoke: (async (p: ISendMessageParams): Promise<ISendMessageResult> => {
+      if (isSharedConversationID(p.conversation_id)) {
+        const result = await httpRequest<{ message: PortalSharedMessage; ai_started: boolean }>(
+          'POST',
+          '/api/portal/shared-messages',
+          {
+            conversation_id: rawSharedConversationID(p.conversation_id),
+            body: p.input,
+            mentions: p.mentions ?? [],
+            attachments: p.files ?? [],
+          }
+        );
+        conversation.userCreated.emit({
+          conversation_id: p.conversation_id,
+          msg_id: result.message.id,
+          content: result.message.body,
+          position: 'right',
+          status: 'finish',
+          hidden: false,
+          created_at: Date.parse(result.message.created_at),
+          teammate_message: true,
+          sender_name: result.message.author_name,
+          sender_user_id: result.message.author_user_id ? String(result.message.author_user_id) : undefined,
+        });
+        return {
+          msg_id: result.message.id,
+          turn_id: '',
+          runtime: {
+            state: result.ai_started ? 'running' : 'idle',
+            can_send_message: true,
+            has_task: result.ai_started,
+            is_processing: result.ai_started,
+            pending_confirmations: 0,
+            turn_id: null,
+          },
+        };
+      }
+      const result = await httpRequest<ISendMessageResult>('POST', `/api/conversations/${p.conversation_id}/messages`, {
+        content: p.input,
+        files: p.files,
+        loading_id: p.loading_id,
+        inject_skills: p.inject_skills,
+      });
+      // The websocket notification can be lost when a browser connection is
+      // half-open. The HTTP acknowledgement is authoritative enough to show
+      // the user's own message immediately; a later websocket event merges by
+      // msg_id instead of duplicating it.
+      conversation.userCreated.emit({
+        conversation_id: p.conversation_id,
+        msg_id: result.msg_id,
+        content: p.input,
+        position: 'right',
+        status: 'finish',
+        hidden: false,
+        created_at: Date.now(),
+      });
+      return result;
+    }) as (p: ISendMessageParams) => Promise<ISendMessageResult>,
+  },
   getSlashCommands: httpGet<AcpSlashCommandApiItem[], { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/slash-commands`
   ),
-  // Latest context-usage snapshot (ACP UsageUpdate shape: tokens in context /
-  // window size / cumulative cost, with per-turn counters under _meta).
-  // Null until the agent reports usage.
-  getUsage: httpGet<
-    {
-      used: number;
-      size: number;
-      cost?: { amount: number; currency: string };
-      _meta?: Record<string, unknown>;
-    } | null,
-    { conversation_id: string }
-  >((p) => `/api/conversations/${p.conversation_id}/usage`),
   askSideQuestion: httpPost<ConversationSideQuestionResult, { conversation_id: string; question: string }>(
     (p) => `/api/conversations/${p.conversation_id}/side-question`,
     (p) => ({ question: p.question })
@@ -401,13 +498,6 @@ export const conversation = {
   confirmMessage: httpPost<void, IConfirmMessageParams>(
     (p) => `/api/conversations/${p.conversation_id}/confirmations/${encodeURIComponent(p.call_id)}/confirm`,
     (p) => ({ msg_id: p.msg_id, data: p.confirm_key })
-  ),
-  // Dedicated answer channel for the structured question card (AskUserQuestion)
-  // — question answers must not ride the permission confirm endpoint
-  // (2026-08-05 ruling). Send either answers[] or decline:true, never both.
-  answerAsk: httpPost<void, IAnswerAskParams>(
-    (p) => `/api/conversations/${p.conversation_id}/asks/${encodeURIComponent(p.request_id)}/answer`,
-    (p) => (p.decline ? { decline: true } : { answers: p.answers ?? [] })
   ),
   listArtifacts: httpGet<IConversationArtifact[], { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/artifacts`
@@ -420,32 +510,19 @@ export const conversation = {
     (p) => ({ status: p.status })
   ),
   responseStream: wsEmitter<IResponseMessage>('message.stream'),
+  runtimeChanged: wsEmitter<IConversationRuntimeChangedEvent>('runtime.changed'),
   userCreated: wsEmitter<{
     conversation_id: string;
     msg_id: string;
-    /** Present when the send request carried a client-generated id, letting
-     * callers correlate this row with the outgoing send without matching on
-     * text/time. Not the canonical id — `msg_id` (the server-assigned id) is
-     * what the message list keys on. */
-    client_msg_id?: string;
     content: string;
     position: 'right';
-    /** 'pending' for a message delivered mid-turn that the agent hasn't
-     * consumed yet (see `message.statusChanged`); 'finish' otherwise. */
-    status: 'finish' | 'pending';
+    status: 'finish';
     hidden: boolean;
     created_at: number;
+    teammate_message?: boolean;
+    sender_name?: string;
+    sender_user_id?: string;
   }>('message.userCreated'),
-  /** Fired when the agent actually consumes a mid-turn-delivered message
-   * (claude command_lifecycle Started; codex synthetic receipt). Flips the
-   * message row from 'pending' to 'finish'; correlate by `msg_id`, never by
-   * text/time. */
-  statusChanged: wsEmitter<{
-    user_id: string;
-    conversation_id: string;
-    msg_id: string;
-    status: 'finish' | 'pending' | 'error';
-  }>('message.statusChanged'),
   artifactStream: wsEmitter<IConversationArtifact>('conversation.artifact'),
   turnCompleted: wsMappedEmitter<IConversationTurnCompletedEvent>('turn.completed', (raw) => {
     const r = raw as Record<string, unknown>;
@@ -472,9 +549,6 @@ export const conversation = {
       is_processing: (rawRuntime.is_processing ?? rawRuntime.isProcessing ?? false) as boolean,
       pending_confirmations: (rawRuntime.pending_confirmations ?? rawRuntime.pendingConfirmations ?? 0) as number,
       turn_id: (rawRuntime.turn_id ?? rawRuntime.turnId ?? null) as string | null,
-      supports_midturn_delivery: (rawRuntime.supports_midturn_delivery ??
-        rawRuntime.supportsMidturnDelivery ??
-        false) as boolean,
     };
     const rawModel = (r.model ?? {}) as Record<string, unknown>;
     const model: IConversationTurnCompletedEvent['model'] = {
@@ -503,12 +577,23 @@ export const conversation = {
   getWorkspace: {
     provider: () => {},
     invoke: (async (p: { conversation_id: string; workspace: string; path: string; search?: string }) => {
+      const sharedProjectID = sharedProjectIDFromPath(p.workspace);
+      if (sharedProjectID) {
+        const raw = await sharedFileRequest<Array<{ name: string; type: string }>>(sharedProjectID, 'dir', {
+          path: p.path,
+        });
+        return fromBackendWorkspaceList(raw, p.workspace, p.path.replace(`${p.workspace}/`, ''));
+      }
       const rel = absoluteToRelativePath(p.path, p.workspace);
       const url = `/api/conversations/${p.conversation_id}/workspace?path=${encodeURIComponent(rel)}${p.search ? `&search=${encodeURIComponent(p.search)}` : ''}`;
       const raw = await httpRequest<Array<{ name: string; type: string }>>('GET', url);
       return fromBackendWorkspaceList(raw, p.workspace, rel);
     }) as (p: { conversation_id: string; workspace: string; path: string; search?: string }) => Promise<IDirOrFile[]>,
   },
+  responseSearchWorkSpace: stubProvider<void, { file: number; dir: number; match?: IDirOrFile }>(
+    'responseSearchWorkSpace',
+    undefined as unknown as void
+  ),
   confirmation: {
     add: wsEmitter<IConfirmation<unknown> & { conversation_id: string }>('confirmation.add'),
     update: wsEmitter<IConfirmation<unknown> & { conversation_id: string }>('confirmation.update'),
@@ -537,50 +622,6 @@ export const runtime = {
 };
 
 // ---------------------------------------------------------------------------
-// Project Explorer control plane — routed to /api/projects/* (HTTP; the data
-// plane is the WS fs/* monitor). See explorer-stage3 HTTP contract.
-// ---------------------------------------------------------------------------
-
-export const project = {
-  /** GET /api/projects/{id} → full project detail incl. all pe roots (entries). */
-  get: httpGet<ProjectDetailDto, { project_id: string }>((p) => `/api/projects/${encodeURIComponent(p.project_id)}`),
-  /**
-   * POST /api/projects/{id}/folders → attach a folder, returns the single new (or,
-   * for a subdir, the existing focused) entry. 409 `project_explorer_duplicate` /
-   * `project_explorer_overlap` surface via BackendHttpError.code.
-   */
-  /**
-   * POST /api/projects/{id}/resolve-ref → the strongest identity for a file.
-   *
-   * The explorer and a chat link describe the same file differently (`project` vs
-   * `local`), so anything keyed on the ref — tab identity, change subscriptions —
-   * would otherwise treat one file as two. This resolves a local path that lives
-   * under one of the project's roots into its project form.
-   *
-   * Always answers with a usable ref: `project` and `upload` come back untouched,
-   * and a path outside every root — or one that does not exist — is echoed back
-   * rather than raising, so a caller mid-way through opening a missing file still
-   * has something to render with. `upgraded` says whether it changed.
-   *
-   * The comparison stays server-side because case folding is a compile-time
-   * platform decision; comparing path strings here would miss matches on macOS and
-   * merge distinct files on Linux.
-   */
-  resolveRef: httpPost<{ file: ChatFileRef; upgraded: boolean }, { project_id: string; file: ChatFileRef }>(
-    (p) => `/api/projects/${encodeURIComponent(p.project_id)}/resolve-ref`,
-    (p) => ({ file: p.file })
-  ),
-  attachFolder: httpPost<ProjectEntryDto, { project_id: string } & AttachFolderRequest>(
-    (p) => `/api/projects/${encodeURIComponent(p.project_id)}/folders`,
-    (p) => (p.display_name ? { uri: p.uri, display_name: p.display_name } : { uri: p.uri })
-  ),
-  /** DELETE /api/projects/{id}/folders/{pe_id} → 204. Workspace entry is immutable (backend rejects). */
-  removeFolder: httpDelete<void, { project_id: string; pe_id: string }>(
-    (p) => `/api/projects/${encodeURIComponent(p.project_id)}/folders/${encodeURIComponent(p.pe_id)}`
-  ),
-};
-
-// ---------------------------------------------------------------------------
 // CDP status / config types (used by application, stays IPC)
 // ---------------------------------------------------------------------------
 
@@ -588,6 +629,12 @@ export interface ICdpStatus {
   enabled: boolean;
   port: number | null;
   startupEnabled: boolean;
+  instances: Array<{
+    pid: number;
+    port: number;
+    cwd: string;
+    startTime: number;
+  }>;
   configEnabled: boolean;
   isDevMode: boolean;
 }
@@ -609,7 +656,6 @@ export type RuntimeFailureKind =
   | 'unsupported_platform'
   | 'bundled_resource_missing'
   | 'bundled_resource_invalid'
-  | 'activation_io_failed'
   | 'unknown';
 
 export interface IRuntimeStatusScope {
@@ -691,32 +737,6 @@ export const application = {
   setZoomFactor: bridge.buildProvider<number, { factor: number }>('app.set-zoom-factor'),
   getCdpStatus: bridge.buildProvider<IBridgeResponse<ICdpStatus>, void>('app.get-cdp-status'),
   updateCdpConfig: bridge.buildProvider<IBridgeResponse<ICdpConfig>, Partial<ICdpConfig>>('app.update-cdp-config'),
-  /**
-   * 清空应用内浏览器的登录态与缓存（cookie / localStorage / 缓存）。
-   * 登录态是全局共享的，所以这是唯一的"退出所有网站登录"入口。
-   *
-   * Clear the in-app browser's sign-in state and cache (cookies / localStorage /
-   * caches). Sign-in state is globally shared, so this is the only way to sign out
-   * of every site the agent or user logged into.
-   */
-  clearBrowserData: bridge.buildProvider<IBridgeResponse<void>, void>('app.clear-browser-data'),
-  /**
-   * 渲染进程把侧边浏览器 webview 的 webContents id 报给主进程，用于把单目标 CDP 通道
-   * 附加到它。
-   *
-   * 为什么必须由渲染进程报：webview 的句柄只存在于渲染进程（webviewRef），主进程无法
-   * 凭空知道哪个 webContents 是「侧边浏览器」。主进程会校验 getType() === 'webview'，
-   * 所以即使这个通道被误用也无法拿主窗口去附加。
-   *
-   * The renderer reports the in-app browser webview's webContents id so the single-target
-   * CDP bridge can attach to it. It must come from the renderer because the webview handle
-   * only exists there (webviewRef); main cannot otherwise tell which WebContents is the
-   * in-app browser. Main validates getType() === 'webview', so even a misused call cannot
-   * attach to the main window.
-   */
-  reportBrowserWebContentsId: bridge.buildProvider<IBridgeResponse<void>, { webContentsId: number }>(
-    'app.report-browser-webcontents-id'
-  ),
   getStartOnBootStatus: bridge.buildProvider<IBridgeResponse<IStartOnBootStatus>, void>('app.get-start-on-boot-status'),
   setStartOnBoot: bridge.buildProvider<IBridgeResponse<IStartOnBootStatus>, { enabled: boolean }>(
     'app.set-start-on-boot'
@@ -739,9 +759,6 @@ export const application = {
 export const update = {
   open: bridge.buildEmitter<{ source?: 'menu' | 'about' | 'tray' }>('update.open'),
   check: bridge.buildProvider<IBridgeResponse<UpdateCheckResult>, UpdateCheckRequest>('update.check'),
-  consumeInstallerLastFailure: bridge.buildProvider<IBridgeResponse<InstallerLastFailureMarker | null>, void>(
-    'update.installer-last-failure.consume'
-  ),
   download: bridge.buildProvider<IBridgeResponse<UpdateDownloadResult>, UpdateDownloadRequest>('update.download'),
   cancelDownload: bridge.buildProvider<IBridgeResponse, UpdateDownloadCancelRequest>('update.download.cancel'),
   downloadProgress: bridge.buildEmitter<UpdateDownloadProgressEvent>('update.download.progress'),
@@ -762,144 +779,125 @@ export const autoUpdate = {
 };
 
 // ---------------------------------------------------------------------------
-// Dialog — native IPC picker on Electron, server-side picker on WebUI
+// Dialog — stays IPC (native file picker)
 // ---------------------------------------------------------------------------
 
-export type ShowOpenOptions =
-  | { defaultPath?: string; properties?: OpenDialogOptions['properties']; filters?: OpenDialogOptions['filters'] }
-  | undefined;
-
-export type ShowOpenHandler = (options: ShowOpenOptions) => Promise<string[] | undefined>;
-
-/**
- * `show-open` is an Electron-only IPC channel: on WebUI the bridge speaks over a
- * WebSocket whose server side has no provider for it, so an invoke would hang
- * forever with no rejection — every directory/file picker silently does nothing.
- *
- * The renderer registers a server-side picker here during startup. Electron is
- * unaffected: `window.electronAPI` is present there, so the native dialog wins.
- */
-let webShowOpenHandler: ShowOpenHandler | null = null;
-
-export const registerWebShowOpenHandler = (handler: ShowOpenHandler | null): void => {
-  webShowOpenHandler = handler;
-};
-
-const nativeShowOpen = bridge.buildProvider<string[] | undefined, ShowOpenOptions>('show-open');
-
-/** Detect Electron at call time because this adapter is shared by Electron and WebUI renderers. */
-const isElectronRenderer = (): boolean =>
-  typeof window !== 'undefined' && Boolean((window as { electronAPI?: unknown }).electronAPI);
-
 export const dialog = {
-  showOpen: {
-    provider: nativeShowOpen.provider,
-    invoke: ((options?: ShowOpenOptions) => {
-      if (!isElectronRenderer() && webShowOpenHandler) {
-        return webShowOpenHandler(options);
-      }
-      return nativeShowOpen.invoke(options);
-    }) as typeof nativeShowOpen.invoke,
-  },
+  showOpen: bridge.buildProvider<
+    string[] | undefined,
+    | { defaultPath?: string; properties?: OpenDialogOptions['properties']; filters?: OpenDialogOptions['filters'] }
+    | undefined
+  >('show-open'),
 };
 
 // ---------------------------------------------------------------------------
 // File System — routed to /api/fs/* and /api/skills/*
 // ---------------------------------------------------------------------------
 
-export type SkillFileNode = {
-  name: string;
-  relativePath: string;
-  type: 'directory' | 'file';
-  children?: SkillFileNode[];
-};
-
-// Keep both transports available: Electron owns dedicated skill-file IPC channels,
-// while WebUI must use the backend's workspace-scoped filesystem endpoints.
-const webListSkillFiles = httpPost<RawSkillFileNode[], { dir: string; root: string }>('/api/fs/dir');
-const webReadSkillFile = httpPost<string | null, { path: string; workspace: string }>('/api/fs/read');
-const nativeListSkillFiles = bridge.buildProvider<SkillFileNode[], { skill_location: string }>('skills.files.list');
-const nativeReadSkillFile = bridge.buildProvider<string, { skill_location: string; relative_path: string }>(
-  'skills.files.read'
-);
-
-/** Raw metadata as the backend serializes it (snake_case). */
-type RawFileMetadata = {
-  name: string;
-  path: string;
-  size: number;
-  type: string;
-  last_modified: number;
-  is_directory?: boolean;
-};
-
-/** Map backend snake_case metadata to the camelCase {@link IFileMetadata}. */
-function fromBackendFileMetadata(raw: RawFileMetadata): IFileMetadata {
-  return {
-    name: raw.name,
-    path: raw.path,
-    size: raw.size,
-    type: raw.type,
-    lastModified: raw.last_modified,
-    isDirectory: raw.is_directory,
-  };
-}
-
 export const fs = {
-  getFilesByDir: httpPost<Array<IDirOrFile>, { dir: string; root: string }>('/api/fs/dir'),
-  // Reveal a project-scoped entry in the OS file manager (Finder/Explorer).
-  // The backend resolves the pe-ref to an absolute path (resolve_reference) and
-  // calls shell.showItemInFolder — the front end never builds the absolute path
-  // (avoids the Windows verbatim `\\?\` pitfall). Electron-only at the call site.
-  reveal: httpPost<void, { pe_id: string; relative_path: string }>('/api/fs/reveal'),
-  // Copy a project-scoped entry's absolute device path to the OS clipboard, for
-  // the Explorer "copy absolute path" action. Mirrors reveal: the backend resolves
-  // the path AND writes the clipboard itself, returning void — the front end never
-  // receives the absolute path. Electron desktop-only (a remote WebUI must not use
-  // it). Errors come back as codes only, never a message containing a path.
-  copyAbsolutePath: httpPost<void, { pe_id: string; relative_path: string }>('/api/fs/copy-absolute-path'),
-  // Open a file in the OS default application, addressed by ChatFileRef so it
-  // works for all three ref kinds (project / local / upload). The backend
-  // resolves the ref and shells out; the front end never receives an absolute
-  // path — errors come back as codes only (FILE_NOT_FOUND / REVEAL_FAILED /
-  // INTERNAL_ERROR), never a message containing a path. This is the escape hatch
-  // for tabs that cannot be previewed (oversized, unsupported), including
-  // explorer-opened files that deliberately carry no file_path.
-  openSystem: httpPost<void, { file: ChatFileRef }>('/api/fs/open-system'),
-  listWorkspaceFiles: withResponseMap(
-    httpPost<Array<RawWorkspaceFlatFile>, { root: string }>('/api/fs/list'),
-    fromBackendWorkspaceFlatFiles
-  ),
-  getImageBase64: httpPost<string | null, { path: string; workspace?: string }>('/api/fs/image-base64'),
+  getFilesByDir: {
+    provider: () => {},
+    invoke: (async (p: { dir: string; root: string }) => {
+      const projectID = sharedProjectIDFromPath(p.root);
+      return projectID
+        ? sharedFileRequest<Array<IDirOrFile>>(projectID, 'dir', { path: p.dir })
+        : httpRequest<Array<IDirOrFile>>('POST', '/api/fs/dir', p);
+    }) as (p: { dir: string; root: string }) => Promise<Array<IDirOrFile>>,
+  },
+  listWorkspaceFiles: {
+    provider: () => {},
+    invoke: (async (p: { root: string }) => {
+      const projectID = sharedProjectIDFromPath(p.root);
+      const raw = projectID
+        ? await sharedFileRequest<Array<RawWorkspaceFlatFile>>(projectID, 'list')
+        : await httpRequest<Array<RawWorkspaceFlatFile>>('POST', '/api/fs/list', p);
+      return fromBackendWorkspaceFlatFiles(raw);
+    }) as (p: { root: string }) => Promise<ReturnType<typeof fromBackendWorkspaceFlatFiles>>,
+  },
+  getImageBase64: {
+    provider: () => {},
+    invoke: (async (p: { path: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<string | null>(projectID, 'image-base64', { path: p.path })
+        : httpRequest<string | null>('POST', '/api/fs/image-base64', p);
+    }) as (p: { path: string; workspace?: string }) => Promise<string | null>,
+  },
   fetchRemoteImage: httpPost<string, { url: string }>('/api/fs/fetch-remote-image'),
-  readFile: httpPost<string | null, { path: string; workspace?: string }>('/api/fs/read'),
-  writeFile: httpPost<boolean, { path: string; data: string; workspace?: string }>('/api/fs/write'),
-  getFileMetadata: httpPost<IFileMetadata, { path: string; workspace?: string }>('/api/fs/metadata'),
-  // ── ChatFileRef content endpoints (PR-2: preview I/O by ref identity) ──────
-  // Read a file addressed by ChatFileRef; `encoding` selects text (utf8) vs image
-  // data URL (dataurl) vs raw base64. Backend: POST /api/fs/content → String.
-  readContent: httpPost<string, { file: ChatFileRef; encoding: ContentEncoding }>('/api/fs/content'),
-  // Write a file addressed by ChatFileRef. Optimistic concurrency: when `ifMatch`
-  // (last-known mtime ms) is set it travels as the `If-Match` header, and a stale
-  // value yields 409 Conflict (surfaced as BackendHttpError.status). PUT /api/fs/content.
-  writeContent: httpPut<boolean, { file: ChatFileRef; data: string; ifMatch?: number }>(
-    '/api/fs/content',
-    ({ file, data }) => ({ file, data }),
-    ({ ifMatch }) => (ifMatch != null ? { 'If-Match': String(ifMatch) } : undefined)
-  ),
-  // Metadata for a ChatFileRef-addressed file; backend snake_case is mapped to the
-  // camelCase IFileMetadata the preview layer reads. POST /api/fs/content/metadata.
-  getContentMetadata: withResponseMap(
-    httpPost<RawFileMetadata, { file: ChatFileRef }>('/api/fs/content/metadata'),
-    fromBackendFileMetadata
-  ),
-  // Import OS files into a project entry's directory (A-paste). `target` is the
-  // drop-target pe + relative dir ('' = its root). Name conflicts are reported in
-  // `failed_files` (not overwritten); directories are rejected there this round.
-  copyFilesToProject: httpPost<
-    { copied_files: string[]; failed_files: Array<{ path: string; reason: string }> },
-    { file_paths: string[]; target: { pe_id: string; relative_path: string }; source_root?: string }
+  readFile: {
+    provider: () => {},
+    invoke: (async (p: { path: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<string | null>(projectID, 'read', { path: p.path })
+        : httpRequest<string | null>('POST', '/api/fs/read', p);
+    }) as (p: { path: string; workspace?: string }) => Promise<string | null>,
+  },
+  readFileBuffer: {
+    provider: () => {},
+    invoke: (async (p: { path: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<string | null>(projectID, 'read-buffer', { path: p.path })
+        : httpRequest<string | null>('POST', '/api/fs/read-buffer', p);
+    }) as (p: { path: string; workspace?: string }) => Promise<string | null>,
+  },
+  createTempFile: httpPost<string, { file_name: string }>('/api/fs/temp'),
+  writeFile: {
+    provider: () => {},
+    invoke: (async (p: { path: string; data: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<boolean>(projectID, 'write', { path: p.path, data: p.data })
+        : httpRequest<boolean>('POST', '/api/fs/write', p);
+    }) as (p: { path: string; data: string; workspace?: string }) => Promise<boolean>,
+  },
+  createZip: httpPost<
+    boolean,
+    {
+      path: string;
+      workspace?: string;
+      source_root?: string;
+      request_id?: string;
+      files: Array<{
+        name: string;
+        content?: string | Uint8Array;
+        source_path?: string;
+      }>;
+    }
+  >('/api/fs/zip'),
+  cancelZip: httpPost<boolean, { request_id: string }>('/api/fs/zip/cancel'),
+  getFileMetadata: {
+    provider: () => {},
+    invoke: (async (p: { path: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<IFileMetadata>(projectID, 'metadata', { path: p.path })
+        : httpRequest<IFileMetadata>('POST', '/api/fs/metadata', p);
+    }) as (p: { path: string; workspace?: string }) => Promise<IFileMetadata>,
+  },
+  copyFilesToWorkspace: httpPost<
+    { copied_files: string[]; failed_files?: Array<{ path: string; error: string }> },
+    { file_paths: string[]; workspace: string; source_root?: string }
   >('/api/fs/copy'),
+  removeEntry: {
+    provider: () => {},
+    invoke: (async (p: { path: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<void>(projectID, 'remove', { path: p.path })
+        : httpRequest<void>('POST', '/api/fs/remove', p);
+    }) as (p: { path: string; workspace?: string }) => Promise<void>,
+  },
+  renameEntry: {
+    provider: () => {},
+    invoke: (async (p: { path: string; new_name: string; workspace?: string }) => {
+      const projectID = sharedProjectIDFromPath(p.workspace) ?? sharedProjectIDFromPath(p.path);
+      return projectID
+        ? sharedFileRequest<{ new_path: string }>(projectID, 'rename', { path: p.path, new_name: p.new_name })
+        : httpRequest<{ new_path: string }>('POST', '/api/fs/rename', p);
+    }) as (p: { path: string; new_name: string; workspace?: string }) => Promise<{ new_path: string }>,
+  },
   readBuiltinRule: httpPost<string, { file_name: string }>('/api/skills/builtin-rule'),
   readBuiltinSkill: httpPost<string, { file_name: string }>('/api/skills/builtin-skill'),
   readAssistantRule: httpPost<string, { assistant_id: string; locale?: string }>('/api/skills/assistant-rule/read'),
@@ -1001,40 +999,25 @@ export const fs = {
   ),
   enableSkillsMarket: httpPost<void, void>('/api/skills/market/enable'),
   disableSkillsMarket: httpPost<void, void>('/api/skills/market/disable'),
-  listSkillFiles: {
-    provider: nativeListSkillFiles.provider,
-    invoke: async ({ skill_location }: { skill_location: string }) => {
-      if (isElectronRenderer()) return nativeListSkillFiles.invoke({ skill_location });
-
-      // The generic WebUI directory endpoint returns backend-shaped nodes, so
-      // normalize them to the same contract consumed from native IPC.
-      const root = resolveWebSkillRoot(skill_location);
-      const nodes = await webListSkillFiles.invoke({ dir: root, root });
-      return fromBackendSkillFileNodes(nodes);
-    },
-  },
-  readSkillFile: {
-    provider: nativeReadSkillFile.provider,
-    invoke: async ({ skill_location, relative_path }: { skill_location: string; relative_path: string }) => {
-      if (isElectronRenderer()) return nativeReadSkillFile.invoke({ skill_location, relative_path });
-      const content = await webReadSkillFile.invoke(resolveWebSkillFile(skill_location, relative_path));
-      if (content === null) throw new Error('Skill file could not be read');
-      return content;
-    },
-  },
 };
 
 // ---------------------------------------------------------------------------
 // File Watch — routed to /api/fs/watch/*
 // ---------------------------------------------------------------------------
 
-// Note for whoever next compares a watch event's path against a local one: the
-// workspace Office watch removed here carried the repo's only macOS
-// `/private/var` → `/var` (and `/private/tmp` → `/tmp`) normalizer. macOS reports
-// watch events under the `/private` symlink while a workspace path usually is not,
-// so a naive string comparison silently never matches on that platform. The fold
-// survives as `normalizeWatchPath` in `renderer/utils/workspace/workspace.ts` —
-// use it on both sides of the comparison.
+export const fileWatch = {
+  startWatch: httpPost<void, { file_path: string }>('/api/fs/watch/start'),
+  stopWatch: httpPost<void, { file_path: string }>('/api/fs/watch/stop'),
+  stopAllWatches: httpPost<void, void>('/api/fs/watch/stop-all'),
+  fileChanged: wsEmitter<{ file_path: string; event_type: string }>('fileWatch.fileChanged'),
+};
+
+// Workspace Office file watch
+export const workspaceOfficeWatch = {
+  start: httpPost<void, { workspace: string }>('/api/fs/office-watch/start'),
+  stop: httpPost<void, { workspace: string }>('/api/fs/office-watch/stop'),
+  fileAdded: wsEmitter<{ file_path: string; workspace: string }>('workspaceOfficeWatch.fileAdded'),
+};
 
 // File streaming updates (real-time content push when agent writes)
 export const fileStream = {
@@ -1045,6 +1028,43 @@ export const fileStream = {
     relative_path: string;
     operation: 'write' | 'delete';
   }>('fileStream.contentUpdate'),
+};
+
+// File snapshot providers
+export const fileSnapshot = {
+  init: httpPost<import('@/common/types/platform/fileSnapshot').SnapshotInfo, { workspace: string }>(
+    '/api/fs/snapshot/init'
+  ),
+  compare: withResponseMap(
+    httpPost<RawCompareResult, { workspace: string }>('/api/fs/snapshot/compare'),
+    fromBackendCompareResult
+  ),
+  getBaselineContent: httpPost<string | null, { workspace: string; file_path: string }>('/api/fs/snapshot/baseline'),
+  getInfo: httpPost<import('@/common/types/platform/fileSnapshot').SnapshotInfo, { workspace: string }>(
+    '/api/fs/snapshot/info'
+  ),
+  dispose: httpPost<void, { workspace: string }>('/api/fs/snapshot/dispose'),
+  stageFile: httpPost<void, { workspace: string; file_path: string }>('/api/fs/snapshot/stage'),
+  stageAll: httpPost<void, { workspace: string }>('/api/fs/snapshot/stage-all'),
+  unstageFile: httpPost<void, { workspace: string; file_path: string }>('/api/fs/snapshot/unstage'),
+  unstageAll: httpPost<void, { workspace: string }>('/api/fs/snapshot/unstage-all'),
+  discardFile: httpPost<
+    void,
+    {
+      workspace: string;
+      file_path: string;
+      operation: import('@/common/types/platform/fileSnapshot').FileChangeOperation;
+    }
+  >('/api/fs/snapshot/discard'),
+  resetFile: httpPost<
+    void,
+    {
+      workspace: string;
+      file_path: string;
+      operation: import('@/common/types/platform/fileSnapshot').FileChangeOperation;
+    }
+  >('/api/fs/snapshot/reset'),
+  getBranches: httpPost<string[], { workspace: string }>('/api/fs/snapshot/branches'),
 };
 
 // ---------------------------------------------------------------------------
@@ -1067,6 +1087,231 @@ export const google = {
     { isSubscriber: boolean; tier?: string; lastChecked: number; message?: string },
     { proxy?: string }
   >('/api/google/subscription-status'),
+};
+
+// ---------------------------------------------------------------------------
+// Portal — authenticated user operations (WebUI only)
+// ---------------------------------------------------------------------------
+
+export type PortalUsageWindow = {
+  limit_usd: string;
+  used_usd: string;
+  remaining_usd: string;
+  reset_at: string;
+};
+
+export type PortalUsageCountWindow = {
+  used: number;
+  limit: number;
+  reset_at: string;
+};
+
+export type PortalUsageProvider = {
+  kind: 'chatgpt' | 'kimi';
+  label: string;
+  daily: PortalUsageWindow;
+  weekly: PortalUsageWindow;
+  pro?: PortalUsageCountWindow;
+};
+
+export type PortalStorageUsage = {
+  personal: PortalStorageBucketUsage;
+  shared: PortalStorageBucketUsage;
+};
+
+export type PortalStorageBucketUsage = {
+  limit_bytes: number;
+  used_bytes: number;
+  remaining_bytes: number;
+  measured_at: string;
+};
+
+export type PortalUsageSummary = {
+  as_of: string;
+  providers: PortalUsageProvider[];
+  storage?: PortalStorageUsage;
+};
+
+export type PortalNotification = {
+  id: string;
+  title?: string;
+  message: string;
+  published_at?: string;
+};
+
+export type PortalNotificationFeed = {
+  notifications: PortalNotification[];
+};
+
+export type PortalManagedUser = {
+  username: string;
+  windows_username: string;
+  windows_sid: string;
+  enabled: boolean;
+  created_at: string;
+  last_login_at?: string;
+  resource_usage?: PortalUsageSummary;
+  resource_usage_unavailable?: boolean;
+  kimi_datasource?: PortalKimiDatasourceGrant;
+};
+
+export type PortalKimiDatasourceGrant = {
+  enabled: boolean;
+  allowed_sources: string[];
+  daily_limit: number;
+  monthly_limit: number;
+  daily_used: number;
+  monthly_used: number;
+};
+
+export type PortalManagedUsersResponse = {
+  success: boolean;
+  users: PortalManagedUser[];
+  kimi_datasource_sources?: string[];
+};
+
+export type PortalManagedUserUsage = {
+  username: string;
+  resource_usage?: PortalUsageSummary;
+  resource_usage_unavailable?: boolean;
+};
+
+export type PortalManagedUsersUsageResponse = {
+  success: boolean;
+  users: PortalManagedUserUsage[];
+};
+
+export type PortalProfile = {
+  id: string;
+  username: string;
+  display_name: string;
+  collaboration_enabled: boolean;
+  collaboration_capable: boolean;
+};
+
+export type PortalSkillMarketEntry = {
+  id: string;
+  name: string;
+  description: string;
+  publisher: { username: string; display_name: string };
+  updated_at: string;
+  can_delete: boolean;
+};
+
+export type PortalProvisionJob = {
+  id: string;
+  username: string;
+  status: 'running' | 'succeeded' | 'failed';
+  percent: number;
+  step: string;
+  error_code?: string;
+  error_message?: string;
+};
+
+export const portal = {
+  getMyUsage: httpGet<PortalUsageSummary, void>('/api/portal/me/usage'),
+  getNotifications: httpGet<PortalNotificationFeed, void>('/api/portal/me/notifications'),
+  getProfile: httpGet<{ success: boolean; profile: PortalProfile }, void>('/api/portal/me/profile'),
+  updateProfile: httpPatch<
+    { success: boolean; profile: PortalProfile },
+    { display_name: string; collaboration_enabled: boolean }
+  >('/api/portal/me/profile'),
+  restartService: httpPost<{ success: boolean; reconnect_after_ms: number }, void>('/api/portal/me/restart-service'),
+  listSkillMarket: httpGet<{ success: boolean; skills: PortalSkillMarketEntry[] }, void>('/api/portal/skill-market'),
+  publishSkill: httpPost<{ success: boolean; skill: PortalSkillMarketEntry }, { skill_name: string }>(
+    '/api/portal/skill-market'
+  ),
+  installMarketSkill: httpPost<unknown, { id: string }>('/api/portal/skill-market/install'),
+  deleteMarketSkill: httpDelete<{ success: boolean }, { id: string }>(
+    (params) => `/api/portal/skill-market?id=${encodeURIComponent(params.id)}`
+  ),
+  listProjects: httpGet<{ projects: PortalPrivateProject[] }, void>('/api/portal/me/projects'),
+  createProject: httpPost<{ path: string }, { name: string }>('/api/portal/me/projects'),
+  renameProject: httpPatch<
+    { old_path: string; new_path: string; updated_conversations: number },
+    { path: string; name: string; force?: boolean }
+  >('/api/portal/me/projects'),
+  listSharedProjects: httpGet<{ projects: PortalSharedProject[] }, void>('/api/portal/shared-projects'),
+  listAllSharedProjects: httpGet<{ projects: PortalSharedProject[] }, void>(
+    '/api/portal/shared-projects?include_hidden=1'
+  ),
+  setSharedProjectHidden: httpPut<{ success: boolean }, { project_id: string; hidden: boolean }>(
+    '/api/portal/shared-projects/hidden'
+  ),
+  createSharedProject: httpPost<
+    { project: PortalSharedProject },
+    { name: string; source_kind: 'new' | 'copy' | 'migrate'; source_project_id?: string }
+  >('/api/portal/shared-projects'),
+  transferSharedProject: httpPost<{ project: PortalSharedProject }, { project_id: string; new_owner_user_id: number }>(
+    '/api/portal/shared-projects/transfer'
+  ),
+  createSharedConversation: httpPost<
+    { conversation: PortalSharedConversation },
+    {
+      project_id: string;
+      name: string;
+      assistant_id: string;
+      assistant_backend: 'codex' | 'kimi';
+      model_id: string;
+      thinking_effort: string;
+    }
+  >('/api/portal/shared-conversations'),
+  getSharedRuntimeOptions: httpGet<PortalSharedRuntimeOptions, { backend: 'codex' | 'kimi' }>(
+    ({ backend }) => `/api/portal/shared-runtime-options?backend=${encodeURIComponent(backend)}`
+  ),
+  updateSharedConversationModel: httpPatch<
+    { conversation: PortalSharedConversation },
+    { conversation_id: string; model_id?: string; thinking_effort?: string }
+  >('/api/portal/shared-conversations'),
+  listAllSharedConversations: httpGet<{ conversations: PortalSharedConversation[] }, void>(
+    '/api/portal/shared-conversations?include_hidden=1'
+  ),
+  setSharedConversationHidden: httpPatch<
+    { conversation: PortalSharedConversation },
+    { conversation_id: string; hidden: boolean }
+  >('/api/portal/shared-conversations'),
+  searchSharedUsers: httpGet<{ users: PortalSharedUser[] }, { q: string }>(
+    ({ q }) => `/api/portal/shared-users?q=${encodeURIComponent(q)}`
+  ),
+  createSharedInvite: httpPost<{ invite: unknown }, { project_id: string; target_user_id: number }>(
+    '/api/portal/shared-invites'
+  ),
+  listSharedInvites: httpGet<{ invites: PortalSharedInvite[] }, void>('/api/portal/shared-invites'),
+  acceptSharedInvite: httpPost<{ success: boolean }, { invite_id: string }>('/api/portal/shared-invites/accept'),
+  declineSharedInvite: httpPost<{ success: boolean }, { invite_id: string }>('/api/portal/shared-invites/decline'),
+  createSharedInviteLink: httpPost<{ token: string; expires_at: string }, { project_id: string }>(
+    '/api/portal/shared-invite-links'
+  ),
+  acceptSharedInviteLink: httpPost<{ project_id: string }, { token: string }>('/api/portal/shared-invite-links/accept'),
+  listSharedMembers: httpGet<{ members: PortalSharedMember[] }, { project_id: string }>(
+    ({ project_id }) => `/api/portal/shared-members?project_id=${encodeURIComponent(project_id)}`
+  ),
+  removeSharedMember: httpDelete<{ success: boolean }, { project_id: string; user_id: number }>(
+    '/api/portal/shared-members',
+    (params) => params
+  ),
+  leaveSharedProject: httpDelete<{ success: boolean }, { project_id: string }>(
+    '/api/portal/shared-members/leave',
+    (params) => params
+  ),
+  listManagedUsers: httpGet<PortalManagedUsersResponse, void>('/api/portal/admin/users'),
+  addManagedUser: httpPost<
+    { success: boolean; job: PortalProvisionJob },
+    { username: string; portal_password: string }
+  >('/api/portal/admin/users'),
+  getManagedUserJob: httpGet<{ success: boolean; job: PortalProvisionJob }, { id: string }>(
+    (params) => `/api/portal/admin/user-jobs?id=${encodeURIComponent(params.id)}`
+  ),
+  getManagedUsersUsage: httpGet<PortalManagedUsersUsageResponse, void>('/api/portal/admin/users/usage'),
+  disableManagedUser: httpPost<{ success: boolean }, { username: string }>('/api/portal/admin/users/disable'),
+  enableManagedUser: httpPost<{ success: boolean }, { username: string }>('/api/portal/admin/users/enable'),
+  resetManagedUserPassword: httpPost<{ success: boolean }, { username: string; portal_password: string }>(
+    '/api/portal/admin/users/reset-password'
+  ),
+  setManagedUserKimiDatasource: httpPost<
+    { success: boolean; kimi_datasource: PortalKimiDatasourceGrant },
+    { username: string; enabled: boolean; allowed_sources: string[]; daily_limit: number; monthly_limit: number }
+  >('/api/portal/admin/users/kimi-datasource'),
 };
 
 // ---------------------------------------------------------------------------
@@ -1360,44 +1605,88 @@ export type GetConversationMessagesParams = {
 };
 
 export const database = {
-  getConversationMessages: httpGet<
-    MessageCursorPage<import('@/common/chat/chatLib').TMessage>,
-    GetConversationMessagesParams
-  >((p) => {
-    const params = new URLSearchParams();
-    if (p.limit !== undefined) params.set('limit', String(p.limit));
-    if (p.before) params.set('before', p.before);
-    if (p.after) params.set('after', p.after);
-    if (p.anchor_message_id) params.set('anchor_message_id', p.anchor_message_id);
-    if (p.content_mode) params.set('content_mode', p.content_mode);
-    const qs = params.toString();
-    return `/api/conversations/${p.conversation_id}/messages${qs ? `?${qs}` : ''}`;
-  }),
+  getConversationMessages: {
+    provider: () => {},
+    invoke: (async (p: GetConversationMessagesParams) => {
+      if (!isSharedConversationID(p.conversation_id)) {
+        const params = new URLSearchParams();
+        if (p.limit !== undefined) params.set('limit', String(p.limit));
+        if (p.before) params.set('before', p.before);
+        if (p.after) params.set('after', p.after);
+        if (p.anchor_message_id) params.set('anchor_message_id', p.anchor_message_id);
+        if (p.content_mode) params.set('content_mode', p.content_mode);
+        const qs = params.toString();
+        return httpRequest<MessageCursorPage<import('@/common/chat/chatLib').TMessage>>(
+          'GET',
+          `/api/conversations/${p.conversation_id}/messages${qs ? `?${qs}` : ''}`
+        );
+      }
+      const params = new URLSearchParams({ conversation_id: rawSharedConversationID(p.conversation_id) });
+      if (p.limit !== undefined) params.set('limit', String(p.limit));
+      if (p.after) params.set('after', p.after);
+      const result = await httpRequest<{ messages: PortalSharedMessage[] }>(
+        'GET',
+        `/api/portal/shared-messages?${params.toString()}`
+      );
+      const items: import('@/common/chat/chatLib').TMessage[] = result.messages.map((message) => ({
+        id: message.id,
+        msg_id: message.id,
+        conversation_id: p.conversation_id,
+        type: 'text',
+        position: message.kind === 'system' ? 'center' : message.is_current_user ? 'right' : 'left',
+        status: 'finish',
+        created_at: Date.parse(message.created_at),
+        content: {
+          content: message.body,
+          // Reuse the ordinary teammate header for every human participant,
+          // including the current user, so group-chat messages always show an
+          // author name and deterministic avatar.
+          teammateMessage: message.kind === 'user',
+          senderName: message.author_name,
+          senderUserId: message.author_user_id ? String(message.author_user_id) : undefined,
+        },
+      }));
+      return {
+        items,
+        oldest_cursor: result.messages[0] ? String(result.messages[0].seq) : null,
+        newest_cursor: result.messages.at(-1) ? String(result.messages.at(-1)!.seq) : null,
+        has_more_before: false,
+        has_more_after: result.messages.length === (p.limit ?? 100),
+      };
+    }) as (p: GetConversationMessagesParams) => Promise<MessageCursorPage<import('@/common/chat/chatLib').TMessage>>,
+  },
   getConversationMessage: httpGet<
     import('@/common/chat/chatLib').TMessage,
     { conversation_id: string; message_id: string }
   >((p) => `/api/conversations/${p.conversation_id}/messages/${encodeURIComponent(p.message_id)}`),
-  /**
-   * Newest message of one type, or null. Serves the plan bar: `upsert_message`
-   * does not refresh `created_at`, so a plan row stays anchored at the start of
-   * its turn and a busy turn buries it outside the paginated load.
-   */
-  getLatestConversationMessageOfType: httpGet<
-    import('@/common/chat/chatLib').TMessage | null,
-    { conversation_id: string; type: string }
-  >((p) => `/api/conversations/${p.conversation_id}/messages/latest?type=${encodeURIComponent(p.type)}`),
-  getUserConversations: withResponseMap(
-    httpGet<PaginatedResult<import('@/common/config/storage').TChatConversation>, { cursor?: string; limit?: number }>(
-      (p) => {
-        const params = new URLSearchParams();
-        if (p.cursor) params.set('cursor', p.cursor);
-        if (p.limit) params.set('limit', String(p.limit));
-        const qs = params.toString();
-        return `/api/conversations${qs ? `?${qs}` : ''}`;
+  getUserConversations: {
+    provider: () => {},
+    invoke: (async (p: { cursor?: string; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (p.cursor) params.set('cursor', p.cursor);
+      if (p.limit) params.set('limit', String(p.limit));
+      const qs = params.toString();
+      const ordinary = fromApiPaginatedConversations(
+        await httpRequest<PaginatedResult<TChatConversation>>('GET', `/api/conversations${qs ? `?${qs}` : ''}`)
+      );
+      if (p.cursor) return ordinary;
+      let shared: { conversations: PortalSharedConversation[] };
+      try {
+        shared = await httpRequest<{ conversations: PortalSharedConversation[] }>(
+          'GET',
+          '/api/portal/shared-conversations'
+        );
+      } catch (error) {
+        // Collaboration is opt-in. A disabled user still owns ordinary
+        // conversations, so the expected collaboration gate must not erase
+        // their private history from the sidebar.
+        if (isBackendHttpError(error) && error.code === 'COLLABORATION_DISABLED') return ordinary;
+        throw error;
       }
-    ),
-    fromApiPaginatedConversations
-  ),
+      const sharedItems = shared.conversations.map(fromPortalSharedConversation);
+      return { ...ordinary, items: [...sharedItems, ...ordinary.items], total: ordinary.total + sharedItems.length };
+    }) as (p: { cursor?: string; limit?: number }) => Promise<PaginatedResult<TChatConversation>>,
+  },
   searchConversationMessages: withResponseMap(
     httpGet<PaginatedResult<ApiMessageSearchItem>, { keyword: string; page?: number; page_size?: number }>(
       (p) =>
@@ -1405,6 +1694,28 @@ export const database = {
     ),
     fromApiSearchResult
   ),
+};
+
+// ---------------------------------------------------------------------------
+// Preview History — routed to /api/preview-history/*
+// ---------------------------------------------------------------------------
+
+function mapPreviewTarget(target: PreviewHistoryTarget): Record<string, unknown> {
+  return { ...target, content_type: target.contentType, contentType: undefined };
+}
+
+export const previewHistory = {
+  list: httpPost<PreviewSnapshotInfo[], { target: PreviewHistoryTarget }>('/api/preview-history/list', (p) => ({
+    target: mapPreviewTarget(p.target),
+  })),
+  save: httpPost<PreviewSnapshotInfo, { target: PreviewHistoryTarget; content: string }>(
+    '/api/preview-history/save',
+    (p) => ({ target: mapPreviewTarget(p.target), content: p.content })
+  ),
+  getContent: httpPost<
+    { snapshot: PreviewSnapshotInfo; content: string } | null,
+    { target: PreviewHistoryTarget; snapshot_id: string }
+  >('/api/preview-history/get-content', (p) => ({ target: mapPreviewTarget(p.target), snapshot_id: p.snapshot_id })),
 };
 
 // Preview panel
@@ -1434,34 +1745,25 @@ export const document = {
 // Office Previews — routed to /api/*-preview/*
 // ---------------------------------------------------------------------------
 
-// Office watch bridges. start/stop additively carry a `file` (ChatFileRef) the
-// backend prefers over `file_path` (resolves pe→path server-side, keeps the same
-// watch session key for stop). `file_path` is still sent (required by the DTO;
-// '' when only a ref is available) and used as the legacy fallback.
-type OfficeStartParams = { file_path?: string; workspace?: string; file?: ChatFileRef };
-type OfficeStopParams = { file_path?: string; file?: ChatFileRef };
-const officeStartBody = (p: OfficeStartParams) => ({
-  file_path: p.file_path ?? '',
-  workspace: p.workspace,
-  file: p.file,
-});
-const officeStopBody = (p: OfficeStopParams) => ({ file_path: p.file_path ?? '', file: p.file });
-
 export const pptPreview = {
-  start: httpPost<{ url: string; error?: string }, OfficeStartParams>('/api/ppt-preview/start', officeStartBody),
-  stop: httpPost<void, OfficeStopParams>('/api/ppt-preview/stop', officeStopBody),
+  start: httpPost<{ url: string; error?: string }, { file_path: string; workspace?: string }>('/api/ppt-preview/start'),
+  stop: httpPost<void, { file_path: string }>('/api/ppt-preview/stop'),
   status: wsEmitter<{ state: 'starting' | 'installing' | 'ready' | 'error'; message?: string }>('ppt-preview.status'),
 };
 
 export const wordPreview = {
-  start: httpPost<{ url: string; error?: string }, OfficeStartParams>('/api/word-preview/start', officeStartBody),
-  stop: httpPost<void, OfficeStopParams>('/api/word-preview/stop', officeStopBody),
+  start: httpPost<{ url: string; error?: string }, { file_path: string; workspace?: string }>(
+    '/api/word-preview/start'
+  ),
+  stop: httpPost<void, { file_path: string }>('/api/word-preview/stop'),
   status: wsEmitter<{ state: 'starting' | 'installing' | 'ready' | 'error'; message?: string }>('word-preview.status'),
 };
 
 export const excelPreview = {
-  start: httpPost<{ url: string; error?: string }, OfficeStartParams>('/api/excel-preview/start', officeStartBody),
-  stop: httpPost<void, OfficeStopParams>('/api/excel-preview/stop', officeStopBody),
+  start: httpPost<{ url: string; error?: string }, { file_path: string; workspace?: string }>(
+    '/api/excel-preview/start'
+  ),
+  stop: httpPost<void, { file_path: string }>('/api/excel-preview/stop'),
   status: wsEmitter<{ state: 'starting' | 'installing' | 'ready' | 'error'; message?: string }>('excel-preview.status'),
 };
 
@@ -1520,18 +1822,14 @@ export const systemSettings = {
   getKeepAwake: httpGetClientSetting<boolean>('keepAwake'),
   setKeepAwake: httpPut<void, { enabled: boolean }>('/api/settings/client', (p) => ({ keepAwake: p.enabled })),
   changeLanguage: httpPatch<void, { language: string }>('/api/settings', (p) => ({ language: p.language })),
-  // Cross-session messaging master switch. NOTE the channel differs from the
-  // sibling switches above: this one is a TYPED COLUMN on `system_settings`
-  // (migration 040), so it goes through `/api/settings`, not the
-  // `/api/settings/client` KV. `changeLanguage` right above is the precedent.
-  getCrossSessionMessageEnabled: httpGet<{ cross_session_message_enabled: boolean }, void>('/api/settings'),
-  setCrossSessionMessageEnabled: httpPatch<void, { enabled: boolean }>('/api/settings', (p) => ({
-    cross_session_message_enabled: p.enabled,
-  })),
   languageChanged: wsEmitter<{ language: string }>('system-settings:language-changed'),
   getSaveUploadToWorkspace: httpGetClientSetting<boolean>('saveUploadToWorkspace'),
   setSaveUploadToWorkspace: httpPut<void, { enabled: boolean }>('/api/settings/client', (p) => ({
     saveUploadToWorkspace: p.enabled,
+  })),
+  getAutoPreviewOfficeFiles: httpGetClientSetting<boolean>('autoPreviewOfficeFiles'),
+  setAutoPreviewOfficeFiles: httpPut<void, { enabled: boolean }>('/api/settings/client', (p) => ({
+    autoPreviewOfficeFiles: p.enabled,
   })),
   getPetEnabled: bridge.buildProvider<boolean, void>('system-settings:get-pet-enabled'),
   setPetEnabled: bridge.buildProvider<void, { enabled: boolean }>('system-settings:set-pet-enabled'),
@@ -1646,7 +1944,6 @@ export const cron = {
       agent_config: p.updates.metadata?.agent_config,
       conversation_title: p.updates.metadata?.conversation_title,
       max_retries: p.updates.state?.max_retries,
-      queue_enabled: p.updates.state?.queue_enabled,
     })
   ),
   removeJob: httpDelete<void, { job_id: string }>((p) => `/api/cron/jobs/${p.job_id}`),
@@ -1704,7 +2001,6 @@ export interface ICronJob {
     run_count: number;
     retry_count: number;
     max_retries: number;
-    queue_enabled: boolean;
   };
 }
 
@@ -1720,6 +2016,9 @@ export interface ICronAgentConfigRead {
   model?: ICronProviderModel;
   config_options?: Record<string, string>;
   workspace?: string;
+  skill_ids?: string[];
+  mcp_ids?: string[];
+  weixin_reminder_enabled?: boolean;
 }
 
 export interface ICronProviderModel {
@@ -1736,6 +2035,9 @@ export interface ICronAgentConfigWrite {
   model?: ICronProviderModel;
   config_options?: Record<string, string>;
   workspace?: string;
+  skill_ids?: string[];
+  mcp_ids?: string[];
+  weixin_reminder_enabled?: boolean;
 }
 
 export interface ICreateCronJobParams {
@@ -1748,7 +2050,6 @@ export interface ICreateCronJobParams {
   conversation_title?: string;
   created_by: 'user' | 'agent';
   execution_mode?: 'existing' | 'new_conversation';
-  queue_enabled?: boolean;
   agent_config?: ICronAgentConfigWrite;
 }
 
@@ -1767,7 +2068,6 @@ export interface ICronJobUpdateParams {
   };
   state?: {
     max_retries?: number;
-    queue_enabled?: boolean;
   };
 }
 
@@ -1778,14 +2078,10 @@ export interface ICronJobUpdateParams {
 interface ISendMessageParams {
   input: string;
   conversation_id: string;
-  /** Source-tagged file refs; the backend resolves each to an absolute path and
-   *  injects it into the message. See {@link ChatFileRef}. */
-  files?: ChatFileRef[];
+  files?: string[];
   loading_id?: string;
   inject_skills?: string[];
-  /** Conversations the user referenced with `@@`. Ids only — the backend
-   *  resolves the (mutable) name from the id. */
-  sessions?: SessionRef[];
+  mentions?: PortalSharedMention[];
 }
 
 // Server-assigned identifier for the newly created user message. Clients must
@@ -1797,11 +2093,24 @@ export interface ISendMessageResult {
   runtime: TConversationRuntimeSummary;
 }
 
-export interface IAnswerAskParams {
+export interface IForkConversationParams {
   conversation_id: string;
-  request_id: string;
-  answers?: Array<{ question: string; labels: string[] }>;
-  decline?: boolean;
+  message_id: string;
+  replacement_content?: string;
+}
+
+export interface IForkConversationResult {
+  conversation: TChatConversation;
+  send?: ISendMessageResult;
+}
+
+export interface ISteerConversationParams {
+  conversation_id: string;
+  input: string;
+}
+
+export interface ISteerConversationResult {
+  msg_id: string;
 }
 
 export interface IConfirmMessageParams {
@@ -1821,6 +2130,7 @@ export interface ICreateConversationParams {
     locale?: string;
     conversation_overrides?: {
       model?: string;
+      thought_level?: string;
       permission?: string;
       skill_ids?: string[];
       disabled_builtin_skill_ids?: string[];
@@ -1907,9 +2217,6 @@ export interface IResponseMessage {
   turn_id?: string;
   conversation_id: string;
   created_at?: number;
-  /** Backend turn anchor (codex Turn.id) for fork gating; mirrors the
-   *  persisted messages.backend_turn_id so live frames gate like history. */
-  backend_turn_id?: string;
   hidden?: boolean;
   position?: 'left' | 'right' | 'center' | 'pop';
   status?: 'finish' | 'pending' | 'error' | 'work';
@@ -1978,10 +2285,6 @@ export interface IConversationTurnCompletedEvent {
     is_processing: boolean;
     pending_confirmations: number;
     turn_id: string | null;
-    /** Whether a message sent right now reaches the agent without waiting for
-     * the current turn to end. The ONLY capability bit the frontend may gate
-     * mid-turn UI on. */
-    supports_midturn_delivery: boolean;
   };
   workspace: string;
   model: {
@@ -1996,6 +2299,14 @@ export interface IConversationTurnCompletedEvent {
     status?: string | null;
     created_at: number;
   };
+}
+
+export interface IConversationRuntimeChangedEvent {
+  conversation_id: string;
+  turn_id: string;
+  state: 'starting' | 'running' | 'waiting_confirmation' | 'cancelling' | 'completed';
+  is_processing: boolean;
+  can_send_message: boolean;
 }
 
 export interface IConversationListChangedEvent {
@@ -2247,15 +2558,34 @@ export type IRealtimeReconnectedEvent = {
   timestamp: number;
 };
 
+export type IRealtimeDisconnectedEvent = IRealtimeReconnectedEvent & {
+  code: number;
+  reason: string;
+};
+
+export type IRealtimeReconcileRequestedEvent = IRealtimeReconnectedEvent & {
+  conversation_id: string;
+  runtime?: TConversationRuntimeSummary | null;
+};
+
+export type IRealtimeErrorEvent = {
+  code?: string;
+  recoverable?: boolean;
+  message?: string;
+};
+
 export const realtime = {
   reconnected: wsEmitter<IRealtimeReconnectedEvent>('realtime.reconnected'),
+  disconnected: wsEmitter<IRealtimeDisconnectedEvent>('realtime.disconnected'),
+  reconcileRequested: wsEmitter<IRealtimeReconcileRequestedEvent>('realtime.reconcileRequested'),
+  error: wsEmitter<IRealtimeErrorEvent>('realtime.error'),
 };
 
 export const team = {
   create: withResponseMap(
     httpPost<TTeam, ICreateTeamParams>('/api/teams', (p) => ({
       name: p.name,
-      agents: p.agents.map(toBackendAssistant),
+      assistants: p.assistants.map(toBackendAssistant),
       ...(p.workspace ? { workspace: p.workspace } : {}),
     })),
     fromBackendTeam
@@ -2281,17 +2611,6 @@ export const team = {
   ),
   stop: httpDelete<void, { team_id: string }>((p) => `/api/teams/${p.team_id}/session`),
   ensureSession: httpPost<void, { team_id: string }>((p) => `/api/teams/${p.team_id}/session`),
-  getConfigOptions: httpGet<GetConfigOptionsResponse, { team_id: string; conversation_id: string }>(
-    (p) => `/api/teams/${p.team_id}/conversations/${encodeURIComponent(p.conversation_id)}/config-options`
-  ),
-  setConfigOption: httpPut<
-    SetConfigOptionResponse,
-    { team_id: string; conversation_id: string; option_id: string; value: string }
-  >(
-    (p) =>
-      `/api/teams/${p.team_id}/conversations/${encodeURIComponent(p.conversation_id)}/config-options/${encodeURIComponent(p.option_id)}`,
-    (p): SetConfigOptionRequest => ({ value: p.value })
-  ),
   activeLease: httpPost<void, { team_id: string }>(
     (p) => `/api/teams/${p.team_id}/active-lease`,
     () => undefined
@@ -2299,10 +2618,6 @@ export const team = {
   renameAgent: httpPatch<void, { team_id: string; slot_id: string; new_name: string }>(
     (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/name`,
     (p) => ({ name: p.new_name })
-  ),
-  updateAgentModel: httpPatch<void, { team_id: string; slot_id: string; model_id: string }>(
-    (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/model`,
-    (p) => ({ model_id: p.model_id })
   ),
   renameTeam: httpPatch<void, { id: string; name: string }>(
     (p) => `/api/teams/${p.id}/name`,
@@ -2313,31 +2628,6 @@ export const team = {
     (p) => ({ mode: p.session_mode })
   ),
   getRunState: httpGet<ITeamRunStateResponse, { team_id: string }>((p) => `/api/teams/${p.team_id}/run-state`),
-  listMailbox: httpGet<ITeamMailboxMessage[], { team_id: string; limit?: number }>(
-    (p) => `/api/teams/${p.team_id}/mailbox?limit=${p.limit ?? 500}`
-  ),
-  listTasks: httpGet<ITeamTaskItem[], { team_id: string; limit?: number; ids?: string[] }>((p) =>
-    buildListTasksPath(p)
-  ),
-  listActivity: httpGet<
-    ITeamActivityPage,
-    {
-      team_id: string;
-      limit?: number;
-      cursor_ts?: number;
-      cursor_id?: string;
-      direction?: 'desc' | 'asc';
-      kind?: 'all' | 'message' | 'task';
-    }
-  >((p) => {
-    const q = new URLSearchParams();
-    if (p.limit != null) q.set('limit', String(p.limit));
-    if (p.cursor_ts != null) q.set('cursor_ts', String(p.cursor_ts));
-    if (p.cursor_id != null) q.set('cursor_id', p.cursor_id);
-    if (p.direction) q.set('direction', p.direction);
-    if (p.kind) q.set('kind', p.kind);
-    return `/api/teams/${p.team_id}/activity?${q.toString()}`;
-  }),
   sendMessage: httpPost<ITeamRunAck, ISendTeamMessageParams>(
     (p) => `/api/teams/${p.team_id}/messages`,
     (p) => ({
@@ -2351,30 +2641,6 @@ export const team = {
       content: p.input,
       files: p.files,
     })
-  ),
-  interruptAgent: httpPost<ITeamInterruptAgentResponse, IInterruptTeamAgentParams>(
-    (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/interrupt`,
-    (p) => ({
-      message: p.input,
-      files: p.files,
-      reason: p.reason,
-      queued_policy: p.queued_policy ?? 'retain',
-    })
-  ),
-  attachAgent: httpPost<void, { team_id: string; slot_id: string }>(
-    (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/attach`
-  ),
-  /**
-   * Force-restart a team member's agent runtime (kill the cached CLI process
-   * and rebuild it via the team attach chain, preserving the resume anchor).
-   * Synchronous: resolves once the member is Ready again. Returns HTTP 409
-   * with code TEAM_MEMBER_BUSY while the member is mid-reply.
-   */
-  restartAgentRuntime: httpPost<void, { team_id: string; slot_id: string }>(
-    (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/runtime/restart`
-  ),
-  resetAgentContext: httpPost<TeamContextResetResponse, { team_id: string; slot_id: string }>(
-    (p) => `/api/teams/${p.team_id}/agents/${p.slot_id}/context/reset`
   ),
   cancelRun: httpPost<void, ICancelTeamRunParams>(
     (p) => `/api/teams/${p.team_id}/runs/${p.team_run_id}/cancel`,
@@ -2399,15 +2665,13 @@ export const team = {
   agentSpawned: wsEmitter<ITeamAgentSpawnedEvent>('team.agentSpawned'),
   agentRemoved: wsEmitter<ITeamAgentRemovedEvent>('team.agentRemoved'),
   agentRenamed: wsEmitter<ITeamAgentRenamedEvent>('team.agentRenamed'),
-  agentRuntimeStatusChanged: wsEmitter<ITeamAgentRuntimeStatusEvent>('team.agentRuntimeStatusChanged'),
   listChanged: wsEmitter<ITeamListChangedEvent>('team.listChanged'),
   created: wsEmitter<ITeamCreatedEvent>('team.created'),
   removed: wsEmitter<ITeamRemovedEvent>('team.removed'),
   renamed: wsEmitter<ITeamRenamedEvent>('team.renamed'),
   teammateMessage: wsEmitter<ITeamTeammateMessageEvent>('team.teammateMessage'),
-  sessionStatusChanged: wsEmitter<ITeamSessionStatusChangedEvent>('team.sessionStatusChanged'),
+  mcpStatus: wsEmitter<ITeamMcpStatusEvent>('team.mcpStatus'),
   taskChanged: wsEmitter<ITeamTaskChangedEvent>('team.taskChanged'),
-  mailboxChanged: wsEmitter<ITeamMailboxChangedEvent>('team.mailboxChanged'),
   sessionChanged: wsEmitter<ITeamSessionChangedEvent>('team.sessionChanged'),
   runAccepted: wsEmitter<ITeamRunEvent>('team.runAccepted'),
   runStarted: wsEmitter<ITeamRunEvent>('team.runStarted'),
@@ -2418,91 +2682,4 @@ export const team = {
   childTurnStarted: wsEmitter<ITeamChildTurnEvent>('team.childTurnStarted'),
   childTurnCompleted: wsEmitter<ITeamChildTurnEvent>('team.childTurnCompleted'),
   childTurnCancelled: wsEmitter<ITeamChildTurnEvent>('team.childTurnCancelled'),
-  slotWorkChanged: wsEmitter<ITeamSlotWorkChangedEvent>('team.slotWorkChanged'),
-};
-
-export const sidebar = {
-  // First screen: pinned → project area (real projects + dir pseudo-groups) → chats.
-  // `win` is a repeated query param (one per group to widen); `limit` caps items per group.
-  get: withResponseMap(
-    httpGet<import('@/common/types/sidebar').SidebarResponse, { limit?: number; win?: string[]; archived?: boolean }>(
-      (p) => {
-        const params = new URLSearchParams();
-        if (p.limit) params.set('limit', String(p.limit));
-        for (const w of p.win ?? []) params.append('win', w);
-        // Flip the read to the archive slice. The archived page reuses this same
-        // grouped read model — only the backend `archived_at` predicate changes.
-        if (p.archived) params.set('archived', 'true');
-        const qs = params.toString();
-        return `/api/sidebar${qs ? `?${qs}` : ''}`;
-      }
-    ),
-    fromApiSidebar
-  ),
-  // One more window of a single group (the "+10" paging). `scope` is the group token,
-  // `cursor` the keyset cursor from the previous page. `archived` pages the archive
-  // slice (mirrors `get`) — the archived management page pages its groups this way.
-  items: withResponseMap(
-    httpGet<
-      import('@/common/types/sidebar').SidebarItemsResponse,
-      { scope: string; cursor?: string; limit?: number; archived?: boolean }
-    >((p) => {
-      const params = new URLSearchParams();
-      params.set('scope', p.scope);
-      if (p.cursor) params.set('cursor', p.cursor);
-      if (p.limit) params.set('limit', String(p.limit));
-      if (p.archived) params.set('archived', 'true');
-      return `/api/sidebar/items?${params.toString()}`;
-    }),
-    fromApiSidebarItems
-  ),
-  // Remove a project and everything classified into its group (teams + standalone
-  // conversations), BR-19 "所见即所删". With `dry_run` nothing is deleted and the
-  // response reports the counts that *would* be removed (used for the confirm
-  // dialog). A missing / non-standard project maps to 404.
-  removeProject: httpDelete<
-    import('@/common/types/sidebar').RemoveProjectResult,
-    { project_id: string; dry_run?: boolean }
-  >((p) => `/api/sidebar/project/${encodeURIComponent(p.project_id)}${p.dry_run ? '?dry_run=true' : ''}`),
-  // Archive a conversation/team (moves its slice out of the active sidebar and
-  // unpins it). Team members cascade with the team. Both take no body; a missing
-  // or foreign id maps to 404.
-  archive: httpPost<void, { item_type: import('@/common/types/sidebar').OrderItemType; item_id: string }>(
-    (p) => `/api/sidebar/${p.item_type}/${encodeURIComponent(p.item_id)}/archive`,
-    () => undefined
-  ),
-  // Restore an archived conversation/team to the active sidebar.
-  unarchive: httpPost<void, { item_type: import('@/common/types/sidebar').OrderItemType; item_id: string }>(
-    (p) => `/api/sidebar/${p.item_type}/${encodeURIComponent(p.item_id)}/unarchive`,
-    () => undefined
-  ),
-  // Empty the archive: hard-delete every archived team (members cascade) and every
-  // independent archived conversation. Returns the removed counts.
-  deleteArchived: httpDelete<import('@/common/types/sidebar').ArchiveDeleteResult>('/api/sidebar/archived'),
-  // Permanently delete a single archived unit (a conversation row or a team, whose
-  // members cascade). The id is validated against the archived slice — an active,
-  // foreign, or team-member id maps to 404.
-  deleteArchivedItem: httpDelete<void, { item_type: import('@/common/types/sidebar').OrderItemType; item_id: string }>(
-    (p) => `/api/sidebar/archived/${p.item_type}/${encodeURIComponent(p.item_id)}`
-  ),
-  // Archive an entire standard project in one request: every unit classified into
-  // its group (teams cascade to members, path-merged unbound conversations
-  // included) moves to the archive slice and is unpinned. Dir pseudo-groups have
-  // no project_id and instead loop `archive` over their items. Missing /
-  // non-standard project maps to 404.
-  archiveProject: httpPost<void, { project_id: string }>(
-    (p) => `/api/sidebar/project/${encodeURIComponent(p.project_id)}/archive`,
-    () => undefined
-  ),
-  // Restore an entire archived standard project in one request.
-  unarchiveProject: httpPost<void, { project_id: string }>(
-    (p) => `/api/sidebar/project/${encodeURIComponent(p.project_id)}/unarchive`,
-    () => undefined
-  ),
-  // Hard-delete every archived unit of a standard project (teams cascade). The
-  // project record is kept. Returns the removed counts. Missing / non-standard
-  // project maps to 404.
-  deleteArchivedProject: httpDelete<import('@/common/types/sidebar').ArchiveDeleteResult, { project_id: string }>(
-    (p) => `/api/sidebar/archived/project/${encodeURIComponent(p.project_id)}`
-  ),
 };

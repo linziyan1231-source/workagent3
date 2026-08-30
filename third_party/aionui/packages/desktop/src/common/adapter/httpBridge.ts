@@ -2,11 +2,9 @@
  * HTTP/WS bridge factory — drop-in replacement for bridge.buildProvider / bridge.buildEmitter
  * that routes calls to aioncore via REST API and WebSocket.
  *
- * Exported helpers produce objects with the same shape as the local IPC bridge,
+ * Exported helpers produce objects with the same shape as @office-ai/platform bridge,
  * so existing renderer code works without changes.
  */
-
-import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 
 // ---------------------------------------------------------------------------
 // Base URL
@@ -152,8 +150,6 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
-  /** Extra request headers merged on top of the default `Content-Type`. */
-  headers?: Record<string, string>;
 };
 
 const SENSITIVE_LOG_KEY_PATTERN = /api[_-]?key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|secret/i;
@@ -174,63 +170,17 @@ function redactForLog(value: unknown, depth = 0): unknown {
   );
 }
 
-const REFRESH_ENDPOINT = '/api/auth/refresh';
-
-/**
- * Paths where a 401 is a genuine credential decision rather than an expired
- * session — refreshing and replaying them would be recursive or nonsensical.
- */
-function isAuthEndpoint(path: string): boolean {
-  return path.startsWith(REFRESH_ENDPOINT) || path === '/login' || path === '/logout';
-}
-
-/**
- * Resolve the Core CSRF double-submit token for the current context.
- *
- * The open-source WebUI removed its CSRF layer with the legacy webserver (M6);
- * a double-submit scheme is slated to return in M7. Until then this is a stub
- * that reports "no token available", so the shared session-refresh primitive
- * (`sessionRefresh.ts`) attaches no `x-csrf-token` header and the backend —
- * which enforces no CSRF check here — accepts the request unchanged.
- *
- * It exists as the single seam every state-changing request would call for its
- * token, so restoring CSRF in M7 (and the aionpro superset, whose backend does
- * enforce the double-submit check) only swaps this body — no caller changes.
- *
- * Returns '' — always, for now.
- */
-export function resolveCoreCsrfToken(): string {
-  return '';
-}
-
-function sendHttpRequest(
-  method: string,
-  path: string,
-  headers: Record<string, string>,
-  body?: unknown
-): Promise<Response> {
-  const url = `${getBaseUrl()}${path}`;
-  return fetch(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-}
-
 export async function httpRequest<T>(
   method: string,
   path: string,
   body?: unknown,
   options?: HttpRequestOptions
 ): Promise<T> {
+  const url = `${getBaseUrl()}${path}`;
   const headers: Record<string, string> = {};
 
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
-  }
-
-  if (options?.headers) {
-    Object.assign(headers, options.headers);
   }
 
   console.debug(
@@ -238,20 +188,11 @@ export async function httpRequest<T>(
     body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
   );
 
-  let response = await sendHttpRequest(method, path, headers, body);
-
-  // Expired access cookie → 401. Attempt one silent session refresh, then replay
-  // the original request — the WebUI half of the #4124 fix. refreshSession() is a
-  // no-op outside browser mode and single-flights concurrent 401s into one POST.
-  // The auth endpoints themselves are skipped to avoid recursion.
-  if (response.status === 401 && !isAuthEndpoint(path)) {
-    console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
-      response = await sendHttpRequest(method, path, headers, body);
-    }
-  }
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 
   if (!response.ok) {
     // Response body can only be consumed once — read as text, then try JSON
@@ -336,16 +277,14 @@ export function httpPost<Data, Params = undefined>(
 
 export function httpPut<Data, Params = undefined>(
   path: string | ((params: Params) => string),
-  mapBody?: (params: Params) => unknown,
-  mapHeaders?: (params: Params) => Record<string, string> | undefined
+  mapBody?: (params: Params) => unknown
 ): ProviderLike<Data, Params> {
   return {
     provider: () => {},
     invoke: (async (params?: Params) => {
       const resolvedPath = typeof path === 'function' ? path(params!) : path;
       const body = mapBody ? mapBody(params!) : params;
-      const headers = mapHeaders ? mapHeaders(params!) : undefined;
-      return httpRequest<Data>('PUT', resolvedPath, body, headers ? { headers } : undefined);
+      return httpRequest<Data>('PUT', resolvedPath, body);
     }) as ProviderLike<Data, Params>['invoke'],
   };
 }
@@ -365,13 +304,14 @@ export function httpPatch<Data, Params = undefined>(
 }
 
 export function httpDelete<Data, Params = undefined>(
-  path: string | ((params: Params) => string)
+  path: string | ((params: Params) => string),
+  mapBody?: (params: Params) => unknown
 ): ProviderLike<Data, Params> {
   return {
     provider: () => {},
     invoke: (async (params?: Params) => {
       const resolvedPath = typeof path === 'function' ? path(params!) : path;
-      return httpRequest<Data>('DELETE', resolvedPath);
+      return httpRequest<Data>('DELETE', resolvedPath, mapBody ? mapBody(params!) : undefined);
     }) as ProviderLike<Data, Params>['invoke'],
   };
 }
@@ -396,11 +336,17 @@ export function stubProvider<Data, Params = undefined>(name: string, defaultValu
 
 type WsCallback = (data: unknown) => void;
 const REALTIME_RECONNECTED_EVENT = 'realtime.reconnected';
+const REALTIME_DISCONNECTED_EVENT = 'realtime.disconnected';
+const REALTIME_HEARTBEAT_TIMEOUT_MS = 75_000;
+const REALTIME_HEALTH_CHECK_MS = 15_000;
 const wsListeners = new Map<string, Set<WsCallback>>();
 let ws: WebSocket | null = null;
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let wsReconnectAttempt = 0;
 let wsHasOpened = false;
+let wsShouldReconnect = true;
+let sharedEvents: EventSource | null = null;
+let sharedEventConsumers = 0;
 
 function dispatchWsEvent(eventName: string, payload: unknown): void {
   const handlers = wsListeners.get(eventName);
@@ -435,28 +381,43 @@ function ensureWs(): void {
   }
 
   const current = ws;
+  let lastActivityAt = Date.now();
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
+
+  const clearHealthTimer = () => {
+    if (healthTimer) {
+      clearInterval(healthTimer);
+      healthTimer = null;
+    }
+  };
 
   current.addEventListener('open', () => {
     console.debug('[ensureWs] CONNECTED');
     const isReconnect = wsHasOpened;
     wsHasOpened = true;
     wsReconnectAttempt = 0;
+    lastActivityAt = Date.now();
+    clearHealthTimer();
+    healthTimer = setInterval(() => {
+      if (current.readyState === WebSocket.OPEN && Date.now() - lastActivityAt > REALTIME_HEARTBEAT_TIMEOUT_MS) {
+        console.warn('[ensureWs] heartbeat timed out; forcing reconnect');
+        current.close(4000, 'realtime heartbeat timeout');
+      }
+    }, REALTIME_HEALTH_CHECK_MS);
     if (isReconnect) {
       dispatchWsEvent(REALTIME_RECONNECTED_EVENT, { timestamp: Date.now() });
     }
   });
 
   current.addEventListener('close', (e) => {
+    clearHealthTimer();
     console.debug('[ensureWs] CLOSED code=' + e.code + ' reason=' + e.reason);
     if (ws === current) ws = null;
-    if (e.code === WS_CLOSE_POLICY_VIOLATION) {
-      // Auth policy violation (expired/missing session). Blindly reconnecting with
-      // the same dead cookie is the #4124 loop — refresh once and only reconnect if
-      // it succeeds. On failure the realtime stream stays down until re-auth;
-      // browser.ts's bridge socket drives the /login redirect.
-      void handleWsAuthClose();
-      return;
-    }
+    dispatchWsEvent(REALTIME_DISCONNECTED_EVENT, {
+      timestamp: Date.now(),
+      code: e.code,
+      reason: e.reason,
+    });
     scheduleWsReconnect();
   });
 
@@ -466,6 +427,7 @@ function ensureWs(): void {
   });
 
   current.addEventListener('message', (event: MessageEvent) => {
+    lastActivityAt = Date.now();
     try {
       const msg = JSON.parse(event.data as string) as {
         name?: string;
@@ -475,6 +437,25 @@ function ensureWs(): void {
       };
       const eventName = msg.name ?? msg.event;
       const payload = msg.data ?? msg.payload;
+      if (eventName === 'ping') {
+        if (current.readyState === WebSocket.OPEN) {
+          current.send(JSON.stringify({ name: 'pong', data: { timestamp: Date.now() } }));
+        }
+        return;
+      }
+      if (eventName === 'realtime.error' && payload && typeof payload === 'object') {
+        const code = (payload as { code?: unknown }).code;
+        if (code === 'REALTIME_AUTH_MISSING' || code === 'REALTIME_AUTH_EXPIRED') {
+          wsShouldReconnect = false;
+          if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+          }
+          dispatchWsEvent(eventName, payload);
+          current.close(1008, String(code));
+          return;
+        }
+      }
       console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
       if (eventName) {
         dispatchWsEvent(eventName, payload);
@@ -485,52 +466,74 @@ function ensureWs(): void {
   });
 }
 
+function ensureSharedEvents(): void {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined' || sharedEvents) return;
+  const source = new EventSource(`${getBaseUrl()}/api/portal/shared-events`, { withCredentials: true });
+  sharedEvents = source;
+  source.addEventListener('message', (event) => {
+    try {
+      const message = JSON.parse((event as MessageEvent<string>).data) as {
+        event?: string;
+        payload?: unknown;
+      };
+      if (message.event) dispatchWsEvent(message.event, message.payload);
+    } catch {
+      // Ignore malformed collaboration events. EventSource retains its
+      // Last-Event-ID and the server will replay valid database rows.
+    }
+  });
+  source.addEventListener('error', () => {
+    if (source.readyState === EventSource.CLOSED && sharedEvents === source) {
+      // A pre-login 401 closes EventSource permanently in Chromium. Recreate
+      // the stream after the login flow explicitly reports an authenticated session.
+      sharedEvents = null;
+      return;
+    }
+    console.debug('[shared-events] disconnected; awaiting automatic replay');
+  });
+}
+
+export function reconnectSharedEvents(): void {
+  if (sharedEvents) sharedEvents.close();
+  sharedEvents = null;
+  if (sharedEventConsumers > 0) ensureSharedEvents();
+}
+
+export function subscribeSharedEvents(): () => void {
+  sharedEventConsumers++;
+  ensureSharedEvents();
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    sharedEventConsumers = Math.max(0, sharedEventConsumers - 1);
+    if (sharedEventConsumers === 0 && sharedEvents) {
+      sharedEvents.close();
+      sharedEvents = null;
+    }
+  };
+}
+
+export function reconnectRealtime(): void {
+  wsShouldReconnect = true;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (ws) ws.close();
+  ws = null;
+  ensureWs();
+  reconnectSharedEvents();
+}
+
 function scheduleWsReconnect(): void {
-  if (wsReconnectTimer) return;
+  if (wsReconnectTimer || !wsShouldReconnect) return;
   const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempt), 30000);
   wsReconnectAttempt++;
   wsReconnectTimer = setTimeout(() => {
     wsReconnectTimer = null;
     ensureWs();
   }, delay);
-}
-
-/**
- * Handle a realtime socket closed for auth policy violation (code 1008): attempt
- * one shared session refresh, then reconnect only if the session was renewed.
- * A failed refresh means the session is truly dead — we stop rather than loop.
- */
-async function handleWsAuthClose(): Promise<void> {
-  const refreshed = await refreshSession();
-  if (refreshed) {
-    wsReconnectAttempt = 0;
-    ensureWs();
-  }
-}
-
-/**
- * Send an outbound frame over the shared WS singleton, wrapped in the realtime
- * envelope `{ name, data }` (backend routes by `name`; the fs monitor uses
- * `name === "fs"`, see stage-1 protocol.md v3).
- *
- * Ordered-stream semantics: if the socket is not OPEN the frame is **dropped**
- * (never buffered). The caller re-declares full state on reconnect (the monitor
- * client zeroes `current` and re-subscribes via `realtime.reconnected`), so a
- * dropped outbound never leaves an undetectable gap. Returns `true` when the
- * frame was handed to the socket.
- */
-export function wsSend(name: string, data: unknown): boolean {
-  ensureWs();
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    return false;
-  }
-  try {
-    ws.send(JSON.stringify({ name, data }));
-    return true;
-  } catch (e) {
-    console.error('[wsSend] send failed:', e);
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +558,7 @@ export function wsEmitter<Params = undefined>(eventName: string): EmitterLike<Pa
         wsListeners.get(eventName)?.delete(cb);
       };
     },
-    emit: (() => {}) as EmitterLike<Params>['emit'],
+    emit: ((params?: Params) => dispatchWsEvent(eventName, params)) as EmitterLike<Params>['emit'],
   };
 }
 

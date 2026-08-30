@@ -5,7 +5,6 @@
   "nextRun": "Próxima execução",
   "lastRun": "Última execução",
   "lastError": "Erro",
-  "lastErrorWithDetail": "Último erro: {{error}}",
   "message": "Mensagem",
   "goToConversation": "Ir para a conversa",
   "status": {
@@ -14,7 +13,7 @@
     "error": "Erro",
     "unread": "Nova execução",
     "unconfigured": "Sem tarefa agendada",
-    "defaultPrompt": "Todos os dias às 10h, pesquise as últimas notícias sobre IA, resuma e gere um relatório de insights. (Use a habilidade /cron para criar uma tarefa agendada no AionUi.)"
+    "defaultPrompt": "Todos os dias às 10h, pesquise as últimas notícias sobre IA, resuma e gere um relatório de insights."
   },
   "actions": {
     "goTo": "Ver Chat",
@@ -54,10 +53,10 @@
     "newTask": "Nova tarefa",
     "createViaChat": "Criar via chat",
     "createManually": "Criar manualmente",
-    "description": "Execute tarefas agendadas. Você também pode pedir ao AionUi em qualquer conversa para criar uma para você.",
+    "description": "Execute tarefas agendadas. Você também pode pedir ao CLIENTNAME em qualquer conversa para criar uma para você.",
     "awakeBanner": "As tarefas agendadas são executadas apenas enquanto o computador está ativo.",
     "keepAwake": "Manter ativo",
-    "keepAwakeTooltip": "Quando ativado, o AionUi impedirá que o computador durma",
+    "keepAwakeTooltip": "Quando ativado, o CLIENTNAME impedirá que o computador durma",
     "createTask": "Criar Tarefa Agendada",
     "editTask": "Editar Tarefa Agendada",
     "createSuccess": "Tarefa criada com sucesso",
@@ -82,8 +81,6 @@
       "prompt": "Prompt",
       "promptRequired": "Prompt é obrigatório",
       "promptPlaceholder": "Instruções para o assistente executar",
-      "queue": "Proteção de fila",
-      "queueHint": "Quando ativada, uma nova execução é ignorada enquanto a conversa agendada anterior ainda estiver em andamento, sem interromper o assistente.",
       "frequency": "Frequência",
       "cronExpr": "Expressão Cron",
       "cronExprRequired": "A expressão Cron é obrigatória",
@@ -127,23 +124,7 @@
       "dailyAt": "Todos os dias às {{time}}",
       "weekdaysAt": "Dias de semana às {{time}}",
       "weeklyAt": "Toda {{day}} às {{time}}"
-    },
-    "custom": {
-      "modeLabel": "Padrão de repetição",
-      "interval": "A cada intervalo",
-      "monthly": "Mensalmente",
-      "advanced": "Expressão Cron avançada",
-      "every": "A cada",
-      "unit": "Unidade",
-      "minutes": "Minutos",
-      "hours": "Horas",
-      "time": "Horário",
-      "weekdays": "Dias da semana",
-      "monthDay": "Dia do mês",
-      "preview": "Cron gerado"
-    },
-    "searchPlaceholder": "Pesquisar tarefas...",
-    "noSearchResults": "Nenhuma tarefa agendada correspondente."
+    }
   },
   "trigger": {
     "runScheduledTask": "Executar tarefa agendada: {{name}}"

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AuthType } from '@/common/types/provider/authType';
+import { AuthType } from '@office-ai/aioncli-core';
 import { isNewApiPlatform } from './platformConstants';
 
 /**

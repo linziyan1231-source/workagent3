@@ -9,7 +9,6 @@ import type { AutoUpdateStatus, UpdateDownloadProgressEvent } from '@/common/upd
 import { uuid } from '@/common/utils';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatByteRate, formatByteSize } from '@/renderer/services/i18n/format';
 import {
   initialUpdateNotificationState,
   updateNotificationReducer,
@@ -21,8 +20,6 @@ import {
 } from './updateNotificationState';
 import { getIncludePrerelease, runUpdateCheck, type CheckUpdateOutcome } from './checkForUpdatesShared';
 import { setUpdateReadyState } from './updateReadyState';
-import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
-import { OPEN_MIGRATION_DIALOG_EVENT } from './UpdateMigrationDialog';
 
 type AvailableOutcome = Extract<CheckUpdateOutcome, { kind: 'available' }>;
 
@@ -30,23 +27,35 @@ export const UPDATE_AVAILABLE_EVENT = 'aionui-update-available';
 
 declare const __APP_VERSION__: string;
 
-export const formatUpdateSize = (bytes: number, language?: string) => formatByteSize(bytes, language);
+const formatSpeed = (bytesPerSecond: number) => {
+  if (bytesPerSecond > 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+  }
+  return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+};
 
-const toAutoProgress = (evt: AutoUpdateStatus, language?: string): UpdateNotificationProgress | null => {
+export const formatUpdateSize = (bytes: number) => {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / 1024).toFixed(1)} KB`;
+};
+
+const toAutoProgress = (evt: AutoUpdateStatus): UpdateNotificationProgress | null => {
   if (!evt.progress) return null;
   return {
     percent: Math.round(evt.progress.percent),
     transferred: evt.progress.transferred,
     total: evt.progress.total,
-    speed: formatByteRate(evt.progress.bytesPerSecond, language),
+    speed: formatSpeed(evt.progress.bytesPerSecond),
   };
 };
 
-const toManualProgress = (evt: UpdateDownloadProgressEvent, language?: string): UpdateNotificationProgress => ({
+const toManualProgress = (evt: UpdateDownloadProgressEvent): UpdateNotificationProgress => ({
   percent: Math.round(evt.percent ?? 0),
   transferred: evt.receivedBytes ?? 0,
   total: evt.totalBytes ?? 0,
-  speed: formatByteRate(evt.bytesPerSecond ?? 0, language),
+  speed: formatSpeed(evt.bytesPerSecond ?? 0),
 });
 
 const createInitialState = (): UpdateNotificationState => ({
@@ -65,7 +74,7 @@ const getVersionLabelFromState = (state: UpdateNotificationState): string =>
   state.updateInfo?.version || state.autoUpdateInfo?.version || '';
 
 export const useUpdateNotificationController = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [state, dispatchState] = useReducer(reduceNotificationState, undefined, createInitialState);
   const stateRef = useRef(state);
   const restoreDownloadedPendingRef = useRef(true);
@@ -202,31 +211,8 @@ export const useUpdateNotificationController = () => {
     void restoreDownloadedUpdate();
   }, [restoreDownloadedUpdate]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void ipcBridge.update.consumeInstallerLastFailure
-      .invoke()
-      .then((res) => {
-        if (cancelled || !res?.success || !res.data) return;
-        dispatch({ type: 'installerLastFailureConsumed', marker: res.data });
-      })
-      .catch((error) => {
-        console.warn('Consume installer last failure marker error:', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch]);
-
   const openUpdateNotification = useCallback(
     (source: UpdateNotificationOpenSource, userInitiated: boolean) => {
-      // Discontinued build: every manual entry point (tray / menu / IPC-open)
-      // opens the migration card instead of checking. Flag is compile-time, so
-      // this branch is stripped from normal builds.
-      if (IS_DISCONTINUED_BUILD) {
-        window.dispatchEvent(new CustomEvent(OPEN_MIGRATION_DIALOG_EVENT));
-        return;
-      }
       const current = stateRef.current;
       dispatch({ type: 'openRequested', source, userInitiated });
       if (
@@ -280,7 +266,7 @@ export const useUpdateNotificationController = () => {
           dispatchAutoAvailable(evt);
           break;
         case 'downloading': {
-          const progress = toAutoProgress(evt, i18n.language);
+          const progress = toAutoProgress(evt);
           if (progress) {
             dispatch({ type: 'autoProgress', progress });
           }
@@ -303,7 +289,7 @@ export const useUpdateNotificationController = () => {
     });
 
     return () => removeListener();
-  }, [dispatchAutoAvailable, t, i18n.language]);
+  }, [dispatchAutoAvailable, t]);
 
   useEffect(() => {
     const removeProgressListener = ipcBridge.update.downloadProgress.on((evt: UpdateDownloadProgressEvent) => {
@@ -312,14 +298,14 @@ export const useUpdateNotificationController = () => {
         type: 'manualProgress',
         downloadId: evt.downloadId,
         status: evt.status,
-        progress: toManualProgress(evt, i18n.language),
+        progress: toManualProgress(evt),
         filePath: evt.file_path,
         error: evt.error || t('update.downloadFailed'),
       });
     });
 
     return () => removeProgressListener();
-  }, [t, i18n.language]);
+  }, [t]);
 
   const openReleasePage = useCallback(() => {
     if (!state.releasePageUrl) return;
@@ -401,12 +387,6 @@ export const useUpdateNotificationController = () => {
     void ipcBridge.shell.showItemInFolder.invoke(state.downloadPath);
   }, [state.downloadPath]);
 
-  const viewInstallerLastFailureLog = useCallback(() => {
-    const logPath = state.installerLastFailure?.logPath;
-    if (!logPath) return;
-    void ipcBridge.shell.showItemInFolder.invoke(logPath);
-  }, [state.installerLastFailure?.logPath]);
-
   const dismiss = useCallback((reason: 'later' | 'close') => {
     dispatch({ type: 'dismissRequested', reason });
   }, []);
@@ -472,7 +452,6 @@ export const useUpdateNotificationController = () => {
       quitAndInstall,
       openFile,
       showInFolder,
-      viewInstallerLastFailureLog,
       dismiss,
       cancelDownload,
       minimize,

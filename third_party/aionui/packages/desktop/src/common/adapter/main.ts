@@ -7,7 +7,7 @@
 import type { BrowserWindow } from 'electron';
 import { ipcMain } from 'electron';
 
-import { bridge } from '@/common/platform/bridge';
+import { bridge } from '@office-ai/platform';
 import { ADAPTER_BRIDGE_EVENT_KEY } from './constant';
 import { registerWebSocketBroadcaster, getBridgeEmitter, setBridgeEmitter, broadcastToAll } from './registry';
 

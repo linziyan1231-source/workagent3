@@ -2,21 +2,22 @@ import { ipcBridge } from '@/common';
 import { joinPath } from '@/common/chat/chatLib';
 import { LoadingTwo } from '@icon-park/react';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useConversationContextSafe } from '@renderer/hooks/context/ConversationContext';
+import { createContext } from '@renderer/utils/ui/createContext';
 import { iconColors } from '@/renderer/styles/colors';
+
+const [useLocalImage, LocalImageProvider, useUpdateLocalImage] = createContext({ root: '' });
 
 const LocalImageView: React.FC<{
   src: string;
   alt: string;
   className?: string;
-}> = ({ src, alt, className }) => {
+}> & {
+  Provider: typeof LocalImageProvider;
+  useUpdateLocalImage: typeof useUpdateLocalImage;
+} = ({ src, alt, className }) => {
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState(src);
-  // Resolve relative image paths (e.g. ![](./chart.png)) against the conversation
-  // workspace = the agent cwd, and pass it as the fs sandbox workspace. Outside a
-  // conversation (settings markdown) there is no workspace, so the src is sent
-  // through unchanged — matching the previous default root of ''.
-  const root = useConversationContextSafe()?.workspace ?? '';
+  const { root } = useLocalImage();
 
   const absolutePath = useMemo(() => {
     if (!root) return src;
@@ -67,5 +68,8 @@ const LocalImageView: React.FC<{
     );
   return <img src={url} alt={alt} className={className} />;
 };
+
+LocalImageView.Provider = LocalImageProvider;
+LocalImageView.useUpdateLocalImage = useUpdateLocalImage;
 
 export default LocalImageView;

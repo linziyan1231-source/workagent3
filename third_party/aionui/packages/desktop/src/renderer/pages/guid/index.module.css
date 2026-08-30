@@ -63,7 +63,7 @@
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  margin-inline-end: 0;
+  margin-right: 0;
 }
 
 /* 方案E：模型 + 权限各自独立 tb-btn，中间有竖线分隔 */
@@ -100,27 +100,6 @@
 
 .actionConfigGroup :global(.sendbox-model-btn .arco-btn-content > span:first-child) {
   gap: 4px !important;
-  min-width: 0 !important;
-}
-
-/* Model button must be allowed to shrink so a long label truncates instead of
- * pushing the send button / mode switch out of the row on narrow viewports. */
-.actionConfigGroup :global(.sendbox-model-btn) {
-  min-width: 0 !important;
-  max-width: 100% !important;
-}
-
-.actionConfigGroup :global(.sendbox-model-btn .arco-btn-content) {
-  min-width: 0 !important;
-  overflow: hidden !important;
-}
-
-.actionConfigGroup :global(.sendbox-model-btn .guid-model-label) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  max-width: 220px;
 }
 
 .actionSubmit {
@@ -128,7 +107,7 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  margin-inline-start: auto;
+  margin-left: auto;
   min-width: 0;
 }
 
@@ -136,9 +115,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-block: 6px 10px;
-  padding-inline-start: 14px;
-  padding-inline-end: 6px;
+  padding: 6px 6px 10px 14px;
   background: transparent;
 }
 
@@ -186,9 +163,7 @@
   color: var(--color-text-2);
   background: transparent;
   border: none;
-  padding-block: 4px;
-  padding-inline-start: 6px;
-  padding-inline-end: 4px;
+  padding: 4px 4px 4px 6px;
   cursor: pointer;
   font-family: inherit;
   transition:
@@ -216,7 +191,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin-inline-end: 2px;
+  margin-right: 2px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -396,25 +371,21 @@
   }
 
   .actionEntry {
-    margin-inline-end: 0;
+    margin-right: 0;
   }
 
   .actionConfigGroup {
     gap: 0;
   }
 
-  .actionConfigGroup :global(.sendbox-model-btn .guid-model-label) {
-    max-width: 90px;
-  }
-
   .actionConfigGroupWithDivider > :first-child::after {
-    inset-inline-end: -6px;
+    right: -6px;
     height: 16px;
   }
 
   .actionSubmit {
     flex-shrink: 0;
-    margin-inline-start: 8px;
+    margin-left: 8px;
   }
 }
 
@@ -463,23 +434,6 @@
   animation: agentSelectPop 0.4s ease-out forwards;
 }
 
-/* 更多 Agent 面板：细微且快速的下滑淡入 */
-@keyframes assistantOverflowPanelIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.assistantOverflowPanel {
-  transform-origin: top center;
-  animation: assistantOverflowPanelIn 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
-}
-
 :global([data-theme='dark']) .assistantSelectorInactive {
   opacity: 1;
   color: var(--aou-9) !important;
@@ -515,9 +469,7 @@
   position: relative;
   max-height: 200px;
   overflow-y: auto;
-  padding-block: 4px;
-  padding-inline-start: 4px;
-  padding-inline-end: 6px;
+  padding: 4px 6px 4px 4px;
   scrollbar-width: thin;
 }
 

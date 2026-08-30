@@ -1,7 +1,13 @@
 {
+  "shared": {
+    "mentionCandidates": "Assistant and members",
+    "assistant": "Assistant",
+    "member": "Member",
+    "files": "Files"
+  },
   "welcome": {
     "title": "Привіт, які плани на сьогодні?",
-    "placeholder": "Надішліть повідомлення, завантажте файли, відкрийте папку, створіть заплановане завдання або введіть / для команд...",
+    "placeholder": "Надішліть повідомлення, завантажте файли, відкрийте папку або створіть заплановане завдання...",
     "linkFolder": "Відкрити папку",
     "newConversation": "Новий чат",
     "selectModel": "Вибрати модель",
@@ -12,14 +18,21 @@
     "clearWorkspace": "Видалити проєкт",
     "openFolder": "Відкрити папку",
     "none": "Немає",
-    "quickActionsTitle": "Що вміє AionUi?",
+    "quickActionsTitle": "Що вміє CLIENTNAME?",
     "quickActionFeedback": "Повідомити про проблему",
     "quickActionStar": "Подобається? Поставте нам зірку!",
-    "skillsMarket": "Маркет навичок AionUi",
+    "skillsMarket": "Маркет навичок CLIENTNAME",
     "skillsMarketDesc": "Шукайте та активуйте навички спільноти за запитом. Налаштуйте один раз — доступно для всіх агентів.",
     "skillsMarketDetails": "Докладніше >>"
   },
   "history": {
+    "hideSharedConversation": "Hide conversation",
+    "sharedConversationHidden": "Shared conversation hidden",
+    "sharedConversationHideFailed": "Shared conversation could not be hidden",
+    "sharedProjectHidden": "Shared project hidden",
+    "sharedProjectHideFailed": "Shared project could not be hidden",
+    "newPrivateSharedConversation": "New conversation in this shared project",
+    "hideSharedProject": "Hide shared project",
     "recents": "Недавні",
     "noHistory": "Немає історії чатів",
     "deleteTitle": "Видалити",
@@ -30,7 +43,6 @@
     "saveName": "Зберегти",
     "cancelEdit": "Скасувати",
     "rename": "Перейменувати",
-    "createCronTask": "Створити заплановане завдання",
     "renameTitle": "Перейменувати чат",
     "renamePlaceholder": "Будь ласка, введіть нову назву",
     "renameSuccess": "Перейменовано успішно",
@@ -43,15 +55,7 @@
     "batchExportConfirm": "Експортувати {{count}} вибраних тем?",
     "batchDelete": "Масове видалення",
     "batchDeleteConfirm": "Видалити {{count}} вибраних тем?",
-    "batchDeleteConfirm_one": "Видалити {{count}} вибрану тему?",
-    "batchDeleteConfirm_other": "Видалити {{count}} вибраних тем?",
-    "batchDeleteConfirm_few": "Видалити {{count}} вибрані теми?",
-    "batchDeleteConfirm_many": "Видалити {{count}} вибраних тем?",
     "batchDeleteSuccess": "Видалено {{count}} тем",
-    "batchDeleteSuccess_one": "Видалено {{count}} тему",
-    "batchDeleteSuccess_other": "Видалено {{count}} тем",
-    "batchDeleteSuccess_few": "Видалено {{count}} теми",
-    "batchDeleteSuccess_many": "Видалено {{count}} тем",
     "batchNoSelection": "Спочатку виберіть теми",
     "export": "Експортувати",
     "exportDialogTitle": "Експорт тем",
@@ -66,10 +70,12 @@
     "exportFailed": "Помилка експорту",
     "pin": "Закріпити",
     "unpin": "Відкріпити",
-    "markAsUnread": "Позначити як непрочитане",
-    "markAsRead": "Позначити як прочитане",
     "pinned": "Закріплено",
     "pinFailed": "Не вдалося закріпити",
+    "weixinReminder": "Нагадування WeChat",
+    "weixinReminderEnabled": "Нагадування увімкнено",
+    "weixinReminderDisabled": "Нагадування вимкнено",
+    "weixinReminderUpdateFailed": "Не вдалося оновити нагадування WeChat",
     "pinnedSection": "Закріплені",
     "deleteSuccess": "Видалено успішно",
     "deleteFailed": "Не вдалося видалити",
@@ -79,21 +85,25 @@
     "earlier": "Раніше",
     "projectsSection": "Проєкти",
     "conversationsSection": "Розмови",
+    "renameProjectTitle": "Перейменувати проєкт",
+    "renameProject": "Перейменувати проєкт",
+    "renameProjectPlaceholder": "Введіть нову назву проєкту",
+    "renameProjectSuccess": "Проєкт перейменовано на «{{name}}»",
+    "renameProjectExists": "Проєкт із такою назвою вже існує",
+    "renameProjectInvalid": "Назва проєкту недійсна",
+    "renameProjectInUse": "Проєкт використовується. Зупиніть пов’язані завдання й повторіть спробу",
+    "renameProjectForce": "Примусово завершити програми й перейменувати",
+    "renameProjectForceRisk": "Ризик: програми, що використовують цю папку, буде примусово завершено, а незбережені дані можуть бути втрачені.",
+    "renameProjectForceConfirmTitle": "Примусово завершити програми?",
+    "renameProjectForceConfirmContent": "Програми поточного користувача Windows, які використовують файли цього проєкту, буде завершено перед перейменуванням папки. Незбережену роботу може бути втрачено. Цю дію неможливо скасувати.",
+    "renameProjectForceConfirm": "Завершити й перейменувати",
+    "renameProjectForceFailed": "Не вдалося безпечно визначити або завершити всі програми; папку не перейменовано",
+    "renameProjectFailed": "Не вдалося перейменувати проєкт",
+    "removeProjectTitle": "Видалити проєкт",
+    "removeProject": "Видалити проєкт",
+    "removeProjectConfirm": "Видалити проєкт «{{name}}»? Також буде видалено {{count}} розмов у ньому.",
     "newConversationInProject": "Нова розмова в цьому проєкті",
-    "deleting": "Видалення...",
-    "reorderPinned": "Перетягніть, щоб змінити порядок закріплених розмов",
-    "forkedFrom": "Відгалуження від «{{name}}»",
-    "forkedConversation": "Відгалужена розмова",
-    "archive": "Архівувати",
-    "archiveSuccess": "Заархівовано",
-    "archiveFailed": "Не вдалося заархівувати",
-    "batchArchive": "Batch archive",
-    "batchArchiveConfirm": "Archive {{count}} selected topics? You can restore or delete them from Archived in Settings.",
-    "batchArchiveSuccess": "Archived {{count}} topics",
-    "archiveProject": "Archive project",
-    "archiveProjectTitle": "Archive project",
-    "archiveProjectConfirm": "Archive project \"{{name}}\"? Its {{count}} conversation(s) will be archived too. You can restore or delete them from Archived in Settings.",
-    "archiving": "Archiving..."
+    "deleting": "Видалення..."
   },
   "historySearch": {
     "tooltip": "Пошук повідомлень",
@@ -323,7 +333,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "AionUi could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "CLIENTNAME could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -331,11 +341,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "AionUi received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "CLIENTNAME received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "AionUi could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "CLIENTNAME could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",
@@ -352,6 +362,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_RESOURCE_EXHAUSTED": {
+        "title": "Недостатньо пам’яті в середовищі користувача",
+        "body": "Попередній перегляд або фонове завдання використовує забагато ресурсів. Закрийте перегляд Office, трохи зачекайте та повторіть спробу."
       }
     }
   },
@@ -435,8 +449,7 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "Термінал",
-      "explorer": "Провідник",
-      "browser": "Браузер"
+      "explorer": "Провідник"
     }
   },
   "minimap": {
@@ -444,11 +457,7 @@
     "searchHint": "Натисніть тут для пошуку за ключовими словами",
     "empty": "Поки немає запитань та відповідей",
     "noMatch": "Відповідний контент не знайдено",
-    "count": "{{count}} ходів",
-    "count_one": "{{count}} хід",
-    "count_other": "{{count}} ходів",
-    "count_few": "{{count}} ходи",
-    "count_many": "{{count}} ходів"
+    "count": "{{count}} ходів"
   },
   "chat": {
     "noModelSelected": "Модель для поточної сесії не вибрана, неможливо надіслати повідомлення",
@@ -466,7 +475,6 @@
     "switchAgentFailed": "Не вдалося переключити агента",
     "speech": {
       "recordTooltip": "Почати голосове введення",
-      "recordTooltipWithShortcut": "Голосове введення cmd+M",
       "pickFileTooltip": "Вибрати аудіофайл",
       "stopTooltip": "Зупинити запис",
       "processing": "Транскрибування аудіо...",
@@ -502,8 +510,8 @@
     "error": "Не вдалося відповісти на бічне запитання."
   },
   "commandQueue": {
-    "title": "Чернетки",
-    "clear": "Очистити чернетки",
+    "title": "Черга команд",
+    "clear": "Очистити чергу",
     "edit": "Редагувати",
     "editing": "Редагування",
     "editPlaceholder": "Оновіть команду в черзі перед виконанням.",
@@ -513,46 +521,15 @@
     "reorder": "Перетягніть, щоб змінити порядок",
     "remove": "Видалити",
     "files": "{{count}} файлів",
-    "files_one": "{{count}} файл",
-    "files_other": "{{count}} файлів",
-    "files_few": "{{count}} файли",
-    "files_many": "{{count}} файлів",
     "pausedAfterFailure": "Наступна команда в черзі не може запуститися. Відредагуйте, змініть порядок або видаліть її, щоб продовжити.",
     "emptyInput": "Команди в черзі не можуть бути порожніми.",
     "queueFull": "Черга заповнена. Видаліть команду перед додаванням нових.",
     "inputTooLong": "Ця команда в черзі занадто довга. Скоротіть її перед надсиланням.",
     "tooManyFiles": "Занадто багато файлів прикріплено до цієї команди в черзі.",
-    "queueTooLarge": "Дані черги занадто великі для безпечного збереження. Спочатку видаліть кілька команд.",
-    "sendNow": "Надіслати зараз",
-    "modeToggle": "Перемкнути режим надсилання",
-    "help": "Довідка",
-    "helpIntro": "Повідомлення, надіслані під час відповіді ШІ, чекають тут.",
-    "helpAuto": ": надсилаються автоматично по черзі після кожної відповіді.",
-    "helpManual": ": зберігаються без надсилання; надішліть кожне кнопкою «Надіслати зараз».",
-    "clearConfirmTitle": "Очистити чернетки надсилання?",
-    "clearConfirmContent": "Усі повідомлення в очікуванні буде видалено. Цю дію не можна скасувати.",
-    "mode": {
-      "auto": "Авто-надсилання",
-      "manual": "Ручне надсилання"
-    },
-    "addToQueue": "Додати до чернеток",
-    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
-    "midturnBlocked": "Втручання не підтримується, поки цей агент відповідає. Використайте «Додати до чернеток».",
-    "enterShortcut": "Enter",
-    "actionMode": "Choose send action",
-    "midturnBlockedSendHint": "This agent is still working, so the message can’t be sent directly. Save it to Draft box and send it later.",
-    "addToQueueBusyHint": "Save to Draft box and send it later."
+    "queueTooLarge": "Дані черги занадто великі для безпечного збереження. Спочатку видаліть кілька команд."
   },
   "contextUsage": {
-    "contextUsed": "контексту використано",
-    "tokensUsed": "Використано токенів: {{tokens}}",
-    "windowUnknown": "Розмір контекстного вікна невідомий",
-    "sessionCost": "Вартість сесії",
-    "input": "Ввід",
-    "output": "Вивід",
-    "thought": "Міркування",
-    "cachedRead": "Читання кешу",
-    "cachedWrite": "Запис кешу"
+    "contextUsed": "контексту використано"
   },
   "skill_generator": {
     "title": "Створити Навичку/Правило",
@@ -592,27 +569,18 @@
       "loaded": "Завантажено",
       "failed": "Помилка",
       "unsupported": "Не підтримується"
-    },
-    "selected": "Вибрані MCP"
+    }
   },
   "runtimePreparing": {
     "sendboxHint": "Готується середовище виконання. Перший запуск може тривати трохи довше."
   },
   "sendbox": {
-    "hint": "Введіть / для команд, @ для посилань на файли, ↑/↓ для історії повідомлень",
-    "mediaPathFallback": "Цей агент не підтримує цей тип файлу нативно; його буде надіслано як шлях до файлу.",
-    "hintWithSessions": "/ — команди, @ — файли, @@ — розмови, ↑/↓ — історія"
+    "hint": "Введіть / для команд, @ для посилань на файли"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Цей запит завершився без видимої відповіді."
-      },
-      "ACP_EMPTY_TURN_NEEDS_AUTH": {
-        "body": "Цей запит не дав видимої відповіді. Якщо ви вже ввійшли, можливо, це тимчасова проблема бекенду або з'єднання — повторіть спробу або почніть нову розмову. Якщо ви ще не ввійшли, ви можете ввійти: {{hint}}."
-      },
-      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
-        "body": "Цей запит не дав видимої відповіді. Можливо, поточна розмова наближається до межі довжини контексту — повторіть спробу або почніть нову розмову та спробуйте знову."
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "У цьому запиті модель досягла ліміту вихідних токенів до появи видимої відповіді."
@@ -622,180 +590,8 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "Модель відхилила цей запит до появи видимої відповіді."
-      },
-      "ANTIGRAVITY_STEPS_FAILED": {
-        "body": "Кроків завершилося невдало: {{count}}; вони НЕ були виконані. agy все одно позначає такі ходи як успішні — перевіряйте фактичний результат, а не відповідь."
-      },
-      "CLI_VERSION_OLDER": {
-        "body": "Встановлена версія {{cli}} старіша за перевірену AionUi; деякі можливості можуть бути відсутні. Радимо оновити {{cli}}. (встановлено: {{reported}} / перевірено AionUi: {{verified}})"
-      },
-      "CLI_VERSION_NEWER": {
-        "body": "Встановлена версія {{cli}} новіша за перевірену AionUi. Зазвичай усе працює; повідомте про дивну поведінку. (встановлено: {{reported}} / перевірено AionUi: {{verified}})"
-      },
-      "CODEX_RETRYING": {
-        "body": "{{detail}} (спроба {{attempts}}, минуло {{elapsed}} — провайдер агента постійно обриває з'єднання, AionUi очікує відновлення.)"
       }
     }
   },
-  "notFound": "Розмову не знайдено або її видалено",
-  "explorer": {
-    "addFolder": "Add folder to project",
-    "removeFolder": "Remove from project",
-    "attachDuplicate": "This folder is already in the project",
-    "attachOverlap": "This folder overlaps a folder already in the project",
-    "attachFailed": "Couldn't add the folder",
-    "removeFailed": "Couldn't remove the folder",
-    "contextMenu": {
-      "rename": "Перейменувати",
-      "addToChat": "Додати в чат",
-      "copyRelativePath": "Копіювати відносний шлях",
-      "copyAbsolutePath": "Копіювати абсолютний шлях",
-      "refresh": "Оновити",
-      "newFile": "Новий файл",
-      "newDir": "Нова папка"
-    },
-    "namePlaceholder": "Назва",
-    "deleteConfirm": "Видалити «{{name}}»? Цю дію не можна скасувати.",
-    "renameFailed": "Не вдалося перейменувати",
-    "newFileFailed": "Не вдалося створити файл",
-    "newDirFailed": "Не вдалося створити папку",
-    "tabs": {
-      "files": "Файли",
-      "changes": "Зміни"
-    },
-    "addedToChat": "{{name}} додано в чат",
-    "imported": "Імпортовано файлів: {{count}}",
-    "importPartialFailed": "Скопійовано: {{copied}}, з помилкою: {{failed}} (конфлікти імен або не підтримується)",
-    "importFailed": "Не вдалося імпортувати файли",
-    "copyNodeFailed": "Не вдалося скопіювати",
-    "moveNodeFailed": "Не вдалося перемістити",
-    "search": {
-      "placeholder": "Пошук файлів за назвою",
-      "searching": "Пошук…",
-      "empty": "Немає відповідних файлів",
-      "limitReached": "Показано перші {{count}} — уточніть запит"
-    },
-    "scm": {
-      "notARepository": "Ця тека не під контролем версій",
-      "noChanges": "Немає змін",
-      "loading": "Завантаження змін…",
-      "loadFailed": "Не вдалося завантажити зміни",
-      "refresh": "Оновити",
-      "groups": {
-        "staged": "Проіндексовані зміни",
-        "unstaged": "Зміни",
-        "changes": "Зміни",
-        "blocked": "Потребує розв’язання"
-      },
-      "sections": {
-        "repositories": "Репозиторії",
-        "changes": "Зміни"
-      },
-      "viewAsTree": "Показати деревом",
-      "viewAsList": "Показати списком",
-      "worktree": "Робоче дерево",
-      "expandWorktrees": "Показати робочі дерева",
-      "collapseWorktrees": "Приховати робочі дерева",
-      "state": {
-        "created": "Додано",
-        "modified": "Змінено",
-        "deleted": "Видалено",
-        "renamed": "Перейменовано",
-        "conflicted": "Конфлікт",
-        "unknown": "Невідомий стан"
-      },
-      "badge": {
-        "created": "A",
-        "modified": "M",
-        "deleted": "D",
-        "renamed": "R",
-        "conflicted": "!",
-        "unknown": "?"
-      },
-      "conflictedHint": "Спершу розв’яжіть цей конфлікт поза AionUi",
-      "opaqueHint": "Цей стан надійшов від новішої версії сервера — лише для перегляду",
-      "degraded": "Оновлення виконується в повільнішому режимі: не вдається записати індекс git",
-      "truncated": "Занадто багато змін — показано лише першу частину",
-      "renamedFrom": "{{from}} → {{to}}",
-      "diff": {
-        "loading": "Завантаження різниці…",
-        "failed": "Не вдалося завантажити різницю",
-        "binary": "Двійковий файл — текстової різниці немає",
-        "truncated": "Різницю скорочено (великий файл)",
-        "empty": "Немає текстових змін",
-        "close": "Закрити різницю"
-      },
-      "actions": {
-        "stage": "Проіндексувати зміни",
-        "unstage": "Прибрати з індексу",
-        "discard": "Скасувати зміни",
-        "stageAll": "Проіндексувати все",
-        "unstageAll": "Прибрати все з індексу",
-        "blockedHint": "Спершу розв’яжіть конфлікт поза AionUi, потім індексуйте або скасовуйте",
-        "confirmDiscardTitle": "Скасувати зміни?",
-        "confirmDiscardTracked": "Правки у {{count}} файлах буде втрачено. Це не можна скасувати.",
-        "confirmDiscardUntracked": "{{count}} нових файлів буде переміщено до смітника.",
-        "confirmDiscardMixed": "Правки у {{tracked}} файлі(ах) буде безповоротно втрачено; {{untracked}} нових файлів потраплять до смітника.",
-        "discardConfirmButton": "Скасувати",
-        "okStage": "Проіндексовано файлів: {{count}}",
-        "okStage_one": "Проіндексовано файлів: {{count}}",
-        "okStage_other": "Проіндексовано файлів: {{count}}",
-        "okStage_few": "Проіндексовано файлів: {{count}}",
-        "okStage_many": "Проіндексовано файлів: {{count}}",
-        "okUnstage": "Прибрано з індексу файлів: {{count}}",
-        "okUnstage_one": "Прибрано з індексу файлів: {{count}}",
-        "okUnstage_other": "Прибрано з індексу файлів: {{count}}",
-        "okUnstage_few": "Прибрано з індексу файлів: {{count}}",
-        "okUnstage_many": "Прибрано з індексу файлів: {{count}}",
-        "okDiscard": "Скасовано зміни у {{count}} файлах",
-        "okDiscard_one": "Скасовано зміни у {{count}} файлі",
-        "okDiscard_other": "Скасовано зміни у {{count}} файлах",
-        "okDiscard_few": "Скасовано зміни у {{count}} файлах",
-        "okDiscard_many": "Скасовано зміни у {{count}} файлах",
-        "partial": "Виконано {{succeeded}} з {{total}} —— не вдалося: {{failed}}",
-        "partialDetail": "Не виконано: {{files}}",
-        "rejectedBlocked": "Нічого не змінено —— спершу розв’яжіть конфлікт",
-        "rejectedUnsupported": "Це сховище не підтримує таку дію",
-        "rejectedFailed": "Не вдалося виконати дію",
-        "retry": "Повторити",
-        "notSent": "Запит не дійшов до сервера, нічого не змінено. Можна повторити.",
-        "outcomeUnknown": "З’єднання скинуто до отримання відповіді — операція могла завершитися, а могла й ні. Оновіть і перевірте список файлів, перш ніж повторювати.",
-        "allFailed": "Жоден із {{count}} файл(ів) не вдалося обробити",
-        "allFailed_one": "Не вдалося обробити {{count}} файл",
-        "allFailed_other": "Жоден із {{count}} файлів не вдалося обробити",
-        "allFailed_few": "Жоден із {{count}} файлів не вдалося обробити",
-        "allFailed_many": "Жоден із {{count}} файлів не вдалося обробити"
-      }
-    },
-    "pathCopied": "Шлях скопійовано",
-    "copyFailed": "Не вдалося скопіювати шлях"
-  },
-  "terminal": {
-    "running": "Виконується",
-    "stopped": "Зупинено",
-    "exited": "Код {{code}}",
-    "stop": "Зупинити",
-    "truncated": "(ранній вивід обрізано)"
-  },
-  "emptyState": {
-    "greeting": "Вітаю! Розкажіть, що потрібно, і я почну."
-  },
-  "crossSession": {
-    "mentionAgain": "Згадати розмову {{name}} у полі введення",
-    "mentionAgainHint": "Натисніть, щоб згадати цю розмову у полі введення",
-    "mentionUnavailable": "Цю розмову більше не можна згадати.",
-    "mentionFailed": "Не вдалося згадати цю розмову.",
-    "fromBadge": "З розмови «{{name}}»",
-    "otherWorkspace": "інша робоча тека",
-    "rateLimitedTitle": "Повідомлення між розмовами, можливо, зациклилися",
-    "rateLimited": "Автоматичні повідомлення між «{{from}}» і «{{to}}» надходять надто часто — можливо, вони зациклилися.",
-    "stopBoth": "Зупинити обидві розмови",
-    "disableFeature": "Вимкнути повідомлення між розмовами"
-  },
-  "planBar": {
-    "title": "План",
-    "progress": "{{completed}}/{{total}}",
-    "expand": "Розгорнути план",
-    "collapse": "Згорнути план"
-  }
+  "notFound": "Розмову не знайдено або її видалено"
 }

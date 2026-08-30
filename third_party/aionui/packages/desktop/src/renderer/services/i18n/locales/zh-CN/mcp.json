@@ -1,9 +1,9 @@
 {
   "integration": {
-    "title": "MCP 集成",
-    "description": "管理模型上下文协议服务器和工具"
+    "title": "插件管理",
+    "description": "管理插件服务器和工具"
   },
-  "label": "MCP",
+  "label": "插件",
   "servers": "服务器",
   "tools": "工具",
   "executionHistory": "执行历史",
@@ -24,7 +24,7 @@
   "parametersJson": "参数 (JSON)",
   "result": "结果",
   "noParameters": "此工具没有参数",
-  "noServers": "未配置 MCP 服务器",
+  "noServers": "未配置插件服务器",
   "noServersFound": "未找到符合条件的服务器",
   "noTools": "无可用工具",
   "noExecutions": "无执行历史",
@@ -63,7 +63,7 @@
   },
   "executionSuccess": "执行成功",
   "executionFailed": "执行失败",
-  "error": "MCP 错误",
+  "error": "插件错误",
   "advancedOptions": "高级选项",
   "timeout": "超时",
   "priority": {

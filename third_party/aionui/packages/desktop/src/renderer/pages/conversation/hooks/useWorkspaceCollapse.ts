@@ -76,13 +76,10 @@ export function useWorkspaceCollapse({
     if (typeof window === 'undefined') {
       return undefined;
     }
-    const handleWorkspaceToggle = (event: Event) => {
+    const handleWorkspaceToggle = () => {
       if (!workspaceEnabled) {
         return;
       }
-      // Mark the cancelable event as handled so keyboard callers only suppress
-      // the native shortcut when a mounted workspace actually toggles.
-      event.preventDefault();
       setRightSiderCollapsed((prev) => {
         const newState = !prev;
         if (preferenceKey) {

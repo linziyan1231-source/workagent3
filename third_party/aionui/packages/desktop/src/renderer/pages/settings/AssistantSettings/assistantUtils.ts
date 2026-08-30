@@ -4,6 +4,7 @@ import type { AssistantListItem, AvailableBackend } from './types';
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
 
 export type AssistantListFilter = 'all' | 'enabled' | 'disabled' | 'builtin' | 'user';
+export const ASSISTANT_SORT_ORDER_GAP = 1000;
 
 /**
  * Source tag shown next to an assistant in the settings list.
@@ -72,6 +73,31 @@ export const reorderAssistantList = (
 };
 
 /**
+ * Build deterministic sort_order updates for a reordered assistant list.
+ */
+export const buildAssistantSortUpdates = (
+  previousAssistants: AssistantListItem[],
+  nextAssistants: AssistantListItem[]
+): Array<{ id: string; sort_order: number }> =>
+  nextAssistants
+    .map((assistant, index) => ({
+      id: assistant.id,
+      sort_order: (index + 1) * ASSISTANT_SORT_ORDER_GAP,
+      previous: previousAssistants.find((item) => item.id === assistant.id),
+    }))
+    .filter(({ previous, sort_order }) => previous?.sort_order !== sort_order)
+    .map(({ id, sort_order }) => ({ id, sort_order }));
+
+/**
+ * Apply normalized sort_order values to a reordered assistant list.
+ */
+export const applyAssistantSortOrders = (assistants: AssistantListItem[]): AssistantListItem[] =>
+  assistants.map((assistant, index) => ({
+    ...assistant,
+    sort_order: (index + 1) * ASSISTANT_SORT_ORDER_GAP,
+  }));
+
+/**
  * Apply search and management filter to assistant list.
  */
 export const filterAssistants = (
@@ -136,24 +162,7 @@ export const filterByEnabled = (
 };
 
 const byAssistantSortOrder = (a: AssistantListItem, b: AssistantListItem) => a.sort_order - b.sort_order;
-
-/// Agent types the assistant editor can drive.
-///
-/// This is a whitelist, so every new `AgentType` is invisible here until it is
-/// added — which is how Antigravity ended up missing from the Agent dropdown
-/// AND showing its raw id (`a9f3c21e`) instead of its name in the editor. Both
-/// symptoms are this one line: an agent filtered out here never reaches
-/// `availableBackends`, and `Select` with no matching Option falls back to
-/// rendering the bare value.
-///
-/// `antigravity` is a first-class agent type rather than an `acp` backend
-/// because agy is a direct-CLI integration (one process per turn), the same
-/// reason it has its own variant in `AgentType`.
-///
-/// Excluded on purpose: `gemini` and `codex` are legacy read-only variants kept
-/// so historical rows stay readable, and `remote` / `nanobot` /
-/// `openclaw-gateway` are not editor-driven.
-const ASSISTANT_EDITOR_AGENT_TYPES = new Set(['acp', 'aionrs', 'antigravity']);
+const ASSISTANT_EDITOR_AGENT_TYPES = new Set(['acp', 'aionrs']);
 
 const isAssistantEditorAgent = (agent: ManagedAgent): boolean => ASSISTANT_EDITOR_AGENT_TYPES.has(agent.agent_type);
 
@@ -169,25 +178,6 @@ export const groupMyAssistants = (assistants: AssistantListItem[]) => {
     cliAssistants: assistants.filter((a) => a.source === 'generated').toSorted(byAssistantSortOrder),
     createdAssistants: assistants.filter((a) => a.source === 'user').toSorted(byAssistantSortOrder),
   };
-};
-
-/**
- * Narrow the editor's agent list by a search query.
- *
- * Matches the id and runtime key as well as the display name: a user who knows
- * an agent as "codex" or "antigravity" should find it without knowing what the
- * row is labelled.
- *
- * Lives here rather than inline in the component so the matching rule is
- * testable on its own — driving an Arco popup to assert which rows survive is
- * both slower and less precise.
- */
-export const filterAssistantEditorBackends = (backends: AvailableBackend[], query: string): AvailableBackend[] => {
-  const keyword = query.trim().toLowerCase();
-  if (!keyword) return backends;
-  return backends.filter((option) =>
-    [option.name, option.id, option.runtimeKey].some((field) => field?.toLowerCase().includes(keyword))
-  );
 };
 
 export const buildAssistantEditorBackends = (
@@ -219,11 +209,6 @@ export const buildAssistantEditorBackends = (
       id: agentId,
       name: agent.name_i18n?.[localeKey] || agent.name,
       runtimeKey,
-      isExtension: agent.isExtension,
-      // Prefer the agent's own avatar/icon; the dropdown falls back to the logo
-      // catalog (keyed by runtimeKey) when this is empty.
-      icon: agent.avatar || agent.icon,
-      customAgentId: agent.custom_agent_id,
       modelOptions: [],
     });
   }

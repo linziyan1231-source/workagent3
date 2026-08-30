@@ -1,7 +1,13 @@
 {
+  "shared": {
+    "mentionCandidates": "助手和成員",
+    "assistant": "助手",
+    "member": "成員",
+    "files": "檔案"
+  },
   "welcome": {
     "title": "Hi，今天有什麼安排？",
-    "placeholder": "發送訊息、上傳檔案、開啟資料夾、建立定時任務，或輸入 / 喚起命令...",
+    "placeholder": "發送訊息、上傳檔案、開啟資料夾或建立定時任務...",
     "linkFolder": "開啟資料夾",
     "newConversation": "新會話",
     "selectModel": "選擇模型",
@@ -12,14 +18,21 @@
     "clearWorkspace": "移除專案",
     "openFolder": "Open Folder",
     "none": "None",
-    "quickActionsTitle": "AionUi 能做什麼？",
+    "quickActionsTitle": "CLIENTNAME 能做什麼？",
     "quickActionFeedback": "反饋問題",
     "quickActionStar": "喜歡我們？點個星吧",
-    "skillsMarket": "AionUi Skills Market",
+    "skillsMarket": "CLIENTNAME Skills Market",
     "skillsMarketDesc": "按需搜尋並啟用社區 Skills，一次設定，所有Agent通用。",
     "skillsMarketDetails": "詳情 >>"
   },
   "history": {
+    "hideSharedConversation": "隱藏對話",
+    "sharedConversationHidden": "共享對話已隱藏",
+    "sharedConversationHideFailed": "無法隱藏共享對話",
+    "sharedProjectHidden": "共享專案已隱藏",
+    "sharedProjectHideFailed": "無法隱藏共享專案",
+    "newPrivateSharedConversation": "在此共享專案中建立對話",
+    "hideSharedProject": "隱藏共享專案",
     "recents": "最近",
     "today": "今天",
     "yesterday": "昨天",
@@ -34,7 +47,6 @@
     "saveName": "儲存",
     "cancelEdit": "取消",
     "rename": "重新命名",
-    "createCronTask": "建立排程任務",
     "renameTitle": "重新命名對話",
     "renamePlaceholder": "請輸入新名稱",
     "renameSuccess": "重新命名成功",
@@ -47,11 +59,7 @@
     "batchExportConfirm": "Export {{count}} selected topics?",
     "batchDelete": "Batch Delete",
     "batchDeleteConfirm": "Delete {{count}} selected topics?",
-    "batchDeleteConfirm_one": "Delete {{count}} selected topics?",
-    "batchDeleteConfirm_other": "Delete {{count}} selected topics?",
     "batchDeleteSuccess": "{{count}} topics deleted",
-    "batchDeleteSuccess_one": "{{count}} topics deleted",
-    "batchDeleteSuccess_other": "{{count}} topics deleted",
     "batchNoSelection": "Please select topics first",
     "export": "Export",
     "exportDialogTitle": "Export Topics",
@@ -66,30 +74,36 @@
     "exportFailed": "Export failed",
     "pin": "Pin",
     "unpin": "Unpin",
-    "markAsUnread": "標為未讀",
-    "markAsRead": "標為已讀",
     "pinned": "Pinned",
     "pinFailed": "Pin operation failed",
+    "weixinReminder": "微信提醒",
+    "weixinReminderEnabled": "提醒已開啟",
+    "weixinReminderDisabled": "提醒已關閉",
+    "weixinReminderUpdateFailed": "微信提醒設定失敗",
     "pinnedSection": "Pinned",
     "deleteSuccess": "刪除成功",
     "deleteFailed": "刪除失敗",
     "projectsSection": "專案",
     "conversationsSection": "對話",
+    "renameProjectTitle": "修改專案名稱",
+    "renameProject": "修改專案名稱",
+    "renameProjectPlaceholder": "請輸入新的專案名稱",
+    "renameProjectSuccess": "專案已重新命名為「{{name}}」",
+    "renameProjectExists": "同名專案已存在",
+    "renameProjectInvalid": "專案名稱無效",
+    "renameProjectInUse": "專案正在使用中，請停止相關工作後再試",
+    "renameProjectForce": "強制停止佔用程式後修改",
+    "renameProjectForceRisk": "風險：佔用此資料夾的程式會被強制結束，未儲存的資料可能遺失。",
+    "renameProjectForceConfirmTitle": "確認強制停止佔用程式？",
+    "renameProjectForceConfirmContent": "系統將結束目前 Windows 使用者下所有能確認正在佔用此專案檔案的程式，然後修改資料夾名稱。編輯器、終端或其他程式中未儲存的資料可能遺失，此操作無法復原。",
+    "renameProjectForceConfirm": "強制停止並修改",
+    "renameProjectForceFailed": "無法安全識別或停止全部佔用程式，未執行強制修改",
+    "renameProjectFailed": "專案重新命名失敗",
+    "removeProjectTitle": "移除專案",
+    "removeProject": "移除專案",
+    "removeProjectConfirm": "確定要移除專案「{{name}}」嗎？專案下的 {{count}} 個對話也會被一起移除。",
     "newConversationInProject": "在此專案中新建對話",
-    "deleting": "刪除中...",
-    "reorderPinned": "拖動以調整置頂會話順序",
-    "forkedFrom": "分叉自「{{name}}」",
-    "forkedConversation": "分叉對話",
-    "archive": "封存",
-    "archiveSuccess": "已封存",
-    "archiveFailed": "封存失敗",
-    "batchArchive": "批次歸檔",
-    "batchArchiveConfirm": "確定歸檔已選的 {{count}} 個話題嗎？歸檔後可在設定的歸檔頁恢復或刪除。",
-    "batchArchiveSuccess": "已歸檔 {{count}} 個話題",
-    "archiveProject": "歸檔專案",
-    "archiveProjectTitle": "歸檔專案",
-    "archiveProjectConfirm": "確定歸檔專案「{{name}}」嗎？專案下的 {{count}} 個對話也會一起歸檔。歸檔後可在設定的歸檔頁恢復或刪除。",
-    "archiving": "歸檔中..."
+    "deleting": "刪除中..."
   },
   "historySearch": {
     "tooltip": "搜尋訊息",
@@ -319,7 +333,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "讀取團隊輔助程序回應失敗",
-        "body": "AionUi 無法讀取本地團隊輔助程序的回應。請先重試一次，若持續發生再重新啟動應用。"
+        "body": "CLIENTNAME 無法讀取本地團隊輔助程序的回應。請先重試一次，若持續發生再重新啟動應用。"
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "本地團隊輔助程序拒絕了這次請求",
@@ -327,11 +341,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "團隊輔助程序回傳了異常回應",
-        "body": "AionUi 收到了本地團隊輔助程序的異常回應。請先重試一次，若持續發生再回報問題。"
+        "body": "CLIENTNAME 收到了本地團隊輔助程序的異常回應。請先重試一次，若持續發生再回報問題。"
       },
       "MCP_TCP_READ_FAILED": {
         "title": "讀取本地團隊輔助程序失敗",
-        "body": "AionUi 無法讀取本地團隊輔助程序的 TCP 回應。請先重試一次，如仍失敗可重新啟動應用。"
+        "body": "CLIENTNAME 無法讀取本地團隊輔助程序的 TCP 回應。請先重試一次，如仍失敗可重新啟動應用。"
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "團隊服務尚未就緒",
@@ -348,6 +362,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "請求仍在使用舊的團隊身份欄位",
         "body": "這個團隊操作必須使用 assistant_id，不能再使用舊的 backend 或 agent 欄位。"
+      },
+      "USER_AGENT_RESOURCE_EXHAUSTED": {
+        "title": "使用者執行環境記憶體不足",
+        "body": "預覽或背景工作佔用資源過高。請關閉 Office 預覽，稍候再試。"
       }
     }
   },
@@ -431,8 +449,7 @@
     "openWith": {
       "vscode": "VS Code",
       "terminal": "終端機",
-      "explorer": "檔案總管",
-      "browser": "瀏覽器"
+      "explorer": "檔案總管"
     }
   },
   "minimap": {
@@ -440,9 +457,7 @@
     "searchHint": "點擊這裡搜尋關鍵詞",
     "empty": "暫無問答內容",
     "noMatch": "未找到相符內容",
-    "count": "{{count}} 條",
-    "count_one": "{{count}} 條",
-    "count_other": "{{count}} 條"
+    "count": "{{count}} 條"
   },
   "chat": {
     "noModelSelected": "當前會話未選擇模型，無法發送訊息",
@@ -460,7 +475,6 @@
     "switchAgentFailed": "切換 Agent 失敗",
     "speech": {
       "recordTooltip": "開始語音輸入",
-      "recordTooltipWithShortcut": "語音輸入 cmd+M",
       "pickFileTooltip": "選擇音訊檔案",
       "stopTooltip": "停止錄音",
       "processing": "正在轉寫音訊...",
@@ -496,8 +510,8 @@
     "error": "順便提問失敗。"
   },
   "commandQueue": {
-    "title": "草稿箱",
-    "clear": "清空草稿箱",
+    "title": "佇列中的指令",
+    "clear": "清空佇列",
     "edit": "編輯",
     "editing": "編輯中",
     "editPlaceholder": "可以在執行前先調整這筆排隊指令。",
@@ -507,44 +521,15 @@
     "reorder": "拖動以調整排隊指令順序",
     "remove": "移除",
     "files": "{{count}} 個檔案",
-    "files_one": "{{count}} 個檔案",
-    "files_other": "{{count}} 個檔案",
     "pausedAfterFailure": "下一條排隊指令啟動失敗。請編輯、調整順序或移除後再繼續。",
     "emptyInput": "排隊指令不能為空。",
     "queueFull": "佇列已滿，請先移除部分指令再繼續新增。",
     "inputTooLong": "排隊指令內容過長，請縮短後再發送。",
     "tooManyFiles": "這條排隊指令附加的檔案過多。",
-    "queueTooLarge": "佇列資料過大，無法安全快取，請先移除部分排隊指令。",
-    "sendNow": "立即發送",
-    "modeToggle": "切換發送模式",
-    "help": "使用說明",
-    "helpIntro": "AI 回覆期間你發送的訊息會先存到這裡。",
-    "helpAuto": "：AI 每輪回覆結束後自動依序發送。",
-    "helpManual": "：只暫存不自動發送，逐筆點「立即發送」。",
-    "clearConfirmTitle": "確定清空發送草稿箱？",
-    "clearConfirmContent": "所有待發送的訊息都會被移除，且無法復原。",
-    "mode": {
-      "auto": "自動發送",
-      "manual": "手動發送"
-    },
-    "addToQueue": "存到草稿箱",
-    "addToQueueShortcut": "⌘ + Enter / Ctrl + Enter",
-    "midturnBlocked": "目前 Agent 正在處理，暫時不能直接傳送。可以先存到草稿箱，稍後傳送。",
-    "enterShortcut": "Enter",
-    "actionMode": "Choose send action",
-    "midturnBlockedSendHint": "目前 Agent 正在處理，暫時不能直接傳送。可以先存到草稿箱，稍後傳送。",
-    "addToQueueBusyHint": "先存到草稿箱，稍後傳送。"
+    "queueTooLarge": "佇列資料過大，無法安全快取，請先移除部分排隊指令。"
   },
   "contextUsage": {
-    "contextUsed": "上下文已使用",
-    "tokensUsed": "已使用 {{tokens}} tokens",
-    "windowUnknown": "上下文視窗大小未知",
-    "sessionCost": "對話成本",
-    "input": "輸入",
-    "output": "輸出",
-    "thought": "思考",
-    "cachedRead": "快取讀取",
-    "cachedWrite": "快取寫入"
+    "contextUsed": "上下文已使用"
   },
   "skill_generator": {
     "title": "Generate Skill/Rule",
@@ -584,27 +569,18 @@
       "loaded": "已載入",
       "failed": "失敗",
       "unsupported": "不支援"
-    },
-    "selected": "已選 MCP"
+    }
   },
   "runtimePreparing": {
     "sendboxHint": "正在準備執行環境。首次啟動可能會稍慢一些。"
   },
   "sendbox": {
-    "hint": "輸入 / 喚起命令，@ 引用檔案，↑/↓ 切換歷史訊息",
-    "mediaPathFallback": "該 Agent 不原生支援此檔案類型，將以檔案路徑形式傳送。",
-    "hintWithSessions": "輸入 / 喚起命令，@ 引用檔案，@@ 引用對話，↑/↓ 切換歷史訊息"
+    "hint": "輸入 / 喚起命令，@ 引用檔案"
   },
   "agentTip": {
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "這次請求沒有產生任何可見回覆。"
-      },
-      "ACP_EMPTY_TURN_NEEDS_AUTH": {
-        "body": "這次請求沒有產生任何可見回覆。若你已登入，可能是後端瞬時或連線問題，請重試或新建對話；若尚未登入，可嘗試登入：{{hint}}。"
-      },
-      "ACP_EMPTY_TURN_TOKEN_LIMIT": {
-        "body": "這次請求沒有產生任何可見回覆。目前的對話可能已接近上下文長度上限，建議重試，或新建對話後再試。"
       },
       "ACP_EMPTY_TURN_MAX_TOKENS": {
         "body": "這次請求在產生任何可見回覆前已達到模型輸出 token 上限。"
@@ -614,172 +590,8 @@
       },
       "ACP_EMPTY_TURN_REFUSAL": {
         "body": "模型在產生任何可見回覆前拒絕了這次請求。"
-      },
-      "ANTIGRAVITY_STEPS_FAILED": {
-        "body": "本輪有 {{count}} 個步驟失敗且未生效。agy 仍會將這類輪次標記為成功，請核對實際結果而非回覆內容。"
-      },
-      "CLI_VERSION_OLDER": {
-        "body": "已安裝的 {{cli}} 低於 AionUi 驗證過的版本，部分功能可能缺失。建議升級 {{cli}}。 （本機 {{reported}} / AionUi 驗證過 {{verified}}）"
-      },
-      "CLI_VERSION_NEWER": {
-        "body": "已安裝的 {{cli}} 高於 AionUi 驗證過的版本。通常仍可正常使用；如遇異常行為請回報。 （本機 {{reported}} / AionUi 驗證過 {{verified}}）"
-      },
-      "CODEX_RETRYING": {
-        "body": "{{detail}}（累計第 {{attempts}} 次重試，已等待 {{elapsed}}——Agent 的服務方反覆中斷連線，AionUi 正在等待重連。）"
       }
     }
   },
-  "notFound": "會話不存在或已被刪除",
-  "explorer": {
-    "addFolder": "新增資料夾到專案",
-    "removeFolder": "從專案移除",
-    "attachDuplicate": "該資料夾已在專案中",
-    "attachOverlap": "該資料夾與專案中既有資料夾重疊",
-    "attachFailed": "新增資料夾失敗",
-    "removeFailed": "移除資料夾失敗",
-    "contextMenu": {
-      "rename": "重新命名",
-      "addToChat": "加入對話",
-      "copyRelativePath": "複製相對路徑",
-      "copyAbsolutePath": "複製絕對路徑",
-      "refresh": "重新整理",
-      "newFile": "新增檔案",
-      "newDir": "新增資料夾"
-    },
-    "namePlaceholder": "名稱",
-    "deleteConfirm": "刪除「{{name}}」？此操作無法復原。",
-    "renameFailed": "重新命名失敗",
-    "newFileFailed": "建立檔案失敗",
-    "newDirFailed": "建立資料夾失敗",
-    "tabs": {
-      "files": "檔案",
-      "changes": "變更"
-    },
-    "addedToChat": "已將 {{name}} 加入對話",
-    "imported": "已匯入 {{count}} 個檔案",
-    "importPartialFailed": "已複製 {{copied}} 個，{{failed}} 個失敗（重名或不支援）",
-    "importFailed": "匯入檔案失敗",
-    "copyNodeFailed": "複製失敗",
-    "moveNodeFailed": "移動失敗",
-    "search": {
-      "placeholder": "依檔名搜尋",
-      "searching": "搜尋中…",
-      "empty": "沒有符合的檔案",
-      "limitReached": "僅顯示前 {{count}} 項 — 請縮小範圍"
-    },
-    "scm": {
-      "notARepository": "該資料夾未納入版本控制",
-      "noChanges": "沒有變更",
-      "loading": "正在載入變更…",
-      "loadFailed": "無法載入變更",
-      "refresh": "重新整理",
-      "groups": {
-        "staged": "已暫存的變更",
-        "unstaged": "變更",
-        "changes": "變更",
-        "blocked": "需先解決"
-      },
-      "sections": {
-        "repositories": "儲存庫",
-        "changes": "變更"
-      },
-      "viewAsTree": "以樹狀檢視顯示",
-      "viewAsList": "以清單檢視顯示",
-      "worktree": "工作樹",
-      "expandWorktrees": "顯示工作樹",
-      "collapseWorktrees": "隱藏工作樹",
-      "state": {
-        "created": "新增",
-        "modified": "已修改",
-        "deleted": "已刪除",
-        "renamed": "已重新命名",
-        "conflicted": "衝突",
-        "unknown": "未識別的狀態"
-      },
-      "badge": {
-        "created": "A",
-        "modified": "M",
-        "deleted": "D",
-        "renamed": "R",
-        "conflicted": "!",
-        "unknown": "?"
-      },
-      "conflictedHint": "請先在 AionUi 之外解決此衝突",
-      "opaqueHint": "該狀態來自更新版本的後端 — 僅供檢視",
-      "degraded": "由於無法更新 git 索引，重新整理正以較慢的模式執行",
-      "truncated": "變更過多，僅顯示前一部分",
-      "renamedFrom": "{{from}} → {{to}}",
-      "diff": {
-        "loading": "正在載入差異…",
-        "failed": "無法載入差異",
-        "binary": "二進位檔案 — 無文字差異",
-        "truncated": "差異已截斷（檔案過大）",
-        "empty": "沒有文字變更",
-        "close": "關閉差異"
-      },
-      "actions": {
-        "stage": "暫存變更",
-        "unstage": "取消暫存",
-        "discard": "捨棄變更",
-        "stageAll": "全部暫存",
-        "unstageAll": "全部取消暫存",
-        "blockedHint": "請先在 AionUi 之外解決衝突，然後再暫存或捨棄",
-        "confirmDiscardTitle": "要捨棄變更嗎？",
-        "confirmDiscardTracked": "{{count}} 個檔案的修改將遺失，且無法復原。",
-        "confirmDiscardUntracked": "{{count}} 個新檔案將被移到垃圾桶。",
-        "confirmDiscardMixed": "{{tracked}} 個檔案的修改將遺失且無法復原；{{untracked}} 個新檔案將被移到垃圾桶。",
-        "discardConfirmButton": "捨棄",
-        "okStage": "已暫存 {{count}} 個檔案",
-        "okStage_one": "已暫存 {{count}} 個檔案",
-        "okStage_other": "已暫存 {{count}} 個檔案",
-        "okUnstage": "已取消暫存 {{count}} 個檔案",
-        "okUnstage_one": "已取消暫存 {{count}} 個檔案",
-        "okUnstage_other": "已取消暫存 {{count}} 個檔案",
-        "okDiscard": "已捨棄 {{count}} 個檔案",
-        "okDiscard_one": "已捨棄 {{count}} 個檔案",
-        "okDiscard_other": "已捨棄 {{count}} 個檔案",
-        "partial": "已完成 {{succeeded}}/{{total}} —— {{failed}} 個未能完成",
-        "partialDetail": "未完成：{{files}}",
-        "rejectedBlocked": "未變動任何內容 —— 請先解決衝突",
-        "rejectedUnsupported": "該儲存庫不支援此操作",
-        "rejectedFailed": "操作未能完成",
-        "retry": "重試",
-        "notSent": "請求沒有送達後端，未變動任何內容。可以重試。",
-        "outcomeUnknown": "連線在收到回覆前已重設——此操作可能已完成，也可能未完成。請重新整理並核對檔案清單，確認後再決定是否重試。",
-        "allFailed": "{{count}} 個檔案都未能處理",
-        "allFailed_one": "{{count}} 個檔案都未能處理",
-        "allFailed_other": "{{count}} 個檔案都未能處理"
-      }
-    },
-    "pathCopied": "已複製路徑",
-    "copyFailed": "複製路徑失敗"
-  },
-  "terminal": {
-    "running": "執行中",
-    "stopped": "已停止",
-    "exited": "結束碼 {{code}}",
-    "stop": "停止",
-    "truncated": "(較早輸出已截斷)"
-  },
-  "emptyState": {
-    "greeting": "你好！說說你的需求，我這就開始。"
-  },
-  "crossSession": {
-    "mentionAgain": "在輸入框中提及對話 {{name}}",
-    "mentionAgainHint": "點擊以在輸入框中提及此對話",
-    "mentionUnavailable": "該對話已無法提及",
-    "mentionFailed": "無法提及該對話",
-    "fromBadge": "來自對話「{{name}}」",
-    "otherWorkspace": "不同工作目錄",
-    "rateLimitedTitle": "跨對話訊息可能在空轉",
-    "rateLimited": "對話「{{from}}」與「{{to}}」之間的自動訊息過於頻繁，可能在空轉。",
-    "stopBoth": "停止這兩個對話",
-    "disableFeature": "關閉跨對話訊息"
-  },
-  "planBar": {
-    "title": "計劃",
-    "progress": "{{completed}}/{{total}}",
-    "expand": "展開計劃",
-    "collapse": "收合計劃"
-  }
+  "notFound": "會話不存在或已被刪除"
 }

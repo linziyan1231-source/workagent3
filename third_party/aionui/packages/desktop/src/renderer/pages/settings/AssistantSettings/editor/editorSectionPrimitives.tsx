@@ -38,45 +38,39 @@ export const SectionCard: React.FC<SectionCardProps> = ({
           </span>
         ) : null}
         {readOnly && readOnlyLabel ? (
-          <span className='ms-auto rounded-8px bg-fill-1 px-8px py-3px text-10px font-500 text-t-tertiary'>
+          <span className='ml-auto rounded-8px bg-fill-1 px-8px py-3px text-10px font-500 text-t-tertiary'>
             {readOnlyLabel}
           </span>
         ) : null}
-        {extra ? <div className='ms-auto'>{extra}</div> : null}
+        {extra ? <div className='ml-auto'>{extra}</div> : null}
       </div>
       {children}
     </section>
   );
 };
 
-export const FieldLabel: React.FC<{ children: React.ReactNode; required?: boolean; icon?: React.ReactNode }> = ({
+export const FieldLabel: React.FC<{ children: React.ReactNode; required?: boolean }> = ({
   children,
   required = false,
-  icon,
 }) => {
   return (
     <div className='w-86px flex-shrink-0 pt-6px text-13px leading-20px text-t-secondary'>
-      <span className='flex items-center gap-6px leading-none'>
-        {required ? <span className='text-[rgb(var(--danger-6))]'>*</span> : null}
-        {icon ? <span className='inline-flex shrink-0 items-center text-t-tertiary'>{icon}</span> : null}
-        <span>{children}</span>
-      </span>
+      {required ? <span className='mr-4px text-[rgb(var(--danger-6))]'>*</span> : null}
+      {children}
     </div>
   );
 };
 
 type ConfigRowProps = {
-  label: React.ReactNode;
+  label: string;
   children: React.ReactNode;
   hint?: React.ReactNode;
-  /** Optional leading icon shown before the label text. */
-  icon?: React.ReactNode;
 };
 
-export const ConfigRow: React.FC<ConfigRowProps> = ({ label, children, hint, icon }) => {
+export const ConfigRow: React.FC<ConfigRowProps> = ({ label, children, hint }) => {
   return (
     <div className='flex items-start gap-12px'>
-      <FieldLabel icon={icon}>{label}</FieldLabel>
+      <FieldLabel>{label}</FieldLabel>
       <div className='min-w-0 flex-1 space-y-8px'>
         {children}
         {hint ? <div className='text-11px leading-18px text-t-tertiary'>{hint}</div> : null}
