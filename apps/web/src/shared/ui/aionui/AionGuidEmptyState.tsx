@@ -22,7 +22,7 @@ type Props = {
   onEngineChange: (engine: EngineId) => void;
   onPresetChange: (preset: PresetDefinition) => void;
   onSend: (value: string) => void;
-  onAttach: () => void;
+  onAttach: (files: FileList) => Promise<string[]>;
 };
 
 const fallbackEngines: Array<{ id: EngineId; label: string }> = [
@@ -44,6 +44,7 @@ export function AionGuidEmptyState({
   onEngineChange,
   onPresetChange,
   onSend,
+  onAttach,
 }: Props) {
   const { t, i18n } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -128,6 +129,7 @@ export function AionGuidEmptyState({
       onFilesUploaded={(paths: string[]) =>
         setFiles((current) => [...current, ...paths])
       }
+      onBrowserFilesSelected={onAttach}
       modelSelectorNode={modelSelector}
       modeBackend={engine}
       selectedMode="default"

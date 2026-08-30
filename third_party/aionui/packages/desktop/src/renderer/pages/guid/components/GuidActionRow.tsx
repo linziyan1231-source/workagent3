@@ -22,6 +22,7 @@ type GuidActionRowProps = {
   // File handling
   files: string[];
   onFilesUploaded: (paths: string[]) => void;
+  onBrowserFilesSelected?: (files: FileList) => Promise<string[]>;
 
   // Model selector node (rendered by parent)
   modelSelectorNode: React.ReactNode;
@@ -51,6 +52,7 @@ type GuidActionRowProps = {
 const GuidActionRow: React.FC<GuidActionRowProps> = ({
   files,
   onFilesUploaded,
+  onBrowserFilesSelected,
   modelSelectorNode,
   modeBackend,
   selectedMode,
@@ -85,6 +87,11 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       if (!fileList || fileList.length === 0) return;
       setUploading(true);
       try {
+        if (onBrowserFilesSelected) {
+          const paths = await onBrowserFilesSelected(fileList);
+          if (paths.length > 0) onFilesUploaded(paths);
+          return;
+        }
         const processed = await FileService.processDroppedFiles(fileList);
         if (processed.length > 0) {
           onFilesUploaded(processed.map((f) => f.path));
@@ -97,7 +104,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
       // Reset so the same file can be re-selected
       e.target.value = '';
     },
-    [onFilesUploaded, t]
+    [onBrowserFilesSelected, onFilesUploaded, t]
   );
 
   const getModeDisplayLabel = (mode: AgentModeOption): string =>

@@ -20,5 +20,7 @@ wrappers in `renderer/components/base/AionModal.tsx`, the absolute hooks module
 specifier in `renderer/pages/conversation/Messages/MessageList.tsx`, and the
 optional `hiddenBuiltinIds` input on the settings sider. They preserve
 visual/runtime behavior while allowing WorkAgent3's Web adapter to replace
-desktop state and omit features excluded by `plan.md`. Other Web integration
-remains in the adapter layer.
+desktop state and omit features excluded by `plan.md`. The guide action row
+also accepts an optional browser-file callback so its unchanged picker can
+hand selected `File` objects to the WorkAgent3 HTTP asset port. Other Web
+integration remains in the adapter layer.

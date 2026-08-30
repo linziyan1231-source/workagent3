@@ -413,27 +413,47 @@ export function ConversationPage({
     }
   }
 
-  async function attach(files: FileList | null) {
-    if (active === undefined || assetPort === undefined || files === null)
-      return;
+  async function attach(files: FileList | null): Promise<string[]> {
+    if (assetPort === undefined || files === null) return [];
+    let targetSession = active;
     try {
+      if (targetSession === undefined) {
+        const created = await port.create({
+          engine,
+          title: "New conversation",
+          workspace: workspaceId ?? "default",
+          presetId,
+        });
+        targetSession = created;
+        setSessions((current) => [created, ...current]);
+        setActiveId(created.id);
+        onWorkspaceSelect?.(created.workspaceId);
+      }
+      const uploadSession = targetSession;
+      const uploadedNames: string[] = [];
       for (const file of files) {
         const asset = await assetPort.attach(
-          active.workspaceId,
-          active.id,
+          uploadSession.workspaceId,
+          uploadSession.id,
           file,
         );
         setAssets((current) => ({
           ...current,
-          [active.id]: [...(current[active.id] ?? []), asset],
+          [uploadSession.id]: [...(current[uploadSession.id] ?? []), asset],
         }));
         setStagedAssets((current) => ({
           ...current,
-          [active.id]: [...(current[active.id] ?? []), asset.id],
+          [uploadSession.id]: [
+            ...(current[uploadSession.id] ?? []),
+            asset.id,
+          ],
         }));
+        uploadedNames.push(asset.name);
       }
+      return uploadedNames;
     } catch {
       setNotice("Attachment upload failed. Files up to 25 MB are supported.");
+      return [];
     } finally {
       if (attachmentInputRef.current !== null)
         attachmentInputRef.current.value = "";
@@ -685,7 +705,7 @@ export function ConversationPage({
                             setEngine(next.engine);
                           }}
                           onSend={send}
-                          onAttach={() => attachmentInputRef.current?.click()}
+                          onAttach={attach}
                         />
                       </div>
                     ) : (
