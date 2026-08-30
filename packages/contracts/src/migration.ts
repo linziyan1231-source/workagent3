@@ -55,6 +55,7 @@ export const mcpServerSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
+    description: z.string(),
     source: z.enum(["managed", "user"]),
     transport: mcpTransportSchema,
     enabled: z.boolean(),

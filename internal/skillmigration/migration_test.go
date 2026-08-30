@@ -4,16 +4,24 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillruntime"
 )
 
 type readiness struct {
 	status Status
 	reason string
+}
+
+type credentialStates map[string]bool
+
+func (states credentialStates) CredentialReady(_ context.Context, id string) bool {
+	return states[id]
 }
 
 func (r readiness) MigrationStatus(context.Context, []string) (Status, string) {
@@ -116,6 +124,70 @@ func TestInterruptedJournalRequiresRetry(t *testing.T) {
 	results, err := migration.Results(context.Background())
 	if err != nil || len(results) != 1 || results[0].Status != NeedsReview || results[0].Reason != "migration_interrupted_retry_required" {
 		t.Fatalf("unexpected interrupted journal: %#v, %v", results, err)
+	}
+}
+
+func TestMCPMigrationMapsManagedReplacementBeforeSkills(t *testing.T) {
+	migration, _ := openMigration(t, nil)
+	catalog, err := mcpruntime.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	replacement := mcpruntime.Server{
+		ID: "managed-dwg", Name: "DWG Quantity", Description: "Managed", Source: "managed", Enabled: true,
+		Transport:  mcpruntime.Transport{Kind: "http", URL: "http://127.0.0.1:39001/mcp", HeaderCredentialIDs: map[string]string{}},
+		ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "none", Health: "healthy",
+	}
+	results, err := migration.MigrateMCP(context.Background(), []MCPServer{{
+		ID: "old-dwg", Name: "DWG Quantity", Description: "Old", Source: "managed", Enabled: true, ToolPolicy: "all", OAuthState: "none",
+	}}, catalog, nil, map[string]mcpruntime.Server{"dwg quantity": replacement})
+	if err != nil || len(results) != 1 || results[0].Status != Ready || results[0].TargetID != replacement.ID {
+		t.Fatalf("managed migration failed: %#v, %v", results, err)
+	}
+	mapping, err := migration.MCPMapping(context.Background())
+	if err != nil || mapping["old-dwg"] != replacement.ID {
+		t.Fatalf("unexpected mapping: %#v, %v", mapping, err)
+	}
+	remapped, err := RemapSkillDependencies([]Asset{{OldID: "skill", RequiredMCPServerIDs: []string{"old-dwg"}}}, mapping)
+	if err != nil || remapped[0].RequiredMCPServerIDs[0] != replacement.ID {
+		t.Fatalf("skill dependency was not remapped: %#v, %v", remapped, err)
+	}
+}
+
+func TestMCPMigrationKeepsUnsafeItemsRecoverable(t *testing.T) {
+	migration, _ := openMigration(t, nil)
+	catalog, err := mcpruntime.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	command := "/opt/user/server"
+	if runtime.GOOS == "windows" {
+		command = `C:\user\server.exe`
+	}
+	results, err := migration.MigrateMCP(context.Background(), []MCPServer{
+		{
+			ID: "remote", Name: "Remote", Description: "Remote", Source: "user", Enabled: true,
+			Transport:  MCPTransport{Kind: "http", URL: "https://example.com/mcp", HeaderCredentialIDs: map[string]string{"Authorization": "missing"}},
+			ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "ready",
+		},
+		{
+			ID: "stdio", Name: "Stdio", Description: "Stdio", Source: "user", Enabled: true,
+			Transport:  MCPTransport{Kind: "stdio", Command: command, Args: []string{}, EnvironmentCredentialIDs: map[string]string{}},
+			ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "none",
+		},
+	}, catalog, credentialStates{}, nil)
+	if err != nil || results[0].Status != NeedsAuth || results[1].Status != NeedsReview {
+		t.Fatalf("unexpected MCP migration states: %#v, %v", results, err)
+	}
+	remote, err := catalog.Get(context.Background(), "remote")
+	if err != nil || remote.OAuthState != "needs_auth" {
+		t.Fatalf("remote auth state not preserved: %#v, %v", remote, err)
+	}
+	stdio, err := catalog.Get(context.Background(), "stdio")
+	if err != nil || stdio.Enabled || stdio.Health != "needs_review" {
+		t.Fatalf("stdio was not imported disabled for review: %#v, %v", stdio, err)
 	}
 }
 

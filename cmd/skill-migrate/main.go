@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
@@ -62,15 +63,35 @@ func run(arguments []string, output io.Writer) error {
 		return err
 	}
 	defer mcp.Close()
+	credentials, err := credentialbroker.Open(filepath.Join(*runtimeDirectory, "credential-broker.db"), credentialbroker.NewUserProtector())
+	if err != nil {
+		return err
+	}
+	defer credentials.Close()
 	migration, err := skillmigration.Open(filepath.Join(*runtimeDirectory, "skill-migration.db"), skills, releasedSkills(*releaseRoot))
 	if err != nil {
 		return err
 	}
 	defer migration.Close()
-	results, err := migration.Migrate(context.Background(), manifest, catalogReadiness{catalog: mcp})
+	ctx := context.Background()
+	mcpResults, err := migration.MigrateMCP(ctx, manifest.MCPServers, mcp, credentialReadiness{store: credentials}, nil)
 	if err != nil {
 		return err
 	}
+	mapping, err := migration.MCPMapping(ctx)
+	if err != nil {
+		return err
+	}
+	remappedSkills, err := skillmigration.RemapSkillDependencies(manifest.Skills, mapping)
+	if err != nil {
+		return err
+	}
+	manifest.Skills = remappedSkills
+	skillResults, err := migration.Migrate(ctx, manifest, catalogReadiness{catalog: mcp})
+	if err != nil {
+		return err
+	}
+	results := append(mcpResults, skillResults...)
 	return json.NewEncoder(output).Encode(struct {
 		SID     string                  `json:"sid"`
 		Results []skillmigration.Result `json:"results"`
@@ -102,12 +123,19 @@ type catalogReadiness struct{ catalog *mcpruntime.Catalog }
 func (r catalogReadiness) MigrationStatus(ctx context.Context, ids []string) (skillmigration.Status, string) {
 	for _, id := range ids {
 		server, err := r.catalog.Get(ctx, id)
+		if err == nil && server.OAuthState == "needs_auth" {
+			return skillmigration.NeedsAuth, "mcp_needs_auth:" + id
+		}
 		if err != nil || !server.Enabled || server.Health == "unavailable" || server.Health == "needs_review" || server.Health == "unknown" {
 			return skillmigration.NeedsReview, "mcp_not_healthy:" + id
 		}
-		if server.OAuthState == "needs_auth" {
-			return skillmigration.NeedsAuth, "mcp_needs_auth:" + id
-		}
 	}
 	return skillmigration.Ready, ""
+}
+
+type credentialReadiness struct{ store *credentialbroker.Store }
+
+func (r credentialReadiness) CredentialReady(ctx context.Context, id string) bool {
+	metadata, err := r.store.Metadata(ctx, id)
+	return err == nil && metadata.State == credentialbroker.StateReady
 }

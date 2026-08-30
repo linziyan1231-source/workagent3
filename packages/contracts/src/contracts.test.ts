@@ -188,6 +188,7 @@ describe("migration inventory", () => {
         {
           id: "mcp-1",
           name: "MCP",
+          description: "Migrated MCP",
           source: "user" as const,
           enabled: true,
           transport: {
