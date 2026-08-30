@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "go:test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/go.ps1 test ./...",
-    "profile:dump": "pnpm --filter @workagent/harness-bundle build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dump-harness-profile.ps1",
+    "profile:dump": "pnpm --filter @workagent/contracts build && pnpm --filter @workagent/harness-bundle build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dump-harness-profile.ps1",
     "profile:smoke": "pnpm profile:dump && node scripts/smoke-harness.mjs",
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
     "test": "pnpm -r --if-present test",

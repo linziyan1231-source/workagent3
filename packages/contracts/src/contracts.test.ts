@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   engineEventSchema,
+  moduleManifestListSchema,
   skillMcpInventorySchema,
+  validateModuleGraph,
   workspaceEntrySchema,
 } from "./index.js";
 
@@ -52,5 +54,42 @@ describe("migration inventory", () => {
         results: [],
       }),
     ).toThrow();
+  });
+});
+
+describe("module manifests", () => {
+  const manifest = (id: string, dependencies: string[] = []) => ({
+    id,
+    version: "1.0.0",
+    layer: "runtime" as const,
+    required: true,
+    capabilities: [`${id}.read`],
+    dependencies: dependencies.map((dependency) => ({
+      id: dependency,
+      contract: `${dependency}/v1`,
+    })),
+    configSchema: `${id}/config/v1`,
+    dataOwner: id,
+    healthCheck: `${id}/health/v1`,
+  });
+
+  it("accepts an acyclic declared dependency graph", () => {
+    const parsed = moduleManifestListSchema.parse([
+      manifest("engine-registry"),
+      manifest("personal-work", ["engine-registry"]),
+    ]);
+    expect(() => validateModuleGraph(parsed)).not.toThrow();
+  });
+
+  it("rejects missing and cyclic module dependencies", () => {
+    expect(() =>
+      validateModuleGraph([manifest("personal-work", ["engine-registry"])]),
+    ).toThrow("missing_module_dependency");
+    expect(() =>
+      validateModuleGraph([
+        manifest("personal-work", ["workspace-runtime"]),
+        manifest("workspace-runtime", ["personal-work"]),
+      ]),
+    ).toThrow("cyclic_module_dependency");
   });
 });

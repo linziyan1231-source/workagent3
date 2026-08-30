@@ -9,6 +9,7 @@ import { RuntimeController } from "./runtime.js";
 import { WorkspaceController } from "./workspace-api.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
+import { RUNTIME_MODULES } from "./module-manifests.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -90,6 +91,7 @@ export function apply(ctx: Context): void {
           }
           json(response, 200, {
             engines: ENGINE_CAPABILITIES,
+            modules: RUNTIME_MODULES,
           });
         },
       }),

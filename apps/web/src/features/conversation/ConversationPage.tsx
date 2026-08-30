@@ -15,7 +15,7 @@ import type {
   RuntimeMessage,
   WorkspaceAsset,
 } from "@workagent/contracts";
-import type { AuthUser } from "../auth/authPort.js";
+import type { AuthUser } from "../../shared/types/auth.js";
 import { conversationPort, type ConversationPort } from "./conversationPort.js";
 
 export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;

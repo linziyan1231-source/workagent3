@@ -1,10 +1,6 @@
 import { requestJson } from "../../shared/api/http.js";
-
-export type AuthUser = {
-  id: number;
-  username: string;
-  disabled: boolean;
-};
+import type { AuthUser } from "../../shared/types/auth.js";
+export type { AuthUser } from "../../shared/types/auth.js";
 
 type UserEnvelope = { user: AuthUser };
 

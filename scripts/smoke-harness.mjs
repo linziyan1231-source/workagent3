@@ -108,6 +108,22 @@ try {
           )
         )
           throw new Error("engine registry returned an invalid status matrix");
+        const capabilityResponse = await fetch(
+          `http://127.0.0.1:${port}/v1/capabilities`,
+          { headers: { authorization: `Bearer ${token}` } },
+        );
+        const capabilities = await capabilityResponse.json();
+        if (
+          !capabilityResponse.ok ||
+          !Array.isArray(capabilities.modules) ||
+          !capabilities.modules.some(
+            (module) =>
+              module.id === "workspace-runtime" &&
+              typeof module.dataOwner === "string" &&
+              typeof module.healthCheck === "string",
+          )
+        )
+          throw new Error("runtime module manifests were not published");
         const createdWorkspace = await fetch(
           `http://127.0.0.1:${port}/v1/workspaces`,
           {
