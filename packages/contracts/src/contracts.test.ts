@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { engineEventSchema, skillMcpInventorySchema } from "./index.js";
+import {
+  engineEventSchema,
+  skillMcpInventorySchema,
+  workspaceEntrySchema,
+} from "./index.js";
 
 describe("engine events", () => {
   it("accepts the minimal normalized assistant event", () => {
@@ -17,6 +21,21 @@ describe("engine events", () => {
 
   it("rejects an event outside the public runtime contract", () => {
     expect(() => engineEventSchema.parse({ type: "internal.trace" })).toThrow();
+  });
+});
+
+describe("workspace contract", () => {
+  it("does not expose absolute host paths", () => {
+    expect(() =>
+      workspaceEntrySchema.parse({
+        name: "secret.txt",
+        path: "C:\\private\\secret.txt",
+        kind: "file",
+        size: 1,
+        modifiedAt: "2026-08-30T10:00:00+08:00",
+      }),
+    ).toThrow();
+    expect(workspaceEntrySchema.keyof().options).not.toContain("absolutePath");
   });
 });
 

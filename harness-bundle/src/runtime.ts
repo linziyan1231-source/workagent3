@@ -254,8 +254,34 @@ export class RuntimeController {
         });
         return;
       }
+      if (request.method === "GET") {
+        writeJson(response, 200, {
+          id,
+          engine: record.engine,
+          title: record.title,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        });
+        return;
+      }
       if (request.method === "DELETE") {
-        writeJson(response, 501, { error: "session_delete_unsupported" });
+        try {
+          if (record.activating !== undefined) await record.activating;
+          if (record.handle !== undefined) await record.handle.dispose();
+          if (record.native !== undefined) await record.native.close();
+        } catch (error) {
+          console.error("workagent-runtime-api: session close failed", error);
+          writeJson(response, 503, { error: "session_close_failed" });
+          return;
+        }
+        this.#sessions.delete(id);
+        this.#index.delete(id);
+        for (const subscriber of this.#subscribers.get(id) ?? []) {
+          subscriber.end();
+        }
+        this.#subscribers.delete(id);
+        response.writeHead(204);
+        response.end();
         return;
       }
       writeJson(response, 405, { error: "method_not_allowed" });

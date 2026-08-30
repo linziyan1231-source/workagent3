@@ -11,8 +11,12 @@ const dsh = fileURLToPath(
 );
 const token = "workagent-profile-smoke-token";
 const nativeHome = join(home, "native-smoke");
+const workspaceRoot = fileURLToPath(
+  new URL("../.cache/workspaces", import.meta.url),
+);
 await mkdir(join(nativeHome, "codex"), { recursive: true });
 await mkdir(join(nativeHome, "kimi"), { recursive: true });
+await mkdir(workspaceRoot, { recursive: true });
 
 const port = await new Promise((resolve, reject) => {
   const server = createServer();
@@ -36,6 +40,7 @@ const child = spawn(process.execPath, [dsh, "--profile", "workagent"], {
     KIMI_CODE_HOME: process.env.KIMI_CODE_HOME ?? join(nativeHome, "kimi"),
     WORKAGENT_RUNTIME_PORT: String(port),
     WORKAGENT_RUNTIME_TOKEN: token,
+    WORKAGENT_WORKSPACE_ROOT: workspaceRoot,
   },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
@@ -88,6 +93,41 @@ try {
           succeeded = true;
           break;
         }
+        const createdWorkspace = await fetch(
+          `http://127.0.0.1:${port}/v1/workspaces`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ name: `Smoke ${Date.now()}` }),
+          },
+        );
+        if (createdWorkspace.status !== 201)
+          throw new Error(
+            `workspace creation failed: ${await createdWorkspace.text()}`,
+          );
+        const workspace = await createdWorkspace.json();
+        const contentURL = `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/content?path=smoke.txt`;
+        const written = await fetch(contentURL, {
+          method: "PUT",
+          headers: { authorization: `Bearer ${token}` },
+          body: "workspace smoke",
+        });
+        if (!written.ok)
+          throw new Error(`workspace write failed: ${await written.text()}`);
+        const downloaded = await fetch(contentURL, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!downloaded.ok || (await downloaded.text()) !== "workspace smoke")
+          throw new Error("workspace download did not round-trip");
+        const deleted = await fetch(contentURL, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (deleted.status !== 204)
+          throw new Error(`workspace delete failed with ${deleted.status}`);
         const engines = [
           "harness",
           ...(process.env.WORKAGENT_NATIVE_SMOKE_ENGINES ?? "")

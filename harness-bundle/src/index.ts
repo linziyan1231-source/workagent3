@@ -6,6 +6,7 @@ import type {} from "@deepseek-ai/dsh-agent-default-model";
 import type {} from "@deepseek-ai/dsh-host-webserver";
 import type {} from "@deepseek-ai/dsh-session";
 import { RuntimeController } from "./runtime.js";
+import { WorkspaceController } from "./workspace-api.js";
 
 export const name = "workagent-runtime-api";
 export const inject = ["agentDefaultModel", "agents", "sessions", "webServer"];
@@ -110,4 +111,5 @@ export function apply(ctx: Context): void {
   );
   const runtime = new RuntimeController(ctx, token);
   runtime.mount();
+  new WorkspaceController(ctx, token);
 }

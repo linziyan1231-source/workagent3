@@ -177,6 +177,7 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 	}
 	environment = append(environment,
 		"DSH_HOME="+directories.dshHome,
+		"WORKAGENT_WORKSPACE_ROOT="+directories.workspace,
 		"CODEX_HOME="+filepath.Join(directories.native, "codex"),
 		"KIMI_CODE_HOME="+filepath.Join(directories.native, "kimi"),
 		"WORKAGENT_RUNTIME_TOKEN="+token,
