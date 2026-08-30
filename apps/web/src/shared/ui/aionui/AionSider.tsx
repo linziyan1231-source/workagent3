@@ -11,7 +11,7 @@ import ConversationRow from "@renderer/pages/conversation/GroupedHistory/Convers
 import type { TChatConversation } from "@/common/config/storage";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
-import { Button } from "@arco-design/web-react";
+import { Button, Input, Message, Modal } from "@arco-design/web-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,9 +24,9 @@ type Props = {
   onQuery: (value: string) => void;
   onNew: () => void;
   onSelect: (session: RuntimeSession) => void;
-  onRename: (session: RuntimeSession) => void;
-  onDelete: (session: RuntimeSession) => void;
-  onBatchDelete: (sessions: RuntimeSession[]) => void;
+  onRename: (session: RuntimeSession, title: string) => Promise<boolean>;
+  onDelete: (session: RuntimeSession) => Promise<boolean>;
+  onBatchDelete: (sessions: RuntimeSession[]) => Promise<boolean>;
   onSettings: () => void;
   onAssistants: () => void;
   assistantsActive: boolean;
@@ -42,6 +42,9 @@ export function AionSider(props: Props) {
   const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
   const [menuVisibleId, setMenuVisibleId] = useState<string>();
   const [pinnedIds, setPinnedIds] = useState(() => new Set<string>());
+  const [renameTarget, setRenameTarget] = useState<RuntimeSession>();
+  const [renameName, setRenameName] = useState("");
+  const [renameLoading, setRenameLoading] = useState(false);
   const { t } = useTranslation();
   const isMobile = layout?.isMobile ?? false;
   const tooltipProps = getSiderTooltipProps(false);
@@ -67,8 +70,98 @@ export function AionSider(props: Props) {
         pinned: pinnedIds.has(session.id),
       },
     }) as TChatConversation;
+
+  const closeRename = () => {
+    setRenameTarget(undefined);
+    setRenameName("");
+  };
+
+  const confirmRename = async () => {
+    const title = renameName.trim();
+    if (!renameTarget || !title) return;
+    setRenameLoading(true);
+    try {
+      if (await props.onRename(renameTarget, title)) {
+        closeRename();
+        Message.success(t("conversation.history.renameSuccess"));
+      } else {
+        Message.error(t("conversation.history.renameFailed"));
+      }
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const confirmDelete = (session: RuntimeSession) => {
+    Modal.confirm({
+      title: t("conversation.history.deleteTitle"),
+      content: t("conversation.history.deleteConfirm"),
+      okText: t("conversation.history.confirmDelete"),
+      cancelText: t("conversation.history.cancelDelete"),
+      okButtonProps: { status: "warning" },
+      onOk: async () => {
+        if (await props.onDelete(session))
+          Message.success(t("conversation.history.deleteSuccess"));
+        else Message.error(t("conversation.history.deleteFailed"));
+      },
+      style: { borderRadius: "12px" },
+      alignCenter: true,
+      getPopupContainer: () => document.body,
+    });
+  };
+
+  const confirmBatchDelete = (items: RuntimeSession[]) => {
+    if (items.length === 0) return;
+    Modal.confirm({
+      title: t("conversation.history.batchDelete"),
+      content: t("conversation.history.batchDeleteConfirm", {
+        count: items.length,
+      }),
+      okText: t("conversation.history.confirmDelete"),
+      cancelText: t("conversation.history.cancelDelete"),
+      okButtonProps: { status: "warning" },
+      onOk: async () => {
+        if (await props.onBatchDelete(items)) {
+          Message.success(
+            t("conversation.history.batchDeleteSuccess", {
+              count: items.length,
+            }),
+          );
+          setSelectedIds(new Set());
+          setBatchMode(false);
+        } else {
+          Message.error(t("conversation.history.deleteFailed"));
+        }
+      },
+      style: { borderRadius: "12px" },
+      alignCenter: true,
+      getPopupContainer: () => document.body,
+    });
+  };
   return (
     <div className="size-full min-h-0 flex flex-col">
+      <Modal
+        title={t("conversation.history.renameTitle")}
+        visible={renameTarget !== undefined}
+        onOk={confirmRename}
+        onCancel={closeRename}
+        okText={t("conversation.history.saveName")}
+        cancelText={t("conversation.history.cancelEdit")}
+        confirmLoading={renameLoading}
+        okButtonProps={{ disabled: !renameName.trim() }}
+        style={{ borderRadius: "12px" }}
+        alignCenter
+        getPopupContainer={() => document.body}
+      >
+        <Input
+          autoFocus
+          value={renameName}
+          onChange={setRenameName}
+          onPressEnter={confirmRename}
+          placeholder={t("conversation.history.renamePlaceholder")}
+          allowClear
+        />
+      </Modal>
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-2px">
         <SiderToolbar
           isMobile={isMobile}
@@ -126,11 +219,9 @@ export function AionSider(props: Props) {
                   status="warning"
                   disabled={selectedIds.size === 0}
                   onClick={() => {
-                    props.onBatchDelete(
+                    confirmBatchDelete(
                       visible.filter((session) => selectedIds.has(session.id)),
                     );
-                    setSelectedIds(new Set());
-                    setBatchMode(false);
                   }}
                 >
                   {t("conversation.history.batchDelete")}
@@ -172,8 +263,11 @@ export function AionSider(props: Props) {
                 onMenuVisibleChange={(_id, visible) =>
                   setMenuVisibleId(visible ? session.id : undefined)
                 }
-                onEditStart={() => props.onRename(session)}
-                onDelete={() => props.onDelete(session)}
+                onEditStart={() => {
+                  setRenameTarget(session);
+                  setRenameName(session.title);
+                }}
+                onDelete={() => confirmDelete(session)}
                 onTogglePin={() =>
                   setPinnedIds((current) => {
                     const next = new Set(current);

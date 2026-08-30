@@ -460,10 +460,11 @@ export function ConversationPage({
     }
   }
 
-  async function renameSession(session: RuntimeSession = active!) {
-    if (session === undefined) return;
-    const title = window.prompt("Conversation name", session.title)?.trim();
-    if (!title || title === session.title) return;
+  async function renameSession(
+    session: RuntimeSession,
+    title: string,
+  ): Promise<boolean> {
+    if (title === session.title) return true;
     try {
       const updated = await port.rename(session.id, title);
       setSessions((current) =>
@@ -471,14 +472,14 @@ export function ConversationPage({
           session.id === updated.id ? updated : session,
         ),
       );
+      return true;
     } catch {
       setNotice("The conversation could not be renamed.");
+      return false;
     }
   }
 
-  async function deleteSession(session: RuntimeSession = active!) {
-    if (session === undefined) return;
-    if (!window.confirm(`Delete “${session.title}”?`)) return;
+  async function deleteSession(session: RuntimeSession): Promise<boolean> {
     try {
       await port.remove(session.id);
       const remaining = sessions.filter((item) => item.id !== session.id);
@@ -486,22 +487,25 @@ export function ConversationPage({
       if (session.id === activeId) setActiveId(remaining[0]?.id);
       if (remaining[0] !== undefined)
         onWorkspaceSelect?.(remaining[0].workspaceId);
+      return true;
     } catch {
       setNotice("The conversation could not be deleted.");
+      return false;
     }
   }
 
-  async function deleteSessions(items: RuntimeSession[]) {
-    if (items.length === 0) return;
-    if (!window.confirm(`Delete ${items.length} conversations?`)) return;
+  async function deleteSessions(items: RuntimeSession[]): Promise<boolean> {
+    if (items.length === 0) return true;
     try {
       await Promise.all(items.map((session) => port.remove(session.id)));
       const deleted = new Set(items.map((session) => session.id));
       const remaining = sessions.filter((session) => !deleted.has(session.id));
       setSessions(remaining);
       if (activeId && deleted.has(activeId)) setActiveId(remaining[0]?.id);
+      return true;
     } catch {
       setNotice("Some conversations could not be deleted.");
+      return false;
     }
   }
 
@@ -550,7 +554,7 @@ export function ConversationPage({
       }}
       onRename={renameSession}
       onDelete={deleteSession}
-      onBatchDelete={(items) => void deleteSessions(items)}
+      onBatchDelete={deleteSessions}
       onSettings={() => {
         setSidebarOpen(false);
         navigationRef.current?.("/settings/model");
