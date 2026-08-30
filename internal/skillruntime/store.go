@@ -144,6 +144,98 @@ VALUES(?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.T
 	return s.Get(ctx, input.ID)
 }
 
+// InstallMarket installs a market package or atomically replaces an older
+// market version with the same id or name. User and managed packages are never
+// overwritten by a market action.
+func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, error) {
+	if input.Source != "market" {
+		return Entry{}, errors.New("market installation requires market source")
+	}
+	existing, err := scanEntry(s.db.QueryRowContext(ctx, skillSelect+` WHERE id=? OR name=? COLLATE NOCASE LIMIT 1`, input.ID, strings.TrimSpace(input.Name)))
+	if errors.Is(err, ErrNotFound) {
+		return s.Install(ctx, input)
+	}
+	if err != nil {
+		return Entry{}, err
+	}
+	if existing.Source != "market" {
+		return Entry{}, errors.New("market skill cannot replace a non-market skill")
+	}
+	if err := validateInstall(input); err != nil {
+		return Entry{}, err
+	}
+	source, err := filepath.Abs(input.SourceDirectory)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := validateSkillTree(source); err != nil {
+		return Entry{}, err
+	}
+	if err := validateSkillDocument(filepath.Join(source, "SKILL.md")); err != nil {
+		return Entry{}, err
+	}
+	staging, err := os.MkdirTemp(filepath.Join(s.skillsRoot, ".staging"), safeSegment(input.ID)+"-")
+	if err != nil {
+		return Entry{}, err
+	}
+	defer os.RemoveAll(staging)
+	bundleName := safeSegment(input.Name)
+	if err := copySkillTree(source, filepath.Join(staging, bundleName)); err != nil {
+		return Entry{}, err
+	}
+	oldDirectory := filepath.Join(s.skillsRoot, filepath.FromSlash(strings.Split(existing.RelativePath, "/")[0]))
+	trash := filepath.Join(s.skillsRoot, ".trash", safeSegment(existing.ID)+"-upgrade-"+fmt.Sprint(s.now().UTC().UnixMilli()))
+	if err := os.Rename(oldDirectory, trash); err != nil {
+		return Entry{}, fmt.Errorf("archive previous market skill: %w", err)
+	}
+	restoreOld := true
+	defer func() {
+		if restoreOld {
+			_ = os.Rename(trash, oldDirectory)
+		}
+	}()
+	destination := filepath.Join(s.skillsRoot, safeSegment(input.ID))
+	if destination != oldDirectory {
+		if _, err := os.Stat(destination); err == nil {
+			return Entry{}, errors.New("skill destination is already occupied")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Entry{}, err
+		}
+	}
+	if err := os.Rename(staging, destination); err != nil {
+		return Entry{}, fmt.Errorf("activate market skill: %w", err)
+	}
+	removeNew := true
+	defer func() {
+		if removeNew {
+			_ = os.RemoveAll(destination)
+		}
+	}()
+	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
+	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName))
+	transaction, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM skills WHERE id=?`, existing.ID); err != nil {
+		return Entry{}, err
+	}
+	stamp := s.now().UTC().UnixMilli()
+	if _, err := transaction.ExecContext(ctx, `INSERT INTO skills
+(id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,created_at,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
+		input.Source, input.Enabled, relativePath, string(requiredMCP), stamp, stamp); err != nil {
+		return Entry{}, fmt.Errorf("store upgraded market skill: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return Entry{}, err
+	}
+	removeNew = false
+	restoreOld = false
+	return s.Get(ctx, input.ID)
+}
+
 func (s *Store) Get(ctx context.Context, id string) (Entry, error) {
 	return scanEntry(s.db.QueryRowContext(ctx, skillSelect+` WHERE id=?`, id))
 }

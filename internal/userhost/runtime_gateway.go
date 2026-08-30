@@ -121,6 +121,7 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
 	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))
 	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher))
+	mux.HandleFunc("POST /v1/skills/market-install", installMarketSkill(skills, skillPublisher))
 	if migration != nil {
 		mux.HandleFunc("GET /v1/migrations/skills-mcp", listSkillMCPMigration(migration))
 	}

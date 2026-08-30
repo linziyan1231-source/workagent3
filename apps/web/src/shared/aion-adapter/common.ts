@@ -6,7 +6,9 @@ import type {
   PortalUsageSummary,
 } from "./ipcBridge.js";
 
-const toRendererSkill = (skill: Awaited<ReturnType<typeof skillPort.list>>[number]) => ({
+const toRendererSkill = (
+  skill: Awaited<ReturnType<typeof skillPort.list>>[number],
+) => ({
   name: skill.name,
   description: skill.description,
   location: skill.relativePath,
@@ -125,9 +127,12 @@ export const ipcBridge = {
       },
     },
     installMarketSkill: {
-      invoke: async (_input: { id: string }) => {
-        throw new Error("skill_market_install_not_available");
-      },
+      invoke: async (input: { id: string }) =>
+        requestJson("/api/portal/skill-market/install", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
     },
     deleteMarketSkill: {
       invoke: async (_input: { id: string }) => {

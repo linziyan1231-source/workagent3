@@ -2,9 +2,14 @@ package skillmarket
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -15,7 +20,7 @@ import (
 )
 
 var (
-	ErrNotFound    = errors.New("skill market entry not found")
+	ErrNotFound    = contracts.ErrSkillMarketEntryNotFound
 	ErrForbidden   = errors.New("skill market operation forbidden")
 	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 )
@@ -44,8 +49,9 @@ type Entry struct {
 }
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db          *sql.DB
+	archiveRoot string
+	now         func() time.Time
 }
 
 func Open(path string) (*Store, error) {
@@ -54,11 +60,25 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open skill market database: %w", err)
 	}
 	database.SetMaxOpenConns(1)
-	store := &Store{db: database, now: time.Now}
+	store := &Store{db: database, archiveRoot: filepath.Join(filepath.Dir(path), "skill-market"), now: time.Now}
 	if err := store.migrate(context.Background()); err != nil {
 		database.Close()
 		return nil, err
 	}
+	return store, nil
+}
+
+func OpenWithArchiveRoot(path, archiveRoot string) (*Store, error) {
+	store, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	root, err := filepath.Abs(archiveRoot)
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+	store.archiveRoot = root
 	return store, nil
 }
 
@@ -163,6 +183,55 @@ func (s *Store) Delete(ctx context.Context, id, actorUsername string, admin bool
 	}
 	_, err = s.db.ExecContext(ctx, `DELETE FROM skill_market_entries WHERE id=?`, id)
 	return err
+}
+
+func (s *Store) ApprovedPackage(ctx context.Context, id string) (contracts.SkillMarketPackage, error) {
+	entry, err := s.ByID(ctx, id)
+	if err != nil {
+		return contracts.SkillMarketPackage{}, err
+	}
+	if entry.Status != Approved {
+		return contracts.SkillMarketPackage{}, ErrNotFound
+	}
+	if entry.ArchiveBytes <= 0 || entry.ArchiveBytes > 50<<20 {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive exceeds installation limit")
+	}
+	cleanKey := filepath.Clean(filepath.FromSlash(entry.ObjectKey))
+	if filepath.IsAbs(cleanKey) || cleanKey == "." || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(filepath.Separator)) {
+		return contracts.SkillMarketPackage{}, errors.New("invalid skill market object key")
+	}
+	archivePath := filepath.Join(s.archiveRoot, cleanKey)
+	resolvedRoot, err := filepath.EvalSymlinks(s.archiveRoot)
+	if err != nil {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
+	}
+	resolvedArchive, err := filepath.EvalSymlinks(archivePath)
+	if err != nil {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolvedArchive)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return contracts.SkillMarketPackage{}, errors.New("invalid skill market object key")
+	}
+	info, err := os.Lstat(resolvedArchive)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() != entry.ArchiveBytes {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
+	}
+	file, err := os.Open(resolvedArchive)
+	if err != nil {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
+	}
+	defer file.Close()
+	archive, err := io.ReadAll(io.LimitReader(file, entry.ArchiveBytes+1))
+	if err != nil || int64(len(archive)) != entry.ArchiveBytes {
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive is unavailable")
+	}
+	digest := sha256.Sum256(archive)
+	if !strings.EqualFold(hex.EncodeToString(digest[:]), entry.ArchiveDigest) {
+		clear(archive)
+		return contracts.SkillMarketPackage{}, errors.New("skill market archive integrity check failed")
+	}
+	return contracts.SkillMarketPackage{ID: entry.ID, Name: entry.Name, Description: entry.Description, Version: entry.Version, Archive: archive}, nil
 }
 
 const marketSelect = `SELECT id,name,description,version,publisher_username,publisher_display_name,object_key,archive_digest,archive_bytes,status,created_at,updated_at FROM skill_market_entries`

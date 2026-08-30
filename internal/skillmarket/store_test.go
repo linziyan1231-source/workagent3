@@ -1,7 +1,11 @@
 package skillmarket
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -36,6 +40,43 @@ func TestReviewGatesMarketVisibility(t *testing.T) {
 	visible, _ = store.ListApproved(t.Context(), "bob")
 	if visible[0].CanDelete {
 		t.Fatal("unrelated viewer can delete market entry")
+	}
+}
+
+func TestApprovedPackageVerifiesArchiveBoundaryAndDigest(t *testing.T) {
+	root := t.TempDir()
+	archive := []byte("verified archive")
+	digest := sha256.Sum256(archive)
+	if err := os.MkdirAll(filepath.Join(root, "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "objects", "skill.zip"), archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenWithArchiveRoot(filepath.Join(t.TempDir(), "market.db"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entry, err := store.Publish(t.Context(), Entry{
+		ID: "verified", Name: "Verified", Description: "Verified skill", Version: "1.0.0",
+		PublisherUsername: "alice", ObjectKey: "objects/skill.zip", ArchiveDigest: hex.EncodeToString(digest[:]), ArchiveBytes: int64(len(archive)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Review(t.Context(), entry.ID, Approved); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := store.ApprovedPackage(t.Context(), entry.ID)
+	if err != nil || string(pack.Archive) != string(archive) {
+		t.Fatalf("approved package = %#v, %v", pack, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "objects", "skill.zip"), []byte("tampered archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ApprovedPackage(t.Context(), entry.ID); err == nil {
+		t.Fatal("tampered package was accepted")
 	}
 }
 

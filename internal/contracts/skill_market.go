@@ -1,6 +1,11 @@
 package contracts
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var ErrSkillMarketEntryNotFound = errors.New("skill market entry not found")
 
 type SkillMarketEntry struct {
 	ID           string    `json:"id"`
@@ -16,4 +21,14 @@ type SkillMarketEntry struct {
 type Publisher struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+}
+
+// SkillMarketPackage is an internal Portal-to-UserHost transfer object. It is
+// never serialized to the browser-facing market catalog.
+type SkillMarketPackage struct {
+	ID          string
+	Name        string
+	Description string
+	Version     string
+	Archive     []byte
 }

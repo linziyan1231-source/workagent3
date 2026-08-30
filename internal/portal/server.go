@@ -1,12 +1,15 @@
 package portal
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 
@@ -50,6 +53,7 @@ type SettingsPort interface {
 
 type SkillMarketPort interface {
 	ListApproved(context.Context, string) ([]contracts.SkillMarketEntry, error)
+	ApprovedPackage(context.Context, string) (contracts.SkillMarketPackage, error)
 }
 
 type Modules struct {
@@ -91,6 +95,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("PUT /api/settings/client", s.requireUser(s.updateClientSettings))
 	mux.HandleFunc("GET /api/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("GET /api/portal/skill-market", s.requireUser(s.skillMarket))
+	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
@@ -109,6 +114,57 @@ func (s *Server) skillMarket(writer http.ResponseWriter, request *http.Request, 
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"success": true, "skills": entries})
+}
+
+func (s *Server) installMarketSkill(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.SkillMarket == nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill_market_unavailable")
+		return
+	}
+	var input struct {
+		ID string `json:"id"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || input.ID == "" || len(input.ID) > 128 {
+		writeError(writer, http.StatusBadRequest, "invalid_skill_market_install")
+		return
+	}
+	pack, err := s.modules.SkillMarket.ApprovedPackage(request.Context(), input.ID)
+	if errors.Is(err, contracts.ErrSkillMarketEntryNotFound) {
+		writeError(writer, http.StatusNotFound, "skill_market_entry_not_found")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill_market_archive_unavailable")
+		return
+	}
+	defer clear(pack.Archive)
+	endpoint, err := s.runtimes.Resolve(request.Context(), user.SID)
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "runtime_unavailable")
+		return
+	}
+	metadata, _ := json.Marshal(map[string]string{"id": pack.ID, "name": pack.Name, "description": pack.Description, "version": pack.Version})
+	target := endpoint.BaseURL.ResolveReference(&url.URL{Path: "/v1/skills/market-install"})
+	downstream, _ := http.NewRequestWithContext(request.Context(), http.MethodPost, target.String(), bytes.NewReader(pack.Archive))
+	downstream.Header.Set("Authorization", "Bearer "+endpoint.Token)
+	downstream.Header.Set("Content-Type", "application/zip")
+	downstream.Header.Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+	response, err := (&http.Client{Timeout: 2 * time.Minute}).Do(downstream)
+	if err != nil {
+		writeError(writer, http.StatusBadGateway, "skill_install_failed")
+		return
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil || len(body) > 1<<20 {
+		writeError(writer, http.StatusBadGateway, "skill_install_failed")
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(response.StatusCode)
+	_, _ = writer.Write(body)
 }
 
 func (s *Server) clientSettings(writer http.ResponseWriter, request *http.Request, user store.User) {

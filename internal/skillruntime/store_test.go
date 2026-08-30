@@ -126,6 +126,45 @@ func TestInstallRejectsLinks(t *testing.T) {
 	}
 }
 
+func TestInstallMarketAtomicallyReplacesOlderMarketVersion(t *testing.T) {
+	root := t.TempDir()
+	firstSource := filepath.Join(root, "first")
+	secondSource := filepath.Join(root, "second")
+	writeSkillPackage(t, firstSource)
+	writeSkillPackage(t, secondSource)
+	if err := os.WriteFile(filepath.Join(secondSource, "references", "guide.md"), []byte("version two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(filepath.Join(root, "catalog.db"), filepath.Join(root, "installed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.now = func() time.Time { return time.UnixMilli(1_700_000_000_000) }
+	first, err := store.InstallMarket(t.Context(), InstallInput{Entry: Entry{ID: "market-v1", Name: "Drawing Review", Version: "1.0.0", Source: "market", Enabled: true}, SourceDirectory: firstSource})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.InstallMarket(t.Context(), InstallInput{Entry: Entry{ID: "market-v2", Name: "Drawing Review", Version: "2.0.0", Source: "market", Enabled: true}, SourceDirectory: secondSource})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != "market-v2" || second.Version != "2.0.0" {
+		t.Fatalf("upgraded entry = %#v", second)
+	}
+	if _, err := store.Get(t.Context(), first.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old market version remains: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(store.RootFor(second), "drawing-review", "references", "guide.md"))
+	if err != nil || string(contents) != "version two" {
+		t.Fatalf("upgraded package contents = %q, %v", contents, err)
+	}
+	trash, err := os.ReadDir(filepath.Join(root, "installed", ".trash"))
+	if err != nil || len(trash) != 1 {
+		t.Fatalf("previous version was not retained for recovery: %#v, %v", trash, err)
+	}
+}
+
 func writeSkillPackage(t *testing.T, directory string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(directory, "references"), 0o700); err != nil {
