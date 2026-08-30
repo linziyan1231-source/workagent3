@@ -50,5 +50,5 @@ export type EngineBridge = {
 };
 
 export type EngineSessionOptions = {
-  mcpServers: readonly import("@workagent/contracts").RuntimeMcpServer[];
+  mcpServers: readonly import("../mcp-projection.js").ResolvedMcpServer[];
 };

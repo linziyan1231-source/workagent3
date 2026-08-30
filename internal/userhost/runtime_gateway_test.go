@@ -14,6 +14,9 @@ import (
 )
 
 type gatewayTestProtector struct{}
+type gatewayTestPublisher struct{}
+
+func (gatewayTestPublisher) Publish(context.Context) error { return nil }
 
 func (gatewayTestProtector) Seal(value []byte) ([]byte, error) {
 	return append([]byte("sealed:"), value...), nil
@@ -44,7 +47,7 @@ func TestRuntimeGatewayOwnsMCPRoutesAndAuthenticates(t *testing.T) {
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), target, "runtime-token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, target, "runtime-token")
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/mcp-servers", nil))
@@ -82,7 +85,7 @@ func TestRuntimeGatewayRejectsPlaintextMCPHeaders(t *testing.T) {
 	catalog, _ := mcpruntime.Open(":memory:")
 	defer catalog.Close()
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), target, "token")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, target, "token")
 	body := `{"name":"unsafe","source":"user","enabled":true,"transport":{"kind":"http","url":"https://example.com/mcp","headers":{"Authorization":"secret"}},"toolPolicy":"all","allowedTools":[],"oauthState":"none"}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/mcp-servers", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer token")
@@ -116,7 +119,7 @@ func TestRuntimeGatewayListsMetadataAndAcceptsCredentialReferences(t *testing.T)
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
-	handler := newRuntimeGatewayHandler(catalog, credentials, target, "token")
+	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, target, "token")
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	statusRequest.Header.Set("Authorization", "Bearer token")

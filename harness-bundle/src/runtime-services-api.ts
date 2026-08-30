@@ -8,7 +8,6 @@ import type {
 } from "./model-access-store.js";
 import type { PresetStore } from "./preset-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
-import { runtimeMcpMutationSchema } from "@workagent/contracts";
 
 const json = (
   response: ServerResponse,
@@ -83,6 +82,19 @@ export class RuntimeServicesController {
       if (request.method !== "GET") return this.#method(response, "GET");
       json(response, 200, credentials.listStatuses());
     });
+    route("/internal/mcp-projection", async (request, response) => {
+      if (request.method !== "PUT") return this.#method(response, "PUT");
+      try {
+        mcp.replace(await body(request));
+        response.writeHead(204, { "cache-control": "no-store" });
+        response.end();
+      } catch (error) {
+        json(response, 400, {
+          error:
+            error instanceof Error ? error.message : "invalid_mcp_projection",
+        });
+      }
+    });
     route("/v1/presets", (request, response) =>
       this.#presets(request, response, presets),
     );
@@ -145,13 +157,7 @@ export class RuntimeServicesController {
       if (path === "/v1/mcp-servers") {
         if (request.method === "GET")
           return json(response, 200, mcp.listServers());
-        if (request.method === "POST")
-          return json(
-            response,
-            201,
-            mcp.create(runtimeMcpMutationSchema.parse(await body(request))),
-          );
-        return this.#method(response, "GET, POST");
+        return this.#method(response, "GET");
       }
       const match = /^\/v1\/mcp-servers\/([^/]+)$/.exec(path);
       if (match === null) return json(response, 404, { error: "not_found" });
@@ -162,15 +168,7 @@ export class RuntimeServicesController {
           ? json(response, 404, { error: "mcp_server_not_found" })
           : json(response, 200, server);
       }
-      if (request.method === "PATCH")
-        return json(response, 200, mcp.update(id, await body(request)));
-      if (request.method === "DELETE") {
-        mcp.delete(id);
-        response.writeHead(204);
-        response.end();
-        return;
-      }
-      this.#method(response, "GET, PATCH, DELETE");
+      this.#method(response, "GET");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "invalid_request";

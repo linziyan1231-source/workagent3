@@ -114,7 +114,7 @@ export function apply(ctx: Context): void {
   const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
   const models = new ModelAccessStore(dshHome);
   const skills = new SkillCatalogStore(dshHome);
-  const mcp = new McpCatalogStore(dshHome);
+  const mcp = new McpCatalogStore();
   const presets = new PresetStore(dshHome, models, skills, mcp);
   new RuntimeServicesController(
     ctx,

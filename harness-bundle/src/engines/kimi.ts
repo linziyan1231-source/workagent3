@@ -142,27 +142,30 @@ export class KimiBridge implements EngineBridge {
 }
 
 export const projectMcpServers = (
-  servers: readonly import("@workagent/contracts").RuntimeMcpServer[],
+  servers: readonly import("../mcp-projection.js").ResolvedMcpServer[],
 ): McpServer[] =>
-  servers.map((server) => {
+  servers.map((projection) => {
+    const server = projection.server;
     const transport = server.transport;
     if (transport.kind === "stdio") {
-      if (Object.keys(transport.environmentCredentialIds).length !== 0)
-        throw new Error(`mcp_credentials_unavailable:${server.id}`);
       return {
         name: server.name,
         command: transport.command,
         args: transport.args,
-        env: [],
+        env: Object.entries(projection.environment).map(([name, value]) => ({
+          name,
+          value,
+        })),
       };
     }
-    if (Object.keys(transport.headerCredentialIds).length !== 0)
-      throw new Error(`mcp_credentials_unavailable:${server.id}`);
     return {
       type: transport.kind,
       name: server.name,
       url: transport.url,
-      headers: [],
+      headers: Object.entries(projection.headers).map(([name, value]) => ({
+        name,
+        value,
+      })),
     };
   });
 

@@ -1,63 +1,50 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { McpCatalogStore } from "./capability-store.js";
 
-describe("SID-private MCP catalog", () => {
-  it("persists an explicit empty-tool policy without ambiguous semantics", () => {
-    const home = mkdtempSync(join(tmpdir(), "workagent-mcp-"));
-    const store = new McpCatalogStore(home);
-    const server = store.create({
-      name: "Local tools",
-      source: "user",
-      enabled: true,
-      transport: {
-        kind: "http",
-        url: "http://127.0.0.1:8123/mcp",
-        headerCredentialIds: {},
-      },
-      toolPolicy: "none",
-      allowedTools: [],
-      oauthState: "none",
+const server = {
+  id: "mcp-1",
+  name: "Reference",
+  source: "user" as const,
+  enabled: true,
+  transport: {
+    kind: "http" as const,
+    url: "https://example.com/mcp",
+    headerCredentialIds: { Authorization: "credential-1" },
+  },
+  toolPolicy: "all" as const,
+  allowedTools: [],
+  oauthState: "ready" as const,
+  health: "healthy" as const,
+  createdAt: "2026-08-31T00:00:00.000Z",
+  updatedAt: "2026-08-31T00:00:00.000Z",
+};
+
+describe("UserHost-owned MCP projection", () => {
+  it("keeps resolved credentials out of the public catalog", () => {
+    const store = new McpCatalogStore();
+    store.replace({
+      servers: [
+        {
+          server,
+          environment: {},
+          headers: { Authorization: "private" },
+          state: "ready",
+        },
+      ],
     });
-    expect(new McpCatalogStore(home).getServer(server.id)?.toolPolicy).toBe(
-      "none",
-    );
+    expect(store.getServer("mcp-1")).toEqual(server);
+    expect(JSON.stringify(store.listServers())).not.toContain("private");
+    expect(store.resolveServer("mcp-1")?.headers.Authorization).toBe("private");
   });
 
-  it("rejects insecure remote endpoints and ambiguous allowlists", () => {
-    const home = mkdtempSync(join(tmpdir(), "workagent-mcp-"));
-    const store = new McpCatalogStore(home);
+  it("replaces atomically and rejects mismatched credential keys", () => {
+    const store = new McpCatalogStore();
+    store.replace({ servers: [] });
     expect(() =>
-      store.create({
-        name: "Remote",
-        source: "user",
-        enabled: true,
-        transport: {
-          kind: "sse",
-          url: "http://example.com/events",
-          headerCredentialIds: {},
-        },
-        toolPolicy: "all",
-        allowedTools: [],
-        oauthState: "none",
+      store.replace({
+        servers: [{ server, environment: {}, headers: {}, state: "ready" }],
       }),
-    ).toThrow("mcp_endpoint_requires_https");
-    expect(() =>
-      store.create({
-        name: "Empty list",
-        source: "user",
-        enabled: true,
-        transport: {
-          kind: "http",
-          url: "https://example.com/mcp",
-          headerCredentialIds: {},
-        },
-        toolPolicy: "allowlist",
-        allowedTools: [],
-        oauthState: "none",
-      }),
-    ).toThrow("allowlist requires at least one tool");
+    ).toThrow("resolved MCP headers do not match credential references");
+    expect(store.listServers()).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import type {
   EngineBridge,
   NativeEngineStatus,
 } from "./types.js";
+import type { ResolvedMcpServer } from "../mcp-projection.js";
 
 type ObjectValue = Record<string, unknown>;
 type ThreadResponse = { thread: { id: string } };
@@ -63,7 +64,7 @@ export class CodexBridge implements EngineBridge {
   async create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
-    _options?: import("./types.js").EngineSessionOptions,
+    options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     const result = await rpc.request<ThreadResponse>("thread/start", {
@@ -71,6 +72,9 @@ export class CodexBridge implements EngineBridge {
       approvalPolicy: "never",
       sandbox: "workspace-write",
       serviceName: "workagent3",
+      config: {
+        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+      },
     });
     const session = new CodexSession(rpc, result.thread.id, onEvent, () => {
       this.#sessions.delete(result.thread.id);
@@ -83,7 +87,7 @@ export class CodexBridge implements EngineBridge {
     nativeId: string,
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
-    _options?: import("./types.js").EngineSessionOptions,
+    options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     await rpc.request("thread/resume", {
@@ -91,6 +95,9 @@ export class CodexBridge implements EngineBridge {
       cwd: workspace,
       approvalPolicy: "never",
       sandbox: "workspace-write",
+      config: {
+        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+      },
     });
     const session = new CodexSession(rpc, nativeId, onEvent, () => {
       this.#sessions.delete(nativeId);
@@ -183,6 +190,41 @@ export class CodexBridge implements EngineBridge {
     session?.notification(method, values ?? {});
   }
 }
+
+export const projectCodexMcpServers = (
+  servers: readonly ResolvedMcpServer[],
+): Record<string, Record<string, unknown>> =>
+  Object.fromEntries(
+    servers.map((projection) => {
+      const { server } = projection;
+      const policy =
+        server.toolPolicy === "all"
+          ? {}
+          : { enabled_tools: server.allowedTools };
+      if (server.transport.kind === "stdio")
+        return [
+          server.id,
+          {
+            command: server.transport.command,
+            args: server.transport.args,
+            env: projection.environment,
+            required: true,
+            ...policy,
+          },
+        ];
+      if (server.transport.kind === "sse")
+        throw new Error(`unsupported_mcp_transport:codex:sse:${server.id}`);
+      return [
+        server.id,
+        {
+          url: server.transport.url,
+          http_headers: projection.headers,
+          required: true,
+          ...policy,
+        },
+      ];
+    }),
+  );
 
 class CodexSession implements BridgeSession {
   readonly nativeId: string;

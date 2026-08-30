@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
@@ -33,7 +34,13 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandler(catalog, credentials, target, token)
+	publisher := &harnessProjectionPublisher{catalog: catalog, credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
+	if err := publisher.Publish(context.Background()); err != nil {
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	handler := newRuntimeGatewayHandler(catalog, credentials, publisher, target, token)
 	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials}, nil
 }
 
@@ -55,14 +62,17 @@ type credentialCatalog interface {
 	Metadata(context.Context, string) (credentialbroker.Metadata, error)
 }
 
-func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, target *url.URL, token string) http.Handler {
+func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, target *url.URL, token string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
-	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog))
-	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials))
-	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials))
-	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog))
+	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog, credentials))
+	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
+	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
+	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
+	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
+		writeRuntimeError(writer, http.StatusNotFound, "not_found")
+	})
 	mux.Handle("/", proxy)
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		provided, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
@@ -111,18 +121,23 @@ func listCredentialStatuses(credentials credentialCatalog, target *url.URL, toke
 	}
 }
 
-func listMCPServers(catalog *mcpruntime.Catalog) http.HandlerFunc {
+func listMCPServers(catalog *mcpruntime.Catalog, credentials credentialCatalog) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		servers, err := catalog.List(request.Context())
 		if err != nil {
 			writeRuntimeError(writer, http.StatusInternalServerError, "mcp_catalog_failed")
 			return
 		}
+		for index := range servers {
+			if !validCredentialReferences(request.Context(), credentials, servers[index].Transport) {
+				servers[index].OAuthState = "needs_auth"
+			}
+		}
 		writeRuntimeJSON(writer, http.StatusOK, servers)
 	}
 }
 
-func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog) http.HandlerFunc {
+func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input mcpMutation
 		decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
@@ -155,11 +170,15 @@ func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog)
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_mcp_server")
 			return
 		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
+			return
+		}
 		writeRuntimeJSON(writer, http.StatusCreated, server)
 	}
 }
 
-func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog) http.HandlerFunc {
+func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		server, err := catalog.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, mcpruntime.ErrNotFound) {
@@ -213,6 +232,10 @@ func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog)
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_mcp_server")
 			return
 		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
+			return
+		}
 		writeRuntimeJSON(writer, http.StatusOK, server)
 	}
 }
@@ -233,7 +256,7 @@ func validCredentialReferences(ctx context.Context, credentials credentialCatalo
 	return true
 }
 
-func deleteMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
+func deleteMCPServer(catalog *mcpruntime.Catalog, publisher mcpProjectionPublisher) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		server, err := catalog.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, mcpruntime.ErrNotFound) {
@@ -250,6 +273,10 @@ func deleteMCPServer(catalog *mcpruntime.Catalog) http.HandlerFunc {
 		}
 		if err := catalog.Delete(request.Context(), server.ID); err != nil {
 			writeRuntimeError(writer, http.StatusInternalServerError, "mcp_catalog_failed")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
 			return
 		}
 		writer.WriteHeader(http.StatusNoContent)

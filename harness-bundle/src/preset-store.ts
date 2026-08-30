@@ -211,6 +211,8 @@ export class PresetStore {
         throw new Error(`invalid_mcp_binding:${id}:disabled`);
       if (server.oauthState === "needs_auth")
         throw new Error(`invalid_mcp_binding:${id}:needs_auth`);
+      if (server.health === "unavailable" || server.health === "needs_review")
+        throw new Error(`invalid_mcp_binding:${id}:${server.health}`);
     }
   }
 

@@ -60,7 +60,7 @@ describe("SID-private preset store", () => {
       home,
       new ModelAccessStore(home),
       new SkillCatalogStore(home),
-      new McpCatalogStore(home),
+      new McpCatalogStore(),
     );
     expect(() =>
       store.create({
@@ -73,8 +73,9 @@ describe("SID-private preset store", () => {
 
   it("freezes resolved MCP definitions in the session binding", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
-    const mcp = new McpCatalogStore(home);
-    const server = mcp.create({
+    const mcp = new McpCatalogStore();
+    const server = {
+      id: "mcp-original",
       name: "Original name",
       source: "user",
       enabled: true,
@@ -86,6 +87,12 @@ describe("SID-private preset store", () => {
       toolPolicy: "all",
       allowedTools: [],
       oauthState: "none",
+      health: "healthy",
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
+    } as const;
+    mcp.replace({
+      servers: [{ server, environment: {}, headers: {}, state: "ready" }],
     });
     const store = new PresetStore(
       home,
@@ -100,7 +107,16 @@ describe("SID-private preset store", () => {
     });
     const binding = store.resolve(preset.id);
 
-    mcp.update(server.id, { name: "Changed name" });
+    mcp.replace({
+      servers: [
+        {
+          server: { ...server, name: "Changed name" },
+          environment: {},
+          headers: {},
+          state: "ready",
+        },
+      ],
+    });
 
     expect(binding.resolvedSnapshot.resolvedMcpServers?.[0]?.name).toBe(
       "Original name",
