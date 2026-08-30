@@ -21,6 +21,7 @@ import (
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
+	"workagent3/internal/settings"
 	"workagent3/internal/speech"
 	"workagent3/internal/store"
 )
@@ -36,6 +37,7 @@ func run() error {
 	databasePath := flag.String("db", filepath.Join("data", "portal.db"), "Portal SQLite path")
 	modelAccessPath := flag.String("model-access-db", "", "Model Access SQLite path (defaults beside Portal database)")
 	quotaPath := flag.String("quota-db", "", "Quota SQLite path (defaults beside Portal database)")
+	settingsPath := flag.String("settings-db", "", "Settings SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
@@ -57,7 +59,10 @@ func run() error {
 	if *quotaPath == "" {
 		*quotaPath = filepath.Join(filepath.Dir(*databasePath), "quota.db")
 	}
-	for _, path := range []string{*modelAccessPath, *quotaPath} {
+	if *settingsPath == "" {
+		*settingsPath = filepath.Join(filepath.Dir(*databasePath), "settings.db")
+	}
+	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return fmt.Errorf("create module data directory: %w", err)
 		}
@@ -75,6 +80,11 @@ func run() error {
 		return err
 	}
 	defer quotas.Close()
+	clientSettings, err := settings.Open(*settingsPath)
+	if err != nil {
+		return err
+	}
+	defer clientSettings.Close()
 	speechProxy, err := speech.NewProxy(
 		os.Getenv("WORKAGENT_SPEECH_URL"),
 		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
@@ -89,7 +99,7 @@ func run() error {
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings})
 	if err != nil {
 		return err
 	}

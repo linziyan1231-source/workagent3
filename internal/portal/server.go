@@ -13,6 +13,7 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/contracts"
 	"workagent3/internal/runtimeapi"
+	"workagent3/internal/settings"
 	"workagent3/internal/store"
 )
 
@@ -42,10 +43,16 @@ type SpeechPort interface {
 	ServeSpeech(http.ResponseWriter, *http.Request, string)
 }
 
+type SettingsPort interface {
+	Get(context.Context, string, []string) (map[string]json.RawMessage, error)
+	Put(context.Context, string, map[string]json.RawMessage) error
+}
+
 type Modules struct {
 	ModelAccess ModelAccessPort
 	Quota       QuotaUsagePort
 	Speech      SpeechPort
+	Settings    SettingsPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -75,11 +82,59 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))
+	mux.HandleFunc("GET /api/settings/client", s.requireUser(s.clientSettings))
+	mux.HandleFunc("PUT /api/settings/client", s.requireUser(s.updateClientSettings))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
+}
+
+func (s *Server) clientSettings(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Settings == nil {
+		writeError(writer, http.StatusServiceUnavailable, "settings_unavailable")
+		return
+	}
+	keys := request.URL.Query()["keys"]
+	if len(keys) == 0 || len(keys) > 32 {
+		writeError(writer, http.StatusBadRequest, "invalid_setting_keys")
+		return
+	}
+	for _, key := range keys {
+		if key == "" || len(key) > 128 {
+			writeError(writer, http.StatusBadRequest, "invalid_setting_keys")
+			return
+		}
+	}
+	values, err := s.modules.Settings.Get(request.Context(), user.SID, keys)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "settings_failed")
+		return
+	}
+	writeJSON(writer, http.StatusOK, values)
+}
+
+func (s *Server) updateClientSettings(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Settings == nil {
+		writeError(writer, http.StatusServiceUnavailable, "settings_unavailable")
+		return
+	}
+	values := make(map[string]json.RawMessage)
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
+	if err := decoder.Decode(&values); err != nil || len(values) == 0 || len(values) > 32 {
+		writeError(writer, http.StatusBadRequest, "invalid_settings")
+		return
+	}
+	if err := s.modules.Settings.Put(request.Context(), user.SID, values); err != nil {
+		if errors.Is(err, settings.ErrUnsupportedKey) {
+			writeError(writer, http.StatusBadRequest, "unsupported_setting")
+			return
+		}
+		writeError(writer, http.StatusInternalServerError, "settings_failed")
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) sameOriginWrites(next http.Handler) http.Handler {
