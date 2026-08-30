@@ -1,0 +1,6 @@
+interface:
+  display_name: "LLM Wiki Lint"
+  short_description: "Audit OKF conformance, provenance, and freshness"
+  default_prompt: "Use $wiki-lint to audit this project LLM Wiki without repairing it."
+
+

@@ -35,7 +35,8 @@ type Entry struct {
 
 type InstallInput struct {
 	Entry
-	SourceDirectory string
+	SourceDirectory   string
+	SkillSubdirectory string
 }
 
 type Store struct {
@@ -99,10 +100,14 @@ func (s *Store) Install(ctx context.Context, input InstallInput) (Entry, error) 
 	if err := validateSkillTree(source); err != nil {
 		return Entry{}, err
 	}
-	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil {
+	skillDirectory, err := skillDirectory(source, input.SkillSubdirectory)
+	if err != nil {
+		return Entry{}, err
+	}
+	if _, err := os.Stat(filepath.Join(skillDirectory, "SKILL.md")); err != nil {
 		return Entry{}, errors.New("skill package is missing SKILL.md")
 	}
-	if err := validateSkillDocument(filepath.Join(source, "SKILL.md")); err != nil {
+	if err := validateSkillDocument(filepath.Join(skillDirectory, "SKILL.md")); err != nil {
 		return Entry{}, err
 	}
 	stagingParent := filepath.Join(s.skillsRoot, ".staging")
@@ -132,7 +137,7 @@ func (s *Store) Install(ctx context.Context, input InstallInput) (Entry, error) 
 		}
 	}()
 	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
-	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName))
+	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	stamp := s.now().UTC().UnixMilli()
 	_, err = s.db.ExecContext(ctx, `INSERT INTO skills
 (id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,created_at,updated_at)
@@ -152,6 +157,17 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 	if input.Source != "market" {
 		return Entry{}, errors.New("market installation requires market source")
 	}
+	return s.installOrReplace(ctx, input, "market")
+}
+
+func (s *Store) InstallManaged(ctx context.Context, input InstallInput) (Entry, error) {
+	if input.Source != "managed" && input.Source != "builtin" {
+		return Entry{}, errors.New("managed installation requires managed or builtin source")
+	}
+	return s.installOrReplace(ctx, input, input.Source)
+}
+
+func (s *Store) installOrReplace(ctx context.Context, input InstallInput, replaceSource string) (Entry, error) {
 	existing, err := scanEntry(s.db.QueryRowContext(ctx, skillSelect+` WHERE id=? OR name=? COLLATE NOCASE LIMIT 1`, input.ID, strings.TrimSpace(input.Name)))
 	if errors.Is(err, ErrNotFound) {
 		return s.Install(ctx, input)
@@ -159,8 +175,8 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 	if err != nil {
 		return Entry{}, err
 	}
-	if existing.Source != "market" {
-		return Entry{}, errors.New("market skill cannot replace a non-market skill")
+	if existing.Source != replaceSource {
+		return Entry{}, errors.New("skill package cannot replace a package from another source")
 	}
 	if err := validateInstall(input); err != nil {
 		return Entry{}, err
@@ -172,7 +188,11 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 	if err := validateSkillTree(source); err != nil {
 		return Entry{}, err
 	}
-	if err := validateSkillDocument(filepath.Join(source, "SKILL.md")); err != nil {
+	skillDirectory, err := skillDirectory(source, input.SkillSubdirectory)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := validateSkillDocument(filepath.Join(skillDirectory, "SKILL.md")); err != nil {
 		return Entry{}, err
 	}
 	staging, err := os.MkdirTemp(filepath.Join(s.skillsRoot, ".staging"), safeSegment(input.ID)+"-")
@@ -187,7 +207,7 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 	oldDirectory := filepath.Join(s.skillsRoot, filepath.FromSlash(strings.Split(existing.RelativePath, "/")[0]))
 	trash := filepath.Join(s.skillsRoot, ".trash", safeSegment(existing.ID)+"-upgrade-"+fmt.Sprint(s.now().UTC().UnixMilli()))
 	if err := os.Rename(oldDirectory, trash); err != nil {
-		return Entry{}, fmt.Errorf("archive previous market skill: %w", err)
+		return Entry{}, fmt.Errorf("archive previous skill package: %w", err)
 	}
 	restoreOld := true
 	defer func() {
@@ -204,7 +224,7 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 		}
 	}
 	if err := os.Rename(staging, destination); err != nil {
-		return Entry{}, fmt.Errorf("activate market skill: %w", err)
+		return Entry{}, fmt.Errorf("activate skill package: %w", err)
 	}
 	removeNew := true
 	defer func() {
@@ -213,7 +233,7 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 		}
 	}()
 	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
-	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName))
+	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	transaction, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Entry{}, err
@@ -227,7 +247,7 @@ func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, e
 (id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,created_at,updated_at)
 VALUES(?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
 		input.Source, input.Enabled, relativePath, string(requiredMCP), stamp, stamp); err != nil {
-		return Entry{}, fmt.Errorf("store upgraded market skill: %w", err)
+		return Entry{}, fmt.Errorf("store upgraded skill package: %w", err)
 	}
 	if err := transaction.Commit(); err != nil {
 		return Entry{}, err
@@ -420,6 +440,22 @@ func validateInstall(input InstallInput) error {
 		}
 	}
 	return nil
+}
+
+func skillDirectory(source, subdirectory string) (string, error) {
+	if subdirectory == "" {
+		return source, nil
+	}
+	clean := filepath.Clean(filepath.FromSlash(subdirectory))
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("invalid skill subdirectory")
+	}
+	directory := filepath.Join(source, clean)
+	relative, err := filepath.Rel(source, directory)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", errors.New("skill subdirectory escapes package")
+	}
+	return directory, nil
 }
 
 func safeSegment(value string) string {

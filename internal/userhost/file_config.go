@@ -23,6 +23,7 @@ type FileConfig struct {
 	RegistrationCredentialFile string            `json:"registrationCredentialFile"`
 	Limits                     winutil.JobLimits `json:"limits"`
 	StartupTimeoutSeconds      int               `json:"startupTimeoutSeconds,omitempty"`
+	ManagedSkillsRoot          string            `json:"managedSkillsRoot,omitempty"`
 }
 
 func LoadFileConfig(path string) (FileConfig, error) {
@@ -39,6 +40,9 @@ func LoadFileConfig(path string) (FileConfig, error) {
 	}
 	if !filepath.IsAbs(config.DataRoot) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.RegistrationCredentialFile) {
 		return FileConfig{}, errors.New("data root, Harness command, and registration credential file must be absolute")
+	}
+	if config.ManagedSkillsRoot != "" && !filepath.IsAbs(config.ManagedSkillsRoot) {
+		return FileConfig{}, errors.New("managed skills root must be absolute")
 	}
 	return config, nil
 }

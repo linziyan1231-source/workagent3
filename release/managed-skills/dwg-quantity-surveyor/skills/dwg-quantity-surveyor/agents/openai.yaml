@@ -1,0 +1,5 @@
+interface:
+  display_name: "DWG Quantity Surveyor"
+  short_description: "Create detailed, non-blank DWG quantity takeoffs"
+  default_prompt: "Use $dwg-quantity-surveyor to analyze these DWGs and produce a detailed, zero-blank BOQ with traceable measurements and clearly labeled estimates."
+

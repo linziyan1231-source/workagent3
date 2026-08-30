@@ -1,0 +1,6 @@
+interface:
+  display_name: "LLM Wiki Ingest"
+  short_description: "Ingest sources into traceable OKF concepts"
+  default_prompt: "Use $wiki-ingest to ingest these sources into the project LLM Wiki."
+
+

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "id": "dwg-quantity-surveyor",
+      "name": "dwg-quantity-surveyor",
+      "description": "Investigate DWG construction drawings and produce evidence-backed quantity takeoffs through the managed DWG MCP.",
+      "version": "0.1.0",
+      "relativePath": "dwg-quantity-surveyor",
+      "skillSubdirectory": "skills/dwg-quantity-surveyor",
+      "enabledByDefault": false,
+      "requiredMcpServerIds": ["dwg-quantity-surveyor"]
+    },
+    {
+      "id": "wiki-dream",
+      "name": "wiki-dream",
+      "description": "Run an incremental or weekly deep maintenance cycle for an OKF project wiki.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-dream",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
+      "id": "wiki-edit",
+      "name": "wiki-edit",
+      "description": "Apply explicit, recoverable mutations to an existing OKF project wiki.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-edit",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
+      "id": "wiki-ingest",
+      "name": "wiki-ingest",
+      "description": "Ingest bounded sources into an existing OKF project wiki with provenance.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-ingest",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
+      "id": "wiki-lint",
+      "name": "wiki-lint",
+      "description": "Run a read-only conformance and freshness audit of an OKF project wiki.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-lint",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
+      "id": "wiki-query",
+      "name": "wiki-query",
+      "description": "Answer project-scoped questions from an OKF project wiki without writes.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-query",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
+      "id": "wiki-setup",
+      "name": "wiki-setup",
+      "description": "Initialize or migrate an OKF project wiki and configure WorkAgent3 Automation maintenance.",
+      "version": "0.1.0",
+      "relativePath": "llm-wiki",
+      "skillSubdirectory": "skills/wiki-setup",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    }
+  ]
+}

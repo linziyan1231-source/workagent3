@@ -1,0 +1,5 @@
+interface:
+  display_name: "LLM Wiki Edit"
+  short_description: "Apply explicit, recoverable OKF knowledge edits"
+  default_prompt: "Use $wiki-edit to make this explicit change to the project LLM Wiki."
+

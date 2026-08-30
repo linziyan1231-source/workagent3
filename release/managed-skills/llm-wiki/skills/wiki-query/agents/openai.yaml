@@ -1,0 +1,6 @@
+interface:
+  display_name: "LLM Wiki Query"
+  short_description: "Answer from the OKF project wiki without writes"
+  default_prompt: "Use $wiki-query to answer this question from the project LLM Wiki."
+
+

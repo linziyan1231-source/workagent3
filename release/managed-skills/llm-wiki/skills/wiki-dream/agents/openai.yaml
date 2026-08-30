@@ -1,0 +1,8 @@
+interface:
+  display_name: "LLM Wiki Dream"
+  short_description: "Run Luna xhigh OKF Wiki maintenance"
+  default_prompt: "Use $wiki-dream on GPT-5.6 Luna with xhigh reasoning to run this project's incremental or weekly deep Wiki maintenance."
+
+policy:
+  allow_implicit_invocation: false
+

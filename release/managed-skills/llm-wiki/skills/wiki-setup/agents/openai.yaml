@@ -1,0 +1,5 @@
+interface:
+  display_name: "LLM Wiki Setup"
+  short_description: "Set up an OKF v0.2 Wiki and Dream schedule"
+  default_prompt: "Use $wiki-setup to initialize or migrate this project's Google OKF v0.2 LLM Wiki and schedule daily Dream work with a weekly deep cycle on GPT-5.6 Luna with xhigh reasoning."
+

@@ -1,0 +1,87 @@
+{
+  "schema": "llm-wiki.config.v2",
+  "knowledge_format": {
+    "name": "okf",
+    "version": "0.2",
+    "profile": "workagent3-wiki-v1"
+  },
+  "workspace_dir": "wiki-llm",
+  "state_dir": ".agent-state/wiki-llm",
+  "language": "project",
+  "link_style": "markdown",
+  "source_roots": [
+    "README.md",
+    "CONTEXT.md",
+    "docs"
+  ],
+  "source_extensions": [
+    ".md",
+    ".mdx",
+    ".txt",
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".csv",
+    ".json",
+    ".yaml",
+    ".yml"
+  ],
+  "exclude": [
+    ".git/**",
+    ".agent-state/**",
+    "wiki-llm/**",
+    "node_modules/**",
+    "vendor/**",
+    "dist/**",
+    "build/**"
+  ],
+  "max_scan_files": 5000,
+  "state_retention": {
+    "completed_runs_days": 30,
+    "preimages_days": 30,
+    "lint_reports_days": 14
+  },
+  "retention_profiles": {
+    "permanent": {
+      "stale_after_days": 365,
+      "valid_for_days": null,
+      "purge_after_days": null
+    },
+    "stable": {
+      "stale_after_days": 180,
+      "valid_for_days": null,
+      "purge_after_days": null
+    },
+    "volatile": {
+      "stale_after_days": 30,
+      "valid_for_days": null,
+      "purge_after_days": null
+    },
+    "ephemeral": {
+      "stale_after_days": 7,
+      "valid_for_days": 30,
+      "purge_after_days": 60
+    }
+  },
+  "dream": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "xhigh",
+    "weekly_deep_day": "SUN",
+    "auto_apply": [
+      "index_rebuild",
+      "deterministic_link_repair",
+      "freshness_transition",
+      "archive_generated",
+      "purge_ephemeral"
+    ],
+    "require_candidate": [
+      "semantic_merge",
+      "contradiction_resolution",
+      "source_deletion",
+      "owner_content_rewrite",
+      "agents_semantic_update"
+    ]
+  }
+}
+

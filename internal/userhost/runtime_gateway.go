@@ -15,6 +15,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
+	"workagent3/internal/managedskills"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
@@ -29,7 +30,7 @@ type runtimeGateway struct {
 	oauth       *mcpOAuthManager
 }
 
-func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, managedSkillsRoot string, target *url.URL, token string) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -44,6 +45,14 @@ func newRuntimeGateway(runtimeDirectory string, target *url.URL, token string) (
 		credentials.Close()
 		catalog.Close()
 		return nil, err
+	}
+	if managedSkillsRoot != "" {
+		if err := managedskills.Sync(context.Background(), managedSkillsRoot, skills); err != nil {
+			skills.Close()
+			credentials.Close()
+			catalog.Close()
+			return nil, err
+		}
 	}
 	migration, err := skillmigration.Open(filepath.Join(runtimeDirectory, "skill-migration.db"), skills, nil)
 	if err != nil {

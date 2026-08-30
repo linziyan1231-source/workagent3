@@ -21,15 +21,16 @@ import (
 )
 
 type Config struct {
-	SID            string
-	DataRoot       string
-	Command        string
-	CodexCommand   string
-	KimiCommand    string
-	Arguments      []string
-	Profile        string
-	Limits         winutil.JobLimits
-	StartupTimeout time.Duration
+	SID               string
+	DataRoot          string
+	Command           string
+	CodexCommand      string
+	KimiCommand       string
+	Arguments         []string
+	Profile           string
+	Limits            winutil.JobLimits
+	StartupTimeout    time.Duration
+	ManagedSkillsRoot string
 }
 
 type Supervisor struct {
@@ -51,8 +52,9 @@ func New(config Config) (*Supervisor, error) {
 		return nil, errors.New("data root must be absolute")
 	}
 	if (config.CodexCommand != "" && !filepath.IsAbs(config.CodexCommand)) ||
-		(config.KimiCommand != "" && !filepath.IsAbs(config.KimiCommand)) {
-		return nil, errors.New("native engine commands must be absolute")
+		(config.KimiCommand != "" && !filepath.IsAbs(config.KimiCommand)) ||
+		(config.ManagedSkillsRoot != "" && !filepath.IsAbs(config.ManagedSkillsRoot)) {
+		return nil, errors.New("native engine commands and managed skills root must be absolute")
 	}
 	if config.StartupTimeout <= 0 {
 		config.StartupTimeout = 45 * time.Second
@@ -117,7 +119,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	gateway, err := newRuntimeGateway(directories.runtime, target, token)
+	gateway, err := newRuntimeGateway(directories.runtime, s.config.ManagedSkillsRoot, target, token)
 	if err != nil {
 		s.Close()
 		return runtimeapi.Registration{}, err
