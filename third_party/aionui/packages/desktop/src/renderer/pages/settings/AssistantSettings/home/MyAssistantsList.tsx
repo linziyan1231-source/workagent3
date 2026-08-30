@@ -44,7 +44,7 @@ const MyAssistantsList: React.FC<MyAssistantsListProps> = ({
   const talkToButler = useTalkToButler();
   const [filter, setFilter] = useState<AssistantEnabledFilter>('all');
 
-  // "Create via chat": hand off to the CLIENTNAME Butler on the home page with a
+  // "Create via chat": hand off to the Puxin AI Butler on the home page with a
   // ready-made create-an-assistant prompt (same flow as the header action).
   const handleCreateViaChat = () => {
     void talkToButler({

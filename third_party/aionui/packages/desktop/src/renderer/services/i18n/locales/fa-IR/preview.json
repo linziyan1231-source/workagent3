@@ -73,7 +73,7 @@
     "installLinkText": "باز کردن راهنمای نصب officecli",
     "errors": {
       "officecliNotFound": "officecli نصب نشده است.",
-      "officecliIncompatible": "نسخه نصب‌شده officecli سازگار نیست. راهنمای عمومی نصب و نسخه را بررسی کنید و دوباره تلاش کنید.",
+      "installFailed": "نصب خودکار officecli ناموفق بود. لاگ‌های بک‌اند را بررسی کنید و دوباره تلاش کنید.",
       "portTimeout": "سرویس پیش‌نمایش شروع شد اما به‌موقع آماده نشد. دوباره تلاش کنید.",
       "startFailed": "شروع سرویس پیش‌نمایش Office ناموفق بود.",
       "outsideSandbox": "این فایل خارج از سندباکس پروژه فعلی است.",
@@ -83,7 +83,7 @@
       "busy": "فایل Office دیگری در حال پیش‌نمایش یا تبدیل است. پیش‌نمایش فعلی را ببندید و دوباره تلاش کنید."
     },
     "serverInstall": {
-      "hint": "CLIENTNAME روی سرور اجرا می‌شود. مؤلفه پیش‌نمایش را روی همان سرور نصب کنید، سپس دوباره تلاش کنید:",
+      "hint": "Puxin AI روی سرور اجرا می‌شود. مؤلفه پیش‌نمایش را روی همان سرور نصب کنید، سپس دوباره تلاش کنید:",
       "icuNote": "اگر همچنان شروع نشد، کتابخانه ICU را روی سرور نصب کنید (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -96,7 +96,7 @@
       "loading": "در حال بارگذاری سند Word...",
       "installing": "در حال نصب officecli...",
       "startFailed": "شروع پیش‌نمایش Word ناموفق بود",
-      "installHint": "OfficeCLI را از صفحه انتشارات رسمی iOfficeAI/OfficeCli نصب کنید"
+      "installHint": "نیاز به officecli دارد. به‌صورت خودکار نصب خواهد شد."
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "در حال بارگذاری فایل Excel...",
       "installing": "در حال نصب officecli...",
       "startFailed": "شروع پیش‌نمایش Excel ناموفق بود",
-      "installHint": "OfficeCLI را از صفحه انتشارات رسمی iOfficeAI/OfficeCli نصب کنید"
+      "installHint": "نیاز به officecli دارد. به‌صورت خودکار نصب خواهد شد."
     }
   },
   "pdf": {

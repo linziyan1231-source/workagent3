@@ -63,10 +63,10 @@
   "more": "Más",
   "refresh": "Actualizar",
   "readOnly": "Solo lectura",
-  "tray.showWindow": "Mostrar CLIENTNAME",
+  "tray.showWindow": "Mostrar Puxin AI",
   "tray.newChat": "Nuevo chat",
   "tray.closeToTray": "Minimizar a bandeja",
-  "tray.about": "Acerca de CLIENTNAME",
+  "tray.about": "Acerca de Puxin AI",
   "tray.restart": "Reiniciar aplicación",
   "tray.quit": "Salir",
   "tray.runningTasks": "Tareas en ejecución",
@@ -77,26 +77,26 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "Este sistema no es compatible con el backend incluido",
-      "description": "CLIENTNAME se abrió, pero el backend local AionCore no puede ejecutarse en esta versión de Linux. Actualiza a una distribución de Linux compatible y reinicia CLIENTNAME.",
+      "description": "Puxin AI se abrió, pero el backend local AionCore no puede ejecutarse en esta versión de Linux. Actualiza a una distribución de Linux compatible y reinicia Puxin AI.",
       "requiredVersions": "Símbolos de runtime requeridos: {{versions}}"
     },
     "incompleteInstallation": {
-      "title": "La instalación de CLIENTNAME está incompleta",
-      "description": "Esta instalación no tiene los recursos locales necesarios, por lo que AionCore no puede iniciar. Descarga e instala la última versión de CLIENTNAME. Si el problema persiste después de reinstalar, verifica si el software de seguridad o antivirus puso en cuarentena AionCore.",
+      "title": "La instalación de Puxin AI está incompleta",
+      "description": "Esta instalación no tiene los recursos locales necesarios, por lo que AionCore no puede iniciar. Descarga e instala la última versión de Puxin AI. Si el problema persiste después de reinstalar, verifica si el software de seguridad o antivirus puso en cuarentena AionCore.",
       "downloadLatest": "Descargar la última versión",
       "sendDiagnostics": "Enviar diagnóstico",
       "diagnosticsSent": "Diagnóstico enviado",
       "diagnosticsReportSuccess": "Reporte de diagnóstico enviado",
       "diagnosticsReportFailed": "Error al enviar el reporte de diagnóstico",
-      "runtimeComponentDescription": "Esta instalación no tiene los componentes de runtime necesarios, por lo que {{resource}} no puede iniciar. Reinstala el último paquete de CLIENTNAME. Si sigue fallando, verifica si el software de seguridad o antivirus puso en cuarentena componentes de CLIENTNAME."
+      "runtimeComponentDescription": "Esta instalación no tiene los componentes de runtime necesarios, por lo que {{resource}} no puede iniciar. Reinstala el último paquete de Puxin AI. Si sigue fallando, verifica si el software de seguridad o antivirus puso en cuarentena componentes de Puxin AI."
     },
     "packageArchitectureMismatch": {
-      "title": "Incompatibilidad de arquitectura del paquete CLIENTNAME",
-      "description": "Este paquete de CLIENTNAME es para {{packageArch}}, pero esta Mac es {{deviceArch}}. Es posible que hayas descargado el paquete incorrecto. Descarga e instala el paquete {{expectedArch}}."
+      "title": "Incompatibilidad de arquitectura del paquete Puxin AI",
+      "description": "Este paquete de Puxin AI es para {{packageArch}}, pero esta Mac es {{deviceArch}}. Es posible que hayas descargado el paquete incorrecto. Descarga e instala el paquete {{expectedArch}}."
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "CLIENTNAME opened, but AionCore stopped while initializing local data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Puxin AI opened, but AionCore stopped while initializing local data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -104,7 +104,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "CLIENTNAME opened, but AionCore stopped while repairing local agent cache data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "Puxin AI opened, but AionCore stopped while repairing local agent cache data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -112,7 +112,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "Local data is corrupted",
-      "description": "CLIENTNAME detected that the local database is corrupted and cannot continue startup. After confirmation, CLIENTNAME will back up the old database and create a new local database to continue startup. Historical local data will not be shown for now, and the old database will be kept as a backup.",
+      "description": "Puxin AI detected that the local database is corrupted and cannot continue startup. After confirmation, Puxin AI will back up the old database and create a new local database to continue startup. Historical local data will not be shown for now, and the old database will be kept as a backup.",
       "confirmRebuild": "Back up old DB and rebuild new DB",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsHint": "Sending diagnostics will not modify the local database.",

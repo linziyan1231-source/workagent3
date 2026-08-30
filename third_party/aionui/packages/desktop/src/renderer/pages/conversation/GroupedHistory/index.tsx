@@ -264,12 +264,7 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
   // Projects section: collect all workspace groups across timeline sections, ordered by recency.
   const projectGroups = useMemo(() => {
     const seen = new Set<string>();
-    const groups: Array<{
-      workspace: string;
-      displayName: string;
-      conversations: TChatConversation[];
-      shared: boolean;
-    }> = [];
+    const groups: Array<{ workspace: string; displayName: string; conversations: TChatConversation[]; shared: boolean }> = [];
     for (const section of timelineSections) {
       for (const item of section.items) {
         if (item.type === 'workspace' && item.workspaceGroup && !seen.has(item.workspaceGroup.workspace)) {
@@ -507,10 +502,7 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
           projectID={sharedCreate.projectID}
           projectName={sharedCreate.projectName}
           onCancel={() => setSharedCreate(null)}
-          onCreated={(id) => {
-            setSharedCreate(null);
-            void navigate(`/conversation/${id}`);
-          }}
+          onCreated={(id) => { setSharedCreate(null); void navigate(`/conversation/${id}`); }}
         />
       )}
 
@@ -722,22 +714,14 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (group.shared)
-                                  setSharedCreate({
-                                    projectID: group.workspace.replace(/^shared:\/\//, ''),
-                                    projectName: group.displayName,
-                                  });
+                                if (group.shared) setSharedCreate({ projectID: group.workspace.replace(/^shared:\/\//, ''), projectName: group.displayName });
                                 else void navigate('/guid', { state: { workspace: group.workspace } });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  if (group.shared)
-                                    setSharedCreate({
-                                      projectID: group.workspace.replace(/^shared:\/\//, ''),
-                                      projectName: group.displayName,
-                                    });
+                                  if (group.shared) setSharedCreate({ projectID: group.workspace.replace(/^shared:\/\//, ''), projectName: group.displayName });
                                   else void navigate('/guid', { state: { workspace: group.workspace } });
                                 }
                               }}
@@ -745,26 +729,24 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
                               <Plus theme='outline' size='14' fill='currentColor' className='block leading-none' />
                             </span>
                           </Tooltip>
-                          {projectMenu && (
-                            <Dropdown
-                              droplist={projectMenu}
-                              trigger='click'
-                              position='br'
-                              getPopupContainer={() => document.body}
-                              unmountOnExit={false}
+                          {projectMenu && <Dropdown
+                            droplist={projectMenu}
+                            trigger='click'
+                            position='br'
+                            getPopupContainer={() => document.body}
+                            unmountOnExit={false}
+                          >
+                            <span
+                              aria-label='Project actions'
+                              className={classNames(
+                                'flex-center cursor-pointer transition-colors text-t-secondary hover:text-t-primary size-20px rd-4px sider-action-btn',
+                                isMobile ? 'flex' : 'hidden group-hover:flex'
+                              )}
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <span
-                                aria-label='Project actions'
-                                className={classNames(
-                                  'flex-center cursor-pointer transition-colors text-t-secondary hover:text-t-primary size-20px rd-4px sider-action-btn',
-                                  isMobile ? 'flex' : 'hidden group-hover:flex'
-                                )}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreOne theme='outline' size='14' fill='currentColor' className='block leading-none' />
-                              </span>
-                            </Dropdown>
-                          )}
+                              <MoreOne theme='outline' size='14' fill='currentColor' className='block leading-none' />
+                            </span>
+                          </Dropdown>}
                         </span>
                       }
                     >

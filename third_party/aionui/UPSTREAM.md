@@ -1,11 +1,15 @@
 # Vendored AionUi Renderer
 
-This directory is an exact source snapshot from the local WorkAgent2/AionUi
-repository requested as the WorkAgent3 frontend baseline.
+This directory is an exact source snapshot from the latest deployed
+WorkAgent2/CLIENTNAME product renderer requested as the WorkAgent3 frontend
+baseline.
 
-- Source: `C:\projects\AionUi`
+- Source: `C:\projects\WorkAgent2\.tools\worktrees\runtime-auth-deploy-ui`
 - Upstream repository: <https://github.com/iOfficeAI/AionUi>
-- Commit: `1f41b9cbcece8599d3bdfd955553c24e42a308c3`
+- Product branch: `codex/dwg-managed-mcp-web77`
+- Commit: `0a5e806e9e495323368fb3b5b5f359c5ff8a9f4b`
+- Release: `2.1.0-beta.editfork.78`
+- Production bundle: `assets/index-DhWTgRtn.js`
 - Source subtree: `packages/desktop/src`
 - License: Apache-2.0 (individual source files retain their license headers)
 

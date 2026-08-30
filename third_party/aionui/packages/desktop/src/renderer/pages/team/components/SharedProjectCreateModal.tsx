@@ -42,9 +42,9 @@ const SharedProjectCreateModal: React.FC<Props> = ({ visible, onClose, onCreated
   const assistants = useMemo(() => presetAssistants.filter(isSharedAssistant), [presetAssistants]);
   const selectedAssistant = assistants.find((assistant) => assistant.id === assistantID);
   const selectedBackend: 'codex' | 'kimi' | undefined = selectedAssistant
-    ? (selectedAssistant.agent?.acp_backend || selectedAssistant.agent?.type || '').toLowerCase().includes('kimi')
-      ? 'kimi'
-      : 'codex'
+    ? ((selectedAssistant.agent?.acp_backend || selectedAssistant.agent?.type || '').toLowerCase().includes('kimi')
+        ? 'kimi'
+        : 'codex')
     : undefined;
   const { options: runtimeOptions } = useSharedRuntimeOptions(selectedBackend);
 
@@ -122,15 +122,7 @@ const SharedProjectCreateModal: React.FC<Props> = ({ visible, onClose, onCreated
   };
 
   const create = async () => {
-    if (
-      !name.trim() ||
-      !selectedAssistant ||
-      !selectedBackend ||
-      !modelID ||
-      !thinkingEffort ||
-      (sourceKind !== 'new' && !sourceProjectID)
-    )
-      return;
+    if (!name.trim() || !selectedAssistant || !selectedBackend || !modelID || !thinkingEffort || (sourceKind !== 'new' && !sourceProjectID)) return;
     setLoading(true);
     try {
       const projectResult = await ipcBridge.portal.createSharedProject.invoke({
@@ -195,9 +187,7 @@ const SharedProjectCreateModal: React.FC<Props> = ({ visible, onClose, onCreated
           <Button
             type='primary'
             loading={loading}
-            disabled={
-              !name.trim() || !assistantID || !modelID || !thinkingEffort || (sourceKind !== 'new' && !sourceProjectID)
-            }
+            disabled={!name.trim() || !assistantID || !modelID || !thinkingEffort || (sourceKind !== 'new' && !sourceProjectID)}
             onClick={() => void create()}
           >
             {t('common.create', { defaultValue: 'Create' })}
@@ -265,14 +255,7 @@ const SharedProjectCreateModal: React.FC<Props> = ({ visible, onClose, onCreated
           </Form.Item>
         )}
         <Form.Item label={t('team.create.fixedAssistant', { defaultValue: 'Assistant for this group chat' })} required>
-          <Select
-            value={assistantID}
-            onChange={(value) => {
-              setAssistantID(value);
-              setModelID(undefined);
-              setThinkingEffort(undefined);
-            }}
-          >
+          <Select value={assistantID} onChange={(value) => { setAssistantID(value); setModelID(undefined); setThinkingEffort(undefined); }}>
             {assistants.map((assistant) => (
               <Select.Option key={assistant.id} value={assistant.id}>
                 {assistant.name}
@@ -281,26 +264,16 @@ const SharedProjectCreateModal: React.FC<Props> = ({ visible, onClose, onCreated
           </Select>
         </Form.Item>
         <Form.Item label={t('common.model')} required>
-          <Select
-            value={modelID}
-            onChange={(value) => {
-              setModelID(value);
-              setThinkingEffort(runtimeOptions?.model_defaults[value] || thinkingEffort);
-            }}
-          >
+          <Select value={modelID} onChange={(value) => { setModelID(value); setThinkingEffort(runtimeOptions?.model_defaults[value] || thinkingEffort); }}>
             {(runtimeOptions?.models ?? []).map((model) => (
-              <Select.Option key={model} value={model}>
-                {model}
-              </Select.Option>
+              <Select.Option key={model} value={model}>{model}</Select.Option>
             ))}
           </Select>
         </Form.Item>
         <Form.Item label={t('agent.thoughtLevel.label')} required>
           <Select value={thinkingEffort} onChange={setThinkingEffort}>
             {(runtimeOptions?.thinking_efforts ?? []).map((effort) => (
-              <Select.Option key={effort} value={effort}>
-                {effort}
-              </Select.Option>
+              <Select.Option key={effort} value={effort}>{effort}</Select.Option>
             ))}
           </Select>
         </Form.Item>

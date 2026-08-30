@@ -18,10 +18,10 @@
     "clearWorkspace": "プロジェクトを解除",
     "openFolder": "Open Folder",
     "none": "None",
-    "quickActionsTitle": "CLIENTNAME で何ができる？",
+    "quickActionsTitle": "Puxin AI で何ができる？",
     "quickActionFeedback": "問題を報告",
     "quickActionStar": "気に入った？スターをください！",
-    "skillsMarket": "CLIENTNAME Skills Market",
+    "skillsMarket": "Puxin AI Skills Market",
     "skillsMarketDesc": "コミュニティ Skills をオンデマンドで検索・有効化。一度設定すれば、すべてのAgentで利用可能。",
     "skillsMarketDetails": "詳細 >>"
   },
@@ -333,7 +333,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "CLIENTNAME could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -341,11 +341,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "CLIENTNAME received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "CLIENTNAME could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",

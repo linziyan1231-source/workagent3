@@ -33,10 +33,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
 import styles from './index.module.css';
 import {
+  DWG_QUANTITY_SKILL_NAME,
   PROFESSIONAL_DATABASE_MCP_ID,
   PROFESSIONAL_DATABASE_SKILL_NAME,
+  isDwgQuantityMcp,
+  isDwgQuantitySkill,
   isProfessionalDatabaseMcp,
   isProfessionalDatabaseSkill,
+  resolveDwgQuantityMcpId,
 } from './utils/capabilityBundles';
 
 const GuidPage: React.FC = () => {
@@ -104,11 +108,40 @@ const GuidPage: React.FC = () => {
     });
   }, []);
 
+  const setDwgQuantityBundle = useCallback(
+    (enabled: boolean) => {
+      const mcpId = resolveDwgQuantityMcpId(availableMcpServers);
+      setGuidEnabledSkills((prev) => {
+        const current = prev ?? [];
+        return enabled
+          ? current.includes(DWG_QUANTITY_SKILL_NAME)
+            ? current
+            : [...current, DWG_QUANTITY_SKILL_NAME]
+          : current.filter((name) => name !== DWG_QUANTITY_SKILL_NAME);
+      });
+      if (!mcpId) return;
+      setGuidSelectedMcpServerIds((prev) => {
+        const current = prev ?? [];
+        return enabled
+          ? current.includes(mcpId)
+            ? current
+            : [...current, mcpId]
+          : current.filter((id) => id !== mcpId);
+      });
+    },
+    [availableMcpServers]
+  );
+
   const handleToggleSkill = useCallback(
     (skillName: string, isAuto: boolean) => {
       if (isProfessionalDatabaseSkill(skillName)) {
         const selected = (guidEnabledSkills ?? []).includes(PROFESSIONAL_DATABASE_SKILL_NAME);
         setProfessionalDatabaseBundle(!selected);
+        return;
+      }
+      if (isDwgQuantitySkill(skillName)) {
+        const selected = (guidEnabledSkills ?? []).includes(DWG_QUANTITY_SKILL_NAME);
+        setDwgQuantityBundle(!selected);
         return;
       }
       if (isAuto) {
@@ -123,7 +156,7 @@ const GuidPage: React.FC = () => {
         });
       }
     },
-    [guidEnabledSkills, setProfessionalDatabaseBundle]
+    [guidEnabledSkills, setDwgQuantityBundle, setProfessionalDatabaseBundle]
   );
 
   const handleToggleMcpServer = useCallback(
@@ -133,12 +166,18 @@ const GuidPage: React.FC = () => {
         setProfessionalDatabaseBundle(!selected);
         return;
       }
+      const server = availableMcpServers.find((item) => item.id === serverId);
+      if (server && isDwgQuantityMcp(server)) {
+        const selected = (guidSelectedMcpServerIds ?? []).includes(server.id);
+        setDwgQuantityBundle(!selected);
+        return;
+      }
       setGuidSelectedMcpServerIds((prev) => {
         const current = prev ?? [];
         return current.includes(serverId) ? current.filter((id) => id !== serverId) : [...current, serverId];
       });
     },
-    [guidSelectedMcpServerIds, setProfessionalDatabaseBundle]
+    [availableMcpServers, guidSelectedMcpServerIds, setDwgQuantityBundle, setProfessionalDatabaseBundle]
   );
 
   useEffect(() => {
@@ -147,6 +186,15 @@ const GuidPage: React.FC = () => {
     const mcpSelected = guidSelectedMcpServerIds.includes(PROFESSIONAL_DATABASE_MCP_ID);
     if (skillSelected !== mcpSelected) setProfessionalDatabaseBundle(true);
   }, [guidEnabledSkills, guidSelectedMcpServerIds, setProfessionalDatabaseBundle]);
+
+  useEffect(() => {
+    if (guidEnabledSkills === undefined || guidSelectedMcpServerIds === undefined) return;
+    const mcpId = resolveDwgQuantityMcpId(availableMcpServers);
+    if (!mcpId) return;
+    const skillSelected = guidEnabledSkills.includes(DWG_QUANTITY_SKILL_NAME);
+    const mcpSelected = guidSelectedMcpServerIds.includes(mcpId);
+    if (skillSelected !== mcpSelected) setDwgQuantityBundle(true);
+  }, [availableMcpServers, guidEnabledSkills, guidSelectedMcpServerIds, setDwgQuantityBundle]);
 
   // --- Hooks ---
   // Only aionrs uses this provider-based model picker now (Gemini runs as a

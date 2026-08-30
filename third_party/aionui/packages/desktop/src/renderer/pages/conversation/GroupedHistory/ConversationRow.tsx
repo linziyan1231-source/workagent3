@@ -280,9 +280,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
                     <Menu.Item key='hide'>
                       <div className='flex items-center gap-8px text-t-secondary'>
                         <DeleteOne theme='outline' size='14' />
-                        <span>
-                          {t('conversation.history.hideSharedConversation', { defaultValue: 'Hide conversation' })}
-                        </span>
+                        <span>{t('conversation.history.hideSharedConversation', { defaultValue: 'Hide conversation' })}</span>
                       </div>
                     </Menu.Item>
                   )}

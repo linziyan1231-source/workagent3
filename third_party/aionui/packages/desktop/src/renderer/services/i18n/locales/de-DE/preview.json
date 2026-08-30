@@ -73,7 +73,7 @@
     "installLinkText": "officecli-Installationsanleitung öffnen",
     "errors": {
       "officecliNotFound": "officecli ist nicht installiert.",
-      "officecliIncompatible": "Das installierte officecli ist inkompatibel. Folge der öffentlichen Einrichtungsanleitung, prüfe die Version und versuche es erneut.",
+      "installFailed": "Automatische Installation von officecli fehlgeschlagen. Überprüfe Backend-Logs und versuche es erneut.",
       "portTimeout": "Vorschau-Dienst gestartet, wurde aber nicht rechtzeitig bereit. Versuche es erneut.",
       "startFailed": "Office-Vorschau-Dienst konnte nicht gestartet werden.",
       "outsideSandbox": "Diese Datei befindet sich außerhalb der aktuellen Projekt-Sandbox.",
@@ -83,7 +83,7 @@
       "busy": "Eine andere Office-Datei wird bereits angezeigt oder konvertiert. Schließe die aktuelle Vorschau und versuche es erneut."
     },
     "serverInstall": {
-      "hint": "CLIENTNAME läuft auf einem Server. Installiere die Vorschau-Komponente auf diesem Server und versuche es erneut:",
+      "hint": "Puxin AI läuft auf einem Server. Installiere die Vorschau-Komponente auf diesem Server und versuche es erneut:",
       "icuNote": "Falls es immer noch nicht startet, installiere die ICU-Bibliothek auf dem Server (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -96,7 +96,7 @@
       "loading": "Word-Dokument wird geladen...",
       "installing": "officecli wird installiert...",
       "startFailed": "Word-Vorschau konnte nicht gestartet werden",
-      "installHint": "Installiere OfficeCLI über die offizielle iOfficeAI/OfficeCLI releases-Seite"
+      "installHint": "Erfordert officecli. Wird automatisch installiert."
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "Excel-Datei wird geladen...",
       "installing": "officecli wird installiert...",
       "startFailed": "Excel-Vorschau konnte nicht gestartet werden",
-      "installHint": "Installiere OfficeCLI über die offizielle iOfficeAI/OfficeCLI releases-Seite"
+      "installHint": "Erfordert officecli. Wird automatisch installiert."
     }
   },
   "pdf": {
