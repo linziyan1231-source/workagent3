@@ -7,6 +7,11 @@ export type FileMetadata = {
 };
 export const allSupportedExts: string[] = [];
 
+export function getFileExtension(fileName: string) {
+  const index = fileName.lastIndexOf(".");
+  return index === -1 ? "" : fileName.slice(index).toLowerCase();
+}
+
 export function getCleanFileNames(paths: string[]) {
   return paths.map((path) => path.split(/[\\/]/).pop() ?? path);
 }

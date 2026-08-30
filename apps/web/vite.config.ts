@@ -123,10 +123,6 @@ export default defineConfig({
       },
       { find: "swr", replacement: `${webModules}/swr` },
       { find: "qrcode.react", replacement: `${webModules}/qrcode.react` },
-      {
-        find: "@renderer/assets/logos/brand/app.png",
-        replacement: `${adapter("workagent-logo.svg")}?no-inline`,
-      },
       { find: "katex", replacement: `${webModules}/katex` },
       { find: "mermaid", replacement: `${webModules}/mermaid` },
       { find: "postcss", replacement: `${webModules}/postcss` },
@@ -205,10 +201,6 @@ export default defineConfig({
         replacement: adapter("UpdateModal.tsx"),
       },
       {
-        find: "@renderer/pages/conversation/GroupedHistory/ConversationSearchPopover",
-        replacement: adapter("ConversationSearchPopover.tsx"),
-      },
-      {
         find: "./SharedInviteNotifications",
         replacement: adapter("EmptyRendererComponent.tsx"),
       },
@@ -240,10 +232,6 @@ export default defineConfig({
       {
         find: "@/renderer/components/chat/BtwOverlay/useBtwCommand",
         replacement: adapter("btwCommand.ts"),
-      },
-      {
-        find: "@/renderer/components/chat/BtwOverlay",
-        replacement: adapter("BtwOverlay.tsx"),
       },
       {
         find: "@renderer/hooks/file/useConversationExport",
@@ -278,14 +266,6 @@ export default defineConfig({
         replacement: adapter("abortUploads.ts"),
       },
       {
-        find: "@renderer/components/media/UploadProgressBar",
-        replacement: adapter("UploadProgressBar.tsx"),
-      },
-      {
-        find: "@/renderer/components/media/UploadProgressBar",
-        replacement: adapter("UploadProgressBar.tsx"),
-      },
-      {
         find: "@/renderer/services/clientBusinessSettings",
         replacement: adapter("clientBusinessSettings.ts"),
       },
@@ -316,22 +296,6 @@ export default defineConfig({
       {
         find: "@/renderer/hooks/agent/useModelProviderList",
         replacement: adapter("assistantHooks.ts"),
-      },
-      {
-        find: "@/renderer/pages/conversation/Messages/components/TeammateMessageAvatar",
-        replacement: adapter("TeammateMessageAvatar.tsx"),
-      },
-      {
-        find: "@renderer/components/media/FilePreview",
-        replacement: adapter("FilePreview.tsx"),
-      },
-      {
-        find: "@/renderer/components/media/FilePreview",
-        replacement: adapter("FilePreview.tsx"),
-      },
-      {
-        find: "@renderer/components/media/HorizontalFileList",
-        replacement: adapter("HorizontalFileList.tsx"),
       },
       {
         find: "@/renderer/hooks/system/useExtI18n",
