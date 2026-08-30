@@ -6,8 +6,6 @@ import {
   DeleteOne,
   EditOne,
   MessageOne,
-  Search,
-  ToLeft,
 } from "@icon-park/react";
 import type { RuntimeSession } from "@workagent/contracts";
 import SiderItem from "@renderer/components/layout/Sider/SiderItem";
@@ -16,7 +14,6 @@ import SiderFooter from "@renderer/components/layout/Sider/SiderFooter";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { useState } from "react";
-import { BrandLogo } from "./BrandLogo.js";
 
 type Props = {
   sessions: RuntimeSession[];
@@ -43,19 +40,7 @@ export function AionSider(props: Props) {
     session.title.toLocaleLowerCase().includes(props.query.toLocaleLowerCase()),
   );
   return (
-    <aside className="layout-sider aion-sider">
-      <div className="aion-sider__brand">
-        <BrandLogo size={30} />
-        <strong>WorkAgent</strong>
-        <button
-          className="aion-sider__collapse"
-          type="button"
-          aria-label="Collapse sidebar"
-          onClick={props.onClose}
-        >
-          <ToLeft size="16" />
-        </button>
-      </div>
+    <div className="size-full min-h-0 flex flex-col">
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-2px">
         <SiderToolbar
           isMobile={isMobile}
@@ -67,14 +52,6 @@ export function AionSider(props: Props) {
           }}
           onToggleBatchMode={() => setBatchMode((active) => !active)}
         />
-        <label className="aion-sider__search h-34px flex items-center gap-8px px-10px rd-8px">
-          <Search theme="outline" size="15" />
-          <input
-            value={props.query}
-            onChange={(event) => props.onQuery(event.target.value)}
-            placeholder="Search"
-          />
-        </label>
         <div className="sider-section-label sider-section-title px-10px pt-12px pb-4px text-12px text-t-tertiary">
           Recent
         </div>
@@ -126,6 +103,6 @@ export function AionSider(props: Props) {
         showLogout
         onLogoutClick={props.onLogout}
       />
-    </aside>
+    </div>
   );
 }

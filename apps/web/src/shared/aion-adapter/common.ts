@@ -26,6 +26,8 @@ export const ipcBridge = {
     getCdpStatus: { invoke: async () => ({ success: false }) },
     updateCdpConfig: { invoke: async () => ({ success: false }) },
     devToolsStateChanged: { on: () => () => undefined },
+    logStream: { on: () => () => undefined },
+    writeRendererLog: { invoke: async () => undefined },
   },
   systemSettings: {
     getCloseToTray: { invoke: async () => false },
@@ -38,9 +40,38 @@ export const ipcBridge = {
     setSharedConversationHidden: { invoke: async () => undefined },
     updateProfile: { invoke: async () => ({ profile: {} }) },
     restartService: { invoke: async () => ({ reconnect_after_ms: 2000 }) },
+    listSharedInvites: { invoke: async () => ({ invites: [] }) },
+    acceptSharedInvite: { invoke: async () => ({ success: false }) },
+    declineSharedInvite: { invoke: async () => ({ success: false }) },
   },
   conversation: {
-    listChanged: { emit: () => undefined },
+    get: {
+      invoke: async () => ({
+        id: "workagent",
+        name: "WorkAgent",
+        title: "WorkAgent",
+      }),
+    },
+    listChanged: { emit: () => undefined, on: () => () => undefined },
+    responseStream: { on: () => () => undefined },
+    turnCompleted: { on: () => () => undefined },
+  },
+  team: {
+    get: { invoke: async () => null },
+  },
+  task: {
+    stopAll: { invoke: async () => ({ success: false }) },
+  },
+  database: {
+    conversations: { invoke: async () => [] },
+  },
+  windowControls: {
+    getState: { invoke: async () => ({ is_maximized: false }) },
+    stateChanged: { on: () => () => undefined },
+    minimize: { invoke: async () => undefined },
+    maximize: { invoke: async () => undefined },
+    unmaximize: { invoke: async () => undefined },
+    close: { invoke: async () => undefined },
   },
   shell: {
     openExternal: {

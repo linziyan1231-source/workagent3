@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Select, Tooltip } from "@arco-design/web-react";
-import { EditOne, FolderOpen, HamburgerButton } from "@icon-park/react";
+import { Button, Select } from "@arco-design/web-react";
+import { EditOne } from "@icon-park/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
   EngineEvent,
   EngineId,
@@ -17,6 +18,12 @@ import { AionSettingsModal } from "../../shared/ui/aionui/AionSettingsModal.js";
 import { AionSider } from "../../shared/ui/aionui/AionSider.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
 import { AionMessage } from "../../shared/ui/aionui/AionMessage.js";
+import RendererLayout from "@renderer/components/layout/Layout";
+import {
+  WORKSPACE_STATE_EVENT,
+  WORKSPACE_TOGGLE_EVENT,
+  dispatchWorkspaceStateEvent,
+} from "@renderer/utils/workspace/workspaceEvents";
 
 export type Message = Pick<RuntimeMessage, "id" | "role" | "text">;
 
@@ -170,6 +177,16 @@ export function ConversationPage({
       .catch(() => setNotice("Conversation history could not be refreshed."));
     return port.subscribe(activeId, (event) => applyEvent(activeId, event));
   }, [activeId, port]);
+
+  useEffect(() => {
+    const toggleWorkspace = () => setWorkspaceOpen((open) => !open);
+    window.addEventListener(WORKSPACE_TOGGLE_EVENT, toggleWorkspace);
+    return () => window.removeEventListener(WORKSPACE_TOGGLE_EVENT, toggleWorkspace);
+  }, []);
+
+  useEffect(() => {
+    dispatchWorkspaceStateEvent(!workspaceOpen);
+  }, [workspaceOpen]);
 
   function applyEvent(sessionId: string, event: EngineEvent) {
     if (event.type === "turn.started") {
@@ -367,19 +384,8 @@ export function ConversationPage({
     });
   }
 
-  return (
-    <main
-      className={`aion-layout${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}${sidebarOpen ? " sidebar-open" : ""}`}
-    >
-      {sidebarOpen && (
-        <button
-          className="sidebar-scrim"
-          type="button"
-          aria-label="Close conversations"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      <AionSider
+  const sider = (
+    <AionSider
         sessions={sessions}
         activeId={activeId}
         query={query}
@@ -401,19 +407,20 @@ export function ConversationPage({
         onLogout={onLogout}
         onClose={() => setSidebarOpen(false)}
       />
+  );
+
+  return (
+    <MemoryRouter initialEntries={["/conversation/workagent"]}>
+      <Routes>
+        <Route element={<RendererLayout sider={sider} />}>
+          <Route
+            path="*"
+            element={
+              <main
+                className={`workagent-route-shell${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}`}
+              >
       <section className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}>
         <header className="chat-layout-header chat-layout-header--glass min-h-44px flex items-center justify-between px-16px pt-8px pb-10px gap-16px !bg-1">
-          <Button
-            className="mobile-menu"
-            type="text"
-            shape="circle"
-            icon={<HamburgerButton />}
-            aria-label="Open conversations"
-            onClick={() => {
-              setWorkspaceOpen(false);
-              setSidebarOpen(true);
-            }}
-          />
           <div
             className={`aion-chat-title flex-1 min-w-0 flex items-center gap-8px${isGuid ? " guid-title" : ""}`}
           >
@@ -464,20 +471,6 @@ export function ConversationPage({
                   );
                 })}
               </Select>
-              {workspacePanel && (
-                <Tooltip content="Workspace">
-                  <Button
-                    type="text"
-                    shape="circle"
-                    icon={<FolderOpen />}
-                    aria-label="Workspace"
-                    onClick={() => {
-                      setSidebarOpen(false);
-                      setWorkspaceOpen((open) => !open);
-                    }}
-                  />
-                </Tooltip>
-              )}
             </div>
           )}
         </header>
@@ -612,6 +605,11 @@ export function ConversationPage({
         visible={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
-    </main>
+              </main>
+            }
+          />
+        </Route>
+      </Routes>
+    </MemoryRouter>
   );
 }

@@ -290,6 +290,16 @@
 .aion-layout.has-workspace.workspace-open {
   grid-template-columns: 260px minmax(0, 1fr) minmax(280px, 22vw);
 }
+.workagent-route-shell {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+.workagent-route-shell.has-workspace.workspace-open {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 22vw);
+}
 .layout-sider {
   overflow-x: hidden;
   border-right: 1px solid var(--border-base);
@@ -872,6 +882,10 @@
   }
   .aion-layout,
   .aion-layout.has-workspace.workspace-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workagent-route-shell,
+  .workagent-route-shell.has-workspace.workspace-open {
     grid-template-columns: minmax(0, 1fr);
   }
   .aion-sider {

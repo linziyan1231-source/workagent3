@@ -1,7 +1,10 @@
-import MessageText, {
-  type AionTextMessage,
-} from "@renderer/pages/conversation/Messages/components/MessageText";
+import { lazy, Suspense } from "react";
+import type { AionTextMessage } from "@renderer/pages/conversation/Messages/components/MessageText";
 import { MemoryRouter } from "react-router-dom";
+
+const MessageText = lazy(
+  () => import("@renderer/pages/conversation/Messages/components/MessageText"),
+);
 
 type Props = {
   conversationId: string;
@@ -30,7 +33,9 @@ export function AionMessage({ conversationId, id, role, text }: Props) {
       className={`chat-surface-fluid min-w-0 flex items-start message-item [&>div]:max-w-full px-8px m-t-10px text ${position === "right" ? "justify-end" : "justify-start"}`}
     >
       <MemoryRouter>
-        <MessageText message={message} showCopyRow />
+        <Suspense fallback={null}>
+          <MessageText message={message} showCopyRow />
+        </Suspense>
       </MemoryRouter>
     </div>
   );
