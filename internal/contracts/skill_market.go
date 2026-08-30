@@ -33,3 +33,12 @@ type SkillMarketPackage struct {
 	Version     string
 	Archive     []byte
 }
+
+type SkillMarketPublishInput struct {
+	ID                   string
+	Name                 string
+	Description          string
+	Version              string
+	PublisherUsername    string
+	PublisherDisplayName string
+}

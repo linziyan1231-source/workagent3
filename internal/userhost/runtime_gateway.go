@@ -118,6 +118,7 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
 	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher))
 	mux.HandleFunc("GET /v1/skills", listSkills(skills))
+	mux.HandleFunc("GET /v1/skills/export", exportUserSkill(skills))
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
 	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))
 	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher))

@@ -1,6 +1,7 @@
 package skillruntime
 
 import (
+	"archive/zip"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -240,6 +241,10 @@ func (s *Store) Get(ctx context.Context, id string) (Entry, error) {
 	return scanEntry(s.db.QueryRowContext(ctx, skillSelect+` WHERE id=?`, id))
 }
 
+func (s *Store) GetByName(ctx context.Context, name string) (Entry, error) {
+	return scanEntry(s.db.QueryRowContext(ctx, skillSelect+` WHERE name=? COLLATE NOCASE`, strings.TrimSpace(name)))
+}
+
 func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	rows, err := s.db.QueryContext(ctx, skillSelect+` ORDER BY name,id`)
 	if err != nil {
@@ -292,6 +297,91 @@ func (s *Store) Remove(ctx context.Context, id string) error {
 
 func (s *Store) RootFor(entry Entry) string {
 	return filepath.Join(s.skillsRoot, filepath.FromSlash(strings.Split(entry.RelativePath, "/")[0]))
+}
+
+func (s *Store) DirectoryFor(entry Entry) string {
+	return filepath.Join(s.skillsRoot, filepath.FromSlash(entry.RelativePath))
+}
+
+func (s *Store) ExportUserPackage(ctx context.Context, name string) (Entry, []byte, error) {
+	entry, err := s.GetByName(ctx, name)
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	if entry.Source != "user" {
+		return Entry{}, nil, errors.New("only user skills can be published")
+	}
+	source := s.DirectoryFor(entry)
+	if err := validateSkillTree(source); err != nil {
+		return Entry{}, nil, err
+	}
+	if err := validateSkillDocument(filepath.Join(source, "SKILL.md")); err != nil {
+		return Entry{}, nil, err
+	}
+	archive, err := os.CreateTemp(filepath.Join(s.skillsRoot, ".staging"), "publish-*.zip")
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	archivePath := archive.Name()
+	defer os.Remove(archivePath)
+	zipWriter := zip.NewWriter(archive)
+	prefix := safeSegment(entry.Name)
+	err = filepath.Walk(source, func(current string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == source {
+			return nil
+		}
+		relative, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(filepath.Join(prefix, relative))
+		if info.IsDir() {
+			header.Name += "/"
+		} else {
+			header.Method = zip.Deflate
+		}
+		target, err := zipWriter.CreateHeader(header)
+		if err != nil || info.IsDir() {
+			return err
+		}
+		file, err := os.Open(current)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(target, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
+	zipErr := zipWriter.Close()
+	closeErr := archive.Close()
+	if err != nil || zipErr != nil || closeErr != nil {
+		if err != nil {
+			return Entry{}, nil, err
+		}
+		if zipErr != nil {
+			return Entry{}, nil, zipErr
+		}
+		return Entry{}, nil, closeErr
+	}
+	info, err := os.Stat(archivePath)
+	if err != nil || info.Size() == 0 || info.Size() > 50<<20 {
+		return Entry{}, nil, errors.New("skill package exceeds market archive limit")
+	}
+	contents, err := os.ReadFile(archivePath)
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	return entry, contents, nil
 }
 
 const skillSelect = `SELECT id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json FROM skills`

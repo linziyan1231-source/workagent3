@@ -1,6 +1,8 @@
 package skillruntime
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -162,6 +164,38 @@ func TestInstallMarketAtomicallyReplacesOlderMarketVersion(t *testing.T) {
 	trash, err := os.ReadDir(filepath.Join(root, "installed", ".trash"))
 	if err != nil || len(trash) != 1 {
 		t.Fatalf("previous version was not retained for recovery: %#v, %v", trash, err)
+	}
+}
+
+func TestExportUserPackageCreatesSingleSkillArchive(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	writeSkillPackage(t, source)
+	store, err := Open(filepath.Join(root, "catalog.db"), filepath.Join(root, "installed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	_, err = store.Install(t.Context(), InstallInput{Entry: Entry{ID: "drawing-review", Name: "Drawing Review", Description: "Reviews drawings", Version: "1.0.0", Source: "user", Enabled: true}, SourceDirectory: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, archive, err := store.ExportUserPackage(t.Context(), "drawing review")
+	if err != nil || entry.ID != "drawing-review" || len(archive) == 0 {
+		t.Fatalf("export = %#v, %d bytes, %v", entry, len(archive), err)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, file := range reader.File {
+		if file.Name == "drawing-review/SKILL.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("exported archive files = %#v", reader.File)
 	}
 }
 

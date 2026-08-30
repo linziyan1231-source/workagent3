@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	ErrNotFound    = contracts.ErrSkillMarketEntryNotFound
-	ErrForbidden   = contracts.ErrSkillMarketForbidden
-	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	ErrNotFound     = contracts.ErrSkillMarketEntryNotFound
+	ErrForbidden    = contracts.ErrSkillMarketForbidden
+	versionPattern  = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	marketIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 )
 
 type Status string
@@ -232,6 +233,63 @@ func (s *Store) ApprovedPackage(ctx context.Context, id string) (contracts.Skill
 		return contracts.SkillMarketPackage{}, errors.New("skill market archive integrity check failed")
 	}
 	return contracts.SkillMarketPackage{ID: entry.ID, Name: entry.Name, Description: entry.Description, Version: entry.Version, Archive: archive}, nil
+}
+
+func (s *Store) PublishPackage(ctx context.Context, input contracts.SkillMarketPublishInput, archive []byte) (contracts.SkillMarketEntry, error) {
+	if !marketIDPattern.MatchString(input.ID) || len(archive) == 0 || len(archive) > 50<<20 {
+		return contracts.SkillMarketEntry{}, errors.New("invalid skill market package")
+	}
+	digest := sha256.Sum256(archive)
+	objects := filepath.Join(s.archiveRoot, "objects")
+	if err := os.MkdirAll(objects, 0o700); err != nil {
+		return contracts.SkillMarketEntry{}, fmt.Errorf("create skill market object storage: %w", err)
+	}
+	temporary, err := os.CreateTemp(objects, ".publish-*.zip")
+	if err != nil {
+		return contracts.SkillMarketEntry{}, err
+	}
+	temporaryPath := temporary.Name()
+	activated := false
+	defer func() {
+		temporary.Close()
+		if !activated {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		return contracts.SkillMarketEntry{}, err
+	}
+	if _, err := temporary.Write(archive); err != nil {
+		return contracts.SkillMarketEntry{}, err
+	}
+	if err := temporary.Close(); err != nil {
+		return contracts.SkillMarketEntry{}, err
+	}
+	objectKey := filepath.ToSlash(filepath.Join("objects", input.ID+".zip"))
+	destination := filepath.Join(s.archiveRoot, filepath.FromSlash(objectKey))
+	if _, err := os.Stat(destination); err == nil {
+		return contracts.SkillMarketEntry{}, errors.New("skill market package already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return contracts.SkillMarketEntry{}, err
+	}
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return contracts.SkillMarketEntry{}, err
+	}
+	activated = true
+	entry, err := s.Publish(ctx, Entry{
+		ID: input.ID, Name: input.Name, Description: input.Description, Version: input.Version,
+		PublisherUsername: input.PublisherUsername, PublisherDisplayName: input.PublisherDisplayName,
+		ObjectKey: objectKey, ArchiveDigest: hex.EncodeToString(digest[:]), ArchiveBytes: int64(len(archive)),
+	})
+	if err != nil {
+		_ = os.Remove(destination)
+		return contracts.SkillMarketEntry{}, err
+	}
+	return contracts.SkillMarketEntry{
+		ID: entry.ID, Name: entry.Name, Description: entry.Description, Version: entry.Version,
+		Publisher: contracts.Publisher{Username: entry.PublisherUsername, DisplayName: entry.PublisherDisplayName},
+		UpdatedAt: entry.UpdatedAt.UTC(), ArchiveBytes: entry.ArchiveBytes, CanDelete: true,
+	}, nil
 }
 
 const marketSelect = `SELECT id,name,description,version,publisher_username,publisher_display_name,object_key,archive_digest,archive_bytes,status,created_at,updated_at FROM skill_market_entries`

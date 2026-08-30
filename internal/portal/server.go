@@ -55,6 +55,7 @@ type SkillMarketPort interface {
 	ListApproved(context.Context, string) ([]contracts.SkillMarketEntry, error)
 	ApprovedPackage(context.Context, string) (contracts.SkillMarketPackage, error)
 	Delete(context.Context, string, string, bool) error
+	PublishPackage(context.Context, contracts.SkillMarketPublishInput, []byte) (contracts.SkillMarketEntry, error)
 }
 
 type Modules struct {
@@ -96,6 +97,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("PUT /api/settings/client", s.requireUser(s.updateClientSettings))
 	mux.HandleFunc("GET /api/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("GET /api/portal/skill-market", s.requireUser(s.skillMarket))
+	mux.HandleFunc("POST /api/portal/skill-market", s.requireUser(s.publishMarketSkill))
 	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
 	mux.HandleFunc("DELETE /api/portal/skill-market", s.requireUser(s.deleteMarketSkill))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
@@ -116,6 +118,78 @@ func (s *Server) skillMarket(writer http.ResponseWriter, request *http.Request, 
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"success": true, "skills": entries})
+}
+
+func (s *Server) publishMarketSkill(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.SkillMarket == nil {
+		writeError(writer, http.StatusServiceUnavailable, "skill_market_unavailable")
+		return
+	}
+	var input struct {
+		SkillName string `json:"skill_name"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || input.SkillName == "" || len(input.SkillName) > 240 {
+		writeError(writer, http.StatusBadRequest, "invalid_skill_market_publish")
+		return
+	}
+	endpoint, err := s.runtimes.Resolve(request.Context(), user.SID)
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "runtime_unavailable")
+		return
+	}
+	target := endpoint.BaseURL.ResolveReference(&url.URL{Path: "/v1/skills/export", RawQuery: url.Values{"name": {input.SkillName}}.Encode()})
+	downstream, _ := http.NewRequestWithContext(request.Context(), http.MethodGet, target.String(), nil)
+	downstream.Header.Set("Authorization", "Bearer "+endpoint.Token)
+	response, err := (&http.Client{Timeout: 2 * time.Minute}).Do(downstream)
+	if err != nil {
+		writeError(writer, http.StatusBadGateway, "skill_export_failed")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/zip" {
+		writeError(writer, http.StatusBadRequest, "skill_publish_not_allowed")
+		return
+	}
+	archive, err := io.ReadAll(io.LimitReader(response.Body, (50<<20)+1))
+	if err != nil || len(archive) == 0 || len(archive) > 50<<20 {
+		clear(archive)
+		writeError(writer, http.StatusBadRequest, "invalid_skill_market_package")
+		return
+	}
+	defer clear(archive)
+	encodedMetadata, err := base64.RawURLEncoding.DecodeString(response.Header.Get("X-WorkAgent-Skill-Metadata"))
+	if err != nil || len(encodedMetadata) == 0 || len(encodedMetadata) > 8*1024 {
+		writeError(writer, http.StatusBadGateway, "invalid_skill_export_metadata")
+		return
+	}
+	var metadata struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+	}
+	metadataDecoder := json.NewDecoder(bytes.NewReader(encodedMetadata))
+	metadataDecoder.DisallowUnknownFields()
+	if metadataDecoder.Decode(&metadata) != nil || metadataDecoder.Decode(&struct{}{}) != io.EOF || !strings.EqualFold(metadata.Name, input.SkillName) {
+		writeError(writer, http.StatusBadGateway, "invalid_skill_export_metadata")
+		return
+	}
+	id, err := auth.RandomToken(18)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "skill_market_failed")
+		return
+	}
+	entry, err := s.modules.SkillMarket.PublishPackage(request.Context(), contracts.SkillMarketPublishInput{
+		ID: id, Name: metadata.Name, Description: metadata.Description, Version: metadata.Version,
+		PublisherUsername: user.Username, PublisherDisplayName: user.Username,
+	}, archive)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "skill_market_publish_failed")
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"success": true, "skill": entry})
 }
 
 func (s *Server) installMarketSkill(writer http.ResponseWriter, request *http.Request, user store.User) {

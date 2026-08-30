@@ -122,9 +122,12 @@ export const ipcBridge = {
         ),
     },
     publishSkill: {
-      invoke: async (_input: { skill_name: string }) => {
-        throw new Error("skill_market_publish_not_available");
-      },
+      invoke: async (input: { skill_name: string }) =>
+        requestJson("/api/portal/skill-market", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
     },
     installMarketSkill: {
       invoke: async (input: { id: string }) =>

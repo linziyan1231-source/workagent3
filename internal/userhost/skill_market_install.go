@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"workagent3/internal/skillruntime"
@@ -22,6 +23,32 @@ type marketSkillMetadata struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Version     string `json:"version"`
+}
+
+func exportUserSkill(skills *skillruntime.Store) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		name := request.URL.Query().Get("name")
+		if name == "" || len(name) > 240 {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_skill_name")
+			return
+		}
+		entry, archive, err := skills.ExportUserPackage(request.Context(), name)
+		if errors.Is(err, skillruntime.ErrNotFound) {
+			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
+			return
+		}
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, "skill_publish_not_allowed")
+			return
+		}
+		defer clear(archive)
+		metadata, _ := json.Marshal(marketSkillMetadata{ID: entry.ID, Name: entry.Name, Description: entry.Description, Version: entry.Version})
+		writer.Header().Set("Content-Type", "application/zip")
+		writer.Header().Set("Content-Length", strconv.Itoa(len(archive)))
+		writer.Header().Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write(archive)
+	}
 }
 
 func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {

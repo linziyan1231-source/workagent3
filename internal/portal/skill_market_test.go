@@ -127,3 +127,50 @@ func TestSkillMarketPublisherCanDeleteOwnEntry(t *testing.T) {
 		t.Fatalf("market entry remains after delete: %v", err)
 	}
 }
+
+func TestSkillMarketPublishExportsOnlyThroughSIDRuntime(t *testing.T) {
+	users, _ := store.Open(":memory:")
+	defer users.Close()
+	user, _ := users.CreateUser(t.Context(), "alice", "S-1-5-21-5003", "unused")
+	_ = users.CreateSession(t.Context(), "publish-session", user.ID, time.Now().Add(time.Hour))
+	market, err := skillmarket.OpenWithArchiveRoot(filepath.Join(t.TempDir(), "market.db"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer market.Close()
+	archive := []byte("runtime-created-zip")
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/skills/export" || request.URL.Query().Get("name") != "My Skill" || request.Header.Get("Authorization") != "Bearer publish-token" {
+			t.Fatalf("unexpected export request: %s", request.URL.String())
+		}
+		metadata, _ := json.Marshal(map[string]string{"id": "local-id", "name": "My Skill", "description": "A user skill", "version": "1.2.3"})
+		writer.Header().Set("Content-Type", "application/zip")
+		writer.Header().Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write(archive)
+	}))
+	defer downstream.Close()
+	target, _ := url.Parse(downstream.URL)
+	server, _ := NewWithModules(users, StaticRouter{user.SID: {BaseURL: target, Token: "publish-token"}}, false, Modules{SkillMarket: market})
+	request := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/skill-market", strings.NewReader(`{"skill_name":"My Skill"}`))
+	request.Header.Set("Origin", "http://portal.test")
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "publish-session"})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("publish response %d: %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Skill struct {
+			ID string `json:"id"`
+		} `json:"skill"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Skill.ID == "" {
+		t.Fatalf("publish result = %#v, %v", result, err)
+	}
+	entry, err := market.ByID(t.Context(), result.Skill.ID)
+	if err != nil || entry.PublisherUsername != "alice" || entry.Status != skillmarket.Draft {
+		t.Fatalf("published entry = %#v, %v", entry, err)
+	}
+}
