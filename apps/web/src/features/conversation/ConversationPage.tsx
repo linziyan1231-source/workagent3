@@ -69,6 +69,9 @@ const AppearanceSettings = lazy(
 const SystemSettings = lazy(
   () => import("@renderer/pages/settings/SystemSettings"),
 );
+const AgentSettings = lazy(
+  () => import("@renderer/pages/settings/AgentSettings"),
+);
 
 function NavigationCapture({
   navigationRef,
@@ -574,8 +577,12 @@ export function ConversationPage({
             }
           />
           <Route
-            path="/settings/agent"
-            element={<Navigate to="/settings/model" replace />}
+            path="/settings/agent/*"
+            element={
+              <Suspense fallback={<div className="size-full bg-bg-0" />}>
+                <AgentSettings />
+              </Suspense>
+            }
           />
           <Route
             path="/settings/capabilities/*"

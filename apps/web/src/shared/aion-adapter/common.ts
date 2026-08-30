@@ -7,6 +7,7 @@ import type {
   PortalSkillMarketEntry,
   PortalUsageSummary,
 } from "./ipcBridge.js";
+import { getManagedAgents } from "./assistantHooks.js";
 
 const toRendererSkill = (
   skill: Awaited<ReturnType<typeof skillPort.list>>[number],
@@ -278,21 +279,33 @@ export const ipcBridge = {
   },
   acpConversation: new Proxy(
     {
-      getManagedAgents: { invoke: async () => [] },
+      getManagedAgents: { invoke: getManagedAgents },
+      checkManagedAgentHealthById: {
+        invoke: async ({ id }: { id: string }) => {
+          const agent = (await getManagedAgents()).find((item) => item.id === id);
+          if (!agent) throw new Error("engine_not_found");
+          return agent;
+        },
+      },
     },
     {
-      get: (_target, key) => ({
-        invoke: async () =>
-          key === "checkProviderHealth"
-            ? {
+      get: (target, key) => {
+        if (key in target) return target[key as keyof typeof target];
+        return {
+          invoke: async () => {
+            if (key === "checkProviderHealth") {
+              return {
                 status: "unknown",
                 message: "managed_health_status_only",
                 elapsed_ms: 0,
-              }
-            : undefined,
-        on: () => () => undefined,
-        emit: () => undefined,
-      }),
+              };
+            }
+            throw new Error(`unsupported_browser_agent_command:${String(key)}`);
+          },
+          on: () => () => undefined,
+          emit: () => undefined,
+        };
+      },
     },
   ),
 };

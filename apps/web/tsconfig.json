@@ -27,6 +27,9 @@
       "@renderer/pages/settings/SystemSettings": [
         "src/shared/aion-adapter/settingsPages.d.ts"
       ],
+      "@renderer/pages/settings/AgentSettings": [
+        "src/shared/aion-adapter/settingsPages.d.ts"
+      ],
       "@renderer/pages/login": ["src/shared/aion-adapter/loginPage.d.ts"],
       "@renderer/components/layout/Layout": [
         "src/shared/aion-adapter/layout.d.ts"
