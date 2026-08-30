@@ -84,6 +84,30 @@ func Sync(ctx context.Context, releaseRoot string, skills *skillruntime.Store) e
 	return nil
 }
 
+func ReleasedPaths(releaseRoot string) (map[string]string, error) {
+	if !filepath.IsAbs(releaseRoot) {
+		return nil, errors.New("managed skill release root must be absolute")
+	}
+	manifest, err := loadManifest(filepath.Join(releaseRoot, "managed-skills.json"))
+	if err != nil {
+		return nil, err
+	}
+	paths := make(map[string]string, len(manifest.Skills)*2)
+	for _, pack := range manifest.Skills {
+		relative := filepath.Join(filepath.FromSlash(pack.RelativePath), filepath.FromSlash(pack.SkillSubdirectory))
+		path, err := managedSource(releaseRoot, relative)
+		if err != nil {
+			return nil, err
+		}
+		if info, err := os.Stat(filepath.Join(path, "SKILL.md")); err != nil || !info.Mode().IsRegular() {
+			return nil, errors.New("managed release is missing SKILL.md")
+		}
+		paths[strings.ToLower(pack.Name)] = path
+		paths[strings.ToLower(pack.ID)] = path
+	}
+	return paths, nil
+}
+
 func loadManifest(path string) (Manifest, error) {
 	file, err := os.Open(path)
 	if err != nil {

@@ -468,7 +468,7 @@ func (s *Store) targetID(ctx context.Context, asset Asset) (string, error) {
 	}
 	if validID.MatchString(asset.OldID) {
 		existing, getErr := s.skills.Get(ctx, asset.OldID)
-		if errors.Is(getErr, skillruntime.ErrNotFound) || (getErr == nil && asset.LegacySource == "builtin" && existing.Source == "builtin" && strings.EqualFold(existing.Name, asset.Name)) {
+		if errors.Is(getErr, skillruntime.ErrNotFound) || (getErr == nil && asset.LegacySource == "builtin" && (existing.Source == "builtin" || existing.Source == "managed") && strings.EqualFold(existing.Name, asset.Name)) {
 			return asset.OldID, nil
 		}
 		if getErr != nil {

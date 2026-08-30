@@ -113,3 +113,37 @@ func TestRunMigratesMCPBeforeDependentSkill(t *testing.T) {
 		t.Fatalf("dependent skill state is wrong: %#v, %v", entry, err)
 	}
 }
+
+func TestRunUsesManagedReleaseForLegacyBuiltinState(t *testing.T) {
+	root := t.TempDir()
+	manifest := skillmigration.Manifest{
+		SchemaVersion: 1, SID: "S-1-5-21-1", CapturedAt: time.Now(),
+		Skills: []skillmigration.Asset{{
+			OldID: "wiki-query", Name: "wiki-query", Description: "legacy copy", Version: "0.0.1", LegacySource: "builtin", Enabled: false, ContentPath: filepath.Join(root, "obsolete"),
+		}},
+		MCPServers: []skillmigration.MCPServer{}, SkillBindings: []skillmigration.Binding{}, MCPBindings: []skillmigration.Binding{}, Results: []skillmigration.Result{},
+	}
+	manifestPath := filepath.Join(root, "manifest.json")
+	encoded, _ := json.Marshal(manifest)
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	releaseRoot, _ := filepath.Abs(filepath.Join("..", "..", "release", "managed-skills"))
+	runtimeDirectory := filepath.Join(root, "runtime")
+	var output bytes.Buffer
+	if err := run([]string{"--manifest", manifestPath, "--runtime-dir", runtimeDirectory, "--release-skills-root", releaseRoot}, &output); err != nil {
+		t.Fatal(err)
+	}
+	store, err := skillruntime.Open(filepath.Join(runtimeDirectory, "skill-catalog.db"), filepath.Join(runtimeDirectory, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entry, err := store.Get(t.Context(), "wiki-query")
+	if err != nil || entry.Source != "managed" || entry.Version != "0.1.0" || entry.Enabled {
+		t.Fatalf("managed builtin migration = %#v, %v; report %s", entry, err, output.String())
+	}
+	if _, err := os.Stat(filepath.Join(store.DirectoryFor(entry), "..", "..", "scripts", "wiki_tool.py")); err != nil {
+		t.Fatalf("managed shared script was not installed: %v", err)
+	}
+}

@@ -9,9 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"workagent3/internal/credentialbroker"
+	"workagent3/internal/managedskills"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
@@ -68,12 +68,22 @@ func run(arguments []string, output io.Writer) error {
 		return err
 	}
 	defer credentials.Close()
-	migration, err := skillmigration.Open(filepath.Join(*runtimeDirectory, "skill-migration.db"), skills, releasedSkills(*releaseRoot))
+	ctx := context.Background()
+	released := map[string]string{}
+	if *releaseRoot != "" {
+		if err := managedskills.Sync(ctx, *releaseRoot, skills); err != nil {
+			return err
+		}
+		released, err = managedskills.ReleasedPaths(*releaseRoot)
+		if err != nil {
+			return err
+		}
+	}
+	migration, err := skillmigration.Open(filepath.Join(*runtimeDirectory, "skill-migration.db"), skills, released)
 	if err != nil {
 		return err
 	}
 	defer migration.Close()
-	ctx := context.Background()
 	mcpResults, err := migration.MigrateMCP(ctx, manifest.MCPServers, mcp, credentialReadiness{store: credentials}, nil)
 	if err != nil {
 		return err
@@ -96,26 +106,6 @@ func run(arguments []string, output io.Writer) error {
 		SID     string                  `json:"sid"`
 		Results []skillmigration.Result `json:"results"`
 	}{SID: manifest.SID, Results: results})
-}
-
-func releasedSkills(root string) map[string]string {
-	result := map[string]string{}
-	if root == "" {
-		return result
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return result
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			path := filepath.Join(root, entry.Name())
-			if info, err := os.Stat(filepath.Join(path, "SKILL.md")); err == nil && info.Mode().IsRegular() {
-				result[strings.ToLower(entry.Name())] = path
-			}
-		}
-	}
-	return result
 }
 
 type catalogReadiness struct{ catalog *mcpruntime.Catalog }
