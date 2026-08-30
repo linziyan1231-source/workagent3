@@ -415,7 +415,7 @@
 .aion-conversation {
   display: grid;
   min-width: 0;
-  grid-template-rows: 52px minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   overflow: hidden;
 }
 .chat-layout-header--glass {
@@ -584,7 +584,7 @@
 
 /* Renderer pages/guid visual structure. */
 .aion-conversation.is-guid {
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 .is-guid .aion-message-scroll {
   padding: 0;

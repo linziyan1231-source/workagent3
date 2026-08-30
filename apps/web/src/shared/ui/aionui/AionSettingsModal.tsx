@@ -1,5 +1,4 @@
 import { lazy, Suspense } from "react";
-import { MemoryRouter } from "react-router-dom";
 
 const SettingsModal = lazy(
   () => import("@renderer/components/settings/SettingsModal"),
@@ -14,10 +13,8 @@ export function AionSettingsModal({
   onClose: () => void;
 }) {
   return (
-    <MemoryRouter>
-      <Suspense fallback={null}>
-        <SettingsModal visible={visible} onCancel={onClose} />
-      </Suspense>
-    </MemoryRouter>
+    <Suspense fallback={null}>
+      <SettingsModal visible={visible} onCancel={onClose} />
+    </Suspense>
   );
 }

@@ -1,6 +1,4 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Select } from "@arco-design/web-react";
-import { EditOne } from "@icon-park/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
   EngineEvent,
@@ -123,10 +121,10 @@ export function ConversationPage({
     selectedEngine?.state === "needs_auth" ||
     selectedEngine?.state === "unavailable";
   const isGuid =
-    active !== undefined &&
-    activeMessages.length === 0 &&
-    activeInteractions.length === 0 &&
-    !running.includes(active.id);
+    active === undefined ||
+    (activeMessages.length === 0 &&
+      activeInteractions.length === 0 &&
+      !running.includes(active.id));
 
   useEffect(() => {
     void port
@@ -280,11 +278,27 @@ export function ConversationPage({
   }
 
   async function send(content: string) {
-    if (!activeId) return;
+    let sessionId = activeId;
+    if (!sessionId) {
+      try {
+        const session = await port.create({
+          engine,
+          title: content.slice(0, 48) || "New conversation",
+          workspace: workspaceId ?? "default",
+        });
+        sessionId = session.id;
+        setSessions((current) => [session, ...current]);
+        setActiveId(session.id);
+        onWorkspaceSelect?.(session.workspaceId);
+      } catch {
+        setNotice("The personal runtime is unavailable.");
+        return;
+      }
+    }
     setMessages((current) => ({
       ...current,
-      [activeId]: [
-        ...(current[activeId] ?? []),
+      [sessionId]: [
+        ...(current[sessionId] ?? []),
         { id: crypto.randomUUID(), role: "user", text: content },
       ],
     }));
@@ -296,8 +310,8 @@ export function ConversationPage({
         referenced.length === 0
           ? content
           : `${content}\n\nAttached workspace files:\n${referenced.map((asset) => `- ${asset.path}`).join("\n")}`;
-      await port.send(activeId, prompt, content);
-      setStagedAssets((current) => ({ ...current, [activeId]: [] }));
+      await port.send(sessionId, prompt, content);
+      setStagedAssets((current) => ({ ...current, [sessionId]: [] }));
     } catch {
       setNotice("Message delivery failed. Your draft is still visible above.");
     }
@@ -420,60 +434,6 @@ export function ConversationPage({
                 className={`workagent-route-shell${workspacePanel ? " has-workspace" : ""}${workspaceOpen ? " workspace-open" : ""}`}
               >
       <section className={`aion-conversation bg-1${isGuid ? " is-guid" : ""}`}>
-        <header className="chat-layout-header chat-layout-header--glass min-h-44px flex items-center justify-between px-16px pt-8px pb-10px gap-16px !bg-1">
-          <div
-            className={`aion-chat-title flex-1 min-w-0 flex items-center gap-8px${isGuid ? " guid-title" : ""}`}
-          >
-            <span className="aion-agent-dot" />
-            <button
-              type="button"
-              onClick={() => active && !isGuid && renameSession(active)}
-              disabled={!active}
-            >
-              {isGuid ? "WorkAgent" : (active?.title ?? "New conversation")}
-            </button>
-            {active && !isGuid && (
-              <EditOne className="aion-title-edit" size="13" />
-            )}
-          </div>
-          {!isGuid && (
-            <div className="flex items-center gap-12px shrink-0">
-              <Select
-                value={engine}
-                onChange={(value) => setEngine(value as EngineId)}
-                aria-label="Engine"
-                className="header-model-btn"
-                style={{ width: 118 }}
-              >
-                {(["harness", "codex", "kimi"] as const).map((id) => {
-                  const status = engineStatuses.find((item) => item.id === id);
-                  return (
-                    <Select.Option
-                      value={id}
-                      key={id}
-                      disabled={
-                        status?.state === "needs_auth" ||
-                        status?.state === "unavailable"
-                      }
-                    >
-                      {status?.label ??
-                        (id === "harness"
-                          ? "Harness"
-                          : id === "codex"
-                            ? "Codex"
-                            : "Kimi")}
-                      {status?.state === "needs_auth"
-                        ? " · sign in required"
-                        : status?.state === "unavailable"
-                          ? " · unavailable"
-                          : ""}
-                    </Select.Option>
-                  );
-                })}
-              </Select>
-            </div>
-          )}
-        </header>
         <div
           className="aion-message-scroll chat-surface-container"
           aria-live="polite"
@@ -490,20 +450,6 @@ export function ConversationPage({
           )}
           <div className="chat-surface-fluid">
             {notice && <div className="notice">{notice}</div>}
-            {!active && (
-              <div className="aion-empty-state">
-                <span className="aion-empty-logo">✦</span>
-                <h2>How can I help you today?</h2>
-                <p>Start a new conversation or choose one from your history.</p>
-                <Button
-                  type="primary"
-                  onClick={newSession}
-                  disabled={engineBlocked}
-                >
-                  New conversation
-                </Button>
-              </div>
-            )}
             {!isGuid &&
               activeInteractions.map((interaction) => (
                 <article

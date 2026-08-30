@@ -1,14 +1,13 @@
-/**
- * Adapted from AionUi Renderer pages/guid/GuidPage,
- * AssistantSelectionArea and GuidInputCard.
- */
-import { Button, Input, Select } from "@arco-design/web-react";
-import { ArrowUp, FolderOpen, Plus } from "@icon-park/react";
-import type { EngineId, EngineStatus } from "@workagent/contracts";
+import { ConfigProvider, Select } from "@arco-design/web-react";
 import type { Assistant } from "@/common/types/agent/assistantTypes";
 import AssistantSelectionArea from "@renderer/pages/guid/components/AssistantSelectionArea";
+import GuidActionRow from "@renderer/pages/guid/components/GuidActionRow";
+import GuidInputCard from "@renderer/pages/guid/components/GuidInputCard";
+import { useInputFocusRing } from "@renderer/hooks/chat/useInputFocusRing";
 import guidStyles from "@renderer/pages/guid/index.module.css";
-import { useState } from "react";
+import type { EngineId, EngineStatus } from "@workagent/contracts";
+import { type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   engine: EngineId;
@@ -19,32 +18,42 @@ type Props = {
   onAttach: () => void;
 };
 
-const promptExamples = [
-  "Add a new LLM model and API key, then set it as the default model",
-  "Help me configure remote access so I can use WorkAgent from my phone",
-  "A conversation is stuck. Help me diagnose what went wrong",
-  "Create a new assistant and bind a skill to it",
-];
-
 const fallbackEngines: Array<{ id: EngineId; label: string }> = [
   { id: "harness", label: "Personal assistant" },
   { id: "codex", label: "Codex CLI" },
   { id: "kimi", label: "Kimi" },
 ];
 
+/**
+ * WorkAgent3 transport adapter around the production Renderer Guid component
+ * tree. Only engine discovery and send/create are supplied by WorkAgent3.
+ */
 export function AionGuidEmptyState({
   engine,
   engines,
   disabled,
   onEngineChange,
   onSend,
-  onAttach,
 }: Props) {
+  const { t, i18n } = useTranslation();
+  const containerRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
-  const available = fallbackEngines.map((item) => ({
-    ...item,
-    status: engines.find((status) => status.id === item.id),
-  }));
+  const [focused, setFocused] = useState(false);
+  const [selectedAssistantId, setSelectedAssistantId] = useState<string | null>(
+    engine,
+  );
+  const [files, setFiles] = useState<string[]>([]);
+  const { activeBorderColor, inactiveBorderColor, activeShadow } =
+    useInputFocusRing();
+
+  const available = useMemo(
+    () =>
+      fallbackEngines.map((item) => ({
+        ...item,
+        status: engines.find((status) => status.id === item.id),
+      })),
+    [engines],
+  );
   const assistants: Assistant[] = available.map(
     ({ id, label, status }, index) => ({
       id,
@@ -53,7 +62,7 @@ export function AionGuidEmptyState({
       name_i18n: {},
       description_i18n: {},
       avatar: "🤖",
-      enabled: true,
+      enabled: status?.state !== "unavailable",
       sort_order: index,
       agent_id: id,
       agent: { type: id, source: "internal" },
@@ -69,103 +78,112 @@ export function AionGuidEmptyState({
       deletable: false,
     }),
   );
+
   const submit = () => {
     const value = input.trim();
     if (!value || disabled) return;
-    setInput("");
     onSend(value);
+    setInput("");
   };
 
+  const modelSelector = (
+    <Select
+      value={engine}
+      onChange={(value) => {
+        const next = value as EngineId;
+        setSelectedAssistantId(next);
+        onEngineChange(next);
+      }}
+      aria-label="Engine"
+      style={{ minWidth: 118 }}
+    >
+      {available.map(({ id, label, status }) => (
+        <Select.Option
+          key={id}
+          value={id}
+          disabled={
+            status?.state === "needs_auth" || status?.state === "unavailable"
+          }
+        >
+          {status?.label ?? label}
+        </Select.Option>
+      ))}
+    </Select>
+  );
+
+  const actionRow = (
+    <GuidActionRow
+      files={files}
+      onFilesUploaded={(paths: string[]) =>
+        setFiles((current) => [...current, ...paths])
+      }
+      modelSelectorNode={modelSelector}
+      modeBackend={engine}
+      selectedMode="default"
+      dynamicModes={[]}
+      onModeSelect={() => undefined}
+      allSkills={[]}
+      disabledBuiltinSkills={[]}
+      enabledSkills={[]}
+      onToggleSkill={() => undefined}
+      mcpServers={[]}
+      selectedMcpServerIds={[]}
+      onToggleMcpServer={() => undefined}
+      loading={false}
+      isButtonDisabled={disabled || input.trim().length === 0}
+      onSend={submit}
+    />
+  );
+
   return (
-    <div className={`${guidStyles.guidContainer} guid-container`}>
-      <div className={`${guidStyles.guidLayout} guid-layout`}>
-        <div className={`${guidStyles.heroHeader} guid-hero-header`}>
-          <h1>Hi, what are we working on today?</h1>
-        </div>
-
-        <AssistantSelectionArea
-          selectedAssistantId={engine}
-          assistants={assistants}
-          localeKey="en-US"
-          onSelectAssistant={(id) => onEngineChange(id as EngineId)}
-        />
-
-        <div className={`${guidStyles.guidInputCardWrap} guid-input-card-wrap`}>
-          <div className={`${guidStyles.guidInputInner} guid-input-inner`}>
-            <Input.TextArea
-              autoFocus
-              autoSize={{ minRows: 2, maxRows: 12 }}
-              value={input}
-              placeholder="Send a message, upload files, open a folder, or create a scheduled task..."
-              spellCheck={false}
-              onChange={setInput}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-            />
-            <div className={`${guidStyles.actionRow} guid-action-row`}>
-              <Button
-                type="secondary"
-                shape="circle"
-                icon={<Plus />}
-                aria-label="Attach files"
-                onClick={onAttach}
-              />
-              <div className={`${guidStyles.actionSubmit} guid-action-submit`}>
-                <Select
-                  value={engine}
-                  onChange={(value) => onEngineChange(value as EngineId)}
-                  aria-label="Engine"
-                  className="guid-model-select"
-                >
-                  {available.map(({ id, label, status }) => (
-                    <Select.Option
-                      key={id}
-                      value={id}
-                      disabled={
-                        status?.state === "needs_auth" ||
-                        status?.state === "unavailable"
-                      }
-                    >
-                      {status?.label ?? label}
-                    </Select.Option>
-                  ))}
-                </Select>
-                <span className="guid-permission">Full auto</span>
-                <Button
-                  className="send-button-custom"
-                  shape="circle"
-                  type="primary"
-                  icon={<ArrowUp size={17} />}
-                  disabled={disabled || !input.trim()}
-                  onClick={submit}
-                  aria-label="Send"
-                />
-              </div>
-            </div>
+    <ConfigProvider getPopupContainer={() => containerRef.current ?? document.body}>
+      <div ref={containerRef} className={guidStyles.guidContainer}>
+        <div className={guidStyles.guidLayout}>
+          <div className={guidStyles.heroHeader}>
+            <p className="text-2xl font-semibold mb-0 text-0 text-center">
+              {t("conversation.welcome.title")}
+            </p>
           </div>
-          <button
-            className={`${guidStyles.workspaceFootnote} guid-workspace-footnote`}
-            type="button"
-            onClick={onAttach}
-          >
-            <FolderOpen size={14} />
-            <span>Work in a project</span>
-          </button>
-        </div>
-
-        <div className={`${guidStyles.assistantPromptHint} guid-prompts`}>
-          <span>Try these instructions</span>
-          {promptExamples.map((prompt) => (
-            <button key={prompt} type="button" onClick={() => setInput(prompt)}>
-              {prompt}
-            </button>
-          ))}
+          <AssistantSelectionArea
+            selectedAssistantId={selectedAssistantId}
+            assistants={assistants}
+            localeKey={i18n.language}
+            onSelectAssistant={(id) => {
+              const next = id as EngineId;
+              setSelectedAssistantId(id);
+              onEngineChange(next);
+            }}
+          />
+          <GuidInputCard
+            input={input}
+            onInputChange={setInput}
+            onKeyDown={(event: KeyboardEvent) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            onPaste={() => undefined}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={t("conversation.welcome.placeholder")}
+            isInputActive={focused}
+            isFileDragging={false}
+            activeBorderColor={activeBorderColor}
+            inactiveBorderColor={inactiveBorderColor}
+            activeShadow={activeShadow}
+            dragHandlers={{}}
+            files={files}
+            onRemoveFile={(path: string) =>
+              setFiles((current) => current.filter((item) => item !== path))
+            }
+            actionRow={actionRow}
+            workspaceDir=""
+            onSelectWorkspace={() => undefined}
+            onClearWorkspace={() => undefined}
+          />
         </div>
       </div>
-    </div>
+    </ConfigProvider>
   );
 }
