@@ -3,6 +3,7 @@ package credentialbroker
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -48,6 +49,13 @@ type Input struct {
 	Secret    []byte
 	State     State
 	ExpiresAt *time.Time
+}
+
+type OAuthToken struct {
+	AccessToken  string     `json:"accessToken"`
+	RefreshToken string     `json:"refreshToken,omitempty"`
+	TokenType    string     `json:"tokenType"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
 }
 
 // Metadata is the only credential representation intended for HTTP APIs. It
@@ -169,6 +177,41 @@ func (s *Store) Resolve(ctx context.Context, id string) ([]byte, error) {
 		return nil, fmt.Errorf("unprotect credential: %w", err)
 	}
 	return plain, nil
+}
+
+func (s *Store) PutOAuth(ctx context.Context, id, label string, token OAuthToken) (Metadata, error) {
+	if token.AccessToken == "" || !strings.EqualFold(token.TokenType, "bearer") || len(token.AccessToken) > 64*1024 || len(token.RefreshToken) > 64*1024 {
+		return Metadata{}, errors.New("invalid OAuth token")
+	}
+	payload, err := json.Marshal(token)
+	if err != nil {
+		return Metadata{}, err
+	}
+	defer clearBytes(payload)
+	return s.Put(ctx, Input{ID: id, Kind: KindMCPOAuth, Label: label, Secret: payload, State: StateReady, ExpiresAt: token.ExpiresAt})
+}
+
+func (s *Store) ResolveMCPValue(ctx context.Context, id string) ([]byte, error) {
+	metadata, err := s.Metadata(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	value, err := s.Resolve(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if metadata.Kind != KindMCPOAuth {
+		return value, nil
+	}
+	defer clearBytes(value)
+	var token OAuthToken
+	if json.Unmarshal(value, &token) != nil || token.AccessToken == "" || !strings.EqualFold(token.TokenType, "bearer") {
+		return nil, errors.New("invalid OAuth credential")
+	}
+	result := []byte("Bearer " + token.AccessToken)
+	token.AccessToken = ""
+	token.RefreshToken = ""
+	return result, nil
 }
 
 func (s *Store) Revoke(ctx context.Context, id string) error {

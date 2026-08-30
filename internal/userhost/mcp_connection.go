@@ -79,7 +79,7 @@ func initializeHTTPMCP(ctx context.Context, server mcpruntime.Server, credential
 		}
 	}()
 	for name, id := range server.Transport.HeaderCredentialIDs {
-		secret, err := credentials.Resolve(ctx, id)
+		secret, err := credentials.ResolveMCPValue(ctx, id)
 		if err != nil {
 			return errors.New("mcp_needs_auth")
 		}

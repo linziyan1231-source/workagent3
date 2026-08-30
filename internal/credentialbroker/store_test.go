@@ -137,3 +137,32 @@ func TestStoreRejectsInvalidCredential(t *testing.T) {
 		t.Fatal("Put accepted an empty credential")
 	}
 }
+
+func TestOAuthTokenStoresRefreshMaterialButProjectsOnlyBearer(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "credentials.db")
+	store, err := Open(databasePath, testProtector{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := time.Now().Add(time.Hour)
+	_, err = store.PutOAuth(context.Background(), "oauth", "Remote MCP", OAuthToken{
+		AccessToken: "access-private", RefreshToken: "refresh-private", TokenType: "Bearer", ExpiresAt: &expiresAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, err := store.ResolveMCPValue(context.Background(), "oauth")
+	if err != nil || string(projected) != "Bearer access-private" || bytes.Contains(projected, []byte("refresh-private")) {
+		t.Fatalf("unexpected MCP projection %q: %v", projected, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(database, []byte("access-private")) || bytes.Contains(database, []byte("refresh-private")) {
+		t.Fatal("SQLite contains OAuth plaintext")
+	}
+}

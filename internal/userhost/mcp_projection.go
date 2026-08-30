@@ -15,7 +15,7 @@ import (
 )
 
 type projectionCredentialResolver interface {
-	Resolve(context.Context, string) ([]byte, error)
+	ResolveMCPValue(context.Context, string) ([]byte, error)
 }
 
 type mcpProjectionPublisher interface {
@@ -66,7 +66,7 @@ func (p *harnessProjectionPublisher) Publish(ctx context.Context) error {
 		}
 		if server.Transport.Kind == "stdio" {
 			for name, id := range server.Transport.EnvironmentCredentialIDs {
-				value, err := p.credentials.Resolve(ctx, id)
+				value, err := p.credentials.ResolveMCPValue(ctx, id)
 				if err != nil {
 					markProjectionCredentialFailure(&resolved, err)
 					break
@@ -76,7 +76,7 @@ func (p *harnessProjectionPublisher) Publish(ctx context.Context) error {
 			}
 		} else {
 			for name, id := range server.Transport.HeaderCredentialIDs {
-				value, err := p.credentials.Resolve(ctx, id)
+				value, err := p.credentials.ResolveMCPValue(ctx, id)
 				if err != nil {
 					markProjectionCredentialFailure(&resolved, err)
 					break
