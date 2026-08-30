@@ -28,4 +28,11 @@ describe("JSONL RPC transport", () => {
     fromServer.end();
     await expect(pending).rejects.toThrow("transport closed");
   });
+
+  it("bounds an unresponsive native request", async () => {
+    const rpc = new JsonLineRpc(new PassThrough(), new PassThrough());
+    await expect(rpc.request("account/read", {}, 5)).rejects.toThrow(
+      "account/read timed out",
+    );
+  });
 });

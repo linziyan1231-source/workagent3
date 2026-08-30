@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   EngineEvent,
   EngineId,
+  EngineStatus,
   PendingInteraction,
   RuntimeSession,
 } from "@workagent/contracts";
@@ -66,6 +67,7 @@ export function ConversationPage({
   >({});
   const [resolving, setResolving] = useState<string>();
   const [engine, setEngine] = useState<EngineId>("harness");
+  const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -75,8 +77,16 @@ export function ConversationPage({
     [activeId, messages],
   );
   const activeInteractions = activeId ? (interactions[activeId] ?? []) : [];
+  const selectedEngine = engineStatuses.find((item) => item.id === engine);
+  const engineBlocked =
+    selectedEngine?.state === "needs_auth" ||
+    selectedEngine?.state === "unavailable";
 
   useEffect(() => {
+    void port
+      .engines()
+      .then(setEngineStatuses)
+      .catch(() => setNotice("Engine status is temporarily unavailable."));
     void port
       .list()
       .then((items) => {
@@ -206,7 +216,11 @@ export function ConversationPage({
             <span>Personal workspace</span>
           </div>
         </div>
-        <button className="new-button" onClick={newSession} disabled={busy}>
+        <button
+          className="new-button"
+          onClick={newSession}
+          disabled={busy || engineBlocked}
+        >
           <span>＋</span> New conversation
         </button>
         <div className="session-heading">Recent</div>
@@ -250,10 +264,37 @@ export function ConversationPage({
               value={engine}
               onChange={(event) => setEngine(event.target.value as EngineId)}
             >
-              <option value="harness">Harness</option>
-              <option value="codex">Codex</option>
-              <option value="kimi">Kimi</option>
+              {(["harness", "codex", "kimi"] as const).map((id) => {
+                const status = engineStatuses.find((item) => item.id === id);
+                return (
+                  <option
+                    value={id}
+                    key={id}
+                    disabled={
+                      status?.state === "needs_auth" ||
+                      status?.state === "unavailable"
+                    }
+                  >
+                    {status?.label ??
+                      (id === "harness"
+                        ? "Harness"
+                        : id === "codex"
+                          ? "Codex"
+                          : "Kimi")}
+                    {status?.state === "needs_auth"
+                      ? " · sign in required"
+                      : status?.state === "unavailable"
+                        ? " · unavailable"
+                        : ""}
+                  </option>
+                );
+              })}
             </select>
+            {selectedEngine?.detail && (
+              <small className={`engine-state ${selectedEngine.state}`}>
+                {selectedEngine.detail}
+              </small>
+            )}
           </label>
         </header>
         <div className="message-scroll" aria-live="polite">
@@ -266,7 +307,11 @@ export function ConversationPage({
                 Choose an engine, open a conversation, and give WorkAgent the
                 outcome you want.
               </p>
-              <button className="primary-button compact" onClick={newSession}>
+              <button
+                className="primary-button compact"
+                onClick={newSession}
+                disabled={engineBlocked}
+              >
                 Start a conversation
               </button>
             </div>

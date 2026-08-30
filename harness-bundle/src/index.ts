@@ -7,6 +7,7 @@ import type {} from "@deepseek-ai/dsh-host-webserver";
 import type {} from "@deepseek-ai/dsh-session";
 import { RuntimeController } from "./runtime.js";
 import { WorkspaceController } from "./workspace-api.js";
+import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -87,29 +88,7 @@ export function apply(ctx: Context): void {
             return;
           }
           json(response, 200, {
-            engines: {
-              harness: {
-                approval: true,
-                resume: true,
-                steer: false,
-                toolEvents: true,
-                usage: true,
-              },
-              codex: {
-                approval: false,
-                resume: false,
-                steer: false,
-                toolEvents: true,
-                usage: false,
-              },
-              kimi: {
-                approval: false,
-                resume: false,
-                steer: false,
-                toolEvents: true,
-                usage: false,
-              },
-            },
+            engines: ENGINE_CAPABILITIES,
           });
         },
       }),

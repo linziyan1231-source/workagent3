@@ -12,6 +12,17 @@ export const engineCapabilitiesSchema = z.object({
 });
 export type EngineCapabilities = z.infer<typeof engineCapabilitiesSchema>;
 
+export const engineStatusSchema = z.object({
+  id: engineIdSchema,
+  label: z.string().min(1),
+  available: z.boolean(),
+  authenticated: z.boolean().nullable(),
+  state: z.enum(["ready", "needs_auth", "unknown", "unavailable"]),
+  detail: z.string().optional(),
+  capabilities: engineCapabilitiesSchema,
+});
+export type EngineStatus = z.infer<typeof engineStatusSchema>;
+
 export const createEngineSessionSchema = z.object({
   engine: engineIdSchema,
   title: z.string().trim().min(1).max(200),

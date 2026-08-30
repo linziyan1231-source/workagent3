@@ -11,7 +11,12 @@ import {
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
 import { nativeEngineEnvironment } from "./environment.js";
-import type { BridgeEvent, BridgeSession, EngineBridge } from "./types.js";
+import type {
+  BridgeEvent,
+  BridgeSession,
+  EngineBridge,
+  NativeEngineStatus,
+} from "./types.js";
 
 export class KimiBridge implements EngineBridge {
   readonly id = "kimi" as const;
@@ -61,6 +66,26 @@ export class KimiBridge implements EngineBridge {
 
   async probe(): Promise<void> {
     await this.#connect();
+  }
+
+  async status(): Promise<NativeEngineStatus> {
+    try {
+      await this.#connect();
+      return {
+        available: true,
+        authenticated: null,
+        state: "unknown",
+        detail:
+          "Native Kimi is available; authentication is verified when a session starts.",
+      };
+    } catch {
+      return {
+        available: false,
+        authenticated: null,
+        state: "unavailable",
+        detail: "The native Kimi ACP server could not be reached.",
+      };
+    }
   }
 
   async close(): Promise<void> {

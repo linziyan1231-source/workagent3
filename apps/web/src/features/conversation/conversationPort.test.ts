@@ -70,4 +70,35 @@ describe("ConversationPort", () => {
       }),
     );
   });
+
+  it("validates capability-driven engine status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "codex",
+              label: "Codex",
+              available: true,
+              authenticated: false,
+              state: "needs_auth",
+              capabilities: {
+                approval: false,
+                resume: true,
+                steer: false,
+                toolEvents: true,
+                usage: false,
+              },
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(conversationPort.engines()).resolves.toMatchObject([
+      { id: "codex", state: "needs_auth" },
+    ]);
+  });
 });

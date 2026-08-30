@@ -1,11 +1,42 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { nativeEngineEnvironment } from "./environment.js";
 import { JsonLineRpc } from "./jsonl-rpc.js";
-import type { BridgeEvent, BridgeSession, EngineBridge } from "./types.js";
+import type {
+  BridgeEvent,
+  BridgeSession,
+  EngineBridge,
+  NativeEngineStatus,
+} from "./types.js";
 
 type ObjectValue = Record<string, unknown>;
 type ThreadResponse = { thread: { id: string } };
 type TurnResponse = { turn: { id: string } };
+type AccountResponse = {
+  account: { type?: string } | null;
+  requiresOpenaiAuth: boolean;
+};
+
+export const codexAccountStatus = (
+  result: AccountResponse,
+): NativeEngineStatus => {
+  if (result.requiresOpenaiAuth && result.account === null) {
+    return {
+      available: true,
+      authenticated: false,
+      state: "needs_auth",
+      detail: "Sign in with the native Codex CLI to use this engine.",
+    };
+  }
+  return {
+    available: true,
+    authenticated: result.account !== null || !result.requiresOpenaiAuth,
+    state: "ready",
+    detail:
+      result.account?.type === undefined
+        ? "Native Codex is ready."
+        : `Native Codex is ready (${result.account.type}).`,
+  };
+};
 
 const object = (value: unknown): ObjectValue | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -68,6 +99,23 @@ export class CodexBridge implements EngineBridge {
 
   async probe(): Promise<void> {
     await this.#connection();
+  }
+
+  async status(): Promise<NativeEngineStatus> {
+    try {
+      const rpc = await this.#connection();
+      const result = await rpc.request<AccountResponse>("account/read", {
+        refreshToken: false,
+      });
+      return codexAccountStatus(result);
+    } catch {
+      return {
+        available: false,
+        authenticated: null,
+        state: "unavailable",
+        detail: "The native Codex app-server could not be reached.",
+      };
+    }
   }
 
   async close(): Promise<void> {

@@ -13,6 +13,7 @@ type RpcMessage = {
 type Pending = {
   reject: (reason: Error) => void;
   resolve: (value: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
 };
 
 export class JsonLineRpc {
@@ -53,12 +54,16 @@ export class JsonLineRpc {
     return () => this.#requests.delete(listener);
   }
 
-  request<T>(method: string, params: unknown): Promise<T> {
+  request<T>(method: string, params: unknown, timeoutMs = 15_000): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
+        timeout: setTimeout(() => {
+          this.#pending.delete(id);
+          reject(new Error(`${method} timed out`));
+        }, timeoutMs),
       });
       this.#write({ id, method, params });
     });
@@ -69,7 +74,10 @@ export class JsonLineRpc {
   }
 
   close(reason = new Error("RPC transport closed")): void {
-    for (const pending of this.#pending.values()) pending.reject(reason);
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(reason);
+    }
     this.#pending.clear();
   }
 
@@ -89,6 +97,7 @@ export class JsonLineRpc {
       const pending = this.#pending.get(message.id);
       if (pending === undefined) return;
       this.#pending.delete(message.id);
+      clearTimeout(pending.timeout);
       if (message.error !== undefined) {
         pending.reject(
           new Error(

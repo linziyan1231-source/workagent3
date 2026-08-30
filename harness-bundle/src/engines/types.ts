@@ -24,6 +24,13 @@ export type BridgeSession = {
   send(content: string): Promise<void>;
 };
 
+export type NativeEngineStatus = {
+  available: boolean;
+  authenticated: boolean | null;
+  state: "ready" | "needs_auth" | "unknown" | "unavailable";
+  detail?: string;
+};
+
 export type EngineBridge = {
   readonly id: "codex" | "kimi";
   create(
@@ -36,4 +43,5 @@ export type EngineBridge = {
     onEvent: (event: BridgeEvent) => void,
   ): Promise<BridgeSession>;
   close(): Promise<void>;
+  status(): Promise<NativeEngineStatus>;
 };

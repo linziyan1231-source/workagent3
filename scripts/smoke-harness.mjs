@@ -93,6 +93,21 @@ try {
           succeeded = true;
           break;
         }
+        const engineResponse = await fetch(
+          `http://127.0.0.1:${port}/v1/engines`,
+          { headers: { authorization: `Bearer ${token}` } },
+        );
+        const engineStatuses = await engineResponse.json();
+        if (
+          !engineResponse.ok ||
+          engineStatuses.length !== 3 ||
+          !engineStatuses.every(
+            (item) =>
+              typeof item.available === "boolean" &&
+              typeof item.capabilities?.resume === "boolean",
+          )
+        )
+          throw new Error("engine registry returned an invalid status matrix");
         const createdWorkspace = await fetch(
           `http://127.0.0.1:${port}/v1/workspaces`,
           {

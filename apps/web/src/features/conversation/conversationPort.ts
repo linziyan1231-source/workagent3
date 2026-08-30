@@ -3,6 +3,7 @@ import {
   runtimeApiSchemas,
   type CreateEngineSession,
   type EngineEvent,
+  type EngineStatus,
   interactionApiSchemas,
   type PendingInteraction,
   type RuntimeSession,
@@ -11,9 +12,11 @@ import { requestJson } from "../../shared/api/http.js";
 
 const runtimePath = "/api/runtime/v1/sessions";
 const interactionPath = "/api/runtime/v1/interactions";
+const enginePath = "/api/runtime/v1/engines";
 
 export type ConversationPort = {
   create(input: CreateEngineSession): Promise<RuntimeSession>;
+  engines(): Promise<EngineStatus[]>;
   list(): Promise<RuntimeSession[]>;
   pending(sessionId: string): Promise<PendingInteraction[]>;
   respond(interactionId: string, decision: "allow" | "reject"): Promise<void>;
@@ -32,6 +35,11 @@ export const conversationPort: ConversationPort = {
       body: JSON.stringify(input),
     });
     return runtimeApiSchemas.session.parse(value);
+  },
+  async engines() {
+    return runtimeApiSchemas.engineStatusList.parse(
+      await requestJson<unknown>(enginePath),
+    );
   },
   async list() {
     return runtimeApiSchemas.sessionList.parse(

@@ -21,6 +21,7 @@ import type {
 import { authorized } from "./index.js";
 import { ApprovalBridge } from "./approval-bridge.js";
 import { SessionIndex, type StoredSession } from "./session-index.js";
+import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -188,6 +189,22 @@ export class RuntimeController {
 
   mount(): void {
     this.#ctx.effect(
+      () => () =>
+        Promise.all(
+          [...this.#bridges.values()].map((bridge) => bridge.close()),
+        ),
+      "workagent-runtime-api: native engine shutdown",
+    );
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
+          kind: "exact",
+          path: "/v1/engines",
+          handler: (request, response) => this.#engines(request, response),
+        }),
+      "workagent-runtime-api: engine registry route",
+    );
+    this.#ctx.effect(
       () =>
         this.#ctx.webServer.register({
           kind: "prefix",
@@ -206,6 +223,69 @@ export class RuntimeController {
         }),
       "workagent-runtime-api: normalized session events",
     );
+  }
+
+  async #engines(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    if (!authorized(request, this.#token)) {
+      writeJson(response, 401, { error: "authentication_required" });
+      return;
+    }
+    if (request.method !== "GET") {
+      response.writeHead(405, { allow: "GET" });
+      response.end();
+      return;
+    }
+    const unavailable = (label: string) => ({
+      available: false,
+      authenticated: null,
+      state: "unavailable" as const,
+      detail: `${label} status timed out.`,
+    });
+    const status = async (id: "codex" | "kimi", label: string) => {
+      const bridge = this.#bridges.get(id);
+      if (bridge === undefined) return unavailable(label);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          bridge.status(),
+          new Promise<ReturnType<typeof unavailable>>((resolve) => {
+            timer = setTimeout(() => resolve(unavailable(label)), 8_000);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
+    const [codex, kimi] = await Promise.all([
+      status("codex", "Codex"),
+      status("kimi", "Kimi"),
+    ]);
+    writeJson(response, 200, [
+      {
+        id: "harness",
+        label: "Harness",
+        available: true,
+        authenticated: null,
+        state: "unknown",
+        detail: "Harness is ready; model access is verified on the first turn.",
+        capabilities: ENGINE_CAPABILITIES.harness,
+      },
+      {
+        id: "codex",
+        label: "Codex",
+        ...codex,
+        capabilities: ENGINE_CAPABILITIES.codex,
+      },
+      {
+        id: "kimi",
+        label: "Kimi",
+        ...kimi,
+        capabilities: ENGINE_CAPABILITIES.kimi,
+      },
+    ]);
   }
 
   async #handle(

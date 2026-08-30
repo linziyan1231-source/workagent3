@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   createEngineSessionSchema,
   engineCapabilitiesSchema,
+  engineStatusSchema,
   engineEventSchema,
   engineIdSchema,
 } from "./engine.js";
@@ -18,6 +19,7 @@ export type RuntimeSession = z.infer<typeof runtimeSessionSchema>;
 export const runtimeApiSchemas = {
   createSession: createEngineSessionSchema,
   engineCapabilities: z.record(engineIdSchema, engineCapabilitiesSchema),
+  engineStatusList: z.array(engineStatusSchema),
   engineEvent: engineEventSchema,
   session: runtimeSessionSchema,
   sessionList: z.array(runtimeSessionSchema),
