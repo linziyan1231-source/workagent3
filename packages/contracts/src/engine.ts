@@ -27,6 +27,7 @@ export const createEngineSessionSchema = z.object({
   engine: engineIdSchema,
   title: z.string().trim().min(1).max(200),
   workspace: z.string().min(1),
+  presetId: z.string().min(1).optional(),
 });
 export type CreateEngineSession = z.infer<typeof createEngineSessionSchema>;
 

@@ -6,6 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { presetBindingSchema, type PresetBinding } from "@workagent/contracts";
 
 export type StoredSession = {
   id: string;
@@ -15,6 +16,7 @@ export type StoredSession = {
   createdAt: string;
   updatedAt: string;
   workspaceId?: string;
+  preset?: PresetBinding;
 };
 
 const valid = (value: unknown): value is StoredSession => {
@@ -30,7 +32,9 @@ const valid = (value: unknown): value is StoredSession => {
     typeof item.title === "string" &&
     typeof item.createdAt === "string" &&
     typeof item.updatedAt === "string" &&
-    (item.workspaceId === undefined || typeof item.workspaceId === "string")
+    (item.workspaceId === undefined || typeof item.workspaceId === "string") &&
+    (item.preset === undefined ||
+      presetBindingSchema.safeParse(item.preset).success)
   );
 };
 

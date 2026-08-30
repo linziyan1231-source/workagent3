@@ -6,6 +6,7 @@ import {
   engineEventSchema,
   engineIdSchema,
 } from "./engine.js";
+import { presetBindingSchema } from "./preset.js";
 
 export const runtimeSessionSchema = z.object({
   id: z.string().min(1),
@@ -14,6 +15,7 @@ export const runtimeSessionSchema = z.object({
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
   workspaceId: z.string().min(1),
+  preset: presetBindingSchema,
 });
 export type RuntimeSession = z.infer<typeof runtimeSessionSchema>;
 

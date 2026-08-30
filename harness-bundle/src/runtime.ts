@@ -24,6 +24,8 @@ import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { MessageStore } from "./message-store.js";
+import type { PresetBinding } from "@workagent/contracts";
+import type { PresetStore } from "./preset-store.js";
 
 type SessionRecord = {
   createdAt: string;
@@ -37,6 +39,7 @@ type SessionRecord = {
   title: string;
   updatedAt: string;
   workspaceId: string;
+  preset: PresetBinding;
 };
 
 type PublicEvent = Record<string, unknown> & {
@@ -167,8 +170,14 @@ export class RuntimeController {
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
   readonly #messages: MessageStore;
+  readonly #presets: PresetStore;
 
-  constructor(ctx: Context, token: string, workspaces: WorkspaceStore) {
+  constructor(
+    ctx: Context,
+    token: string,
+    workspaces: WorkspaceStore,
+    presets: PresetStore,
+  ) {
     this.#ctx = ctx;
     this.#token = token;
     const dshHome = process.env.DSH_HOME;
@@ -177,13 +186,15 @@ export class RuntimeController {
     this.#index = new SessionIndex(dshHome);
     this.#messages = new MessageStore(dshHome);
     this.#workspaces = workspaces;
+    this.#presets = presets;
     const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
     for (const session of this.#index.list()) {
       const record = this.#record(session, defaultWorkspace.id);
       this.#sessions.set(session.id, record);
-      if (session.workspaceId === undefined) this.#persist(session.id, record);
+      if (session.workspaceId === undefined || session.preset === undefined)
+        this.#persist(session.id, record);
     }
     new ApprovalBridge(ctx, token, dshHome, (sessionId, event) => {
       const record = this.#sessions.get(sessionId);
@@ -322,6 +333,7 @@ export class RuntimeController {
           createdAt: value.createdAt,
           updatedAt: value.updatedAt,
           workspaceId: value.workspaceId,
+          preset: value.preset,
         })),
       );
       return;
@@ -358,6 +370,7 @@ export class RuntimeController {
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           workspaceId: record.workspaceId,
+          preset: record.preset,
         });
         return;
       }
@@ -369,6 +382,7 @@ export class RuntimeController {
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           workspaceId: record.workspaceId,
+          preset: record.preset,
         });
         return;
       }
@@ -473,6 +487,7 @@ export class RuntimeController {
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         workspaceId: record.workspaceId,
+        preset: record.preset,
       });
       return;
     }
@@ -525,6 +540,25 @@ export class RuntimeController {
     }
     const publicId = `session-${randomUUID()}`;
     const now = new Date().toISOString();
+    let preset: PresetBinding;
+    try {
+      preset = this.#presets.resolve(
+        typeof input.presetId === "string"
+          ? input.presetId
+          : input.engine === "harness"
+            ? "builtin-general"
+            : `builtin-${input.engine}`,
+      );
+    } catch (error) {
+      writeJson(response, 400, {
+        error: error instanceof Error ? error.message : "invalid_preset",
+      });
+      return;
+    }
+    if (preset.resolvedSnapshot.engine !== input.engine) {
+      writeJson(response, 400, { error: "preset_engine_mismatch" });
+      return;
+    }
     const record: SessionRecord = {
       activating: undefined,
       engine: input.engine,
@@ -537,6 +571,7 @@ export class RuntimeController {
       createdAt: now,
       updatedAt: now,
       workspaceId: workspace.id,
+      preset,
     };
     try {
       if (input.engine === "harness") {
@@ -571,6 +606,7 @@ export class RuntimeController {
       createdAt: now,
       updatedAt: now,
       workspaceId: workspace.id,
+      preset,
     });
   }
 
@@ -704,6 +740,13 @@ export class RuntimeController {
       native: undefined,
       nextEventSequence: 1,
       workspaceId: session.workspaceId ?? defaultWorkspaceId,
+      preset:
+        session.preset ??
+        this.#presets.resolve(
+          session.engine === "harness"
+            ? "builtin-general"
+            : `builtin-${session.engine}`,
+        ),
     };
   }
 
@@ -716,6 +759,7 @@ export class RuntimeController {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       workspaceId: record.workspaceId,
+      preset: record.preset,
     });
   }
 

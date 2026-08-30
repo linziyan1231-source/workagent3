@@ -12,5 +12,12 @@ describe("runtime module manifests", () => {
     expect(manifests.map((manifest) => manifest.id)).toContain(
       "workspace-runtime",
     );
+    expect(manifests.map((manifest) => manifest.id)).toEqual(
+      expect.arrayContaining([
+        "model-access",
+        "credential-broker",
+        "preset-runtime",
+      ]),
+    );
   });
 });

@@ -3,6 +3,31 @@ import { conversationPort } from "./conversationPort.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
+const preset = {
+  presetId: "builtin-general",
+  presetVersion: 1,
+  resolvedSnapshot: {
+    id: "builtin-general",
+    version: 1,
+    source: "builtin",
+    name: "General",
+    description: "",
+    avatar: null,
+    enabled: true,
+    engine: "harness",
+    modelId: "harness-default",
+    systemPrompt: "",
+    workspacePolicy: "default",
+    skillIds: [],
+    mcpServerIds: [],
+    toolAllowlist: [],
+    approvalPolicy: "on_risk",
+    createdAt: "2026-08-30T10:00:00.000Z",
+    updatedAt: "2026-08-30T10:00:00.000Z",
+    resolvedAt: "2026-08-30T10:00:00.000Z",
+  },
+};
+
 describe("ConversationPort", () => {
   it("creates sessions only through the same-origin runtime proxy", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -12,6 +37,7 @@ describe("ConversationPort", () => {
           engine: "harness",
           title: "Quarterly plan",
           workspaceId: "workspace-1",
+          preset,
           createdAt: "2026-08-30T10:00:00.000Z",
           updatedAt: "2026-08-30T10:00:00.000Z",
         }),
@@ -159,6 +185,7 @@ describe("ConversationPort", () => {
       engine: "harness",
       title: "Renamed",
       workspaceId: "workspace-1",
+      preset,
       createdAt: "2026-08-30T10:00:00.000Z",
       updatedAt: "2026-08-30T10:01:00.000Z",
     };

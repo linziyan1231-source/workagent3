@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   engineEventSchema,
   moduleManifestListSchema,
+  credentialStatusSchema,
+  presetBindingSchema,
   skillMcpInventorySchema,
   validateModuleGraph,
   workspaceEntrySchema,
@@ -23,6 +25,44 @@ describe("engine events", () => {
 
   it("rejects an event outside the public runtime contract", () => {
     expect(() => engineEventSchema.parse({ type: "internal.trace" })).toThrow();
+  });
+});
+
+describe("credential contract", () => {
+  it("cannot represent credential plaintext", () => {
+    expect(credentialStatusSchema.keyof().options).not.toContain("secret");
+    expect(credentialStatusSchema.keyof().options).not.toContain("token");
+  });
+});
+
+describe("preset contract", () => {
+  it("keeps the resolved version in the session binding", () => {
+    const now = "2026-08-30T10:00:00+08:00";
+    const binding = presetBindingSchema.parse({
+      presetId: "preset-1",
+      presetVersion: 2,
+      resolvedSnapshot: {
+        id: "preset-1",
+        version: 2,
+        source: "user",
+        name: "Builder",
+        description: "",
+        avatar: null,
+        enabled: true,
+        engine: "codex",
+        modelId: null,
+        systemPrompt: "Build it.",
+        workspacePolicy: "default",
+        skillIds: [],
+        mcpServerIds: [],
+        toolAllowlist: [],
+        approvalPolicy: "on_risk",
+        createdAt: now,
+        updatedAt: now,
+        resolvedAt: now,
+      },
+    });
+    expect(binding.resolvedSnapshot.version).toBe(binding.presetVersion);
   });
 });
 

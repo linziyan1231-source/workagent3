@@ -2,15 +2,54 @@ import { validateModuleGraph, type ModuleManifest } from "@workagent/contracts";
 
 export const RUNTIME_MODULES = [
   {
+    id: "model-access",
+    version: "1.0.0",
+    layer: "runtime",
+    required: true,
+    capabilities: ["model.catalog", "model.authorization"],
+    dependencies: [],
+    configSchema: "workagent://schemas/model-access/v1",
+    dataOwner: "employee SID model grants and public catalog projection",
+    healthCheck: "/v1/models",
+  },
+  {
+    id: "credential-broker",
+    version: "1.0.0",
+    layer: "adapter",
+    required: true,
+    capabilities: ["credential.status"],
+    dependencies: [],
+    configSchema: "workagent://schemas/credential-broker/v1",
+    dataOwner: "employee SID native credential directories and references",
+    healthCheck: "/v1/credentials",
+  },
+  {
     id: "engine-registry",
     version: "1.0.0",
     layer: "runtime",
     required: true,
     capabilities: ["engine.catalog", "engine.status", "engine.capabilities"],
-    dependencies: [],
+    dependencies: [
+      { id: "model-access", contract: "ModelCatalogPort/v1" },
+      { id: "credential-broker", contract: "CredentialBrokerPort/v1" },
+    ],
     configSchema: "workagent://schemas/engine-registry/v1",
     dataOwner: "native engine configuration under the employee SID",
     healthCheck: "/v1/engines",
+  },
+  {
+    id: "preset-runtime",
+    version: "1.0.0",
+    layer: "runtime",
+    required: true,
+    capabilities: ["preset.crud", "preset.snapshot", "preset.binding"],
+    dependencies: [
+      { id: "engine-registry", contract: "EngineCatalogPort/v1" },
+      { id: "model-access", contract: "ModelAuthorizationPort/v1" },
+    ],
+    configSchema: "workagent://schemas/preset-runtime/v1",
+    dataOwner: "employee SID private preset definitions and immutable versions",
+    healthCheck: "/v1/presets",
   },
   {
     id: "workspace-runtime",
@@ -35,6 +74,7 @@ export const RUNTIME_MODULES = [
     capabilities: ["session.lifecycle", "session.messages", "session.events"],
     dependencies: [
       { id: "engine-registry", contract: "AgentEngine/v1" },
+      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
       { id: "workspace-runtime", contract: "WorkspaceBinding/v1" },
     ],
     configSchema: "workagent://schemas/personal-work/v1",
