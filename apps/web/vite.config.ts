@@ -8,6 +8,8 @@ const aionSrc = fileURLToPath(
   new URL("../../third_party/aionui/packages/desktop/src", import.meta.url),
 );
 const webModules = fileURLToPath(new URL("./node_modules", import.meta.url));
+const adapter = (name: string) =>
+  fileURLToPath(new URL(`./src/shared/aion-adapter/${name}`, import.meta.url));
 
 export default defineConfig({
   plugins: [react(), UnoCSS(unoConfig)],
@@ -31,6 +33,25 @@ export default defineConfig({
         replacement: `${webModules}/react-router-dom`,
       },
       { find: "swr", replacement: `${webModules}/swr` },
+      { find: /^@\/common$/, replacement: adapter("common.ts") },
+      { find: "@office-ai/platform", replacement: adapter("officePlatform.ts") },
+      { find: "@/renderer/hooks/context/ThemeContext", replacement: adapter("themeContext.ts") },
+      { find: "@/renderer/hooks/context/ConversationContext", replacement: adapter("conversationContext.ts") },
+      { find: "@/renderer/pages/conversation/Preview", replacement: adapter("previewContext.ts") },
+      { find: "@/renderer/utils/emitter", replacement: adapter("emitter.ts") },
+      { find: "@/renderer/components/chat/BtwOverlay/useBtwCommand", replacement: adapter("btwCommand.ts") },
+      { find: "@/renderer/components/chat/BtwOverlay", replacement: adapter("BtwOverlay.tsx") },
+      { find: "@renderer/hooks/file/useConversationExport", replacement: adapter("conversationExport.ts") },
+      { find: "@renderer/hooks/file/useDragUpload", replacement: adapter("dragUpload.ts") },
+      { find: "@renderer/hooks/file/usePasteService", replacement: adapter("pasteService.ts") },
+      { find: "@renderer/pages/conversation/Messages/hooks", replacement: adapter("messageList.ts") },
+      { find: "@renderer/services/FileService", replacement: adapter("fileService.ts") },
+      { find: "@renderer/hooks/file/useUploadState", replacement: adapter("uploadState.ts") },
+      { find: "@renderer/hooks/file/useAbortUploadsOnConversationChange", replacement: adapter("abortUploads.ts") },
+      { find: "@renderer/components/media/UploadProgressBar", replacement: adapter("UploadProgressBar.tsx") },
+      { find: "@/renderer/components/chat/SpeechInputButton", replacement: adapter("SpeechInputButton.tsx") },
+      { find: "@/renderer/hooks/system/useSpeechInput", replacement: adapter("speechInput.ts") },
+      { find: "@/renderer/hooks/system/useLiveTranscriptInsertion", replacement: adapter("liveTranscript.ts") },
       {
         find: "@renderer/utils/platform",
         replacement: fileURLToPath(
