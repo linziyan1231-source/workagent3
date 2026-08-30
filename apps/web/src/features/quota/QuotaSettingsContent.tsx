@@ -1,5 +1,4 @@
 import { Button, Empty, Progress, Spin, Tag } from "@arco-design/web-react";
-import SettingsPageHeader from "@renderer/pages/settings/components/SettingsPageHeader";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { quotaPort, type ModelQuotaUsage } from "./quotaPort.js";
@@ -39,18 +38,24 @@ export default function QuotaSettingsContent() {
 
   return (
     <div className="flex min-h-full flex-col gap-18px">
-      <SettingsPageHeader
-        title={t("settings.usage", { defaultValue: "Usage" })}
-        description={t("settings.usageDescription", {
-          defaultValue:
-            "Model limits and usage assigned to your WorkAgent account.",
-        })}
-        actions={
+      <div className="flex items-start justify-between gap-12px">
+        <div>
+          <h2 className="m-0 text-18px font-bold text-t-primary">
+            {t("settings.usage", { defaultValue: "Usage" })}
+          </h2>
+          <p className="mb-0 mt-6px text-13px text-t-secondary">
+            {t("settings.usageDescription", {
+              defaultValue:
+                "Model limits and usage assigned to your WorkAgent account.",
+            })}
+          </p>
+        </div>
+        <div>
           <Button size="small" onClick={() => void load()} loading={loading}>
             {t("common.refresh", { defaultValue: "Refresh" })}
           </Button>
-        }
-      />
+        </div>
+      </div>
 
       {loading ? (
         <div className="flex min-h-220px items-center justify-center">

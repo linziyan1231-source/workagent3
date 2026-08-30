@@ -1,6 +1,6 @@
 {
-  "pageTitle": "CLIENTNAME - ورود",
-  "brand": "CLIENTNAME",
+  "pageTitle": "Puxin AI - ورود",
+  "brand": "Puxin AI",
   "subtitle": "خوش آمدید، لطفاً به حساب خود وارد شوید",
   "username": "نام کاربری",
   "usernamePlaceholder": "نام کاربری خود را وارد کنید",
@@ -17,7 +17,7 @@
   "footerSecondary": "مدرن و کارآمد",
   "changePassword": {
     "link": "تغییر رمز عبور",
-    "pageTitle": "CLIENTNAME - تغییر رمز عبور",
+    "pageTitle": "Puxin AI - تغییر رمز عبور",
     "title": "تغییر رمز عبور",
     "subtitle": "رمز عبور فعلی را تأیید و رمز جدیدی انتخاب کنید",
     "currentPassword": "رمز عبور فعلی",

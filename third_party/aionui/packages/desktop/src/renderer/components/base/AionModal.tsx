@@ -345,7 +345,7 @@ const AionModal: React.FC<AionModalProps> = ({
       <div className={headerClassName} style={headerStyle}>
         {headerConfig.title && <h3 className={TITLE_BASE_CLASS}>{headerConfig.title}</h3>}
         {headerConfig.showClose && (
-          <button onClick={() => void onCancel?.()} className={CLOSE_BUTTON_CLASS} aria-label='Close'>
+          <button onClick={onCancel} className={CLOSE_BUTTON_CLASS} aria-label='Close'>
             {headerConfig.closeIcon || <Close size={20} fill='#86909c' />}
           </button>
         )}

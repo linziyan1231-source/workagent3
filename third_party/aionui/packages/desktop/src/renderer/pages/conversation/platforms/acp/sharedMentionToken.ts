@@ -19,7 +19,10 @@ export const makeSharedMentionToken = (label: string, kind: string, id: string, 
   return `@${label}${SHARED_MENTION_MARKER}${invisibleIdentity}${SHARED_MENTION_MARKER}`;
 };
 
-export const stripSharedMentionMarkers = (value: string) => value.replace(/[\u2062\u2063\u2064]/gu, '');
+export const stripSharedMentionMarkers = (value: string) =>
+  value.replace(/[\u2062\u2063\u2064]/gu, '');
 
 export const activeSharedMentions = (draft: string, mentions: SelectedSharedMention[]): PortalSharedMention[] =>
-  mentions.filter((mention) => draft.includes(mention.token)).map(({ token: _token, ...mention }) => mention);
+  mentions
+    .filter((mention) => draft.includes(mention.token))
+    .map(({ token: _token, ...mention }) => mention);

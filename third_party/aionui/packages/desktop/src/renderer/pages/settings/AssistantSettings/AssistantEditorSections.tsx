@@ -8,6 +8,7 @@ import {
   buildAgentRuntimeThoughtLevel,
 } from '@/renderer/utils/model/agentRuntimeCatalog';
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
+import { DWG_QUANTITY_SKILL_NAME, resolveDwgQuantityMcpId } from '@/renderer/pages/guid/utils/capabilityBundles';
 import { Select, Tag } from '@arco-design/web-react';
 import { Info, Robot } from '@icon-park/react';
 import React, { useMemo, useState } from 'react';
@@ -267,6 +268,17 @@ const AssistantEditorSections: React.FC<AssistantEditorSectionsProps> = ({ edito
     const nextDisabledAuto = autoSkillNames.filter((skillName) => !values.includes(skillName));
     setSelectedSkills(nextSelected);
     setDisabledBuiltinSkills(nextDisabledAuto);
+
+    const dwgMcpId = resolveDwgQuantityMcpId(availableMcpServers);
+    if (!dwgMcpId) return;
+    const dwgSelected = nextSelected.includes(DWG_QUANTITY_SKILL_NAME);
+    const nextMcpIds = dwgSelected
+      ? selectedMcpIds.includes(dwgMcpId)
+        ? selectedMcpIds
+        : [...selectedMcpIds, dwgMcpId]
+      : selectedMcpIds.filter((id) => id !== dwgMcpId);
+    setSelectedMcpIds(nextMcpIds);
+    if (dwgSelected) setDefaultMcpMode('fixed');
   };
 
   const renderAvatarPreview = () => {

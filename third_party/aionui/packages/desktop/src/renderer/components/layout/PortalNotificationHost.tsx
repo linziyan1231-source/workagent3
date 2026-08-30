@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import type { PortalNotification } from '@/common/adapter/ipcBridge';
 
-const SEEN_STORAGE_KEY = 'CLIENTNAME-portal-notification-seen-v1';
+const SEEN_STORAGE_KEY = 'puxin-portal-notification-seen-v1';
 const POLL_INTERVAL_MS = 60_000;
 const MAX_SEEN_NOTIFICATIONS = 200;
 

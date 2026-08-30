@@ -506,10 +506,7 @@ const AdminAccountsPage: React.FC = () => {
                 <div className='text-t-2'>
                   {t('settings.adminAccounts.kimiDatasource.remaining', {
                     dailyRemaining: Math.max(0, record.kimi_datasource.daily_limit - record.kimi_datasource.daily_used),
-                    monthlyRemaining: Math.max(
-                      0,
-                      record.kimi_datasource.monthly_limit - record.kimi_datasource.monthly_used
-                    ),
+                    monthlyRemaining: Math.max(0, record.kimi_datasource.monthly_limit - record.kimi_datasource.monthly_used),
                   })}
                 </div>
               )}
@@ -638,37 +635,21 @@ const AdminAccountsPage: React.FC = () => {
         <Card bordered={false} className='rounded-16px mt-20px'>
           <div className='mb-12px flex items-center justify-between gap-12px'>
             <div>
-              <Typography.Title heading={6} className='!m-0'>
-                {t('settings.skillsHub.marketTitle')}
-              </Typography.Title>
+              <Typography.Title heading={6} className='!m-0'>{t('settings.skillsHub.marketTitle')}</Typography.Title>
               <Typography.Text type='secondary'>{t('settings.skillsHub.marketDescription')}</Typography.Text>
             </div>
-            <Button
-              icon={<Refresh theme='outline' size='14' />}
-              loading={marketLoading}
-              onClick={() => void loadMarket()}
-            >
-              {t('settings.adminAccounts.refresh')}
-            </Button>
+            <Button icon={<Refresh theme='outline' size='14' />} loading={marketLoading} onClick={() => void loadMarket()}>{t('settings.adminAccounts.refresh')}</Button>
           </div>
-          {marketSkills.length === 0 ? (
-            <Empty description={t('settings.skillsHub.marketEmpty')} />
-          ) : (
+          {marketSkills.length === 0 ? <Empty description={t('settings.skillsHub.marketEmpty')} /> : (
             <div className='flex flex-col divide-y divide-border-1'>
               {marketSkills.map((skill) => (
                 <div key={skill.id} className='py-12px flex items-center gap-12px'>
                   <div className='flex-1 min-w-0'>
                     <Typography.Text bold>{skill.name}</Typography.Text>
                     <div className='text-12px text-t-secondary truncate'>{skill.description}</div>
-                    <div className='text-11px text-t-tertiary'>
-                      {skill.publisher.display_name} (@{skill.publisher.username})
-                    </div>
+                    <div className='text-11px text-t-tertiary'>{skill.publisher.display_name} (@{skill.publisher.username})</div>
                   </div>
-                  {skill.can_delete && (
-                    <Button status='danger' onClick={() => void deleteMarketSkill(skill)}>
-                      {t('common.delete')}
-                    </Button>
-                  )}
+                  {skill.can_delete && <Button status='danger' onClick={() => void deleteMarketSkill(skill)}>{t('common.delete')}</Button>}
                 </div>
               ))}
             </div>

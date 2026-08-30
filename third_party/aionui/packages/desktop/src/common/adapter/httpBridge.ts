@@ -399,7 +399,10 @@ function ensureWs(): void {
     lastActivityAt = Date.now();
     clearHealthTimer();
     healthTimer = setInterval(() => {
-      if (current.readyState === WebSocket.OPEN && Date.now() - lastActivityAt > REALTIME_HEARTBEAT_TIMEOUT_MS) {
+      if (
+        current.readyState === WebSocket.OPEN &&
+        Date.now() - lastActivityAt > REALTIME_HEARTBEAT_TIMEOUT_MS
+      ) {
         console.warn('[ensureWs] heartbeat timed out; forcing reconnect');
         current.close(4000, 'realtime heartbeat timeout');
       }
