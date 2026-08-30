@@ -43,12 +43,24 @@ func TestLoginAndRuntimeRoutingUsesAuthenticatedSID(t *testing.T) {
 		t.Fatalf("login status %d: %s", loginResponse.Code, loginResponse.Body.String())
 	}
 	cookie := loginResponse.Result().Cookies()[0]
+	if cookie.Name != developmentSessionCookie || cookie.Secure {
+		t.Fatalf("invalid development cookie: %#v", cookie)
+	}
 	request := httptest.NewRequest(http.MethodGet, "/api/runtime/v1/sessions", nil)
 	request.AddCookie(cookie)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"path":"/v1/sessions"`) {
 		t.Fatalf("runtime response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSecurePortalUsesHostPrefixedCookie(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	server, _ := New(data, StaticRouter{}, true)
+	if server.cookieName() != secureSessionCookie {
+		t.Fatalf("secure cookie name %q", server.cookieName())
 	}
 }
 

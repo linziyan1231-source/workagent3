@@ -15,7 +15,8 @@ import (
 	"workagent3/internal/store"
 )
 
-const sessionCookie = "__Host-workagent-session"
+const secureSessionCookie = "__Host-workagent-session"
+const developmentSessionCookie = "workagent-session"
 
 type Server struct {
 	store       *store.Store
@@ -55,7 +56,7 @@ type userHandler func(http.ResponseWriter, *http.Request, store.User)
 
 func (s *Server) requireUser(next userHandler) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		cookie, err := request.Cookie(sessionCookie)
+		cookie, err := request.Cookie(s.cookieName())
 		if err != nil {
 			writeError(writer, http.StatusUnauthorized, "authentication_required")
 			return
@@ -100,18 +101,25 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	http.SetCookie(writer, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, Expires: expires})
+	http.SetCookie(writer, &http.Cookie{Name: s.cookieName(), Value: token, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, Expires: expires})
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user})
 }
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request, _ store.User) {
-	cookie, _ := request.Cookie(sessionCookie)
+	cookie, _ := request.Cookie(s.cookieName())
 	if err := s.store.DeleteSession(request.Context(), cookie.Value); err != nil {
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	http.SetCookie(writer, &http.Cookie{Name: sessionCookie, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+	http.SetCookie(writer, &http.Cookie{Name: s.cookieName(), Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) cookieName() string {
+	if s.secure {
+		return secureSessionCookie
+	}
+	return developmentSessionCookie
 }
 
 func (s *Server) me(writer http.ResponseWriter, _ *http.Request, user store.User) {
