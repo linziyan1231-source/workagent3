@@ -122,6 +122,27 @@ func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) er
 	return waitForRuntimeLease(ctx, p.config.PortalURL, spec.SID, spec.RegistrationCredential, 45*time.Second)
 }
 
+func (p *WindowsPlatform) StopInstalledRuntime(ctx context.Context, sid string) error {
+	return runPowerShell(ctx, `$task=Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop; if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop }`, map[string]string{"WA3_TASK": taskName(sid)}, nil)
+}
+
+func (p *WindowsPlatform) StartInstalledRuntime(ctx context.Context, sid string) error {
+	runtimeDirectory := filepath.Join(p.config.DataRootBase, sid, "runtime")
+	credential, err := os.ReadFile(filepath.Join(runtimeDirectory, "portal-registration.token"))
+	if err != nil {
+		return fmt.Errorf("read employee runtime registration credential: %w", err)
+	}
+	defer zero(credential)
+	value := strings.TrimSpace(string(credential))
+	if value == "" {
+		return errors.New("employee runtime registration credential is empty")
+	}
+	if err := runPowerShell(ctx, `Start-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop`, map[string]string{"WA3_TASK": taskName(sid)}, nil); err != nil {
+		return err
+	}
+	return waitForRuntimeLease(ctx, p.config.PortalURL, sid, value, 45*time.Second)
+}
+
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {
 	endpoint := strings.TrimRight(portalURL, "/") + "/internal/runtime/lease?sid=" + url.QueryEscape(sid)
 	deadline := time.NewTimer(timeout)

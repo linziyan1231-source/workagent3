@@ -175,6 +175,56 @@ func (s *Store) SetUserCredentials(ctx context.Context, id int64, passwordHash s
 	return nil
 }
 
+// SetUserEnabled changes the Portal account state and revokes every browser
+// session in the same transaction. Disabling an employee therefore takes
+// effect for already authenticated browsers as well as future logins.
+func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin user state change: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET disabled = ? WHERE username = ?`, !enabled, username)
+	if err != nil {
+		return fmt.Errorf("update user state: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("Portal user does not exist")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit user state change: %w", err)
+	}
+	return nil
+}
+
+// ResetUserPassword rotates only the Portal password. The employee's Windows
+// logon secret remains owned by Employee Manager and is never exposed to the
+// Portal or browser.
+func (s *Store) ResetUserPassword(ctx context.Context, username, passwordHash string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin password reset: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE username = ?`, passwordHash, username)
+	if err != nil {
+		return fmt.Errorf("reset user password: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("Portal user does not exist")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit password reset: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) CreateSession(ctx context.Context, token string, userID int64, expiresAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token, user_id, expires_at) VALUES(?, ?, ?)`, token, userID, expiresAt.Unix())
 	if err != nil {

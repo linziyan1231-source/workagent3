@@ -5,6 +5,28 @@ elevated deployment shell whose account alone can read the data and release
 roots. Do not put passwords, session tokens, Runtime tokens, OAuth material, or
 provider keys in command arguments, manifests, readiness evidence, or tickets.
 
+## Employee lifecycle
+
+Run Employee Manager from an elevated deployment shell. Its configuration and
+Portal database must be private to the service account. Passwords are accepted
+only on standard input; never put them in command arguments or environment
+variables.
+
+```powershell
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action add -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action disable -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action enable -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action reset-password -username alice
+```
+
+`add` and `reset-password` wait for a new Portal password on standard input.
+Use the deployment secret-input mechanism so the value is not retained in
+PowerShell history. `disable` atomically revokes active browser sessions before
+stopping the employee's scheduled UserHost. If the stop fails, the account
+remains disabled. `enable` starts the installed UserHost and waits for its
+authenticated Runtime lease before reopening the Portal account. A failed
+health check leaves the employee disabled.
+
 ## Component release and rollback
 
 The release controller accepts only these independently activatable components:

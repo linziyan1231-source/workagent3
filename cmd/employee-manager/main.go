@@ -42,7 +42,8 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
-	username := flag.String("username", "", "Windows and Portal username to provision")
+	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, or reset-password")
+	username := flag.String("username", "", "Windows and Portal username")
 	flag.Parse()
 	if !filepath.IsAbs(*configPath) || *username == "" {
 		return errors.New("absolute --config and --username are required")
@@ -51,12 +52,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	password, err := io.ReadAll(io.LimitReader(os.Stdin, 257))
-	if err != nil {
-		return fmt.Errorf("read Portal password: %w", err)
+	var password []byte
+	if *action == "add" || *action == "reset-password" {
+		password, err = io.ReadAll(io.LimitReader(os.Stdin, 257))
+		if err != nil {
+			return fmt.Errorf("read Portal password: %w", err)
+		}
+		defer zero(password)
+		password = bytesTrimLineEnding(password)
 	}
-	defer zero(password)
-	password = bytesTrimLineEnding(password)
 	data, err := store.Open(config.DatabasePath)
 	if err != nil {
 		return err
@@ -75,12 +79,25 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
-	user, err := provisioner.Add(ctx, *username, password)
+	var user store.User
+	switch *action {
+	case "add":
+		provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
+		user, err = provisioner.Add(ctx, *username, password)
+	case "enable", "disable":
+		user, err = (employee.Lifecycle{Platform: platform, Users: data}).SetEnabled(ctx, *username, *action == "enable")
+	case "reset-password":
+		err = (employee.Lifecycle{Users: data}).ResetPortalPassword(ctx, *username, password)
+		if err == nil {
+			user, err = data.UserByUsername(ctx, *username)
+		}
+	default:
+		return errors.New("action must be add, enable, disable, or reset-password")
+	}
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"id": user.ID, "username": user.Username, "enabled": !user.Disabled})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled})
 }
 
 func loadManagerConfig(path string) (managerConfig, error) {
