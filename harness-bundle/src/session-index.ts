@@ -16,6 +16,10 @@ export type StoredSession = {
   createdAt: string;
   updatedAt: string;
   workspaceId?: string;
+  workspacePath?: string;
+  internal?: boolean;
+  modelId?: string;
+  thinkingEffort?: "low" | "medium" | "high";
   preset?: PresetBinding;
 };
 
@@ -33,6 +37,14 @@ const valid = (value: unknown): value is StoredSession => {
     typeof item.createdAt === "string" &&
     typeof item.updatedAt === "string" &&
     (item.workspaceId === undefined || typeof item.workspaceId === "string") &&
+    (item.workspacePath === undefined ||
+      typeof item.workspacePath === "string") &&
+    (item.internal === undefined || typeof item.internal === "boolean") &&
+    (item.modelId === undefined || typeof item.modelId === "string") &&
+    (item.thinkingEffort === undefined ||
+      item.thinkingEffort === "low" ||
+      item.thinkingEffort === "medium" ||
+      item.thinkingEffort === "high") &&
     (item.preset === undefined ||
       presetBindingSchema.safeParse(item.preset).success)
   );

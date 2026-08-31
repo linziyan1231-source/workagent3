@@ -36,6 +36,20 @@ type sharedFileManager struct {
 	ownerSID string
 }
 
+func (m *sharedFileManager) ProjectRoot(_ context.Context, projectID string) (string, error) {
+	if !sharedProjectIDPattern.MatchString(strings.TrimSpace(projectID)) {
+		return "", errors.New("shared project is invalid")
+	}
+	root := filepath.Join(m.base, "shared", m.ownerSID, projectID)
+	if err := requireNormalDirectory(root); err != nil {
+		return "", err
+	}
+	if err := validateSharedPathNoReparse(root, "", false); err != nil {
+		return "", err
+	}
+	return root, nil
+}
+
 func newSharedFileManager(dataRoot, ownerSID string) (*sharedFileManager, error) {
 	dataRoot = filepath.Clean(dataRoot)
 	if !filepath.IsAbs(dataRoot) || !strings.EqualFold(filepath.Base(dataRoot), ownerSID) || !validSharedSID(ownerSID) {

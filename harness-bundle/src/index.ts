@@ -25,6 +25,7 @@ import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
 import { QuotaAutomationRunner } from "./quota-runner.js";
+import { SharedTurnController } from "./shared-turn-api.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -142,6 +143,7 @@ export function apply(ctx: Context): void {
     credentials,
   );
   runtime.mount();
+  new SharedTurnController(ctx, token, runtime);
   const automations = new AutomationStore(dshHome);
   const platformQuota = PlatformQuotaClient.fromEnvironment();
   const automationRunner =

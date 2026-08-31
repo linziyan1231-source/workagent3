@@ -1341,7 +1341,11 @@ export const ipcBridge = {
     },
     stop: {
       invoke: async ({ conversation_id }: { conversation_id: string }) => {
-        await conversationPort.cancel(conversation_id);
+        if (isSharedConversation(conversation_id))
+          await collaborationPort.cancelTurn(
+            rawSharedConversationId(conversation_id),
+          );
+        else await conversationPort.cancel(conversation_id);
         return { runtime: { is_processing: false, turn_id: null } };
       },
     },

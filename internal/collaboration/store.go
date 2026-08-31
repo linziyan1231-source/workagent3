@@ -84,6 +84,10 @@ func Open(path string) (*Store, error) {
 		database.Close()
 		return nil, err
 	}
+	if err := store.recoverInterruptedRuns(context.Background()); err != nil {
+		database.Close()
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -184,6 +188,30 @@ CREATE TABLE IF NOT EXISTS shared_messages (
 );
 CREATE INDEX IF NOT EXISTS shared_messages_conversation
 ON shared_messages(conversation_id,seq);
+CREATE TABLE IF NOT EXISTS shared_ai_runs (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES shared_conversations(id) ON DELETE CASCADE,
+  trigger_message_id TEXT NOT NULL REFERENCES shared_messages(id) ON DELETE RESTRICT,
+  engine TEXT NOT NULL CHECK (engine IN ('harness','codex','kimi')),
+  state TEXT NOT NULL CHECK (state IN ('running','succeeded','failed','stopped')),
+  owner_user_id INTEGER NOT NULL,
+  owner_sid TEXT NOT NULL,
+  context_from_seq INTEGER NOT NULL,
+  context_through_seq INTEGER NOT NULL,
+  runtime_session_id TEXT,
+  created_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS shared_ai_one_active
+ON shared_ai_runs(conversation_id) WHERE state='running';
+CREATE TABLE IF NOT EXISTS shared_ai_run_payers (
+  run_id TEXT NOT NULL REFERENCES shared_ai_runs(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  sid TEXT NOT NULL,
+  share_numerator INTEGER NOT NULL DEFAULT 1 CHECK (share_numerator=1),
+  share_denominator INTEGER NOT NULL CHECK (share_denominator >= 1),
+  PRIMARY KEY (run_id,user_id)
+);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate collaboration database: %w", err)

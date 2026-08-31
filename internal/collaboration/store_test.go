@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -365,6 +366,85 @@ func TestSharedConversationVisibilityIsPerMember(t *testing.T) {
 	}
 	if _, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 2, "kimi-late", "low"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("running runtime update = %v", err)
+	}
+}
+
+func TestSharedAIRunFreezesOwnerAndPayerAcrossOwnershipTransfer(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, _ := store.CreateInvite(t.Context(), Invite{ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID, ExpiresAt: store.now().Add(time.Hour)})
+	acceptInvite(t, store, invite.ID, 2)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{ID: "conversation_turn_123", ProjectID: project.ID, Name: "Shared AI", AssistantID: "codex", AssistantBackend: "codex", ModelID: "gpt-5", ThinkingEffort: "high"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := store.AddMessage(t.Context(), Message{ID: "message_turn_123456", Conversation: conversation.ID, AuthorName: "Member", Kind: "user", Body: "Please help", Mentions: []Mention{{Kind: "assistant", ID: "codex"}}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.ReserveAIRun(t.Context(), "run_1234567890123456", message, 2)
+	if err != nil || run.OwnerUserID != 1 || run.OwnerSID != ownerSID || run.PayerUserID != 2 || run.PayerSID != memberSID {
+		t.Fatalf("frozen run = %#v, %v", run, err)
+	}
+	transfer, err := store.BeginOwnershipTransfer(t.Context(), OwnershipTransfer{ID: "transfer_turn_12345", ProjectID: project.ID, FromUserID: 1, ToUserID: 2, ToSID: memberSID}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CompleteOwnershipTransfer(t.Context(), transfer.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.FinishAIRun(t.Context(), run, "message_ai_12345678", "session-shared-conversation_turn_123", "Completed", nil)
+	if err != nil || result.Kind != "assistant" || result.Body != "Completed" {
+		t.Fatalf("AI result = %#v, %v", result, err)
+	}
+	nextMessage, err := store.AddMessage(t.Context(), Message{ID: "message_turn_234567", Conversation: conversation.ID, AuthorName: "Former owner", Kind: "user", Body: "Continue", Mentions: []Mention{{Kind: "assistant", ID: "codex"}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := store.ReserveAIRun(t.Context(), "run_2345678901234567", nextMessage, 1)
+	if err != nil || next.OwnerUserID != 2 || next.OwnerSID != memberSID || next.PreviousRuntimeSessionID == "" {
+		t.Fatalf("next frozen run = %#v, %v", next, err)
+	}
+	stopped, stopMessage, err := store.StopAIRun(t.Context(), conversation.ID, 1, "message_stop_123456")
+	if err != nil || stopped.ID != next.ID || stopMessage.Kind != "system" {
+		t.Fatalf("stopped run = %#v, %#v, %v", stopped, stopMessage, err)
+	}
+}
+
+func TestSharedAIRunRecoveryFailsInterruptedRunClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "collaboration.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) }
+	project := createActiveProject(t, store)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{ID: "conversation_recover", ProjectID: project.ID, Name: "Recovery", AssistantID: "codex", AssistantBackend: "codex", ModelID: "gpt-5", ThinkingEffort: "medium"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := store.AddMessage(t.Context(), Message{ID: "message_recover_123", Conversation: conversation.ID, AuthorName: "Owner", Kind: "user", Body: "Recover me", Mentions: []Mention{{Kind: "assistant", ID: "codex"}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReserveAIRun(t.Context(), "run_recover_123456", message, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	view, err := reopened.ConversationForUser(t.Context(), conversation.ID, 1, true)
+	if err != nil || view.State != "idle" {
+		t.Fatalf("recovered conversation = %#v, %v", view, err)
+	}
+	messages, err := reopened.ListMessages(t.Context(), conversation.ID, 1, 0, 100)
+	if err != nil || len(messages) != 2 || messages[1].Kind != "system" || !strings.Contains(messages[1].Body, "Portal restart") {
+		t.Fatalf("recovery messages = %#v, %v", messages, err)
 	}
 }
 

@@ -41,6 +41,11 @@ export class KimiBridge implements EngineBridge {
       cwd: workspace,
       mcpServers: projectMcpServers(options?.mcpServers ?? []),
     });
+    if (options?.modelId !== undefined)
+      await connection.unstable_setSessionModel({
+        sessionId: result.sessionId,
+        modelId: options.modelId,
+      });
     const session = new KimiSession(connection, result.sessionId, onEvent, () =>
       this.#sessions.delete(result.sessionId),
     );
@@ -60,6 +65,11 @@ export class KimiBridge implements EngineBridge {
       cwd: workspace,
       mcpServers: projectMcpServers(options?.mcpServers ?? []),
     });
+    if (options?.modelId !== undefined)
+      await connection.unstable_setSessionModel({
+        sessionId: nativeId,
+        modelId: options.modelId,
+      });
     const session = new KimiSession(connection, nativeId, onEvent, () => {
       this.#sessions.delete(nativeId);
     });

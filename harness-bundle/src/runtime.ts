@@ -30,7 +30,12 @@ import type {
   AutomationExecution,
   AutomationRunnerPort,
 } from "./automation-store.js";
-import type { CredentialStatus, PresetBinding } from "@workagent/contracts";
+import type {
+  CredentialStatus,
+  PresetBinding,
+  SharedTurnResult,
+  SharedTurnRuntimeRequest,
+} from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
@@ -72,6 +77,10 @@ type SessionRecord = {
   title: string;
   updatedAt: string;
   workspaceId: string;
+  workspacePath?: string;
+  internal?: boolean;
+  modelId?: string;
+  thinkingEffort?: "low" | "medium" | "high";
   preset: PresetBinding;
 };
 
@@ -222,6 +231,8 @@ export class RuntimeController
     Promise<{ sessionId: string; result?: string }>
   >();
   readonly #automationTargets = new Map<string, string>();
+  readonly #sharedTurnExecutions = new Map<string, Promise<SharedTurnResult>>();
+  readonly #sharedTurnTargets = new Map<string, string>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
@@ -274,7 +285,32 @@ export class RuntimeController
   }
 
   workspaceForSession(sessionId: string): string | undefined {
-    return this.#sessions.get(sessionId)?.workspaceId;
+    const record = this.#sessions.get(sessionId);
+    return record?.internal === true ? undefined : record?.workspaceId;
+  }
+
+  executeSharedTurn(
+    request: SharedTurnRuntimeRequest,
+  ): Promise<SharedTurnResult> {
+    const active = this.#sharedTurnExecutions.get(request.runId);
+    if (active !== undefined) return active;
+    const execution = this.#executeSharedTurn(request).finally(() => {
+      this.#sharedTurnExecutions.delete(request.runId);
+      this.#sharedTurnTargets.delete(request.runId);
+    });
+    this.#sharedTurnExecutions.set(request.runId, execution);
+    return execution;
+  }
+
+  async cancelSharedTurn(runId: string): Promise<void> {
+    const sessionId = this.#sharedTurnTargets.get(runId);
+    if (sessionId === undefined) return;
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined || record.internal !== true) return;
+    await this.#activate(sessionId, record);
+    if (record.handle !== undefined)
+      record.handle.agent.cancel({ kind: "user" });
+    else await record.native!.cancel();
   }
 
   execute(
@@ -539,15 +575,17 @@ export class RuntimeController
       writeJson(
         response,
         200,
-        [...this.#sessions.entries()].map(([id, value]) => ({
-          id,
-          engine: value.engine,
-          title: value.title,
-          createdAt: value.createdAt,
-          updatedAt: value.updatedAt,
-          workspaceId: value.workspaceId,
-          preset: value.preset,
-        })),
+        [...this.#sessions.entries()]
+          .filter(([, value]) => value.internal !== true)
+          .map(([id, value]) => ({
+            id,
+            engine: value.engine,
+            title: value.title,
+            createdAt: value.createdAt,
+            updatedAt: value.updatedAt,
+            workspaceId: value.workspaceId,
+            preset: value.preset,
+          })),
       );
       return;
     }
@@ -559,7 +597,7 @@ export class RuntimeController
     if (sessionMatch !== null) {
       const id = decodeURIComponent(sessionMatch[1] ?? "");
       const record = this.#sessions.get(id);
-      if (record === undefined) {
+      if (record === undefined || record.internal === true) {
         writeJson(response, 404, { error: "session_not_found" });
         return;
       }
@@ -633,7 +671,7 @@ export class RuntimeController
     }
     const id = decodeURIComponent(match[1] ?? "");
     const record = this.#sessions.get(id);
-    if (record === undefined) {
+    if (record === undefined || record.internal === true) {
       writeJson(response, 404, { error: "session_not_found" });
       return;
     }
@@ -908,6 +946,122 @@ export class RuntimeController
     return terminal;
   }
 
+  async #executeSharedTurn(
+    request: SharedTurnRuntimeRequest,
+  ): Promise<SharedTurnResult> {
+    const sessionId = `session-shared-${request.conversationId}`;
+    this.#sharedTurnTargets.set(request.runId, sessionId);
+    let record = this.#sessions.get(sessionId);
+    if (
+      record !== undefined &&
+      (record.modelId !== request.modelId ||
+        record.thinkingEffort !== request.thinkingEffort)
+    ) {
+      if (record.handle !== undefined) await record.handle.dispose();
+      if (record.native !== undefined) await record.native.close();
+      this.#sessions.delete(sessionId);
+      this.#index.delete(sessionId);
+      this.#messages.delete(sessionId);
+      record = undefined;
+    }
+    const recovered =
+      record === undefined && request.runtimeSessionId !== undefined;
+    if (record === undefined) {
+      const preset = this.#presets.resolve(
+        request.engine === "harness"
+          ? "builtin-general"
+          : `builtin-${request.engine}`,
+      );
+      if (preset.resolvedSnapshot.engine !== request.engine)
+        throw new Error("shared_turn_preset_engine_mismatch");
+      const resolvedSkills = this.#resolvedSkills(preset);
+      this.#validateSkillCompatibility(request.engine, resolvedSkills);
+      const mcpServers = this.#resolvedMcpServers(preset);
+      this.#validateMcpCompatibility(request.engine, mcpServers);
+      const now = new Date().toISOString();
+      record = {
+        activating: undefined,
+        engine: request.engine,
+        events: [],
+        handle: undefined,
+        native: undefined,
+        nativeId: sessionId,
+        nextEventSequence: 1,
+        title: `Shared ${request.conversationId}`,
+        createdAt: now,
+        updatedAt: now,
+        workspaceId: `shared:${request.projectId}`,
+        workspacePath: request.workspacePath,
+        internal: true,
+        modelId: request.modelId,
+        thinkingEffort: request.thinkingEffort,
+        preset,
+      };
+      if (request.engine === "harness") {
+        record.handle = await this.#createHarness(
+          sessionId,
+          request.workspacePath,
+          mcpServers,
+          resolvedSkills,
+        );
+      } else {
+        const credentialError = nativeCredentialError(
+          request.engine,
+          this.#credentials.statusFor(`${request.engine}-native`),
+        );
+        if (credentialError !== undefined) throw new Error(credentialError);
+        const bridge = this.#bridges.get(request.engine);
+        if (bridge === undefined) throw new Error("engine_unavailable");
+        record.native = await bridge.create(
+          request.workspacePath,
+          (event) =>
+            this.#publish(
+              record!,
+              this.#nativeEvent(sessionId, record!, event),
+            ),
+          {
+            mcpServers,
+            modelId: request.modelId,
+            thinkingEffort: request.thinkingEffort,
+          },
+        );
+        record.nativeId = record.native.nativeId;
+      }
+      this.#sessions.set(sessionId, record);
+      this.#persist(sessionId, record);
+    } else {
+      if (
+        record.internal !== true ||
+        record.engine !== request.engine ||
+        record.workspacePath !== request.workspacePath
+      )
+        throw new Error("shared_turn_session_mismatch");
+      if (record.handle === undefined && record.native === undefined)
+        await this.#activate(sessionId, record);
+    }
+    const terminal = this.#waitForTerminal(sessionId);
+    const input = recovered ? request.recoveryContext : request.context;
+    record.updatedAt = new Date().toISOString();
+    if (record.handle !== undefined) {
+      record.handle.agent.followup(
+        createUserMessage({
+          content: [{ type: "text", text: input }],
+          source: { kind: "user" },
+        }),
+      );
+    } else {
+      await record.native!.send(input);
+    }
+    this.#persist(sessionId, record);
+    const result = await terminal;
+    return {
+      runId: request.runId,
+      runtimeSessionId: sessionId,
+      assistantBody: result.result ?? "",
+      recovered,
+    };
+  }
+
   async #existingAutomationSession(
     sessionId: string,
     definition: AutomationExecution["definition"],
@@ -1130,7 +1284,7 @@ export class RuntimeController
             });
             for (const config of projectHarnessMcpServers(
               mcpServers,
-              this.#workspaces.engineRoot(record.workspaceId),
+              this.#engineWorkspace(record),
             ))
               await installMcp(agentContext, config);
             this.#installHarnessSkills(agentContext, resolvedSkills);
@@ -1144,7 +1298,7 @@ export class RuntimeController
           throw error;
         record.handle = await this.#createHarness(
           record.nativeId,
-          this.#workspaces.engineRoot(record.workspaceId),
+          this.#engineWorkspace(record),
           mcpServers,
           resolvedSkills,
         );
@@ -1155,9 +1309,15 @@ export class RuntimeController
     if (bridge === undefined) throw new Error("engine unavailable");
     record.native = await bridge.resume(
       record.nativeId,
-      this.#workspaces.engineRoot(record.workspaceId),
+      this.#engineWorkspace(record),
       (event) => this.#publish(record, this.#nativeEvent(id, record, event)),
-      { mcpServers },
+      {
+        mcpServers,
+        ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+        ...(record.thinkingEffort === undefined
+          ? {}
+          : { thinkingEffort: record.thinkingEffort }),
+      },
     );
   }
 
@@ -1251,8 +1411,22 @@ export class RuntimeController
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       workspaceId: record.workspaceId,
+      ...(record.workspacePath === undefined
+        ? {}
+        : { workspacePath: record.workspacePath }),
+      ...(record.internal === undefined ? {} : { internal: record.internal }),
+      ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+      ...(record.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: record.thinkingEffort }),
       preset: record.preset,
     });
+  }
+
+  #engineWorkspace(record: SessionRecord): string {
+    return (
+      record.workspacePath ?? this.#workspaces.engineRoot(record.workspaceId)
+    );
   }
 
   #createHarness(

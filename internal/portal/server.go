@@ -89,6 +89,7 @@ type Modules struct {
 	Collaboration      CollaborationPort
 	SharedProjects     SharedProjectPlatformPort
 	SharedFiles        SharedFilePlatformPort
+	SharedTurns        SharedTurnRunner
 	ChatForward        ChatForwardPort
 	IM                 IMPort
 	Notifications      NotificationsPort
@@ -168,6 +169,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("PATCH /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
 	mux.HandleFunc("GET /api/portal/shared-messages", s.requireUser(s.sharedMessages))
 	mux.HandleFunc("POST /api/portal/shared-messages", s.requireUser(s.sharedMessages))
+	mux.HandleFunc("POST /api/portal/shared-runs/cancel", s.requireUser(s.cancelSharedRun))
 	mux.HandleFunc("GET /api/portal/shared-events", s.requireUser(s.sharedEventStream))
 	mux.HandleFunc("POST /api/portal/shared-files", s.requireUser(s.sharedFiles))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))

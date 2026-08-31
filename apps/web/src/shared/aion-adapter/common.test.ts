@@ -731,6 +731,25 @@ describe("production Renderer collaboration adapter", () => {
       }),
     );
   });
+
+  it("routes the formal shared stop action to the shared run", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ stopped: true }, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.conversation.stop.invoke({
+      conversation_id: "shared:conversation-1",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-runs/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ conversation_id: "conversation-1" }),
+      }),
+    );
+  });
 });
 
 describe("production Renderer shared-file adapter", () => {

@@ -166,6 +166,20 @@ export const RUNTIME_MODULES = [
     healthCheck: "/v1/teams",
   },
   {
+    id: "shared-turn",
+    version: "1.0.0",
+    layer: "runtime",
+    required: true,
+    capabilities: ["shared.turn.run", "shared.turn.cancel"],
+    dependencies: [
+      { id: "engine-registry", contract: "AgentEngine/v1" },
+      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+    ],
+    configSchema: "workagent://schemas/shared-turn/v1",
+    dataOwner: "owner SID private shared engine sessions",
+    healthCheck: "/v1/shared-turns",
+  },
+  {
     id: "runtime-api",
     version: "1.0.0",
     layer: "runtime",
@@ -176,6 +190,7 @@ export const RUNTIME_MODULES = [
       { id: "approval-bridge", contract: "ApprovalPort/v1" },
       { id: "automation", contract: "AutomationPort/v1" },
       { id: "ai-team", contract: "TeamPort/v1" },
+      { id: "shared-turn", contract: "SharedTurnRunner/v1" },
       { id: "im-inbox", contract: "InboxPort/v1" },
     ],
     configSchema: "workagent://schemas/runtime-api/v1",

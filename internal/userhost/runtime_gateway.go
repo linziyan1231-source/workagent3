@@ -172,6 +172,10 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 	}
 	if sharedFiles != nil {
 		mux.HandleFunc("POST /internal/shared-files", sharedFileHandler(sharedFiles))
+		if projects, ok := sharedFiles.(sharedTurnProjectResolver); ok {
+			mux.HandleFunc("POST /internal/shared-turns", sharedTurnHandler(projects, target, token))
+			mux.HandleFunc("POST /internal/shared-turns/{id}/cancel", sharedTurnCancelHandler(target, token))
+		}
 	}
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")

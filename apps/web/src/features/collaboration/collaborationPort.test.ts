@@ -131,4 +131,21 @@ describe("collaboration HTTP/SSE client port", () => {
       }),
     );
   });
+
+  it("cancels a shared AI turn through the collaboration port", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ stopped: true }, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await collaborationPort.cancelTurn("conversation-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-runs/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ conversation_id: "conversation-1" }),
+      }),
+    );
+  });
 });

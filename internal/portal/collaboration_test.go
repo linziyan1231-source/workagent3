@@ -36,6 +36,9 @@ type fakeSharedProjectPlatform struct {
 	transferred  []string
 	fileOwner    string
 	fileRequest  SharedFileRequest
+	turnOwner    string
+	turnRequest  SharedTurnRequest
+	cancelRunID  string
 }
 
 func (p *fakeSharedProjectPlatform) ProvisionProject(_ context.Context, projectID, _ string) error {
@@ -65,6 +68,16 @@ func (p *fakeSharedProjectPlatform) FinalizeProjectOwnership(context.Context, st
 func (p *fakeSharedProjectPlatform) Operate(_ context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
 	p.fileOwner, p.fileRequest = ownerSID, input
 	return json.RawMessage(`[{"name":"notes.md","type":"file"}]`), nil
+}
+
+func (p *fakeSharedProjectPlatform) Run(_ context.Context, ownerSID string, input SharedTurnRequest) (SharedTurnResult, error) {
+	p.turnOwner, p.turnRequest = ownerSID, input
+	return SharedTurnResult{RunID: input.RunID, RuntimeSessionID: "session-shared-" + input.ConversationID, AssistantBody: "Shared answer"}, nil
+}
+
+func (p *fakeSharedProjectPlatform) Cancel(_ context.Context, _ string, runID string) error {
+	p.cancelRunID = runID
+	return nil
 }
 
 func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
@@ -171,7 +184,7 @@ func TestCollaborationProjectProvisionFailureCompensates(t *testing.T) {
 }
 
 func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
-	handler, _, _, alice, bob := collaborationTestServer(t)
+	handler, _, platform, alice, bob := collaborationTestServer(t)
 	created := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects", `{"name":"Realtime"}`)
 	var projectBody struct {
 		Project sharedProjectDTO `json:"project"`
@@ -218,6 +231,28 @@ func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
 	runtimeUpdated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","model_id":"gpt-5","thinking_effort":"high"}`)
 	if runtimeUpdated.Code != http.StatusOK || !strings.Contains(runtimeUpdated.Body.String(), `"thinking_effort":"high"`) {
 		t.Fatalf("updated shared runtime = %d %s", runtimeUpdated.Code, runtimeUpdated.Body.String())
+	}
+	aiMessage := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-messages", `{"conversation_id":"`+conversationBody.Conversation.ID+`","body":"Please answer","mentions":[{"kind":"assistant","id":"codex"}],"attachments":[]}`)
+	if aiMessage.Code != http.StatusCreated || !strings.Contains(aiMessage.Body.String(), `"ai_started":true`) {
+		t.Fatalf("AI message = %d %s", aiMessage.Code, aiMessage.Body.String())
+	}
+	deadline := time.Now().Add(time.Second)
+	for platform.turnOwner == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if platform.turnOwner != alice.user.SID || platform.turnRequest.Context == "" || platform.turnRequest.RecoveryContext == "" {
+		t.Fatalf("shared turn = owner %q request %#v", platform.turnOwner, platform.turnRequest)
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		listed = collaborationRequest(t, handler, bob.session, http.MethodGet, "/api/portal/shared-messages?conversation_id="+conversationBody.Conversation.ID, "")
+		if strings.Contains(listed.Body.String(), `"body":"Shared answer"`) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !strings.Contains(listed.Body.String(), `"body":"Shared answer"`) {
+		t.Fatalf("shared AI result = %d %s", listed.Code, listed.Body.String())
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
@@ -266,7 +301,7 @@ func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, 
 	alice := create("alice", "S-1-5-21-1000", "alice-collaboration-session")
 	bob := create("bob", "S-1-5-21-2000", "bob-collaboration-session")
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform})
+	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform})
 	if err != nil {
 		t.Fatal(err)
 	}

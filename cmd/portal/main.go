@@ -181,10 +181,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	sharedTurns, err := portal.NewRuntimeSharedTurnRunner(registry)
+	if err != nil {
+		return err
+	}
 	modules := portal.Modules{
 		ModelAccess: models, Quota: quotas, Speech: speechProxy,
 		Settings: clientSettings, SkillMarket: market,
-		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles,
+		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles, SharedTurns: sharedTurns,
 		Notifications: notificationStore, Audit: auditStore,
 	}
 	if chatForwardProxy != nil {

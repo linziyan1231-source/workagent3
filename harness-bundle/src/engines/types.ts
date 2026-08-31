@@ -51,4 +51,6 @@ export type EngineBridge = {
 
 export type EngineSessionOptions = {
   mcpServers: readonly import("../mcp-projection.js").ResolvedMcpServer[];
+  modelId?: string;
+  thinkingEffort?: "low" | "medium" | "high";
 };

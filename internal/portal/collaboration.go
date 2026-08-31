@@ -46,6 +46,10 @@ type CollaborationPort interface {
 	AddMessage(context.Context, collaboration.Message, int64) (collaboration.Message, error)
 	ListMessages(context.Context, string, int64, int64, int) ([]collaboration.Message, error)
 	ListMessagesForUserAfter(context.Context, int64, int64, int) ([]collaboration.Message, error)
+	ReserveAIRun(context.Context, string, collaboration.Message, int64) (collaboration.AIRun, error)
+	UserMessagesRange(context.Context, string, int64, int64) ([]collaboration.Message, error)
+	FinishAIRun(context.Context, collaboration.AIRun, string, string, string, error) (collaboration.Message, error)
+	StopAIRun(context.Context, string, int64, string) (collaboration.AIRun, collaboration.Message, error)
 	ProjectForUser(context.Context, string, int64, bool) (collaboration.Project, error)
 }
 

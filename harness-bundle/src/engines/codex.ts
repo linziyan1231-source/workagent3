@@ -69,6 +69,7 @@ export class CodexBridge implements EngineBridge {
     const rpc = await this.#connection();
     const result = await rpc.request<ThreadResponse>("thread/start", {
       cwd: workspace,
+      ...(options?.modelId === undefined ? {} : { model: options.modelId }),
       approvalPolicy: "never",
       sandbox: "workspace-write",
       serviceName: "workagent3",
@@ -76,9 +77,16 @@ export class CodexBridge implements EngineBridge {
         mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
       },
     });
-    const session = new CodexSession(rpc, result.thread.id, onEvent, () => {
-      this.#sessions.delete(result.thread.id);
-    });
+    const session = new CodexSession(
+      rpc,
+      result.thread.id,
+      onEvent,
+      () => {
+        this.#sessions.delete(result.thread.id);
+      },
+      options?.modelId,
+      options?.thinkingEffort,
+    );
     this.#sessions.set(result.thread.id, session);
     return session;
   }
@@ -99,9 +107,16 @@ export class CodexBridge implements EngineBridge {
         mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
       },
     });
-    const session = new CodexSession(rpc, nativeId, onEvent, () => {
-      this.#sessions.delete(nativeId);
-    });
+    const session = new CodexSession(
+      rpc,
+      nativeId,
+      onEvent,
+      () => {
+        this.#sessions.delete(nativeId);
+      },
+      options?.modelId,
+      options?.thinkingEffort,
+    );
     this.#sessions.set(nativeId, session);
     return session;
   }
@@ -232,23 +247,33 @@ class CodexSession implements BridgeSession {
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
   #activeTurn: string | undefined;
+  readonly #modelId: string | undefined;
+  readonly #thinkingEffort: "low" | "medium" | "high" | undefined;
 
   constructor(
     rpc: JsonLineRpc,
     nativeId: string,
     emit: (event: BridgeEvent) => void,
     closed: () => void,
+    modelId?: string,
+    thinkingEffort?: "low" | "medium" | "high",
   ) {
     this.#rpc = rpc;
     this.nativeId = nativeId;
     this.#emit = emit;
     this.#closed = closed;
+    this.#modelId = modelId;
+    this.#thinkingEffort = thinkingEffort;
   }
 
   async send(content: string): Promise<void> {
     const result = await this.#rpc.request<TurnResponse>("turn/start", {
       threadId: this.nativeId,
       input: [{ type: "text", text: content }],
+      ...(this.#modelId === undefined ? {} : { model: this.#modelId }),
+      ...(this.#thinkingEffort === undefined
+        ? {}
+        : { effort: this.#thinkingEffort }),
     });
     this.#activeTurn = result.turn.id;
   }

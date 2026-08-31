@@ -206,7 +206,8 @@ func (s *Server) sharedMessages(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	s.sharedEvents.publish(value)
-	writeJSON(writer, http.StatusCreated, map[string]any{"message": messageDTO(value, user.ID), "ai_started": false})
+	aiStarted := s.maybeStartSharedAI(request.Context(), value, user.ID)
+	writeJSON(writer, http.StatusCreated, map[string]any{"message": messageDTO(value, user.ID), "ai_started": aiStarted})
 }
 
 func conversationDTO(value collaboration.Conversation) sharedConversationDTO {

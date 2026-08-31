@@ -207,6 +207,13 @@ export const collaborationPort = {
       },
     );
   },
+  async cancelTurn(conversationId: string) {
+    return requestJson<{ stopped: true }>("/api/portal/shared-runs/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversation_id: conversationId }),
+    });
+  },
   onStream(listener: (message: SharedStreamMessage) => void) {
     streamListeners.add(listener);
     return () => streamListeners.delete(listener);
