@@ -74,6 +74,16 @@ announcement without accessing Portal/Auth tables:
 go run ./cmd/notification-publish -db data/notifications.db -kind maintenance -title "Maintenance" -message "The service will restart in 10 minutes." -expires-in 2h
 ```
 
+Portal generates a new correlation ID for every request, returns it as
+`X-WorkAgent-Correlation-ID`, propagates it to downstream services, and records
+write/security outcomes in the append-only `audit.db` module without request
+bodies, query strings, passwords, tokens, prompts, or file contents. Privileged
+operators can export bounded audit results locally:
+
+```powershell
+go run ./cmd/audit-export -db data/audit.db -correlation-id '<id>' -limit 100
+```
+
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.

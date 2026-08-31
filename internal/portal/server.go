@@ -75,6 +75,10 @@ type NotificationsPort interface {
 	Subscribe(string) (<-chan struct{}, func(), error)
 }
 
+type AuditPort interface {
+	Record(context.Context, contracts.AuditInput) (contracts.AuditEvent, error)
+}
+
 type Modules struct {
 	ModelAccess    ModelAccessPort
 	Quota          QuotaUsagePort
@@ -86,6 +90,7 @@ type Modules struct {
 	ChatForward    ChatForwardPort
 	IM             IMPort
 	Notifications  NotificationsPort
+	Audit          AuditPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -145,7 +150,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
-	return s.securityHeaders(s.sameOriginWrites(mux))
+	return s.securityHeaders(s.correlatedAudit(s.sameOriginWrites(mux)))
 }
 
 func (s *Server) externalWeixinLogin(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -212,6 +217,7 @@ func (s *Server) publishMarketSkill(writer http.ResponseWriter, request *http.Re
 	target := endpoint.BaseURL.ResolveReference(&url.URL{Path: "/v1/skills/export", RawQuery: url.Values{"name": {input.SkillName}}.Encode()})
 	downstream, _ := http.NewRequestWithContext(request.Context(), http.MethodGet, target.String(), nil)
 	downstream.Header.Set("Authorization", "Bearer "+endpoint.Token)
+	setCorrelationHeader(downstream)
 	response, err := (&http.Client{Timeout: 2 * time.Minute}).Do(downstream)
 	if err != nil {
 		writeError(writer, http.StatusBadGateway, "skill_export_failed")
@@ -297,6 +303,7 @@ func (s *Server) installMarketSkill(writer http.ResponseWriter, request *http.Re
 	downstream.Header.Set("Authorization", "Bearer "+endpoint.Token)
 	downstream.Header.Set("Content-Type", "application/zip")
 	downstream.Header.Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+	setCorrelationHeader(downstream)
 	response, err := (&http.Client{Timeout: 2 * time.Minute}).Do(downstream)
 	if err != nil {
 		writeError(writer, http.StatusBadGateway, "skill_install_failed")
@@ -410,14 +417,17 @@ func (s *Server) requireUser(next userHandler) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		cookie, err := request.Cookie(s.cookieName())
 		if err != nil {
+			markAudit(request, "anonymous", true)
 			writeError(writer, http.StatusUnauthorized, "authentication_required")
 			return
 		}
 		user, err := s.store.UserBySession(request.Context(), cookie.Value, s.now())
 		if err != nil {
+			markAudit(request, "anonymous", true)
 			writeError(writer, http.StatusUnauthorized, "authentication_required")
 			return
 		}
+		markAudit(request, user.Username, false)
 		next(writer, request, user)
 	}
 }
@@ -433,6 +443,7 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	markAudit(request, input.Username, false)
 	user, lookupErr := s.store.UserByUsername(request.Context(), input.Username)
 	encoded := s.dummyHash
 	if lookupErr == nil {

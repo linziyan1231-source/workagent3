@@ -140,6 +140,7 @@ func (p *RuntimeSharedProjectPlatform) apply(ctx context.Context, sid, projectID
 	}
 	request.Header.Set("Authorization", "Bearer "+endpoint.Token)
 	request.Header.Set("Content-Type", "application/json")
+	setCorrelationHeader(request)
 	response, err := p.client.Do(request)
 	if err != nil {
 		return fmt.Errorf("call owner Runtime shared-project platform: %w", err)
