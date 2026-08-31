@@ -63,6 +63,7 @@ function AuthenticatedRenderer() {
           };
         }
       }}
+      changePassword={authPort.changePassword}
       logout={logout}
       refresh={async () => setUser(await authPort.currentUser())}
     >

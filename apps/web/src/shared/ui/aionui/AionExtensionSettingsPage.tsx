@@ -16,3 +16,5 @@ export function AionExtensionSettingsPage() {
     </SettingsPageWrapper>
   );
 }
+
+export default AionExtensionSettingsPage;

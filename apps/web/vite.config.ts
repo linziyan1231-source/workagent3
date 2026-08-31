@@ -331,6 +331,15 @@ export default defineConfig({
         replacement: adapter("presetAssistantInfo.ts"),
       },
       {
+        find: /^@renderer\/pages\/settings\/ExtensionSettingsPage$/,
+        replacement: fileURLToPath(
+          new URL(
+            "./src/shared/ui/aionui/AionExtensionSettingsPage.tsx",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
         find: "@/renderer/hooks/system/useExtI18n",
         replacement: adapter("extensionSettings.ts"),
       },

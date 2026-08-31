@@ -117,6 +117,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/password", s.changePassword)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
 	mux.HandleFunc("GET /api/portal/me/profile", s.requireUser(s.profile))
@@ -477,6 +478,58 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 	}
 	http.SetCookie(writer, &http.Cookie{Name: s.cookieName(), Value: token, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, Expires: expires})
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user})
+}
+
+func (s *Server) changePassword(writer http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Username        string `json:"username"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		auth.ValidateUsername(input.Username) != nil || input.CurrentPassword == "" || input.NewPassword == "" || input.ConfirmPassword == "" {
+		writePasswordChangeError(writer, http.StatusBadRequest, "REQUIRED_FIELDS")
+		return
+	}
+	markAudit(request, input.Username, false)
+	if input.NewPassword != input.ConfirmPassword {
+		writePasswordChangeError(writer, http.StatusBadRequest, "PASSWORD_MISMATCH")
+		return
+	}
+	if auth.ValidatePassword([]byte(input.NewPassword)) != nil {
+		writePasswordChangeError(writer, http.StatusBadRequest, "PASSWORD_POLICY")
+		return
+	}
+	user, lookupErr := s.store.UserByUsername(request.Context(), input.Username)
+	encoded := s.dummyHash
+	if lookupErr == nil {
+		encoded = user.PasswordHash
+	}
+	if !auth.VerifyPassword(encoded, []byte(input.CurrentPassword)) || lookupErr != nil || user.Disabled {
+		writePasswordChangeError(writer, http.StatusUnauthorized, "INVALID_CURRENT_PASSWORD")
+		return
+	}
+	if auth.VerifyPassword(user.PasswordHash, []byte(input.NewPassword)) {
+		writePasswordChangeError(writer, http.StatusBadRequest, "PASSWORD_REUSED")
+		return
+	}
+	hash, err := auth.HashPassword([]byte(input.NewPassword))
+	if err != nil {
+		writePasswordChangeError(writer, http.StatusInternalServerError, "SERVER_ERROR")
+		return
+	}
+	if err := s.store.ResetUserPassword(request.Context(), user.Username, hash); err != nil {
+		writePasswordChangeError(writer, http.StatusInternalServerError, "SERVER_ERROR")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"success": true})
+}
+
+func writePasswordChangeError(writer http.ResponseWriter, status int, code string) {
+	writeJSON(writer, status, map[string]any{"success": false, "code": code})
 }
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request, _ store.User) {

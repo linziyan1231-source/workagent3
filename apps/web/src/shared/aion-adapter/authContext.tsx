@@ -1,4 +1,8 @@
 import { createContext, useContext, type PropsWithChildren } from "react";
+import type {
+  ChangePasswordInput,
+  ChangePasswordResult,
+} from "../../features/auth/authPort.js";
 
 type LoginResult =
   | { success: true }
@@ -25,7 +29,7 @@ type AuthAdapter = {
     password: string;
     remember: boolean;
   }): Promise<LoginResult>;
-  changePassword(): Promise<{ success: false; code: "unknown" }>;
+  changePassword(input: ChangePasswordInput): Promise<ChangePasswordResult>;
   logout(): Promise<void>;
   refresh(): Promise<void>;
   clearAuthCache(): void;
@@ -35,12 +39,14 @@ const AuthContext = createContext<AuthAdapter | null>(null);
 
 export function WorkAgentAuthProvider({
   login,
+  changePassword,
   logout = async () => undefined,
   refresh = async () => undefined,
   user,
   children,
 }: PropsWithChildren<{
   login: AuthAdapter["login"];
+  changePassword: AuthAdapter["changePassword"];
   logout?: AuthAdapter["logout"];
   refresh?: AuthAdapter["refresh"];
   user?: AuthAdapter["user"];
@@ -53,7 +59,7 @@ export function WorkAgentAuthProvider({
         startupError: false,
         user,
         login,
-        changePassword: async () => ({ success: false, code: "unknown" }),
+        changePassword,
         logout,
         refresh,
         clearAuthCache: () => undefined,
