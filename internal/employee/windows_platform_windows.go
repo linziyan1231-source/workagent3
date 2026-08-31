@@ -143,6 +143,32 @@ func (p *WindowsPlatform) StartInstalledRuntime(ctx context.Context, sid string)
 	return waitForRuntimeLease(ctx, p.config.PortalURL, sid, value, 45*time.Second)
 }
 
+func (p *WindowsPlatform) UpdateInstalledLimits(_ context.Context, sid string, limits winutil.JobLimits) error {
+	if err := winutil.ValidateJobLimits(limits); err != nil {
+		return err
+	}
+	configPath := filepath.Join(p.config.DataRootBase, sid, "runtime", "userhost.json")
+	payload, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read UserHost configuration: %w", err)
+	}
+	var config userhost.FileConfig
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&config); err != nil {
+		return fmt.Errorf("decode UserHost configuration: %w", err)
+	}
+	if !strings.EqualFold(config.SID, sid) {
+		return errors.New("UserHost configuration SID does not match the employee")
+	}
+	config.Limits = limits
+	payload, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(configPath, append(payload, '\n'))
+}
+
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {
 	endpoint := strings.TrimRight(portalURL, "/") + "/internal/runtime/lease?sid=" + url.QueryEscape(sid)
 	deadline := time.NewTimer(timeout)

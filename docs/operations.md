@@ -17,6 +17,7 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action add -us
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action disable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action enable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action reset-password -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action set-limits -username alice -memory-bytes 4294967296 -cpu-percent 50 -active-processes 64
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action grant-admin -username manager
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-admin -username manager
 ```
@@ -28,6 +29,12 @@ stopping the employee's scheduled UserHost. If the stop fails, the account
 remains disabled. `enable` starts the installed UserHost and waits for its
 authenticated Runtime lease before reopening the Portal account. A failed
 health check leaves the employee disabled.
+
+`set-limits` revokes active sessions, stops the Runtime, atomically updates the
+SID-private UserHost configuration, starts a new Job Object, waits for a healthy
+lease, and only then re-enables the account. Invalid limits are rejected before
+the account changes. An update or health failure leaves the employee disabled
+for explicit repair.
 
 For the formal browser administrator page, run Employee Manager as its own
 privileged service on loopback and point Portal at it. The token file must be an

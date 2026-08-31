@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"workagent3/internal/contracts"
+	"workagent3/internal/winutil"
 )
 
 func Handler(service *Service, token string) http.Handler {
@@ -43,6 +44,7 @@ func Handler(service *Service, token string) http.Handler {
 			Username string                        `json:"username"`
 			Password string                        `json:"portal_password"`
 			Grant    contracts.KimiDatasourceGrant `json:"grant"`
+			Limits   winutil.JobLimits             `json:"limits"`
 		}
 		if !decode(r, &input) {
 			http.Error(w, "invalid request", http.StatusBadRequest)
@@ -60,6 +62,8 @@ func Handler(service *Service, token string) http.Handler {
 			input.Password = ""
 			defer zero(password)
 			err = service.ResetPassword(r.Context(), input.Username, password)
+		case "set-limits":
+			err = service.SetLimits(r.Context(), input.Username, input.Limits)
 		case "kimi-datasource":
 			result, err = service.SetKimiDatasource(r.Context(), input.Username, input.Grant)
 		default:

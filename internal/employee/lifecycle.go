@@ -8,6 +8,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/store"
+	"workagent3/internal/winutil"
 )
 
 // LifecyclePlatform is the privileged operating-system boundary used by
@@ -15,6 +16,11 @@ import (
 type LifecyclePlatform interface {
 	StopInstalledRuntime(context.Context, string) error
 	StartInstalledRuntime(context.Context, string) error
+}
+
+type CapacityPlatform interface {
+	LifecyclePlatform
+	UpdateInstalledLimits(context.Context, string, winutil.JobLimits) error
 }
 
 type LifecycleUserStore interface {
@@ -103,5 +109,48 @@ func (l Lifecycle) SetPortalAdmin(ctx context.Context, username string, admin bo
 		return store.User{}, err
 	}
 	user.Admin = admin
+	return user, nil
+}
+
+// SetLimits replaces the UserHost Job Object under a closed Portal account.
+// Any mutation or health-check failure leaves the employee disabled.
+func (l Lifecycle) SetLimits(ctx context.Context, username string, limits winutil.JobLimits) (store.User, error) {
+	platform, ok := l.Platform.(CapacityPlatform)
+	if !ok || l.Users == nil {
+		return store.User{}, errors.New("employee capacity dependencies are required")
+	}
+	if err := winutil.ValidateJobLimits(limits); err != nil {
+		return store.User{}, err
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return store.User{}, err
+	}
+	wasEnabled := !user.Disabled
+	if wasEnabled {
+		if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
+			return store.User{}, err
+		}
+		user.Disabled = true
+		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
+		}
+	}
+	if err := platform.UpdateInstalledLimits(ctx, user.SID, limits); err != nil {
+		return user, fmt.Errorf("update employee runtime limits: %w", err)
+	}
+	if !wasEnabled {
+		return user, nil
+	}
+	if err := platform.StartInstalledRuntime(ctx, user.SID); err != nil {
+		return user, fmt.Errorf("limits updated but employee runtime health check failed: %w", err)
+	}
+	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
+		rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		_ = platform.StopInstalledRuntime(rollbackContext, user.SID)
+		cancel()
+		return user, err
+	}
+	user.Disabled = false
 	return user, nil
 }

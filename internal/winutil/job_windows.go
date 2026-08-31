@@ -29,8 +29,8 @@ type jobCPUInfo struct {
 }
 
 func NewJob(name string, limits JobLimits) (*Job, error) {
-	if limits.MemoryBytes < 256*1024*1024 || limits.CPUPercent < 1 || limits.CPUPercent > 100 || limits.ActiveProcesses < 3 {
-		return nil, errors.New("invalid Job Object limits")
+	if err := ValidateJobLimits(limits); err != nil {
+		return nil, err
 	}
 	namePointer, err := windows.UTF16PtrFromString(name)
 	if err != nil {
@@ -57,6 +57,13 @@ func NewJob(name string, limits JobLimits) (*Job, error) {
 		return nil, fmt.Errorf("set Job Object CPU limit: %w", err)
 	}
 	return job, nil
+}
+
+func ValidateJobLimits(limits JobLimits) error {
+	if limits.MemoryBytes < 256*1024*1024 || limits.CPUPercent < 1 || limits.CPUPercent > 100 || limits.ActiveProcesses < 3 {
+		return errors.New("invalid Job Object limits")
+	}
+	return nil
 }
 
 func (j *Job) AssignPID(pid uint32) error {

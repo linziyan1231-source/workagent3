@@ -12,6 +12,7 @@ import (
 	"workagent3/internal/contracts"
 	"workagent3/internal/employee"
 	"workagent3/internal/store"
+	"workagent3/internal/winutil"
 )
 
 type UserStore interface {
@@ -128,6 +129,11 @@ func (s *Service) SetEnabled(ctx context.Context, username string, enabled bool)
 
 func (s *Service) ResetPassword(ctx context.Context, username string, password []byte) error {
 	return s.Lifecycle.ResetPortalPassword(ctx, username, password)
+}
+
+func (s *Service) SetLimits(ctx context.Context, username string, limits winutil.JobLimits) error {
+	_, err := s.Lifecycle.SetLimits(ctx, username, limits)
+	return err
 }
 
 func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {

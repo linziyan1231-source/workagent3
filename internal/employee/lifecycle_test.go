@@ -8,13 +8,16 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/store"
+	"workagent3/internal/winutil"
 )
 
 type lifecyclePlatform struct {
-	starts   int
-	stops    int
-	startErr error
-	stopErr  error
+	starts    int
+	stops     int
+	startErr  error
+	stopErr   error
+	updateErr error
+	limits    winutil.JobLimits
 }
 
 type failingEnableStore struct{ *store.Store }
@@ -33,6 +36,10 @@ func (p *lifecyclePlatform) StartInstalledRuntime(context.Context, string) error
 func (p *lifecyclePlatform) StopInstalledRuntime(context.Context, string) error {
 	p.stops++
 	return p.stopErr
+}
+func (p *lifecyclePlatform) UpdateInstalledLimits(_ context.Context, _ string, limits winutil.JobLimits) error {
+	p.limits = limits
+	return p.updateErr
 }
 
 func TestLifecycleDisableRevokesSessionsBeforeRuntimeStop(t *testing.T) {
@@ -112,5 +119,36 @@ func TestLifecyclePasswordResetRevokesSessions(t *testing.T) {
 	}
 	if _, err := data.UserBySession(t.Context(), "active", time.Now()); err == nil {
 		t.Fatal("existing browser session survived password reset")
+	}
+}
+
+func TestLifecycleCapacityChangeRestartsBeforeReopeningAccount(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.CreateSession(t.Context(), "active", user.ID, time.Now().Add(time.Hour))
+	platform := &lifecyclePlatform{}
+	limits := winutil.JobLimits{MemoryBytes: 2 * 1024 * 1024 * 1024, CPUPercent: 40, ActiveProcesses: 32}
+	updated, err := (Lifecycle{Platform: platform, Users: data}).SetLimits(t.Context(), "alice", limits)
+	if err != nil || updated.Disabled || platform.stops != 1 || platform.starts != 1 || platform.limits != limits {
+		t.Fatalf("capacity update was not fully composed: user=%+v platform=%+v err=%v", updated, platform, err)
+	}
+	if _, err := data.UserBySession(t.Context(), "active", time.Now()); err == nil {
+		t.Fatal("capacity restart preserved a stale browser session")
+	}
+}
+
+func TestLifecycleCapacityFailureLeavesEmployeeDisabled(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	platform := &lifecyclePlatform{startErr: errors.New("runtime unhealthy")}
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).SetLimits(t.Context(), "alice", limits); err == nil {
+		t.Fatal("unhealthy Runtime accepted capacity change")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled {
+		t.Fatal("capacity failure reopened the Portal account")
 	}
 }

@@ -12,6 +12,13 @@ type JobLimits struct {
 
 type Job struct{}
 
+func ValidateJobLimits(limits JobLimits) error {
+	if limits.MemoryBytes < 256*1024*1024 || limits.CPUPercent < 1 || limits.CPUPercent > 100 || limits.ActiveProcesses < 3 {
+		return errors.New("invalid Job Object limits")
+	}
+	return nil
+}
+
 func NewJob(_ string, _ JobLimits) (*Job, error) {
 	return nil, errors.New("Windows Job Objects are only available on Windows")
 }
