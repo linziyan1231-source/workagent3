@@ -97,3 +97,8 @@ Go linker flags for `workagent3/internal/buildinfo.Version`, `Commit`, and
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.
+
+Release activation, rollback, restricted owner backups, and isolated restore
+drills are documented in [docs/operations.md](docs/operations.md). The release
+gate requires a 60-second upgrade notice plus successful real Harness, Codex,
+Kimi, and managed Provider readiness evidence.
