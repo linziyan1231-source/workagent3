@@ -10,10 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"workagent3/internal/userhost"
@@ -21,32 +24,45 @@ import (
 )
 
 type WindowsPlatformConfig struct {
-	DataRootBase       string
-	UserHostExecutable string
-	HarnessCommand     string
-	CodexCommand       string
-	KimiCommand        string
-	HarnessArguments   []string
-	Profile            string
-	PortalURL          string
-	Limits             winutil.JobLimits
+	DataRootBase         string
+	UserHostExecutable   string
+	HarnessCommand       string
+	HarnessEntrypoint    string
+	CodexCommand         string
+	KimiCommand          string
+	HarnessArguments     []string
+	Profile              string
+	HarnessProfileSource string
+	PortalURL            string
+	Limits               winutil.JobLimits
 }
 
 type WindowsPlatform struct{ config WindowsPlatformConfig }
 
 func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) {
-	if !filepath.IsAbs(config.DataRootBase) || !filepath.IsAbs(config.UserHostExecutable) || !filepath.IsAbs(config.HarnessCommand) {
-		return nil, errors.New("employee data root and runtime executables must be absolute")
+	if !filepath.IsAbs(config.DataRootBase) || !filepath.IsAbs(config.UserHostExecutable) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.HarnessProfileSource) {
+		return nil, errors.New("employee data root, runtime executables, and Harness profile source must be absolute")
 	}
 	if config.Profile == "" || config.PortalURL == "" {
 		return nil, errors.New("Harness profile and Portal URL are required")
 	}
+	entrypoint := filepath.Clean(filepath.FromSlash(config.HarnessEntrypoint))
+	if config.HarnessEntrypoint == "" || !filepath.IsLocal(entrypoint) || entrypoint == "." {
+		return nil, errors.New("Harness entrypoint must be relative to the released profile")
+	}
+	config.HarnessEntrypoint = entrypoint
 	return &WindowsPlatform{config: config}, nil
 }
 
 func (p *WindowsPlatform) EnsureAccount(_ context.Context, username string, password []byte) (Account, error) {
 	sid, canonical, err := winutil.EnsureLocalStandardAccount(username, password)
-	return Account{SID: sid, Canonical: canonical}, err
+	if err != nil {
+		return Account{}, err
+	}
+	if err := winutil.EnsureBatchLogonRight(sid); err != nil {
+		return Account{}, err
+	}
+	return Account{SID: sid, Canonical: canonical}, nil
 }
 
 func (p *WindowsPlatform) EnsureProfile(_ context.Context, account Account, username string, password []byte) error {
@@ -60,6 +76,10 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(_ context.Context, account Accou
 	}
 	if err := winutil.EnsureSharedOwnerLayout(p.config.DataRootBase, account.SID); err != nil {
 		return "", err
+	}
+	profileDirectory := filepath.Join(root, "dsh-home", "profiles", p.config.Profile)
+	if err := projectHarnessProfile(p.config.HarnessProfileSource, profileDirectory); err != nil {
+		return "", fmt.Errorf("project Harness profile: %w", err)
 	}
 	return root, nil
 }
@@ -77,7 +97,7 @@ func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, 
 	config := userhost.FileConfig{
 		SID: spec.SID, DataRoot: spec.DataRoot, HarnessCommand: p.config.HarnessCommand,
 		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
-		HarnessArguments: p.config.HarnessArguments, Profile: p.config.Profile,
+		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
 		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
 		Limits: p.config.Limits,
 	}
@@ -94,9 +114,38 @@ func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, 
 	}, password)
 }
 
-func (p *WindowsPlatform) StartRuntime(ctx context.Context, sid string) error {
+func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) error {
 	script := `Start-ScheduledTask -TaskName $env:WA3_TASK`
-	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
+	if err := runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(spec.SID)}, nil); err != nil {
+		return err
+	}
+	return waitForRuntimeLease(ctx, p.config.PortalURL, spec.SID, spec.RegistrationCredential, 45*time.Second)
+}
+
+func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {
+	endpoint := strings.TrimRight(portalURL, "/") + "/internal/runtime/lease?sid=" + url.QueryEscape(sid)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: 2 * time.Second}
+	for {
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		request.Header.Set("Authorization", "Bearer "+credential)
+		if response, err := client.Do(request); err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusNoContent {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errors.New("employee runtime did not register before startup timeout")
+		case <-ticker.C:
+		}
+	}
 }
 
 type scheduledTaskSpec struct{ Name, Username, Executable, ConfigPath, WorkingDirectory string }

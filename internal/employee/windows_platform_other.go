@@ -9,15 +9,17 @@ import (
 )
 
 type WindowsPlatformConfig struct {
-	DataRootBase       string
-	UserHostExecutable string
-	HarnessCommand     string
-	CodexCommand       string
-	KimiCommand        string
-	HarnessArguments   []string
-	Profile            string
-	PortalURL          string
-	Limits             winutil.JobLimits
+	DataRootBase         string
+	UserHostExecutable   string
+	HarnessCommand       string
+	HarnessEntrypoint    string
+	CodexCommand         string
+	KimiCommand          string
+	HarnessArguments     []string
+	Profile              string
+	HarnessProfileSource string
+	PortalURL            string
+	Limits               winutil.JobLimits
 }
 type WindowsPlatform struct{}
 

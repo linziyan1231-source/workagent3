@@ -27,7 +27,7 @@ type Platform interface {
 	EnsureProfile(context.Context, Account, string, []byte) error
 	EnsurePrivateDataRoot(context.Context, Account) (string, error)
 	InstallRuntime(context.Context, RuntimeSpec, []byte) error
-	StartRuntime(context.Context, string) error
+	StartRuntime(context.Context, RuntimeSpec) error
 }
 
 type UserStore interface {
@@ -114,7 +114,7 @@ func (p *Provisioner) Add(ctx context.Context, username string, portalPassword [
 	if err := p.Platform.InstallRuntime(ctx, spec, windowsPassword); err != nil {
 		return store.User{}, fmt.Errorf("install employee runtime: %w", err)
 	}
-	if err := p.Platform.StartRuntime(ctx, account.SID); err != nil {
+	if err := p.Platform.StartRuntime(ctx, spec); err != nil {
 		return store.User{}, fmt.Errorf("start employee runtime: %w", err)
 	}
 	if err := p.Users.SetUserCredentials(ctx, user.ID, hash, false); err != nil {

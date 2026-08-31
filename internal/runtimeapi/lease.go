@@ -39,6 +39,19 @@ func LeaseHandler(registry *Registry, authorizer LeaseAuthorizer) http.Handler {
 			http.Error(writer, "authentication_required", http.StatusUnauthorized)
 			return
 		}
+		if request.Method == http.MethodGet {
+			sid := request.URL.Query().Get("sid")
+			if !authorizer.RuntimeRegistrationAuthorized(request.Context(), sid, credential) {
+				http.Error(writer, "registration_rejected", http.StatusUnauthorized)
+				return
+			}
+			if _, err := registry.Resolve(request.Context(), sid); err != nil {
+				http.Error(writer, "runtime_unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
 		var input LeaseRequest
 		decoder := json.NewDecoder(io.LimitReader(request.Body, 8*1024))
 		decoder.DisallowUnknownFields()

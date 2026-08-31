@@ -5,55 +5,45 @@ package winutil
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-var logonUser = windows.NewLazySystemDLL("advapi32.dll").NewProc("LogonUserW")
-var loadUserProfile = windows.NewLazySystemDLL("userenv.dll").NewProc("LoadUserProfileW")
-var unloadUserProfile = windows.NewLazySystemDLL("userenv.dll").NewProc("UnloadUserProfile")
+var createProfile = windows.NewLazySystemDLL("userenv.dll").NewProc("CreateProfile")
 
-type profileInfo struct {
-	Size                                                       uint32
-	Flags                                                      uint32
-	Username, ProfilePath, DefaultPath, ServerName, PolicyPath *uint16
-	Profile                                                    windows.Handle
-}
+const hresultProfileAlreadyExists = 0x800700b7
 
-func EnsureProfileForAccount(sidText, username string, password []byte) error {
-	expected, err := windows.StringToSid(sidText)
-	if err != nil || expected == nil || !expected.IsValid() {
+func EnsureProfileForAccount(sidText, username string, _ []byte) error {
+	sid, err := windows.StringToSid(sidText)
+	if err != nil || sid == nil || !sid.IsValid() {
 		return errors.New("invalid profile SID")
+	}
+	sidPointer, err := windows.UTF16PtrFromString(sidText)
+	if err != nil {
+		return err
 	}
 	name, err := windows.UTF16PtrFromString(username)
 	if err != nil {
 		return err
 	}
-	domain, _ := windows.UTF16PtrFromString(".")
-	secret, err := passwordUTF16(password)
-	if err != nil {
-		return err
+	// CreateProfile is an older shell API whose RPC stub rejects output
+	// buffers larger than MAX_PATH even when the host has long paths enabled.
+	profilePath := make([]uint16, windows.MAX_PATH)
+	hresult, _, _ := createProfile.Call(
+		uintptr(unsafe.Pointer(sidPointer)), uintptr(unsafe.Pointer(name)),
+		uintptr(unsafe.Pointer(&profilePath[0])), uintptr(len(profilePath)),
+	)
+	if uint32(hresult) == hresultProfileAlreadyExists {
+		return nil
 	}
-	defer zeroUTF16(secret)
-	var token windows.Token
-	ok, _, callErr := logonUser.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(domain)), uintptr(unsafe.Pointer(&secret[0])), 4, 0, uintptr(unsafe.Pointer(&token)))
-	if ok == 0 {
-		return fmt.Errorf("log on employee for profile creation: %w", callErr)
+	if hresult != 0 {
+		return fmt.Errorf("create employee profile: HRESULT 0x%08x", uint32(hresult))
 	}
-	defer token.Close()
-	identity, err := token.GetTokenUser()
-	if err != nil || !strings.EqualFold(identity.User.Sid.String(), expected.String()) {
-		return errors.New("profile logon resolved to an unexpected SID")
-	}
-	profile := profileInfo{Size: uint32(unsafe.Sizeof(profileInfo{})), Flags: 1, Username: name}
-	ok, _, callErr = loadUserProfile.Call(uintptr(token), uintptr(unsafe.Pointer(&profile)))
-	if ok == 0 {
-		return fmt.Errorf("load employee profile: %w", callErr)
-	}
-	if ok, _, callErr = unloadUserProfile.Call(uintptr(token), uintptr(profile.Profile)); ok == 0 {
-		return fmt.Errorf("unload employee profile: %w", callErr)
+	path := windows.UTF16ToString(profilePath)
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return errors.New("Windows profile API did not create the profile directory")
 	}
 	return nil
 }

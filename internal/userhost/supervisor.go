@@ -40,6 +40,7 @@ type Supervisor struct {
 	job              *winutil.Job
 	lock             *winutil.InstanceLock
 	cmd              *exec.Cmd
+	harnessLog       *os.File
 	exited           chan error
 	gateway          *runtimeGateway
 	gatewayExited    chan error
@@ -96,23 +97,31 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	arguments := append([]string{}, s.config.Arguments...)
 	arguments = append(arguments, "--profile", s.config.Profile)
+	harnessLog, err := os.OpenFile(filepath.Join(directories.logs, "harness.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		job.Close()
+		lock.Close()
+		return runtimeapi.Registration{}, fmt.Errorf("open private Harness log: %w", err)
+	}
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
 	command.Env = runtimeEnvironment(directories, token, port, s.config.CodexCommand, s.config.KimiCommand)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdout = harnessLog
+	command.Stderr = harnessLog
 	if err := command.Start(); err != nil {
+		harnessLog.Close()
 		job.Close()
 		lock.Close()
 		return runtimeapi.Registration{}, fmt.Errorf("start Harness: %w", err)
 	}
 	if err := job.AssignPID(uint32(command.Process.Pid)); err != nil {
 		command.Process.Kill()
+		harnessLog.Close()
 		job.Close()
 		lock.Close()
 		return runtimeapi.Registration{}, err
 	}
-	s.job, s.cmd = job, command
+	s.job, s.cmd, s.harnessLog = job, command, harnessLog
 	done := make(chan error, 1)
 	s.exited = done
 	go func() { done <- command.Wait() }()
@@ -200,6 +209,12 @@ func (s *Supervisor) Close() error {
 			jobErr := s.job.Close()
 			if err == nil {
 				err = jobErr
+			}
+		}
+		if s.harnessLog != nil {
+			logErr := s.harnessLog.Close()
+			if err == nil {
+				err = logErr
 			}
 		}
 		if s.lock != nil {

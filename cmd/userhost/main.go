@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -28,6 +29,13 @@ func run() error {
 	if !filepath.IsAbs(*configPath) {
 		return errors.New("an absolute --config path is required")
 	}
+	logFile, err := os.OpenFile(filepath.Join(filepath.Dir(*configPath), "userhost.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open private UserHost log: %w", err)
+	}
+	// The process owns this file for its full lifetime. Do not close it before
+	// main records a terminal error returned by run.
+	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
 	config, err := userhost.LoadFileConfig(*configPath)
 	if err != nil {
 		return err

@@ -77,3 +77,30 @@ func TestLeaseHandlerRejectsNonLoopbackCaller(t *testing.T) {
 		t.Fatalf("non-loopback request returned %d", response.Code)
 	}
 }
+
+func TestLeaseStatusIsScopedAndReportsAvailability(t *testing.T) {
+	registry := NewRegistry()
+	const sid = "S-1-5-21-1000"
+	if err := registry.Authorize(sid, "registration-secret"); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/internal/runtime/lease?sid="+sid, nil)
+	request.RemoteAddr = "127.0.0.1:55000"
+	request.Header.Set("Authorization", "Bearer registration-secret")
+	response := httptest.NewRecorder()
+	LeaseHandler(registry, registry).ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing runtime status %d", response.Code)
+	}
+	if err := registry.Register(Registration{SID: sid, BaseURL: "http://127.0.0.1:43123", Token: "runtime-secret", ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/internal/runtime/lease?sid="+sid, nil)
+	request.RemoteAddr = "127.0.0.1:55000"
+	request.Header.Set("Authorization", "Bearer registration-secret")
+	LeaseHandler(registry, registry).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("healthy runtime status %d: %s", response.Code, response.Body.String())
+	}
+}

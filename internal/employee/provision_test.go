@@ -36,7 +36,7 @@ func (p *fakePlatform) InstallRuntime(_ context.Context, spec RuntimeSpec, passw
 	}
 	return nil
 }
-func (p *fakePlatform) StartRuntime(context.Context, string) error {
+func (p *fakePlatform) StartRuntime(context.Context, RuntimeSpec) error {
 	p.calls = append(p.calls, "start")
 	if p.failStart {
 		return errors.New("not ready")
