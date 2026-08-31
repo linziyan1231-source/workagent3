@@ -92,6 +92,7 @@ const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
 
 export const extensions = unavailableService;
 export const webui = unavailableService;
+export const systemSettings = unavailableService;
 export const assistants = {
   list: {
     provider: () => {},

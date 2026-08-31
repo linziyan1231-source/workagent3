@@ -34,6 +34,18 @@
       "@renderer/components/layout/Layout": [
         "src/shared/aion-adapter/layout.d.ts"
       ],
+      "@renderer/components/layout/Router": [
+        "src/shared/aion-adapter/rendererShell.d.ts"
+      ],
+      "@renderer/components/layout/Sider": [
+        "src/shared/aion-adapter/rendererShell.d.ts"
+      ],
+      "@renderer/components/layout/PortalNotificationHost": [
+        "src/shared/aion-adapter/rendererShell.d.ts"
+      ],
+      "@renderer/hooks/context/ConversationHistoryContext": [
+        "src/shared/aion-adapter/rendererShell.d.ts"
+      ],
       "@renderer/pages/guid/components/GuidActionRow": [
         "src/shared/aion-adapter/guidComponents.d.ts"
       ],

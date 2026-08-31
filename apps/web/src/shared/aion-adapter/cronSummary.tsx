@@ -19,3 +19,10 @@ export function useCronJobsMap() {
 export function useCronJobs() {
   return { jobs: [], loading: false };
 }
+
+export function CronJobManager(_props: {
+  conversation_id: string;
+  cron_job_id?: string;
+}) {
+  return null;
+}

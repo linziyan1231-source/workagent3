@@ -117,29 +117,227 @@ describe("production Renderer conversation adapter", () => {
       extra: { backend: "harness", workspace: "default" },
     });
   });
+
+  it("maps pending runtime approvals into formal Renderer confirmations", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: "interaction-1",
+                sessionId: "session-1",
+                turnId: "turn-1",
+                kind: "approval",
+                summary: "Run the build",
+                tool: "pwsh",
+                status: "pending",
+                createdAt: "2026-08-31T06:00:00.000Z",
+              },
+            ]),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    await expect(
+      ipcBridge.conversation.confirmation.list.invoke({
+        conversation_id: "session-1",
+      }),
+    ).resolves.toEqual([
+      {
+        id: "interaction-1",
+        call_id: "interaction-1",
+        title: "pwsh",
+        action: "exec",
+        description: "Run the build",
+        command_type: "pwsh",
+        options: [
+          { label: "Allow once", value: "allow_once" },
+          { label: "Decline", value: "decline" },
+        ],
+      },
+    ]);
+  });
+
+  it("answers runtime approvals and emits the formal removal event", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ accepted: true, status: "rejected" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const removed = vi.fn();
+    const off = ipcBridge.conversation.confirmation.remove.on(removed);
+
+    await ipcBridge.conversation.confirmation.confirm.invoke({
+      conversation_id: "session-1",
+      msg_id: "confirmation:interaction-1",
+      call_id: "interaction-1",
+      data: { value: "decline" },
+    });
+    off();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/interactions/interaction-1/respond",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ decision: "reject" }),
+      }),
+    );
+    expect(removed).toHaveBeenCalledWith({
+      conversation_id: "session-1",
+      id: "interaction-1",
+    });
+  });
+
+  it("creates a runtime session from the formal Renderer conversation input", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: "preset-1",
+              version: 1,
+              source: "builtin",
+              name: "Puxin AI",
+              description: "",
+              avatar: null,
+              enabled: true,
+              engine: "harness",
+              modelId: null,
+              systemPrompt: "",
+              workspacePolicy: "default",
+              skillIds: [],
+              mcpServerIds: [],
+              toolAllowlist: [],
+              approvalPolicy: "on_risk",
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "session-created",
+            engine: "harness",
+            title: "Review this document",
+            workspaceId: "default",
+            preset: {
+              presetId: "preset-1",
+              presetVersion: 1,
+              resolvedSnapshot: {
+                id: "preset-1",
+                version: 1,
+                source: "builtin",
+                name: "Puxin AI",
+                description: "",
+                avatar: null,
+                enabled: true,
+                engine: "harness",
+                modelId: null,
+                systemPrompt: "",
+                workspacePolicy: "default",
+                skillIds: [],
+                mcpServerIds: [],
+                toolAllowlist: [],
+                approvalPolicy: "on_risk",
+                createdAt: now,
+                updatedAt: now,
+                resolvedAt: now,
+              },
+            },
+            createdAt: now,
+            updatedAt: now,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetch);
+
+    const created = await ipcBridge.conversation.create.invoke({
+      name: "Review this document",
+      assistant: { id: "preset-1" },
+      extra: { workspace: "" },
+    });
+
+    expect(created).toMatchObject({
+      id: "session-created",
+      name: "Review this document",
+      type: "acp",
+    });
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        engine: "harness",
+        title: "Review this document",
+        workspace: "default",
+        presetId: "preset-1",
+      }),
+    });
+  });
+
+  it("sends through Runtime while publishing the formal user message event", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    const streamed = vi.fn();
+    const off = ipcBridge.acpConversation.responseStream.on(streamed);
+
+    const result = await ipcBridge.acpConversation.sendMessage.invoke({
+      conversation_id: "session-1",
+      input: "Hello",
+      files: [],
+    });
+    off();
+
+    expect(result.runtime.is_processing).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/sessions/session-1/turns",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ content: "Hello" }),
+      }),
+    );
+    expect(streamed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "user_content",
+        data: "Hello",
+        conversation_id: "session-1",
+      }),
+    );
+  });
 });
 
 describe("production Renderer collaboration adapter", () => {
   it("maps Portal invite fields into the unchanged Web 78 contract", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            invites: [
-              {
-                id: "invite-1",
-                projectId: "project-1",
-                projectName: "Design",
-                inviterName: "Alice",
-                status: "pending",
-                createdAt: "2026-08-31T00:00:00Z",
-                expiresAt: "2026-09-01T00:00:00Z",
-              },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              invites: [
+                {
+                  id: "invite-1",
+                  projectId: "project-1",
+                  projectName: "Design",
+                  inviterName: "Alice",
+                  status: "pending",
+                  createdAt: "2026-08-31T00:00:00Z",
+                  expiresAt: "2026-09-01T00:00:00Z",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
       ),
     );
 

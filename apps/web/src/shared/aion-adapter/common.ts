@@ -1,6 +1,7 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { presetPort } from "../../features/presets/presetPort.js";
 import { notificationPort } from "../../features/notifications/notificationPort.js";
 import { systemPort } from "../../features/system/systemPort.js";
 import { requestJson } from "../api/http.js";
@@ -82,7 +83,153 @@ const toRendererSharedInvite = (invite: SharedInviteResponse) => ({
 const conversationListListeners = new Set<
   (event: ConversationListEvent) => void
 >();
+type RendererConfirmation<Option = unknown> = {
+  title?: string;
+  id: string;
+  action?: string;
+  description: string;
+  call_id: string;
+  options: Array<{ label: string; value: Option }>;
+  command_type?: string;
+};
+type ConfirmationEvent = { conversation_id: string; id: string };
+type ConfirmationAddEvent = RendererConfirmation & {
+  conversation_id: string;
+};
+const confirmationAddListeners = new Set<
+  (event: ConfirmationAddEvent) => void
+>();
+const confirmationRemoveListeners = new Set<
+  (event: ConfirmationEvent) => void
+>();
+type RendererResponseMessage = {
+  type: string;
+  data: unknown;
+  msg_id: string;
+  turn_id?: string;
+  conversation_id: string;
+  created_at?: number;
+  position?: "left" | "right" | "center" | "pop";
+  status?: "finish" | "pending" | "error" | "work";
+  replace?: boolean;
+};
+const responseStreamListeners = new Set<
+  (event: RendererResponseMessage) => void
+>();
+const turnCompletedListeners = new Set<
+  (event: { conversation_id: string; turn_id: string }) => void
+>();
+const runtimeSubscriptions = new Map<string, () => void>();
 const conversationExtras = new Map<string, Record<string, unknown>>();
+
+const toRendererConfirmation = (
+  interaction: Awaited<ReturnType<typeof conversationPort.pending>>[number],
+): RendererConfirmation<string> => ({
+  id: interaction.id,
+  call_id: interaction.id,
+  title: interaction.tool,
+  action: "exec",
+  description: interaction.summary,
+  command_type: interaction.tool,
+  options: [
+    { label: "Allow once", value: "allow_once" },
+    { label: "Decline", value: "decline" },
+  ],
+});
+
+const confirmationDecision = (data: unknown): "allow" | "reject" => {
+  const value =
+    data !== null && typeof data === "object" && "value" in data
+      ? String((data as { value: unknown }).value)
+      : String(data ?? "");
+  return /reject|decline|cancel|deny|\bno\b/i.test(value) ? "reject" : "allow";
+};
+
+const emitResponse = (event: RendererResponseMessage) => {
+  for (const listener of responseStreamListeners) listener(event);
+};
+
+const ensureRuntimeSubscription = (sessionId: string) => {
+  if (
+    runtimeSubscriptions.has(sessionId) ||
+    typeof globalThis.EventSource === "undefined"
+  )
+    return;
+  runtimeSubscriptions.set(
+    sessionId,
+    conversationPort.subscribe(sessionId, (event) => {
+      const base = {
+        conversation_id: sessionId,
+        turn_id: "turnId" in event ? event.turnId : undefined,
+        created_at: Date.parse(event.occurredAt),
+      };
+      if (event.type === "turn.started") {
+        emitResponse({
+          ...base,
+          type: "start",
+          data: null,
+          msg_id: `turn:${event.turnId}`,
+        });
+      } else if (event.type === "assistant.delta") {
+        emitResponse({
+          ...base,
+          type: "content",
+          data: event.delta,
+          msg_id: `assistant:${event.turnId}`,
+          status: "pending",
+        });
+      } else if (event.type === "assistant.completed") {
+        emitResponse({
+          ...base,
+          type: "content",
+          data: event.content,
+          msg_id: `assistant:${event.turnId}`,
+          status: "finish",
+          replace: true,
+        });
+      } else if (event.type === "turn.completed") {
+        emitResponse({
+          ...base,
+          type: "finish",
+          data: null,
+          msg_id: `turn:${event.turnId}`,
+        });
+        for (const listener of turnCompletedListeners)
+          listener({ conversation_id: sessionId, turn_id: event.turnId });
+      } else if (event.type === "turn.failed") {
+        emitResponse({
+          ...base,
+          type: "error",
+          data: { code: event.code, message: event.message },
+          msg_id: `error:${event.turnId}`,
+        });
+      } else if (event.type === "turn.cancelled") {
+        emitResponse({
+          ...base,
+          type: "finish",
+          data: null,
+          msg_id: `turn:${event.turnId}`,
+        });
+      } else if (event.type === "approval.requested") {
+        void conversationPort.pending(sessionId).then((pending) => {
+          const interaction = pending.find(
+            (item) => item.id === event.approvalId,
+          );
+          if (!interaction) return;
+          const confirmation = {
+            ...toRendererConfirmation(interaction),
+            conversation_id: sessionId,
+          };
+          for (const listener of confirmationAddListeners)
+            listener(confirmation);
+        });
+      } else if (event.type === "approval.resolved") {
+        const resolved = { conversation_id: sessionId, id: event.approvalId };
+        for (const listener of confirmationRemoveListeners) listener(resolved);
+      }
+    }),
+  );
+};
 
 const toRendererConversation = (
   session: Awaited<ReturnType<typeof conversationPort.list>>[number],
@@ -103,6 +250,26 @@ const toRendererConversation = (
       ...(conversationExtras.get(session.id) ?? {}),
     },
   }) as TChatConversation;
+
+const createRendererConversation = async (input: {
+  name?: string;
+  assistant?: { id?: string };
+  extra?: { workspace?: string };
+}) => {
+  const presetId = input.assistant?.id;
+  const preset = presetId
+    ? (await presetPort.list()).find((item) => item.id === presetId)
+    : undefined;
+  const session = await conversationPort.create({
+    engine: preset?.engine ?? "harness",
+    title: input.name?.trim().slice(0, 200) || "New conversation",
+    workspace: input.extra?.workspace || "default",
+    ...(presetId ? { presetId } : {}),
+  });
+  for (const listener of conversationListListeners)
+    listener({ conversation_id: session.id, action: "created" });
+  return toRendererConversation(session);
+};
 
 export const ipcBridge = {
   theme: {
@@ -308,15 +475,62 @@ export const ipcBridge = {
     },
   },
   assistants: {
-    list: { invoke: async () => [] },
+    list: {
+      invoke: async () =>
+        (await presetPort.list()).map((preset) => ({
+          id: preset.id,
+          source: preset.source,
+          name: preset.name,
+          name_i18n: {},
+          description: preset.description,
+          description_i18n: {},
+          ...(preset.avatar ? { avatar: preset.avatar } : {}),
+          enabled: preset.enabled,
+          sort_order: 0,
+          agent_id: preset.engine,
+          agent: {
+            type: preset.engine === "harness" ? "aionrs" : preset.engine,
+            source:
+              preset.engine === "harness"
+                ? ("internal" as const)
+                : ("builtin" as const),
+          },
+          enabled_skills: preset.skillIds,
+          custom_skill_names: [],
+          disabled_builtin_skills: [],
+          context: preset.systemPrompt,
+          context_i18n: {},
+          prompts: [],
+          prompts_i18n: {},
+          models: preset.modelId ? [preset.modelId] : [],
+          agent_status: "online" as const,
+          team_selectable: false,
+          deletable: preset.source === "user",
+        })),
+    },
     setState: {
-      invoke: async (_input: { id: string; enabled: boolean }) => undefined,
+      invoke: async (input: { id: string; enabled: boolean }) => {
+        await presetPort.update(input.id, { enabled: input.enabled });
+      },
     },
   },
   conversation: {
+    create: { invoke: createRendererConversation },
+    createWithConversation: {
+      invoke: async ({ conversation }: { conversation: TChatConversation }) =>
+        createRendererConversation({
+          name: conversation.name,
+          assistant: {
+            id: String(conversation.extra?.preset_assistant_id ?? ""),
+          },
+          extra: { workspace: String(conversation.extra?.workspace ?? "") },
+        }),
+    },
     get: {
-      invoke: async ({ id }: { id: string }) =>
-        toRendererConversation(await conversationPort.get(id)),
+      invoke: async ({ id }: { id: string }) => {
+        ensureRuntimeSubscription(id);
+        return toRendererConversation(await conversationPort.get(id));
+      },
     },
     update: {
       invoke: async ({
@@ -346,6 +560,8 @@ export const ipcBridge = {
     remove: {
       invoke: async ({ id }: { id: string }) => {
         await conversationPort.remove(id);
+        runtimeSubscriptions.get(id)?.();
+        runtimeSubscriptions.delete(id);
         conversationExtras.delete(id);
         for (const listener of conversationListListeners)
           listener({ conversation_id: id, action: "deleted" });
@@ -361,12 +577,125 @@ export const ipcBridge = {
         return () => conversationListListeners.delete(listener);
       },
     },
-    responseStream: { on: () => () => undefined },
-    turnCompleted: { on: () => () => undefined },
+    confirmation: {
+      list: {
+        invoke: async ({ conversation_id }: { conversation_id: string }) => {
+          ensureRuntimeSubscription(conversation_id);
+          return (await conversationPort.pending(conversation_id)).map(
+            toRendererConfirmation,
+          );
+        },
+      },
+      confirm: {
+        invoke: async (input: {
+          conversation_id: string;
+          msg_id: string;
+          data: unknown;
+          call_id: string;
+          always_allow?: boolean;
+        }) => {
+          await conversationPort.respond(
+            input.call_id,
+            confirmationDecision(input.data),
+          );
+          const event = {
+            conversation_id: input.conversation_id,
+            id: input.call_id,
+          };
+          for (const listener of confirmationRemoveListeners) listener(event);
+        },
+      },
+      add: {
+        emit: (event: ConfirmationAddEvent) => {
+          for (const listener of confirmationAddListeners) listener(event);
+        },
+        on: (listener: (event: ConfirmationAddEvent) => void) => {
+          confirmationAddListeners.add(listener);
+          return () => confirmationAddListeners.delete(listener);
+        },
+      },
+      update: { on: () => () => undefined },
+      remove: {
+        emit: (event: ConfirmationEvent) => {
+          for (const listener of confirmationRemoveListeners) listener(event);
+        },
+        on: (listener: (event: ConfirmationEvent) => void) => {
+          confirmationRemoveListeners.add(listener);
+          return () => confirmationRemoveListeners.delete(listener);
+        },
+      },
+    },
+    sendMessage: {
+      invoke: async (input: {
+        conversation_id: string;
+        input: string;
+        files?: string[];
+      }) => {
+        ensureRuntimeSubscription(input.conversation_id);
+        const msgId = crypto.randomUUID();
+        emitResponse({
+          type: "user_content",
+          data: input.input,
+          msg_id: msgId,
+          conversation_id: input.conversation_id,
+          created_at: Date.now(),
+          position: "right",
+        });
+        await conversationPort.send(input.conversation_id, input.input);
+        return {
+          msg_id: msgId,
+          turn_id: `pending:${msgId}`,
+          runtime: { is_processing: true, turn_id: `pending:${msgId}` },
+        };
+      },
+    },
+    stop: {
+      invoke: async ({ conversation_id }: { conversation_id: string }) => {
+        await conversationPort.cancel(conversation_id);
+        return { runtime: { is_processing: false, turn_id: null } };
+      },
+    },
+    ensureRuntime: {
+      invoke: async ({ conversation_id }: { conversation_id: string }) => {
+        ensureRuntimeSubscription(conversation_id);
+        return { is_processing: false, turn_id: null };
+      },
+    },
+    activeLease: { invoke: async () => null },
+    getAssociateConversation: { invoke: async () => null },
+    getSlashCommands: { invoke: async () => [] },
+    responseStream: {
+      emit: emitResponse,
+      on: (listener: (event: RendererResponseMessage) => void) => {
+        responseStreamListeners.add(listener);
+        return () => responseStreamListeners.delete(listener);
+      },
+    },
+    turnCompleted: {
+      on: (
+        listener: (event: { conversation_id: string; turn_id: string }) => void,
+      ) => {
+        turnCompletedListeners.add(listener);
+        return () => turnCompletedListeners.delete(listener);
+      },
+    },
   },
-  team: {
-    get: { invoke: async () => null },
-  },
+  team: new Proxy(
+    {
+      get: { invoke: async () => null },
+      list: { invoke: async () => [] },
+    },
+    {
+      get: (target, key) => {
+        if (key in target) return target[key as keyof typeof target];
+        return {
+          invoke: async () => undefined,
+          on: () => () => undefined,
+          emit: () => undefined,
+        };
+      },
+    },
+  ),
   task: {
     stopAll: { invoke: async () => ({ success: false }) },
   },
@@ -384,6 +713,7 @@ export const ipcBridge = {
   windowControls: {
     getState: { invoke: async () => ({ is_maximized: false }) },
     stateChanged: { on: () => () => undefined },
+    maximizedChanged: { on: () => () => undefined },
     minimize: { invoke: async () => undefined },
     maximize: { invoke: async () => undefined },
     unmaximize: { invoke: async () => undefined },
@@ -398,6 +728,40 @@ export const ipcBridge = {
   },
   acpConversation: new Proxy(
     {
+      sendMessage: {
+        invoke: async (input: {
+          conversation_id: string;
+          input: string;
+          files?: string[];
+        }) => {
+          ensureRuntimeSubscription(input.conversation_id);
+          const msgId = crypto.randomUUID();
+          emitResponse({
+            type: "user_content",
+            data: input.input,
+            msg_id: msgId,
+            conversation_id: input.conversation_id,
+            created_at: Date.now(),
+            position: "right",
+          });
+          await conversationPort.send(input.conversation_id, input.input);
+          return {
+            msg_id: msgId,
+            turn_id: `pending:${msgId}`,
+            runtime: {
+              is_processing: true,
+              turn_id: `pending:${msgId}`,
+            },
+          };
+        },
+      },
+      responseStream: {
+        emit: emitResponse,
+        on: (listener: (event: RendererResponseMessage) => void) => {
+          responseStreamListeners.add(listener);
+          return () => responseStreamListeners.delete(listener);
+        },
+      },
       getManagedAgents: { invoke: getManagedAgents },
       checkManagedAgentHealthById: {
         invoke: async ({ id }: { id: string }) => {

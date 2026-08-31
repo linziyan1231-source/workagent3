@@ -1,38 +1,28 @@
 import { useEffect, useState } from "react";
+import Layout from "@renderer/components/layout/Layout";
+import Router from "@renderer/components/layout/Router";
+import Sider from "@renderer/components/layout/Sider";
+import PortalNotificationHost from "@renderer/components/layout/PortalNotificationHost";
+import AppLoader from "@renderer/components/layout/AppLoader";
+import { ConversationHistoryProvider } from "@renderer/hooks/context/ConversationHistoryContext";
 import { authPort, type AuthUser } from "../features/auth/authPort.js";
-import { LoginPage } from "../features/auth/LoginPage.js";
-import { ConversationPage } from "../features/conversation/ConversationPage.js";
-import { WorkspacePanel } from "../features/workspace/WorkspacePanel.js";
-import { workspacePort } from "../features/workspace/workspacePort.js";
-import { presetPort } from "../features/presets/presetPort.js";
-import { mcpPort } from "../features/mcp/mcpPort.js";
-import { skillPort } from "../features/skills/skillPort.js";
-import { automationPort } from "../features/automation/automationPort.js";
 import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
 import { WorkAgentAuthProvider } from "../shared/aion-adapter/authContext.js";
-import PortalNotificationHost from "@renderer/components/layout/PortalNotificationHost";
-
-const workspaceAssets = {
-  list: workspacePort.assets,
-  attach: workspacePort.attach,
-  downloadUrl: workspacePort.downloadUrl,
-};
-
-const capabilities = {
-  skills: skillPort.list,
-  mcpServers: mcpPort.list,
-};
 
 export function App() {
   if (window.location.pathname === "/oauth/mcp/callback") {
     return <OAuthCallbackPage />;
   }
-  return <AuthenticatedApp />;
+  return <AuthenticatedRenderer />;
 }
 
-function AuthenticatedApp() {
+/**
+ * WorkAgent3 owns authentication and transport only. The visible application
+ * tree is the formal CLIENTNAME/AionUi Renderer tree, kept intact so its
+ * layout, routes, settings pages and interaction states stay upstream-owned.
+ */
+function AuthenticatedRenderer() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
-  const [workspaceId, setWorkspaceId] = useState<string>();
 
   useEffect(() => {
     void authPort
@@ -41,52 +31,43 @@ function AuthenticatedApp() {
       .catch(() => setUser(null));
   }, []);
 
-  if (user === undefined) {
-    return <div className="app-loading">Opening your workspace…</div>;
-  }
-  if (user === null) {
-    return (
-      <LoginPage
-        onLogin={async (username, password) => {
-          setUser(await authPort.login(username, password));
-        }}
-      />
-    );
-  }
   const logout = async () => {
     await authPort.logout();
     setUser(null);
   };
+
+  if (user === undefined) return <AppLoader />;
+
   return (
     <WorkAgentAuthProvider
-      user={{ ...user, admin: false }}
-      login={async () => ({ success: true })}
+      user={
+        user === null || user === undefined
+          ? undefined
+          : { ...user, admin: false }
+      }
+      login={async ({ username, password }) => {
+        try {
+          setUser(await authPort.login(username, password));
+          return { success: true };
+        } catch (error) {
+          return {
+            success: false,
+            code: "invalidCredentials",
+            message: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }}
       logout={logout}
       refresh={async () => setUser(await authPort.currentUser())}
     >
-      <ConversationPage
-        user={user}
-        workspaceId={workspaceId}
-        onWorkspaceSelect={setWorkspaceId}
-        assetPort={workspaceAssets}
-        presetPort={presetPort}
-        capabilityPort={capabilities}
-        automationPort={automationPort}
-        workspacePanel={({
-          workspaceId: selectedWorkspaceId,
-          sessionId,
-          onAssetAdded,
-        }) => (
-          <WorkspacePanel
-            selectedId={selectedWorkspaceId}
-            sessionId={sessionId}
-            onSelect={setWorkspaceId}
-            onAssetAdded={onAssetAdded}
-          />
-        )}
-        onLogout={logout}
-      />
       <PortalNotificationHost />
+      <Router
+        layout={
+          <ConversationHistoryProvider>
+            <Layout sider={<Sider />} />
+          </ConversationHistoryProvider>
+        }
+      />
     </WorkAgentAuthProvider>
   );
 }

@@ -112,6 +112,17 @@ export default defineConfig({
         replacement: adapter("ipcBridge.ts"),
       },
       { find: "classnames", replacement: `${webModules}/classnames` },
+      { find: "dayjs", replacement: `${webModules}/dayjs` },
+      { find: "croner", replacement: `${webModules}/croner` },
+      {
+        find: "@noble/hashes",
+        replacement: `${webModules}/@noble/hashes`,
+      },
+      {
+        find: "react-virtuoso",
+        replacement: `${webModules}/react-virtuoso`,
+      },
+      { find: "streamdown", replacement: `${webModules}/streamdown` },
       { find: "diff2html", replacement: `${webModules}/diff2html` },
       { find: "eventemitter3", replacement: `${webModules}/eventemitter3` },
       { find: "i18next", replacement: `${webModules}/i18next` },

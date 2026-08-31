@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -110,5 +110,81 @@ describe("ApprovalBridge", () => {
         readFileSync(join(home, "workagent", "interactions.json"), "utf8"),
       ),
     ).toMatchObject([{ status: "allowed" }]);
+  });
+
+  it("fails closed when a persisted approval no longer has a live resolver", async () => {
+    let route: Handler | undefined;
+    const context = {
+      effect(register: () => unknown) {
+        register();
+      },
+      on() {
+        return () => undefined;
+      },
+      webServer: {
+        register(options: { handler: Handler }) {
+          route = options.handler;
+          return () => undefined;
+        },
+      },
+    };
+    const home = mkdtempSync(join(tmpdir(), "workagent-approval-restart-"));
+    const interactionPath = join(home, "workagent", "interactions.json");
+    mkdirSync(join(home, "workagent"), { recursive: true });
+    writeFileSync(
+      interactionPath,
+      JSON.stringify([
+        {
+          id: "interaction-restarted",
+          sessionId: "session-1",
+          turnId: "turn-4",
+          kind: "approval",
+          summary: "Delete generated files",
+          tool: "pwsh",
+          status: "pending",
+          createdAt: "2026-08-31T06:00:00.000Z",
+        },
+      ]),
+    );
+    const events: unknown[] = [];
+    new ApprovalBridge(
+      context as never,
+      "approval-test-token",
+      home,
+      (_sessionId, event) => events.push(event),
+    );
+
+    const pendingResponse = new ResponseStub();
+    await route!(
+      new RequestStub("GET", "/v1/interactions?sessionId=session-1"),
+      pendingResponse,
+    );
+    expect(JSON.parse(pendingResponse.value)).toMatchObject([
+      { id: "interaction-restarted", status: "pending" },
+    ]);
+
+    const response = new ResponseStub();
+    await route!(
+      new RequestStub(
+        "POST",
+        "/v1/interactions/interaction-restarted/respond",
+        JSON.stringify({ decision: "allow" }),
+      ),
+      response,
+    );
+    expect(response.status).toBe(409);
+    expect(JSON.parse(response.value)).toEqual({
+      error: "interaction_no_longer_live",
+    });
+    expect(JSON.parse(readFileSync(interactionPath, "utf8"))).toMatchObject([
+      { id: "interaction-restarted", status: "unavailable" },
+    ]);
+    expect(events).toMatchObject([
+      {
+        type: "approval.resolved",
+        approvalId: "interaction-restarted",
+        outcome: "unavailable",
+      },
+    ]);
   });
 });
