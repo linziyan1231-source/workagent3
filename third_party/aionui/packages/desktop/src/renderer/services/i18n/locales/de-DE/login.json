@@ -1,6 +1,6 @@
 {
-  "pageTitle": "CLIENTNAME - Anmelden",
-  "brand": "CLIENTNAME",
+  "pageTitle": "Puxin AI - Anmelden",
+  "brand": "Puxin AI",
   "subtitle": "Willkommen zurück, bitte melde dich in deinem Konto an",
   "username": "Benutzername",
   "usernamePlaceholder": "Benutzernamen eingeben",
@@ -17,7 +17,7 @@
   "footerSecondary": "Modern & Effizient",
   "changePassword": {
     "link": "Passwort ändern",
-    "pageTitle": "CLIENTNAME - Passwort ändern",
+    "pageTitle": "Puxin AI - Passwort ändern",
     "title": "Passwort ändern",
     "subtitle": "Bestätige dein aktuelles Passwort und lege ein neues fest",
     "currentPassword": "Aktuelles Passwort",

@@ -64,10 +64,10 @@
   "more": "More",
   "refresh": "Refresh",
   "readOnly": "Read only",
-  "tray.showWindow": "Show CLIENTNAME",
+  "tray.showWindow": "Show Puxin AI",
   "tray.newChat": "New Chat",
   "tray.closeToTray": "Hide to Tray",
-  "tray.about": "About CLIENTNAME",
+  "tray.about": "About Puxin AI",
   "tray.restart": "Restart App",
   "tray.quit": "Quit",
   "tray.runningTasks": "Running Tasks",
@@ -78,26 +78,26 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "This system is not supported by the bundled backend",
-      "description": "CLIENTNAME opened, but the local AionCore backend cannot run on this Linux version. Please upgrade to a supported Linux distribution and restart CLIENTNAME.",
+      "description": "Puxin AI opened, but the local AionCore backend cannot run on this Linux version. Please upgrade to a supported Linux distribution and restart Puxin AI.",
       "requiredVersions": "Required runtime symbols: {{versions}}"
     },
     "incompleteInstallation": {
-      "title": "CLIENTNAME installation is incomplete",
-      "description": "This installation is missing required local resources, so AionCore cannot start. Please download and reinstall the latest CLIENTNAME. If the issue returns after reinstalling, check whether security or antivirus software quarantined AionCore.",
+      "title": "Puxin AI installation is incomplete",
+      "description": "This installation is missing required local resources, so AionCore cannot start. Contact your administrator.",
       "downloadLatest": "Download latest",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
       "diagnosticsReportFailed": "Failed to send diagnostics report",
-      "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Reinstall the latest CLIENTNAME package. If it still happens after reinstalling, check whether security or antivirus software quarantined CLIENTNAME components."
+      "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Contact your administrator."
     },
     "packageArchitectureMismatch": {
-      "title": "CLIENTNAME package architecture mismatch",
-      "description": "This CLIENTNAME package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
+      "title": "Puxin AI package architecture mismatch",
+      "description": "This Puxin AI package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "CLIENTNAME opened, but AionCore stopped while initializing local data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Puxin AI opened, but AionCore stopped while initializing local data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -105,7 +105,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "CLIENTNAME opened, but AionCore stopped while repairing local agent cache data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "Puxin AI opened, but AionCore stopped while repairing local agent cache data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -113,7 +113,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "Local data is corrupted",
-      "description": "CLIENTNAME detected that the local database is corrupted and cannot continue startup. After confirmation, CLIENTNAME will back up the old database and create a new local database to continue startup. Historical local data will not be shown for now, and the old database will be kept as a backup.",
+      "description": "Puxin AI detected that the local database is corrupted and cannot continue startup. After confirmation, Puxin AI will back up the old database and create a new local database to continue startup. Historical local data will not be shown for now, and the old database will be kept as a backup.",
       "confirmRebuild": "Back up old DB and rebuild new DB",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsHint": "Sending diagnostics will not modify the local database.",

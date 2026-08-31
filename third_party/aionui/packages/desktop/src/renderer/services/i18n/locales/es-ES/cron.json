@@ -53,10 +53,10 @@
   },
   "page": {
     "newTask": "Nueva tarea",
-    "description": "Ejecuta tareas según un horario. También puedes pedirle a CLIENTNAME en cualquier conversación que cree una.",
+    "description": "Ejecuta tareas según un horario. También puedes pedirle a Puxin AI en cualquier conversación que cree una.",
     "awakeBanner": "Las tareas programadas solo se ejecutan mientras tu computadora esté encendida.",
     "keepAwake": "Mantener activa",
-    "keepAwakeTooltip": "Cuando está activado, CLIENTNAME evitará que tu computadora entre en modo de suspensión",
+    "keepAwakeTooltip": "Cuando está activado, Puxin AI evitará que tu computadora entre en modo de suspensión",
     "createTask": "Crear tarea programada",
     "editTask": "Editar tarea programada",
     "createSuccess": "Tarea creada correctamente",

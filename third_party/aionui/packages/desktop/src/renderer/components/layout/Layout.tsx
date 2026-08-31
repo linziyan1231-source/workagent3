@@ -124,7 +124,7 @@ const Layout: React.FC<{
   }, [navigate]);
   const location = useLocation();
   const { t } = useTranslation();
-  // The "CLIENTNAME" wordmark acts as Home / Back-to-Chat, but only from settings routes.
+  // The "Puxin AI" wordmark acts as Home / Back-to-Chat, but only from settings routes.
   // In non-settings routes the user is already "home", so it is a no-op (and not actionable).
   const isSettingsRoute = location.pathname.startsWith('/settings');
   // Only wired to the wordmark in the isSettingsRoute branch below, so the

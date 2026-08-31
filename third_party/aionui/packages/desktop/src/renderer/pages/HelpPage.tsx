@@ -46,10 +46,10 @@ const HelpPage: React.FC = () => {
           {t('common.back')}
         </Button>
         <div className={styles.hero}>
-          <img className={styles.heroLogo} src={brandLogo} alt='CLIENTNAME' />
+          <img className={styles.heroLogo} src={brandLogo} alt='Puxin AI' />
           <div>
             <Typography.Title heading={2} className='!m-0 text-t-primary'>
-              CLIENTNAME 智能体平台使用指南
+              Puxin AI 智能体平台使用指南
             </Typography.Title>
             <p className={styles.subtitle}>从第一次对话到团队协作、文件管理与权限设置的完整操作说明</p>
           </div>

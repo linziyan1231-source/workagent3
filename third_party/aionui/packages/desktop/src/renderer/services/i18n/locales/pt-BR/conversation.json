@@ -18,10 +18,10 @@
     "clearWorkspace": "Remover projeto",
     "openFolder": "Abrir Pasta",
     "none": "Nenhum",
-    "quickActionsTitle": "O que o CLIENTNAME pode fazer?",
+    "quickActionsTitle": "O que o Puxin AI pode fazer?",
     "quickActionFeedback": "Reportar Problema",
     "quickActionStar": "Gostou? Nos dê uma estrela!",
-    "skillsMarket": "Mercado de Habilidades CLIENTNAME",
+    "skillsMarket": "Mercado de Habilidades Puxin AI",
     "skillsMarketDesc": "Pesquise e ative as Habilidades da comunidade sob demanda. Configure uma vez, disponível para todos os agentes.",
     "skillsMarketDetails": "Ver Mais >>"
   },
@@ -330,8 +330,8 @@
       },
       "WORKSPACE_PATH_CONTAINS_WHITESPACE_RUNTIME_UNSUPPORTED": {
         "title": "Este caminho de projeto não é mais compatível com execução",
-        "body": "Esta conversa ou tarefa existente usa um caminho de projeto cujos nomes de diretório contêm espaços ou outros caracteres de espaço em branco. O CLIENTNAME não oferece mais suporte ao envio de mensagens em caminhos desse tipo. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco.",
-        "bodyWithPath": "O caminho de projeto existente \"{{workspacePath}}\" contém espaços ou outros caracteres de espaço em branco. O CLIENTNAME não oferece mais suporte ao envio de mensagens em conversas ou tarefas que usam esse caminho. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco."
+        "body": "Esta conversa ou tarefa existente usa um caminho de projeto cujos nomes de diretório contêm espaços ou outros caracteres de espaço em branco. O Puxin AI não oferece mais suporte ao envio de mensagens em caminhos desse tipo. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco.",
+        "bodyWithPath": "O caminho de projeto existente \"{{workspacePath}}\" contém espaços ou outros caracteres de espaço em branco. O Puxin AI não oferece mais suporte ao envio de mensagens em conversas ou tarefas que usam esse caminho. Crie uma nova conversa ou tarefa com um caminho de projeto sem espaços em branco."
       },
       "UNKNOWN_UPSTREAM_ERROR": {
         "title": "O agente ou provedor upstream falhou",
@@ -339,7 +339,7 @@
       },
       "MCP_HTTP_RESPONSE_READ_FAILED": {
         "title": "Failed to read the team helper response",
-        "body": "CLIENTNAME could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
+        "body": "Puxin AI could not read the local team helper response. Retry once, and if it keeps happening, restart the app."
       },
       "MCP_TOOL_REMOTE_ERROR": {
         "title": "The local team helper rejected the request",
@@ -347,11 +347,11 @@
       },
       "MCP_TOOL_RESPONSE_UNEXPECTED": {
         "title": "The team helper returned an unexpected response",
-        "body": "CLIENTNAME received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
+        "body": "Puxin AI received an unexpected response from the local team helper. Retry once, and report it if the problem persists."
       },
       "MCP_TCP_READ_FAILED": {
         "title": "Failed to read from the local team helper",
-        "body": "CLIENTNAME could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
+        "body": "Puxin AI could not read the local team helper TCP response. Retry once, and restart the app if it keeps failing."
       },
       "TEAM_SERVICE_UNAVAILABLE": {
         "title": "Team service is not ready yet",

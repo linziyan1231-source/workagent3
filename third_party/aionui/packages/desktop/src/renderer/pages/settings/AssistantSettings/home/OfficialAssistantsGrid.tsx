@@ -70,7 +70,7 @@ const OfficialAssistantsGrid: React.FC<OfficialAssistantsGridProps> = ({
           />
           <span className='truncate'>
             {t('settings.officialAssistantsHintShort', {
-              defaultValue: 'Maintained by CLIENTNAME · enable to use, duplicate to customize',
+              defaultValue: 'Maintained by Puxin AI · enable to use, duplicate to customize',
             })}
           </span>
         </span>

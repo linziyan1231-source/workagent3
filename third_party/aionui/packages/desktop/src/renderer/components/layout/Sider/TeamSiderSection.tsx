@@ -48,7 +48,10 @@ const TeamSiderSection: React.FC<TeamSiderSectionProps> = ({
   const teamBadgeCounts = useSiderTeamBadges(teams);
   const { mutate: globalMutate } = useSWRConfig();
   const auth = useOptionalAuth();
-  const userCollaborationEnabled = shouldShowUserCollaboration(auth?.user?.collaboration_enabled, isElectronDesktop());
+  const userCollaborationEnabled = shouldShowUserCollaboration(
+    auth?.user?.collaboration_enabled,
+    isElectronDesktop()
+  );
 
   const [createTeamVisible, setCreateTeamVisible] = useState(false);
   const [createSharedVisible, setCreateSharedVisible] = useState(false);
@@ -187,9 +190,7 @@ const TeamSiderSection: React.FC<TeamSiderSectionProps> = ({
                     if (key === 'user') setCreateSharedVisible(true);
                   }}
                 >
-                  <Menu.Item key='ai'>
-                    {t('team.sider.aiCollaboration', { defaultValue: 'AI collaboration' })}
-                  </Menu.Item>
+                  <Menu.Item key='ai'>{t('team.sider.aiCollaboration', { defaultValue: 'AI collaboration' })}</Menu.Item>
                   {userCollaborationEnabled && (
                     <Menu.Item key='user'>
                       {t('team.sider.userCollaboration', { defaultValue: 'User collaboration' })}
