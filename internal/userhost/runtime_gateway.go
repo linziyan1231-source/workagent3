@@ -87,7 +87,15 @@ func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID s
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, restart, assigners...)
+	sharedFiles, err := newSharedFileManager(dataRoot, ownerSID)
+	if err != nil {
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, sharedFiles, restart, assigners...)
 	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth}, nil
 }
 
@@ -129,10 +137,10 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 }
 
 func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, assigners ...mcpProcessAssigner) http.Handler {
-	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, assigners...)
+	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, nil, assigners...)
 }
 
-func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, restart func(), assigners ...mcpProcessAssigner) http.Handler {
+func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, restart func(), assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/system/status", runtimeSystemStatus(target, token))
@@ -161,6 +169,9 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 	}
 	if sharedProjects != nil {
 		mux.HandleFunc("PUT /internal/shared-projects/{id}", sharedProjectPlatformHandler(sharedProjects))
+	}
+	if sharedFiles != nil {
+		mux.HandleFunc("POST /internal/shared-files", sharedFileHandler(sharedFiles))
 	}
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")

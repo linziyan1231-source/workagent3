@@ -177,10 +177,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	sharedFiles, err := portal.NewRuntimeSharedFilePlatform(registry)
+	if err != nil {
+		return err
+	}
 	modules := portal.Modules{
 		ModelAccess: models, Quota: quotas, Speech: speechProxy,
 		Settings: clientSettings, SkillMarket: market,
-		Collaboration: sharedProjects, SharedProjects: sharedPlatform,
+		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles,
 		Notifications: notificationStore, Audit: auditStore,
 	}
 	if chatForwardProxy != nil {

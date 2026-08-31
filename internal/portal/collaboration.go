@@ -44,6 +44,7 @@ type CollaborationPort interface {
 	AddMessage(context.Context, collaboration.Message, int64) (collaboration.Message, error)
 	ListMessages(context.Context, string, int64, int64, int) ([]collaboration.Message, error)
 	ListMessagesForUserAfter(context.Context, int64, int64, int) ([]collaboration.Message, error)
+	ProjectForUser(context.Context, string, int64, bool) (collaboration.Project, error)
 }
 
 // SharedProjectPlatformPort is implemented by the privileged Employee Manager
@@ -54,6 +55,20 @@ type SharedProjectPlatformPort interface {
 	RevokeProjectMember(context.Context, string, string) error
 	TransferProjectOwnership(context.Context, string, string, string, []string) error
 	FinalizeProjectOwnership(context.Context, string, string, bool) error
+}
+
+type SharedFileRequest struct {
+	ProjectID string `json:"project_id"`
+	Operation string `json:"operation"`
+	Path      string `json:"path,omitempty"`
+	Data      string `json:"data,omitempty"`
+	NewName   string `json:"new_name,omitempty"`
+}
+
+// SharedFilePlatformPort routes an already-authorized request to the project
+// owner's Runtime. Portal never resolves or opens a shared filesystem path.
+type SharedFilePlatformPort interface {
+	Operate(context.Context, string, SharedFileRequest) (json.RawMessage, error)
 }
 
 type sharedProjectDTO struct {

@@ -27,6 +27,8 @@ type fakeSharedProjectPlatform struct {
 	granted      []string
 	revoked      []string
 	transferred  []string
+	fileOwner    string
+	fileRequest  SharedFileRequest
 }
 
 func (p *fakeSharedProjectPlatform) ProvisionProject(_ context.Context, projectID, _ string) error {
@@ -51,6 +53,11 @@ func (p *fakeSharedProjectPlatform) TransferProjectOwnership(_ context.Context, 
 
 func (p *fakeSharedProjectPlatform) FinalizeProjectOwnership(context.Context, string, string, bool) error {
 	return nil
+}
+
+func (p *fakeSharedProjectPlatform) Operate(_ context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
+	p.fileOwner, p.fileRequest = ownerSID, input
+	return json.RawMessage(`[{"name":"notes.md","type":"file"}]`), nil
 }
 
 func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
@@ -117,6 +124,28 @@ func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
 	}
 	if projects, err := collaborationData.ListProjects(t.Context(), bob.user.ID, true); err != nil || len(projects) != 0 {
 		t.Fatalf("removed member retained database access: %#v, %v", projects, err)
+	}
+}
+
+func TestSharedFilesAuthorizeMembershipAndRouteToOwnerRuntime(t *testing.T) {
+	handler, _, platform, alice, bob := collaborationTestServer(t)
+	created := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects", `{"name":"Files"}`)
+	var createdBody struct {
+		Project sharedProjectDTO `json:"project"`
+	}
+	if json.Unmarshal(created.Body.Bytes(), &createdBody) != nil {
+		t.Fatal("decode project")
+	}
+	response := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-files", `{"project_id":"`+createdBody.Project.ID+`","operation":"dir","path":"shared://`+createdBody.Project.ID+`"}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"notes.md"`) {
+		t.Fatalf("shared file response = %d %s", response.Code, response.Body.String())
+	}
+	if platform.fileOwner != alice.user.SID || platform.fileRequest.ProjectID != createdBody.Project.ID {
+		t.Fatalf("owner routing = %q %#v", platform.fileOwner, platform.fileRequest)
+	}
+	forbidden := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-files", `{"project_id":"`+createdBody.Project.ID+`","operation":"list"}`)
+	if forbidden.Code != http.StatusNotFound || platform.fileOwner != alice.user.SID {
+		t.Fatalf("non-member response = %d %s", forbidden.Code, forbidden.Body.String())
 	}
 }
 
@@ -218,7 +247,7 @@ func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, 
 	alice := create("alice", "S-1-5-21-1000", "alice-collaboration-session")
 	bob := create("bob", "S-1-5-21-2000", "bob-collaboration-session")
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{Collaboration: collaborationData, SharedProjects: platform})
+	server, err := NewWithModules(users, StaticRouter{}, false, Modules{Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,6 +88,7 @@ type Modules struct {
 	SkillMarket        SkillMarketPort
 	Collaboration      CollaborationPort
 	SharedProjects     SharedProjectPlatformPort
+	SharedFiles        SharedFilePlatformPort
 	ChatForward        ChatForwardPort
 	IM                 IMPort
 	Notifications      NotificationsPort
@@ -168,6 +169,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/portal/shared-messages", s.requireUser(s.sharedMessages))
 	mux.HandleFunc("POST /api/portal/shared-messages", s.requireUser(s.sharedMessages))
 	mux.HandleFunc("GET /api/portal/shared-events", s.requireUser(s.sharedEventStream))
+	mux.HandleFunc("POST /api/portal/shared-files", s.requireUser(s.sharedFiles))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))

@@ -29,6 +29,15 @@ export interface IDirOrFile {
   children?: IDirOrFile[];
 }
 
+export interface IFileMetadata {
+  name: string;
+  path: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  isDirectory?: boolean;
+}
+
 export type IExtensionSettingsTab = {
   id: string;
   title?: string;

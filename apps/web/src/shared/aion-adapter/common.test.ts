@@ -701,3 +701,81 @@ describe("production Renderer collaboration adapter", () => {
     );
   });
 });
+
+describe("production Renderer shared-file adapter", () => {
+  it("routes the formal file tree through the shared Portal port", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: [
+              { name: "docs", type: "directory" },
+              { name: "notes.md", type: "file" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.fs.getFilesByDir.invoke({
+        root: "shared://project_1234567890",
+        dir: "shared://project_1234567890",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        name: "docs",
+        fullPath: "shared://project_1234567890/docs",
+        isDir: true,
+      }),
+      expect.objectContaining({
+        name: "notes.md",
+        fullPath: "shared://project_1234567890/notes.md",
+        isFile: true,
+      }),
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-files",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          project_id: "project_1234567890",
+          operation: "dir",
+          path: "",
+        }),
+      }),
+    );
+  });
+
+  it("keeps shared write paths stable and forwards file content", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, data: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.fs.writeFile.invoke({
+        workspace: "shared://project_1234567890",
+        path: "shared://project_1234567890/notes.md",
+        data: "hello",
+      }),
+    ).resolves.toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-files",
+      expect.objectContaining({
+        body: JSON.stringify({
+          project_id: "project_1234567890",
+          operation: "write",
+          path: "notes.md",
+          data: "hello",
+        }),
+      }),
+    );
+  });
+});

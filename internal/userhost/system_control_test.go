@@ -26,7 +26,7 @@ func TestRuntimeSystemStatusAndRestartAreAuthenticatedAndReal(t *testing.T) {
 	defer harness.Close()
 	target, _ := url.Parse(harness.URL)
 	restarted := make(chan struct{}, 1)
-	handler := newRuntimeGatewayHandlerWithControl(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "runtime-token", nil, func() { restarted <- struct{}{} })
+	handler := newRuntimeGatewayHandlerWithControl(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "runtime-token", nil, nil, func() { restarted <- struct{}{} })
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/system/status", nil))

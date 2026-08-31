@@ -15,6 +15,8 @@ import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
 import type {
+  IDirOrFile,
+  IFileMetadata,
   PortalKimiDatasourceGrant,
   PortalManagedUser,
   PortalProvisionJob,
@@ -52,6 +54,63 @@ type ConversationListEvent = {
 };
 
 const themeListeners = new Set<(theme: Theme) => void>();
+
+const sharedProjectIDFromPath = (value?: string): string | null =>
+  value?.replaceAll("\\", "/").match(/^shared:\/\/([^/]+)(?:\/|$)/)?.[1] ??
+  null;
+
+const sharedRelativePath = (projectId: string, value?: string) => {
+  if (value === undefined) return undefined;
+  const normalized = value.replaceAll("\\", "/");
+  const root = `shared://${projectId}`;
+  if (normalized === root) return "";
+  return normalized.startsWith(`${root}/`)
+    ? normalized.slice(root.length + 1)
+    : normalized;
+};
+
+const sharedFileRequest = <T>(
+  projectId: string,
+  operation: string,
+  fields: { path?: string; data?: string; new_name?: string } = {},
+) =>
+  requestJson<{ success: true; data: T }>("/api/portal/shared-files", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      operation,
+      ...fields,
+      ...(fields.path === undefined
+        ? {}
+        : { path: sharedRelativePath(projectId, fields.path) }),
+    }),
+  }).then((response) => response.data);
+
+const sharedDirectoryEntries = (
+  raw: Array<{ name: string; type: string }>,
+  workspace: string,
+  relativePath: string,
+): IDirOrFile[] => {
+  const base = relativePath === "." ? "" : relativePath;
+  const children = raw.map((entry) => ({
+    name: entry.name,
+    fullPath: `${workspace}/${base ? `${base}/` : ""}${entry.name}`,
+    relativePath: `${base ? `${base}/` : ""}${entry.name}`,
+    isDir: entry.type === "directory",
+    isFile: entry.type !== "directory",
+  }));
+  return [
+    {
+      name: base.split("/").pop() || workspace.split("/").pop() || workspace,
+      fullPath: base ? `${workspace}/${base}` : workspace,
+      relativePath: base,
+      isDir: true,
+      isFile: false,
+      children,
+    },
+  ];
+};
 
 type SharedProjectResponse = {
   id: string;
@@ -470,8 +529,144 @@ export const ipcBridge = {
         await skillPort.remove(skill.id);
       },
     },
-    listWorkspaceFiles: { invoke: async () => [] },
-    getImageBase64: { invoke: async () => "" },
+    getFilesByDir: {
+      invoke: async ({ dir, root }: { dir: string; root: string }) => {
+        const projectId = sharedProjectIDFromPath(root);
+        if (!projectId) return [];
+        const relative = sharedRelativePath(projectId, dir) ?? "";
+        const raw = await sharedFileRequest<
+          Array<{ name: string; type: string }>
+        >(projectId, "dir", { path: dir });
+        return sharedDirectoryEntries(raw, root, relative)[0]?.children ?? [];
+      },
+    },
+    listWorkspaceFiles: {
+      invoke: async ({ root }: { root: string }) => {
+        const projectId = sharedProjectIDFromPath(root);
+        if (!projectId) return [];
+        const raw = await sharedFileRequest<
+          Array<{ name: string; full_path: string; relative_path: string }>
+        >(projectId, "list");
+        return raw.map((entry) => ({
+          name: entry.name,
+          fullPath: entry.full_path,
+          relativePath: entry.relative_path,
+        }));
+      },
+    },
+    getImageBase64: {
+      invoke: async ({
+        path,
+        workspace,
+      }: {
+        path: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        return projectId
+          ? sharedFileRequest<string | null>(projectId, "image-base64", {
+              path,
+            })
+          : "";
+      },
+    },
+    readFile: {
+      invoke: async ({
+        path,
+        workspace,
+      }: {
+        path: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        return projectId
+          ? sharedFileRequest<string | null>(projectId, "read", { path })
+          : null;
+      },
+    },
+    readFileBuffer: {
+      invoke: async ({
+        path,
+        workspace,
+      }: {
+        path: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        return projectId
+          ? sharedFileRequest<string | null>(projectId, "read-buffer", { path })
+          : null;
+      },
+    },
+    writeFile: {
+      invoke: async ({
+        path,
+        data,
+        workspace,
+      }: {
+        path: string;
+        data: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        return projectId
+          ? sharedFileRequest<boolean>(projectId, "write", { path, data })
+          : false;
+      },
+    },
+    getFileMetadata: {
+      invoke: async ({
+        path,
+        workspace,
+      }: {
+        path: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        if (!projectId) throw new Error("browser_workspace_file_unavailable");
+        return sharedFileRequest<IFileMetadata>(projectId, "metadata", {
+          path,
+        });
+      },
+    },
+    removeEntry: {
+      invoke: async ({
+        path,
+        workspace,
+      }: {
+        path: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        if (!projectId) throw new Error("browser_workspace_file_unavailable");
+        await sharedFileRequest<null>(projectId, "remove", { path });
+      },
+    },
+    renameEntry: {
+      invoke: async ({
+        path,
+        new_name,
+        workspace,
+      }: {
+        path: string;
+        new_name: string;
+        workspace?: string;
+      }) => {
+        const projectId =
+          sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
+        if (!projectId) throw new Error("browser_workspace_file_unavailable");
+        return sharedFileRequest<{ new_path: string }>(projectId, "rename", {
+          path,
+          new_name,
+        });
+      },
+    },
   },
   workspaceOfficeWatch: {
     start: { invoke: async () => undefined },
@@ -1151,6 +1346,13 @@ export const ipcBridge = {
             : normalizedPath.startsWith(`${normalizedWorkspace}/`)
               ? normalizedPath.slice(normalizedWorkspace.length + 1)
               : normalizedPath;
+        const sharedProjectId = sharedProjectIDFromPath(workspace);
+        if (sharedProjectId) {
+          const raw = await sharedFileRequest<
+            Array<{ name: string; type: string }>
+          >(sharedProjectId, "dir", { path });
+          return sharedDirectoryEntries(raw, workspace, relativePath);
+        }
         const entries = (await workspacePort.files(workspace, relativePath))
           .filter(
             (entry) =>
