@@ -32,12 +32,10 @@ import type {
 } from "./automation-store.js";
 import type { PresetBinding } from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
-import type {
-  McpCatalogStore,
-  SkillCatalogStore,
-} from "./capability-store.js";
+import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
 import type { ResolvedSkill } from "./skill-projection.js";
+import type { TeamExecution, TeamRunnerPort } from "./team-store.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
 
 type SessionRecord = {
@@ -186,7 +184,7 @@ export const normalizeEvent = (
   }
 };
 
-export class RuntimeController implements AutomationRunnerPort {
+export class RuntimeController implements AutomationRunnerPort, TeamRunnerPort {
   readonly #ctx: Context;
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
@@ -261,6 +259,35 @@ export class RuntimeController implements AutomationRunnerPort {
     });
     this.#automationExecutions.set(request.automationRunId, execution);
     return execution;
+  }
+
+  executeTeamTask(
+    request: TeamExecution,
+  ): Promise<{ sessionId: string; result?: string }> {
+    const now = new Date().toISOString();
+    return this.execute({
+      automationRunId: request.taskId,
+      definition: {
+        id: `team-${request.teamId}-${request.memberId}`,
+        version: 1,
+        name: request.name,
+        enabled: false,
+        schedule: { kind: "interval", everyMinutes: 1 },
+        presetId: request.presetId,
+        engine: request.engine,
+        workspaceId: request.workspaceId,
+        input: request.input,
+        notificationPolicy: "none",
+        nextRunAt: null,
+        lastRunAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  }
+
+  cancelTeamTask(taskId: string): Promise<void> {
+    return this.cancel(taskId);
   }
 
   async cancel(automationRunId: string): Promise<void> {

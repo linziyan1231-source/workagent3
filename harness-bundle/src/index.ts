@@ -19,6 +19,8 @@ import { RuntimeServicesController } from "./runtime-services-api.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import { AutomationController } from "./automation-api.js";
 import { AutomationScheduler, AutomationStore } from "./automation-store.js";
+import { TeamController } from "./team-api.js";
+import { TeamOrchestrator, TeamStore } from "./team-store.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -141,6 +143,8 @@ export function apply(ctx: Context): void {
     automations,
     new AutomationScheduler(automations, runtime),
   );
+  const teams = new TeamStore(dshHome);
+  new TeamController(ctx, token, teams, new TeamOrchestrator(teams, runtime));
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),
   );
