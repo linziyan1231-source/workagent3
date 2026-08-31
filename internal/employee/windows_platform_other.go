@@ -68,3 +68,7 @@ func (*WindowsPlatform) RemoveInstalledRuntime(context.Context, string) error {
 func (*WindowsPlatform) RepairInstalledRuntime(context.Context, store.User, []byte) error {
 	return errors.New("employee lifecycle is only available on Windows")
 }
+
+func (*WindowsPlatform) RenameInstalledAccount(context.Context, store.User, string, []byte) (string, error) {
+	return "", errors.New("employee lifecycle is only available on Windows")
+}

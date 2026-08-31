@@ -21,6 +21,7 @@ type User struct {
 	Username             string     `json:"username"`
 	DisplayName          string     `json:"display_name"`
 	SID                  string     `json:"-"`
+	WindowsUsername      string     `json:"-"`
 	PasswordHash         string     `json:"-"`
 	Disabled             bool       `json:"disabled"`
 	Admin                bool       `json:"admin"`
@@ -63,7 +64,8 @@ CREATE TABLE IF NOT EXISTS users (
   collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1)),
   created_at INTEGER NOT NULL DEFAULT 0,
   last_login_at INTEGER,
-  offboarded INTEGER NOT NULL DEFAULT 0 CHECK (offboarded IN (0, 1))
+  offboarded INTEGER NOT NULL DEFAULT 0 CHECK (offboarded IN (0, 1)),
+  windows_username TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -89,6 +91,7 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 		{name: "created_at", ddl: `ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`},
 		{name: "last_login_at", ddl: `ALTER TABLE users ADD COLUMN last_login_at INTEGER`},
 		{name: "offboarded", ddl: `ALTER TABLE users ADD COLUMN offboarded INTEGER NOT NULL DEFAULT 0 CHECK (offboarded IN (0, 1))`},
+		{name: "windows_username", ddl: `ALTER TABLE users ADD COLUMN windows_username TEXT NOT NULL DEFAULT ''`},
 	} {
 		var exists int
 		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name=?)`, column.name).Scan(&exists); err != nil {
@@ -102,6 +105,9 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=username WHERE trim(display_name)=''`); err != nil {
 		return fmt.Errorf("backfill Portal user display names: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET windows_username=username WHERE trim(windows_username)=''`); err != nil {
+		return fmt.Errorf("backfill Windows usernames: %w", err)
 	}
 	return nil
 }
@@ -138,7 +144,7 @@ func (s *Store) CreateDisabledUser(ctx context.Context, username, sid, passwordH
 
 func (s *Store) createUser(ctx context.Context, username, sid, passwordHash string, disabled bool) (User, error) {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, display_name, sid, password_hash, disabled, created_at) VALUES(?, ?, ?, ?, ?, ?)`, username, username, sid, passwordHash, disabled, now.Unix())
+	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, display_name, sid, windows_username, password_hash, disabled, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`, username, username, sid, username, passwordHash, disabled, now.Unix())
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
@@ -146,7 +152,7 @@ func (s *Store) createUser(ctx context.Context, username, sid, passwordHash stri
 	if err != nil {
 		return User{}, fmt.Errorf("read created user id: %w", err)
 	}
-	return User{ID: id, Username: username, DisplayName: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled, CollaborationCapable: true, CreatedAt: now}, nil
+	return User{ID: id, Username: username, DisplayName: username, SID: sid, WindowsUsername: username, PasswordHash: passwordHash, Disabled: disabled, CollaborationCapable: true, CreatedAt: now}, nil
 }
 
 func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
@@ -154,7 +160,7 @@ func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
 	var disabled, admin, collaborationEnabled, offboarded int
 	var createdAt int64
 	var lastLoginAt sql.NullInt64
-	if err := scanner.Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt, &offboarded); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt, &offboarded, &user.WindowsUsername); err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
@@ -171,15 +177,15 @@ func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE username = ?`, username))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded, windows_username FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE sid = ?`, sid))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded, windows_username FROM users WHERE sid = ?`, sid))
 }
 
 func (s *Store) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded, windows_username FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +205,17 @@ func (s *Store) SetUserCredentials(ctx context.Context, id int64, passwordHash s
 	result, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ?, disabled = ? WHERE id = ?`, passwordHash, disabled, id)
 	if err != nil {
 		return fmt.Errorf("update user credentials: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("Portal user does not exist")
+	}
+	return nil
+}
+
+func (s *Store) SetWindowsUsername(ctx context.Context, id int64, windowsUsername string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET windows_username=? WHERE id=?`, windowsUsername, id)
+	if err != nil {
+		return fmt.Errorf("update Windows username: %w", err)
 	}
 	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 		return errors.New("Portal user does not exist")
@@ -308,7 +325,7 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, e
 
 func (s *Store) UserBySession(ctx context.Context, token string, now time.Time) (User, error) {
 	user, err := scanUser(s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled, u.created_at, u.last_login_at, u.offboarded
+SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled, u.created_at, u.last_login_at, u.offboarded, u.windows_username
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()))
 	if err != nil {

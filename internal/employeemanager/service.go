@@ -38,7 +38,7 @@ func (s *Service) ListManagedUsers(ctx context.Context) ([]contracts.ManagedEmpl
 	}
 	items := make([]contracts.ManagedEmployee, 0, len(users))
 	for _, user := range users {
-		items = append(items, contracts.ManagedEmployee{Username: user.Username, WindowsUsername: user.Username, WindowsSID: user.SID, Enabled: !user.Disabled, Offboarded: user.Offboarded, CreatedAt: user.CreatedAt, LastLoginAt: user.LastLoginAt})
+		items = append(items, contracts.ManagedEmployee{Username: user.Username, WindowsUsername: user.WindowsUsername, WindowsSID: user.SID, Enabled: !user.Disabled, Offboarded: user.Offboarded, CreatedAt: user.CreatedAt, LastLoginAt: user.LastLoginAt})
 	}
 	return items, nil, nil
 }
@@ -143,6 +143,11 @@ func (s *Service) OffboardRetain(ctx context.Context, username string) error {
 
 func (s *Service) Repair(ctx context.Context, username string, password []byte) error {
 	_, err := s.Lifecycle.Repair(ctx, username, password)
+	return err
+}
+
+func (s *Service) RenameWindowsAccount(ctx context.Context, username, newWindowsUsername string, password []byte) error {
+	_, err := s.Lifecycle.RenameWindowsAccount(ctx, username, newWindowsUsername, password)
 	return err
 }
 

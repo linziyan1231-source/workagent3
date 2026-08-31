@@ -46,8 +46,9 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
-	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, repair, set-limits, offboard-retain, grant-admin, or revoke-admin")
+	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, repair, rename-windows, set-limits, offboard-retain, grant-admin, or revoke-admin")
 	username := flag.String("username", "", "Windows and Portal username")
+	newWindowsUsername := flag.String("new-windows-username", "", "new local Windows username for rename-windows")
 	memoryBytes := flag.Uint64("memory-bytes", 0, "Job Object memory limit for set-limits")
 	cpuPercent := flag.Uint("cpu-percent", 0, "Job Object CPU percent for set-limits")
 	activeProcesses := flag.Uint("active-processes", 0, "Job Object process limit for set-limits")
@@ -62,7 +63,7 @@ func run() error {
 		return err
 	}
 	var password []byte
-	if *listen == "" && (*action == "add" || *action == "reset-password" || *action == "repair") {
+	if *listen == "" && (*action == "add" || *action == "reset-password" || *action == "repair" || *action == "rename-windows") {
 		password, err = io.ReadAll(io.LimitReader(os.Stdin, 257))
 		if err != nil {
 			return fmt.Errorf("read Portal password: %w", err)
@@ -111,6 +112,8 @@ func run() error {
 		user, err = lifecycle.OffboardRetain(ctx, *username)
 	case "repair":
 		user, err = lifecycle.Repair(ctx, *username, password)
+	case "rename-windows":
+		user, err = lifecycle.RenameWindowsAccount(ctx, *username, *newWindowsUsername, password)
 	case "grant-admin", "revoke-admin":
 		user, err = (employee.Lifecycle{Users: data}).SetPortalAdmin(ctx, *username, *action == "grant-admin")
 	default:

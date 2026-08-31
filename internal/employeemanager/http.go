@@ -41,11 +41,12 @@ func Handler(service *Service, token string) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/users/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Username        string                        `json:"username"`
-			Password        string                        `json:"portal_password"`
-			WindowsPassword string                        `json:"windows_password"`
-			Grant           contracts.KimiDatasourceGrant `json:"grant"`
-			Limits          winutil.JobLimits             `json:"limits"`
+			Username           string                        `json:"username"`
+			Password           string                        `json:"portal_password"`
+			WindowsPassword    string                        `json:"windows_password"`
+			NewWindowsUsername string                        `json:"new_windows_username"`
+			Grant              contracts.KimiDatasourceGrant `json:"grant"`
+			Limits             winutil.JobLimits             `json:"limits"`
 		}
 		if !decode(r, &input) {
 			http.Error(w, "invalid request", http.StatusBadRequest)
@@ -72,6 +73,11 @@ func Handler(service *Service, token string) http.Handler {
 			input.WindowsPassword = ""
 			defer zero(password)
 			err = service.Repair(r.Context(), input.Username, password)
+		case "rename-windows":
+			password := []byte(input.WindowsPassword)
+			input.WindowsPassword = ""
+			defer zero(password)
+			err = service.RenameWindowsAccount(r.Context(), input.Username, input.NewWindowsUsername, password)
 		case "kimi-datasource":
 			result, err = service.SetKimiDatasource(r.Context(), input.Username, input.Grant)
 		default:

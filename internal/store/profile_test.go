@@ -27,7 +27,7 @@ func TestOpenMigratesLegacyUserProfileColumns(t *testing.T) {
 	}
 	defer data.Close()
 	user, err := data.UserByUsername(t.Context(), "alice")
-	if err != nil || user.DisplayName != "alice" || user.CollaborationEnabled || !user.CollaborationCapable {
+	if err != nil || user.DisplayName != "alice" || user.WindowsUsername != "alice" || user.CollaborationEnabled || !user.CollaborationCapable {
 		t.Fatalf("migrated user = %#v, %v", user, err)
 	}
 }

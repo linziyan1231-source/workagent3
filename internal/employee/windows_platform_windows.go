@@ -176,7 +176,7 @@ func (p *WindowsPlatform) RemoveInstalledRuntime(ctx context.Context, sid string
 }
 
 func (p *WindowsPlatform) RepairInstalledRuntime(ctx context.Context, user store.User, password []byte) error {
-	account, err := p.EnsureAccount(ctx, user.Username, password)
+	account, err := p.EnsureAccount(ctx, localWindowsUsername(user), password)
 	if err != nil {
 		return err
 	}
@@ -205,6 +205,49 @@ func (p *WindowsPlatform) RepairInstalledRuntime(ctx context.Context, user store
 		return err
 	}
 	return p.StartRuntime(ctx, spec)
+}
+
+func (p *WindowsPlatform) RenameInstalledAccount(ctx context.Context, user store.User, newUsername string, password []byte) (string, error) {
+	if err := winutil.ValidateLocalUsername(newUsername); err != nil {
+		return "", err
+	}
+	oldUsername := localWindowsUsername(user)
+	if !strings.EqualFold(oldUsername, newUsername) {
+		if sid, canonical, err := winutil.LookupAccount(`.\` + newUsername); err == nil {
+			if !strings.EqualFold(sid, user.SID) {
+				return "", errors.New("new Windows username belongs to a different SID")
+			}
+			user.WindowsUsername = canonical
+		} else {
+			script := `Rename-LocalUser -Name $env:WA3_OLD_USER -NewName $env:WA3_NEW_USER -ErrorAction Stop`
+			if err := runPowerShell(ctx, script, map[string]string{"WA3_OLD_USER": oldUsername, "WA3_NEW_USER": newUsername}, nil); err != nil {
+				return "", err
+			}
+		}
+	}
+	sid, canonical, err := winutil.LookupAccount(`.\` + newUsername)
+	if err != nil {
+		return "", err
+	}
+	if !strings.EqualFold(sid, user.SID) {
+		return "", errors.New("Windows account SID changed during rename")
+	}
+	user.WindowsUsername = canonical
+	if err := p.RepairInstalledRuntime(ctx, user, password); err != nil {
+		return "", err
+	}
+	return canonical, nil
+}
+
+func localWindowsUsername(user store.User) string {
+	value := strings.TrimSpace(user.WindowsUsername)
+	if value == "" {
+		value = user.Username
+	}
+	if _, name, found := strings.Cut(value, `\`); found {
+		return name
+	}
+	return value
 }
 
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {

@@ -22,6 +22,8 @@ type lifecyclePlatform struct {
 	removeErr error
 	repairs   int
 	repairErr error
+	renames   int
+	renameErr error
 }
 
 type failingEnableStore struct{ *store.Store }
@@ -55,6 +57,16 @@ func (p *lifecyclePlatform) RepairInstalledRuntime(_ context.Context, _ store.Us
 		return errors.New("missing password")
 	}
 	return p.repairErr
+}
+func (p *lifecyclePlatform) RenameInstalledAccount(_ context.Context, user store.User, newUsername string, password []byte) (string, error) {
+	p.renames++
+	if p.renameErr != nil {
+		return "", p.renameErr
+	}
+	if user.SID == "" || len(password) == 0 {
+		return "", errors.New("invalid rename input")
+	}
+	return `WORKSTATION\` + newUsername, nil
 }
 
 func TestLifecycleDisableRevokesSessionsBeforeRuntimeStop(t *testing.T) {
@@ -232,5 +244,35 @@ func TestRepairFailureKeepsRetainedEmployeeClosed(t *testing.T) {
 	stored, _ := data.UserByUsername(t.Context(), "alice")
 	if !stored.Disabled || !stored.Offboarded {
 		t.Fatalf("failed repair changed retention state: %+v", stored)
+	}
+}
+
+func TestRenameWindowsAccountKeepsPortalIdentityAndSID(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateUser(t.Context(), "alice.portal", "S-1-5-21-1000", "hash")
+	_ = data.SetWindowsUsername(t.Context(), user.ID, `WORKSTATION\alice`)
+	platform := &lifecyclePlatform{}
+	result, err := (Lifecycle{Platform: platform, Users: data}).RenameWindowsAccount(t.Context(), "alice.portal", "alice2", []byte("windows rename password"))
+	if err != nil || result.Username != "alice.portal" || result.SID != user.SID || result.WindowsUsername != `WORKSTATION\alice2` || result.Disabled {
+		t.Fatalf("Windows rename changed employee identity: %+v err=%v", result, err)
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice.portal")
+	if stored.WindowsUsername != `WORKSTATION\alice2` || stored.SID != user.SID || platform.stops != 1 || platform.renames != 1 {
+		t.Fatalf("rename was not persisted safely: user=%+v platform=%+v", stored, platform)
+	}
+}
+
+func TestRenameWindowsAccountFailureLeavesPortalClosed(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	platform := &lifecyclePlatform{renameErr: errors.New("rename failed")}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).RenameWindowsAccount(t.Context(), "alice", "alice2", []byte("windows rename password")); err == nil {
+		t.Fatal("failed Windows rename was accepted")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || stored.WindowsUsername != "alice" {
+		t.Fatalf("failed rename was not recoverable: %+v", stored)
 	}
 }

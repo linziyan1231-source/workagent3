@@ -33,12 +33,18 @@ type RepairPlatform interface {
 	RepairInstalledRuntime(context.Context, store.User, []byte) error
 }
 
+type RenamePlatform interface {
+	LifecyclePlatform
+	RenameInstalledAccount(context.Context, store.User, string, []byte) (string, error)
+}
+
 type LifecycleUserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	SetUserEnabled(context.Context, string, bool) error
 	ResetUserPassword(context.Context, string, string) error
 	SetUserAdmin(context.Context, string, bool) error
 	SetUserOffboarded(context.Context, string, bool) error
+	SetWindowsUsername(context.Context, int64, string) error
 }
 
 // Lifecycle coordinates Portal account state with the SID-owned runtime. Its
@@ -231,6 +237,55 @@ func (l Lifecycle) Repair(ctx context.Context, username string, windowsPassword 
 			return user, err
 		}
 		user.Offboarded = false
+	}
+	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
+		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		return user, err
+	}
+	user.Disabled = false
+	return user, nil
+}
+
+func (l Lifecycle) RenameWindowsAccount(ctx context.Context, username, newWindowsUsername string, windowsPassword []byte) (store.User, error) {
+	defer zero(windowsPassword)
+	platform, ok := l.Platform.(RenamePlatform)
+	if !ok || l.Users == nil {
+		return store.User{}, errors.New("employee rename dependencies are required")
+	}
+	if err := winutil.ValidateLocalUsername(newWindowsUsername); err != nil {
+		return store.User{}, err
+	}
+	if len(windowsPassword) == 0 {
+		return store.User{}, errors.New("Windows password is required for rename")
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return store.User{}, err
+	}
+	if user.Admin || user.Offboarded {
+		return store.User{}, errors.New("active managed employee is required for Windows rename")
+	}
+	wasEnabled := !user.Disabled
+	if wasEnabled {
+		if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
+			return store.User{}, err
+		}
+		user.Disabled = true
+		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
+		}
+	}
+	canonical, err := platform.RenameInstalledAccount(ctx, user, newWindowsUsername, windowsPassword)
+	if err != nil {
+		return user, fmt.Errorf("rename Windows account: %w", err)
+	}
+	if err := l.Users.SetWindowsUsername(ctx, user.ID, canonical); err != nil {
+		return user, err
+	}
+	user.WindowsUsername = canonical
+	if !wasEnabled {
+		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		return user, nil
 	}
 	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
 		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)

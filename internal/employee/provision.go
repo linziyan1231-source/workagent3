@@ -34,6 +34,7 @@ type UserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	CreateDisabledUser(context.Context, string, string, string) (store.User, error)
 	SetUserCredentials(context.Context, int64, string, bool) error
+	SetWindowsUsername(context.Context, int64, string) error
 }
 
 type RuntimeAuthorizer interface {
@@ -66,6 +67,9 @@ func (p *Provisioner) Add(ctx context.Context, username string, portalPassword [
 	existing, lookupErr := p.Users.UserByUsername(ctx, username)
 	if lookupErr == nil && !existing.Disabled {
 		return store.User{}, errors.New("Portal username already exists")
+	}
+	if lookupErr == nil && existing.Offboarded {
+		return store.User{}, errors.New("offboarded employee requires explicit repair")
 	}
 	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 		return store.User{}, lookupErr
@@ -103,6 +107,10 @@ func (p *Provisioner) Add(ctx context.Context, username string, portalPassword [
 	if err != nil {
 		return store.User{}, err
 	}
+	if err := p.Users.SetWindowsUsername(ctx, user.ID, account.Canonical); err != nil {
+		return store.User{}, err
+	}
+	user.WindowsUsername = account.Canonical
 	credential, err := p.Secrets.RegistrationCredential()
 	if err != nil {
 		return store.User{}, err

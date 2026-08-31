@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
 )
@@ -49,6 +50,12 @@ func TestUpdateInstalledLimitsPreservesSIDOwnedRuntimeConfig(t *testing.T) {
 	var updated userhost.FileConfig
 	if err := json.Unmarshal(updatedPayload, &updated); err != nil || updated.SID != sid || updated.Limits != limits {
 		t.Fatalf("runtime config was not atomically updated: %+v %v", updated, err)
+	}
+}
+
+func TestLocalWindowsUsernameSeparatesPortalAndWindowsIdentity(t *testing.T) {
+	if value := localWindowsUsername(store.User{Username: "portal.login", WindowsUsername: `WORKSTATION\windows.user`}); value != "windows.user" {
+		t.Fatalf("local Windows username = %q", value)
 	}
 }
 
