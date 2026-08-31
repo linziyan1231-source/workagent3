@@ -27,6 +27,23 @@ remains disabled. `enable` starts the installed UserHost and waits for its
 authenticated Runtime lease before reopening the Portal account. A failed
 health check leaves the employee disabled.
 
+## Three-engine MCP acceptance
+
+Run the deterministic MCP smoke under the target employee SID after native
+Codex and Kimi authentication is ready. Point it at that SID's private native
+homes; do not copy credentials into the repository or a shared test account.
+
+```powershell
+$env:WORKAGENT_CODEX_SMOKE_HOME = 'E:\EmployeeData\S-1-5-21-1000\profile\.codex'
+$env:WORKAGENT_KIMI_SMOKE_HOME = 'E:\EmployeeData\S-1-5-21-1000\profile\.kimi'
+pnpm mcp:smoke
+```
+
+The gate launches the same credential-free managed stdio MCP through the
+official Harness MCP client, Codex app-server and Kimi ACP. It verifies the MCP
+handshake plus a real Harness `ping` tool call without sending a model prompt or
+printing native credentials.
+
 ## Component release and rollback
 
 The release controller accepts only these independently activatable components:
