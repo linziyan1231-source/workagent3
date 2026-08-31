@@ -19,7 +19,7 @@ export function App() {
 
 /**
  * WorkAgent3 owns authentication and transport only. The visible application
- * tree is the formal CLIENTNAME/AionUi Renderer tree, kept intact so its
+ * tree is the managed WorkAgent2 Web 78/AionUi Renderer tree, kept intact so its
  * layout, routes, settings pages and interaction states stay upstream-owned.
  */
 function AuthenticatedRenderer() {
