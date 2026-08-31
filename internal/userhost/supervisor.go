@@ -20,6 +20,8 @@ import (
 	"workagent3/internal/winutil"
 )
 
+var ErrRestartRequested = errors.New("runtime restart requested")
+
 type Config struct {
 	SID               string
 	DataRoot          string
@@ -34,14 +36,15 @@ type Config struct {
 }
 
 type Supervisor struct {
-	config        Config
-	job           *winutil.Job
-	lock          *winutil.InstanceLock
-	cmd           *exec.Cmd
-	exited        chan error
-	gateway       *runtimeGateway
-	gatewayExited chan error
-	once          sync.Once
+	config           Config
+	job              *winutil.Job
+	lock             *winutil.InstanceLock
+	cmd              *exec.Cmd
+	exited           chan error
+	gateway          *runtimeGateway
+	gatewayExited    chan error
+	restartRequested chan struct{}
+	once             sync.Once
 }
 
 func New(config Config) (*Supervisor, error) {
@@ -59,7 +62,7 @@ func New(config Config) (*Supervisor, error) {
 	if config.StartupTimeout <= 0 {
 		config.StartupTimeout = 45 * time.Second
 	}
-	return &Supervisor{config: config}, nil
+	return &Supervisor{config: config, restartRequested: make(chan struct{}, 1)}, nil
 }
 
 func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error) {
@@ -119,7 +122,12 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	gateway, err := newRuntimeGateway(directories.runtime, s.config.ManagedSkillsRoot, s.config.DataRoot, s.config.SID, target, token, job)
+	gateway, err := newRuntimeGateway(directories.runtime, s.config.ManagedSkillsRoot, s.config.DataRoot, s.config.SID, target, token, func() {
+		select {
+		case s.restartRequested <- struct{}{}:
+		default:
+		}
+	}, job)
 	if err != nil {
 		s.Close()
 		return runtimeapi.Registration{}, err
@@ -172,6 +180,8 @@ func (s *Supervisor) Serve(ctx context.Context, reporter LeaseReporter) error {
 				return errors.New("Runtime gateway stopped")
 			}
 			return fmt.Errorf("Runtime gateway stopped: %w", gatewayErr)
+		case <-s.restartRequested:
+			return ErrRestartRequested
 		case <-ticker.C:
 			if err := reporter.Publish(ctx, registration); err != nil {
 				return err

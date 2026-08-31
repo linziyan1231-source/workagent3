@@ -84,6 +84,16 @@ operators can export bounded audit results locally:
 go run ./cmd/audit-export -db data/audit.db -correlation-id '<id>' -limit 100
 ```
 
+The formal WorkAgent2 System and About pages use Portal's authenticated system
+port. `GET /api/system/status` reports build metadata and component health,
+`POST /api/system/runtime/restart` asks the current SID's UserHost to exit for
+Task Scheduler recovery, and `GET /api/system/diagnostics` downloads a
+permission-restricted ZIP containing only redacted build/component metadata and
+the request correlation ID. Runtime URLs, tokens, SIDs, request bodies, prompts,
+and file contents are excluded. Release builds can inject version metadata with
+Go linker flags for `workagent3/internal/buildinfo.Version`, `Commit`, and
+`BuildTime`; development builds report `dev` and `unknown` values.
+
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.

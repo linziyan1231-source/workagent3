@@ -31,7 +31,7 @@ type runtimeGateway struct {
 	oauth       *mcpOAuthManager
 }
 
-func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID string, target *url.URL, token string, assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID s
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandlerWithShared(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, assigners...)
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, restart, assigners...)
 	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth}, nil
 }
 
@@ -129,8 +129,14 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 }
 
 func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, assigners ...mcpProcessAssigner) http.Handler {
+	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, assigners...)
+}
+
+func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, restart func(), assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/system/status", runtimeSystemStatus(target, token))
+	mux.HandleFunc("POST /v1/system/restart", runtimeSystemRestart(restart))
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
 	mux.HandleFunc("POST /v1/credentials", createCredential(credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", revokeCredential(credentials, publisher))
@@ -168,6 +174,35 @@ func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func runtimeSystemStatus(target *url.URL, token string) http.HandlerFunc {
+	client := &http.Client{Timeout: 2 * time.Second}
+	return func(writer http.ResponseWriter, request *http.Request) {
+		healthURL := target.ResolveReference(&url.URL{Path: "/health"})
+		probe, _ := http.NewRequestWithContext(request.Context(), http.MethodGet, healthURL.String(), nil)
+		probe.Header.Set("Authorization", "Bearer "+token)
+		response, err := client.Do(probe)
+		status := "unhealthy"
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode >= 200 && response.StatusCode < 300 {
+				status = "healthy"
+			}
+		}
+		writeRuntimeJSON(writer, http.StatusOK, map[string]any{"components": []map[string]string{{"id": "userhost", "status": "healthy"}, {"id": "harness", "status": status}}})
+	}
+}
+
+func runtimeSystemRestart(restart func()) http.HandlerFunc {
+	return func(writer http.ResponseWriter, _ *http.Request) {
+		if restart == nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "runtime_restart_unavailable")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusAccepted, map[string]any{"accepted": true})
+		time.AfterFunc(100*time.Millisecond, restart)
+	}
 }
 
 func startMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {

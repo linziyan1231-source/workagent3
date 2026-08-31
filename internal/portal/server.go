@@ -114,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
@@ -123,6 +124,9 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/portal/me/notifications/stream", s.requireUser(s.notificationStream))
 	mux.HandleFunc("POST /api/portal/me/notifications/{id}/read", s.requireUser(s.readNotification))
 	mux.HandleFunc("POST /api/portal/me/notifications/{id}/acknowledge", s.requireUser(s.acknowledgeNotification))
+	mux.HandleFunc("GET /api/system/status", s.requireUser(s.systemStatus))
+	mux.HandleFunc("GET /api/system/diagnostics", s.requireUser(s.systemDiagnostics))
+	mux.HandleFunc("POST /api/system/runtime/restart", s.requireUser(s.restartRuntime))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))

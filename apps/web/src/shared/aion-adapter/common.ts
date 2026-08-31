@@ -2,6 +2,7 @@ import { modelAccessPort } from "../../features/models/modelAccessPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
 import { notificationPort } from "../../features/notifications/notificationPort.js";
+import { systemPort } from "../../features/system/systemPort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
@@ -193,6 +194,10 @@ export const ipcBridge = {
     setCloseToTray: { invoke: async () => undefined },
   },
   portal: {
+    getSystemStatus: { invoke: systemPort.status },
+    downloadDiagnostics: {
+      invoke: async () => window.location.assign(systemPort.diagnosticsUrl),
+    },
     getNotifications: { invoke: notificationPort.list },
     acknowledgeNotification: {
       invoke: ({ id }: { id: string }) => notificationPort.acknowledge(id),
@@ -274,7 +279,7 @@ export const ipcBridge = {
           body: JSON.stringify(input),
         }),
     },
-    restartService: { invoke: async () => ({ reconnect_after_ms: 2000 }) },
+    restartService: { invoke: systemPort.restartRuntime },
     listSharedInvites: {
       invoke: async () => {
         const result = await requestJson<{ invites: SharedInviteResponse[] }>(
