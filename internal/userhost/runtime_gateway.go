@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -312,7 +313,11 @@ func listSkills(skills *skillruntime.Store) http.HandlerFunc {
 			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
 			return
 		}
-		writeRuntimeJSON(writer, http.StatusOK, entries)
+		resolved := make([]resolvedSkillEntry, 0, len(entries))
+		for _, entry := range entries {
+			resolved = append(resolved, resolveSkillEntry(entry, exec.LookPath))
+		}
+		writeRuntimeJSON(writer, http.StatusOK, resolved)
 	}
 }
 
@@ -327,7 +332,7 @@ func getSkill(skills *skillruntime.Store) http.HandlerFunc {
 			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
 			return
 		}
-		writeRuntimeJSON(writer, http.StatusOK, entry)
+		writeRuntimeJSON(writer, http.StatusOK, resolveSkillEntry(entry, exec.LookPath))
 	}
 }
 
@@ -342,6 +347,22 @@ func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_enabled_state")
 			return
 		}
+		if *input.Enabled {
+			current, err := skills.Get(request.Context(), request.PathValue("id"))
+			if errors.Is(err, skillruntime.ErrNotFound) {
+				writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
+				return
+			}
+			if err != nil {
+				writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
+				return
+			}
+			resolved := resolveSkillEntry(current, exec.LookPath)
+			if resolved.Health != "ready" {
+				writeRuntimeError(writer, http.StatusConflict, "skill_dependency_unavailable:"+resolved.UnavailableReason)
+				return
+			}
+		}
 		entry, err := skills.SetEnabled(request.Context(), request.PathValue("id"), *input.Enabled)
 		if errors.Is(err, skillruntime.ErrNotFound) {
 			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
@@ -355,7 +376,7 @@ func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
 			return
 		}
-		writeRuntimeJSON(writer, http.StatusOK, entry)
+		writeRuntimeJSON(writer, http.StatusOK, resolveSkillEntry(entry, exec.LookPath))
 	}
 }
 

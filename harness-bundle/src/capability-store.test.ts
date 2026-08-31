@@ -59,6 +59,8 @@ describe("UserHost-owned skill projection", () => {
     enabled: true,
     relativePath: "drawing-review/drawing-review",
     requiredMcpServerIds: [],
+    requiredCommands: [],
+    health: "ready" as const,
   };
 
   it("keeps private roots out of the public catalog", () => {

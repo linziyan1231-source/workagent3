@@ -12,6 +12,9 @@ export const skillCatalogEntrySchema = z.object({
     .min(1)
     .refine((path) => !/^(?:[a-z]:|[/\\])/i.test(path)),
   requiredMcpServerIds: z.array(z.string().min(1)),
+  requiredCommands: z.array(z.string().min(1)).default([]),
+  health: z.enum(["ready", "unavailable"]).default("ready"),
+  unavailableReason: z.string().min(1).optional(),
 });
 export type SkillCatalogEntry = z.infer<typeof skillCatalogEntrySchema>;
 export const skillCatalogListSchema = z.array(skillCatalogEntrySchema);

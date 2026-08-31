@@ -10,6 +10,8 @@ const skill = {
   enabled: true,
   relativePath: "skills/quantity-surveyor",
   requiredMcpServerIds: [],
+  requiredCommands: [],
+  health: "ready" as const,
 };
 
 afterEach(() => vi.unstubAllGlobals());

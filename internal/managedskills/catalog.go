@@ -25,6 +25,7 @@ type Package struct {
 	RelativePath         string   `json:"relativePath"`
 	EnabledByDefault     bool     `json:"enabledByDefault"`
 	RequiredMCPServerIDs []string `json:"requiredMcpServerIds"`
+	RequiredCommands     []string `json:"requiredCommands,omitempty"`
 	SkillSubdirectory    string   `json:"skillSubdirectory,omitempty"`
 }
 
@@ -72,7 +73,7 @@ func Sync(ctx context.Context, releaseRoot string, skills *skillruntime.Store) e
 		_, err = skills.InstallManaged(ctx, skillruntime.InstallInput{
 			Entry: skillruntime.Entry{
 				ID: pack.ID, Name: pack.Name, Description: pack.Description, Version: pack.Version,
-				Source: "managed", Enabled: enabled, RequiredMCPServerIDs: pack.RequiredMCPServerIDs,
+				Source: "managed", Enabled: enabled, RequiredMCPServerIDs: pack.RequiredMCPServerIDs, RequiredCommands: pack.RequiredCommands,
 			},
 			SourceDirectory:   source,
 			SkillSubdirectory: pack.SkillSubdirectory,

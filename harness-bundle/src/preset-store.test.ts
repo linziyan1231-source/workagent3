@@ -71,6 +71,41 @@ describe("SID-private preset store", () => {
     ).toThrow("invalid_mcp_binding:missing:not_found");
   });
 
+  it("rejects a skill whose SID command dependency is unavailable", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const skills = new SkillCatalogStore();
+    const root = process.platform === "win32" ? "C:\\private\\office" : "/private/office";
+    skills.replace({
+      skills: [
+        {
+          entry: {
+            id: "office",
+            name: "Office",
+            description: "Office documents",
+            version: "1",
+            source: "managed",
+            enabled: true,
+            relativePath: "office/office",
+            requiredMcpServerIds: [],
+            requiredCommands: ["officecli"],
+            health: "unavailable",
+            unavailableReason: "command_not_found:officecli",
+          },
+          root,
+        },
+      ],
+    });
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      skills,
+      new McpCatalogStore(),
+    );
+    expect(() =>
+      store.create({ name: "Office", engine: "harness", skillIds: ["office"] }),
+    ).toThrow("invalid_skill_binding:office:command_not_found:officecli");
+  });
+
   it("freezes resolved MCP definitions in the session binding", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const mcp = new McpCatalogStore();

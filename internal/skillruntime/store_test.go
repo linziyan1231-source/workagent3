@@ -34,6 +34,7 @@ func TestInstallListDisableAndRemove(t *testing.T) {
 			Source:               "user",
 			Enabled:              true,
 			RequiredMCPServerIDs: []string{"dwg-server"},
+			RequiredCommands:     []string{"officecli"},
 		},
 		SourceDirectory: source,
 	})
@@ -42,6 +43,9 @@ func TestInstallListDisableAndRemove(t *testing.T) {
 	}
 	if filepath.IsAbs(installed.RelativePath) || installed.RelativePath != "drawing-review/drawing-review" {
 		t.Fatalf("unexpected relative path %q", installed.RelativePath)
+	}
+	if len(installed.RequiredCommands) != 1 || installed.RequiredCommands[0] != "officecli" {
+		t.Fatalf("command dependencies were not preserved: %#v", installed.RequiredCommands)
 	}
 	contents, err := os.ReadFile(filepath.Join(store.RootFor(installed), "drawing-review", "SKILL.md"))
 	if err != nil || !strings.Contains(string(contents), "Drawing Review") {

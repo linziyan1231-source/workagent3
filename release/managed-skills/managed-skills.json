@@ -42,55 +42,61 @@
       "id": "officecli-data-dashboard",
       "name": "officecli-data-dashboard",
       "description": "Create polished Excel dashboard workbooks with OfficeCLI, including KPI cards, charts, conditional formatting, and visual QA.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-data-dashboard",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "officecli-docx",
       "name": "officecli-docx",
       "description": "Create, inspect, edit, and validate Word documents through OfficeCLI.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-docx",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "officecli-financial-model",
       "name": "officecli-financial-model",
       "description": "Build auditable financial models and investor-grade workbooks with OfficeCLI.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-financial-model",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "officecli-pptx",
       "name": "officecli-pptx",
       "description": "Create, inspect, edit, and validate PowerPoint presentations through OfficeCLI.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-pptx",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "officecli-word-form",
       "name": "officecli-word-form",
       "description": "Create professional fillable Word forms and form-style documents with OfficeCLI.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-word-form",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "officecli-xlsx",
       "name": "officecli-xlsx",
       "description": "Create, inspect, edit, calculate, and validate Excel workbooks through OfficeCLI.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "relativePath": "officecli-xlsx",
       "enabledByDefault": false,
-      "requiredMcpServerIds": []
+      "requiredMcpServerIds": [],
+      "requiredCommands": ["officecli"]
     },
     {
       "id": "weixin-file-send",

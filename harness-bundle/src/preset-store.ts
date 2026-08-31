@@ -202,6 +202,10 @@ export class PresetStore {
         throw new Error(`invalid_skill_binding:${id}:not_found`);
       if (!skill.enabled)
         throw new Error(`invalid_skill_binding:${id}:disabled`);
+      if (skill.health === "unavailable")
+        throw new Error(
+          `invalid_skill_binding:${id}:${skill.unavailableReason ?? "unavailable"}`,
+        );
     }
     for (const id of preset.mcpServerIds) {
       const server = this.#mcp?.getServer(id);

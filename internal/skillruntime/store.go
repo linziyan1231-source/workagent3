@@ -31,6 +31,7 @@ type Entry struct {
 	Enabled              bool     `json:"enabled"`
 	RelativePath         string   `json:"relativePath"`
 	RequiredMCPServerIDs []string `json:"requiredMcpServerIds"`
+	RequiredCommands     []string `json:"requiredCommands"`
 }
 
 type InstallInput struct {
@@ -80,11 +81,16 @@ CREATE TABLE IF NOT EXISTS skills (
   enabled INTEGER NOT NULL CHECK (enabled IN (0,1)),
   relative_path TEXT NOT NULL UNIQUE,
   required_mcp_server_ids_json TEXT NOT NULL CHECK (json_valid(required_mcp_server_ids_json)),
+  required_commands_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(required_commands_json)),
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );`)
 	if err != nil {
 		return fmt.Errorf("migrate skill runtime: %w", err)
+	}
+	_, alterErr := s.db.ExecContext(ctx, `ALTER TABLE skills ADD COLUMN required_commands_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(required_commands_json))`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column name") {
+		return fmt.Errorf("migrate skill command dependencies: %w", alterErr)
 	}
 	return nil
 }
@@ -137,12 +143,13 @@ func (s *Store) Install(ctx context.Context, input InstallInput) (Entry, error) 
 		}
 	}()
 	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
+	requiredCommands, _ := json.Marshal(input.RequiredCommands)
 	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	stamp := s.now().UTC().UnixMilli()
 	_, err = s.db.ExecContext(ctx, `INSERT INTO skills
-(id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,created_at,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
-		input.Source, input.Enabled, relativePath, string(requiredMCP), stamp, stamp)
+(id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,required_commands_json,created_at,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
+		input.Source, input.Enabled, relativePath, string(requiredMCP), string(requiredCommands), stamp, stamp)
 	if err != nil {
 		return Entry{}, fmt.Errorf("store installed skill: %w", err)
 	}
@@ -233,6 +240,7 @@ func (s *Store) installOrReplace(ctx context.Context, input InstallInput, replac
 		}
 	}()
 	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
+	requiredCommands, _ := json.Marshal(input.RequiredCommands)
 	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	transaction, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -244,9 +252,9 @@ func (s *Store) installOrReplace(ctx context.Context, input InstallInput, replac
 	}
 	stamp := s.now().UTC().UnixMilli()
 	if _, err := transaction.ExecContext(ctx, `INSERT INTO skills
-(id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,created_at,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
-		input.Source, input.Enabled, relativePath, string(requiredMCP), stamp, stamp); err != nil {
+(id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,required_commands_json,created_at,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Version),
+		input.Source, input.Enabled, relativePath, string(requiredMCP), string(requiredCommands), stamp, stamp); err != nil {
 		return Entry{}, fmt.Errorf("store upgraded skill package: %w", err)
 	}
 	if err := transaction.Commit(); err != nil {
@@ -404,7 +412,7 @@ func (s *Store) ExportUserPackage(ctx context.Context, name string) (Entry, []by
 	return entry, contents, nil
 }
 
-const skillSelect = `SELECT id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json FROM skills`
+const skillSelect = `SELECT id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,required_commands_json FROM skills`
 
 type scanner interface{ Scan(...any) error }
 
@@ -412,7 +420,8 @@ func scanEntry(row scanner) (Entry, error) {
 	var entry Entry
 	var enabled int
 	var requiredMCPJSON string
-	err := row.Scan(&entry.ID, &entry.Name, &entry.Description, &entry.Version, &entry.Source, &enabled, &entry.RelativePath, &requiredMCPJSON)
+	var requiredCommandsJSON string
+	err := row.Scan(&entry.ID, &entry.Name, &entry.Description, &entry.Version, &entry.Source, &enabled, &entry.RelativePath, &requiredMCPJSON, &requiredCommandsJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Entry{}, ErrNotFound
 	}
@@ -421,6 +430,9 @@ func scanEntry(row scanner) (Entry, error) {
 	}
 	if err := json.Unmarshal([]byte(requiredMCPJSON), &entry.RequiredMCPServerIDs); err != nil {
 		return Entry{}, fmt.Errorf("decode skill MCP dependencies: %w", err)
+	}
+	if err := json.Unmarshal([]byte(requiredCommandsJSON), &entry.RequiredCommands); err != nil {
+		return Entry{}, fmt.Errorf("decode skill command dependencies: %w", err)
 	}
 	entry.Enabled = enabled == 1
 	return entry, nil
@@ -437,6 +449,11 @@ func validateInstall(input InstallInput) error {
 	for _, id := range input.RequiredMCPServerIDs {
 		if strings.TrimSpace(id) == "" {
 			return errors.New("invalid required MCP server")
+		}
+	}
+	for _, command := range input.RequiredCommands {
+		if !skillIDPattern.MatchString(command) {
+			return errors.New("invalid required command")
 		}
 	}
 	return nil

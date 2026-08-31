@@ -69,8 +69,8 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		if entry.ID == "professional-database" && (entry.Enabled || len(entry.RequiredMCPServerIDs) != 1 || entry.RequiredMCPServerIDs[0] != "professional-database") {
 			t.Fatalf("professional database release = %#v", entry)
 		}
-		if strings.HasPrefix(entry.ID, "officecli-") && entry.Enabled {
-			t.Fatalf("OfficeCLI skill must remain disabled until its command dependency is ready: %#v", entry)
+		if strings.HasPrefix(entry.ID, "officecli-") && (entry.Enabled || len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "officecli") {
+			t.Fatalf("OfficeCLI skill dependency state = %#v", entry)
 		}
 		if entry.ID == "weixin-file-send" && entry.Enabled {
 			t.Fatalf("Weixin delivery must remain disabled until its connector protocol is ready: %#v", entry)

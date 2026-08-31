@@ -2,6 +2,7 @@ package userhost
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,6 +50,53 @@ func TestHarnessSkillProjectionKeepsRootsOnPrivateRoute(t *testing.T) {
 	}
 	if !strings.Contains(received, `"id":"drawing-review"`) || !strings.Contains(received, `"root":`) || !strings.Contains(received, filepath.Base(store.RootFor(entry))) {
 		t.Fatalf("projection did not contain installed skill root: %s", received)
+	}
+}
+
+func TestResolveSkillEntryReportsMissingCommands(t *testing.T) {
+	entry := skillruntime.Entry{ID: "office", RequiredCommands: []string{"officecli"}}
+	resolved := resolveSkillEntry(entry, func(command string) (string, error) {
+		if command != "officecli" {
+			t.Fatalf("unexpected command %q", command)
+		}
+		return "", errors.New("not found")
+	})
+	if resolved.Health != "unavailable" || resolved.UnavailableReason != "command_not_found:officecli" {
+		t.Fatalf("resolved entry = %#v", resolved)
+	}
+}
+
+func TestRuntimeGatewayRejectsEnablingSkillWithMissingCommand(t *testing.T) {
+	store := openGatewaySkills(t)
+	source := filepath.Join(t.TempDir(), "missing-command-skill")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: missing-command\ndescription: Missing command\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.Install(t.Context(), skillruntime.InstallInput{
+		Entry: skillruntime.Entry{
+			ID: "missing-command", Name: "Missing Command", Version: "1", Source: "managed", Enabled: false,
+			RequiredCommands: []string{"workagent-command-that-does-not-exist"},
+		},
+		SourceDirectory: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := openEmptyMCPCatalog(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse("http://127.0.0.1:1")
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, store, gatewayTestPublisher{}, nil, nil, target, "token")
+	request := httptest.NewRequest(http.MethodPatch, "/v1/skills/missing-command", strings.NewReader(`{"enabled":true}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "skill_dependency_unavailable:command_not_found:workagent-command-that-does-not-exist") {
+		t.Fatalf("enable response %d: %s", response.Code, response.Body.String())
 	}
 }
 

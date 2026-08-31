@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
 
 	"workagent3/internal/skillruntime"
 )
@@ -28,8 +29,28 @@ type harnessSkillProjection struct {
 }
 
 type harnessResolvedSkill struct {
-	Entry skillruntime.Entry `json:"entry"`
+	Entry resolvedSkillEntry `json:"entry"`
 	Root  string             `json:"root"`
+}
+
+type resolvedSkillEntry struct {
+	skillruntime.Entry
+	Health            string `json:"health"`
+	UnavailableReason string `json:"unavailableReason,omitempty"`
+}
+
+type commandLookup func(string) (string, error)
+
+func resolveSkillEntry(entry skillruntime.Entry, lookup commandLookup) resolvedSkillEntry {
+	resolved := resolvedSkillEntry{Entry: entry, Health: "ready"}
+	for _, command := range entry.RequiredCommands {
+		if _, err := lookup(command); err != nil {
+			resolved.Health = "unavailable"
+			resolved.UnavailableReason = "command_not_found:" + command
+			return resolved
+		}
+	}
+	return resolved
 }
 
 func (p *harnessSkillProjectionPublisher) Publish(ctx context.Context) error {
@@ -39,7 +60,7 @@ func (p *harnessSkillProjectionPublisher) Publish(ctx context.Context) error {
 	}
 	projection := harnessSkillProjection{Skills: make([]harnessResolvedSkill, 0, len(entries))}
 	for _, entry := range entries {
-		projection.Skills = append(projection.Skills, harnessResolvedSkill{Entry: entry, Root: p.store.RootFor(entry)})
+		projection.Skills = append(projection.Skills, harnessResolvedSkill{Entry: resolveSkillEntry(entry, exec.LookPath), Root: p.store.RootFor(entry)})
 	}
 	body, err := json.Marshal(projection)
 	if err != nil {

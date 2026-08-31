@@ -95,7 +95,7 @@ export function AionPresetPage({
   const availableSkills = useMemo(
     () =>
       skills
-        .filter((skill) => skill.enabled)
+        .filter((skill) => skill.enabled && skill.health === "ready")
         .map((skill) => ({
           name: skill.name,
           description: skill.description,
