@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -33,5 +33,41 @@ describe("Web feature boundaries", () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it("keeps visible application pages owned by the formal Web78 Renderer", () => {
+    const temporaryPageReplicas = [
+      "features/auth/LoginPage.tsx",
+      "features/conversation/ConversationPage.tsx",
+      "features/workspace/WorkspacePanel.tsx",
+      "shared/ui/aionui/AionAutomationPage.tsx",
+      "shared/ui/aionui/AionGuidEmptyState.tsx",
+      "shared/ui/aionui/AionMessageList.tsx",
+      "shared/ui/aionui/AionPresetPage.tsx",
+      "shared/ui/aionui/AionSendBox.tsx",
+      "shared/ui/aionui/AionSider.tsx",
+      "shared/ui/aionui/AionTeamCreateModal.tsx",
+      "shared/ui/aionui/AionTeamPage.tsx",
+      "shared/ui/aionui/AionTeamSiderSection.tsx",
+      "shared/ui/aionui/BrandLogo.tsx",
+      "shared/ui/aionui/aionui.css",
+    ];
+    expect(
+      temporaryPageReplicas.filter((path) =>
+        existsSync(join(sourceRoot, path)),
+      ),
+    ).toEqual([]);
+
+    const application = readFileSync(
+      join(sourceRoot, "app", "App.tsx"),
+      "utf8",
+    );
+    for (const formalComponent of [
+      "@renderer/components/layout/Layout",
+      "@renderer/components/layout/Router",
+      "@renderer/components/layout/Sider",
+    ]) {
+      expect(application).toContain(formalComponent);
+    }
   });
 });

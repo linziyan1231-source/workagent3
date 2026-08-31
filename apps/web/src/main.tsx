@@ -7,7 +7,6 @@ import "@arco-design/web-react/es/_util/react-19-adapter";
 import "@arco-design/web-react/dist/css/arco.css";
 import "virtual:uno.css";
 import "./styles.css";
-import "./shared/ui/aionui/aionui.css";
 import "../../../third_party/aionui/packages/desktop/src/renderer/styles/arco-override.css";
 import "../../../third_party/aionui/packages/desktop/src/renderer/styles/themes/index.css";
 import "../../../third_party/aionui/packages/desktop/src/renderer/styles/markdown.css";
