@@ -59,11 +59,13 @@ type SkillMarketPort interface {
 }
 
 type Modules struct {
-	ModelAccess ModelAccessPort
-	Quota       QuotaUsagePort
-	Speech      SpeechPort
-	Settings    SettingsPort
-	SkillMarket SkillMarketPort
+	ModelAccess    ModelAccessPort
+	Quota          QuotaUsagePort
+	Speech         SpeechPort
+	Settings       SettingsPort
+	SkillMarket    SkillMarketPort
+	Collaboration  CollaborationPort
+	SharedProjects SharedProjectPlatformPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -100,6 +102,15 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/skill-market", s.requireUser(s.publishMarketSkill))
 	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
 	mux.HandleFunc("DELETE /api/portal/skill-market", s.requireUser(s.deleteMarketSkill))
+	mux.HandleFunc("GET /api/portal/shared-projects", s.requireUser(s.sharedProjects))
+	mux.HandleFunc("POST /api/portal/shared-projects", s.requireUser(s.sharedProjects))
+	mux.HandleFunc("PATCH /api/portal/shared-projects/{id}", s.requireUser(s.sharedProject))
+	mux.HandleFunc("GET /api/portal/shared-projects/{id}/members", s.requireUser(s.sharedProjectMembers))
+	mux.HandleFunc("POST /api/portal/shared-projects/{id}/invites", s.requireUser(s.sharedProjectInvites))
+	mux.HandleFunc("DELETE /api/portal/shared-projects/{id}/members/{userID}", s.requireUser(s.sharedProjectMember))
+	mux.HandleFunc("POST /api/portal/shared-projects/{id}/ownership", s.requireUser(s.sharedProjectOwnership))
+	mux.HandleFunc("GET /api/portal/shared-invites", s.requireUser(s.sharedInvites))
+	mux.HandleFunc("POST /api/portal/shared-invites/{id}/{action}", s.requireUser(s.sharedInviteAction))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))

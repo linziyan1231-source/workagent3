@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/collaboration"
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
@@ -40,6 +41,7 @@ func run() error {
 	quotaPath := flag.String("quota-db", "", "Quota SQLite path (defaults beside Portal database)")
 	settingsPath := flag.String("settings-db", "", "Settings SQLite path (defaults beside Portal database)")
 	skillMarketPath := flag.String("skill-market-db", "", "Skill Market SQLite path (defaults beside Portal database)")
+	collaborationPath := flag.String("collaboration-db", "", "Collaboration SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
@@ -67,7 +69,10 @@ func run() error {
 	if *skillMarketPath == "" {
 		*skillMarketPath = filepath.Join(filepath.Dir(*databasePath), "skill-market.db")
 	}
-	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath, *skillMarketPath} {
+	if *collaborationPath == "" {
+		*collaborationPath = filepath.Join(filepath.Dir(*databasePath), "collaboration.db")
+	}
+	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath, *skillMarketPath, *collaborationPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return fmt.Errorf("create module data directory: %w", err)
 		}
@@ -95,6 +100,11 @@ func run() error {
 		return err
 	}
 	defer market.Close()
+	sharedProjects, err := collaboration.Open(*collaborationPath)
+	if err != nil {
+		return err
+	}
+	defer sharedProjects.Close()
 	speechProxy, err := speech.NewProxy(
 		os.Getenv("WORKAGENT_SPEECH_URL"),
 		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
@@ -109,7 +119,7 @@ func run() error {
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects})
 	if err != nil {
 		return err
 	}
