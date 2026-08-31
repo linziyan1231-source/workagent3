@@ -270,6 +270,7 @@ func (s *Server) sharedInviteAction(writer http.ResponseWriter, request *http.Re
 		}
 		if err := s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID); err != nil {
 			_ = s.modules.Collaboration.AbortInviteAcceptance(request.Context(), id, user.ID)
+			_ = s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID)
 			writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
 			return
 		}
@@ -301,6 +302,7 @@ func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.R
 	}
 	if err := s.modules.SharedProjects.RevokeProjectMember(request.Context(), member.ProjectID, member.SID); err != nil {
 		_ = s.modules.Collaboration.AbortMemberRemoval(request.Context(), member.ProjectID, user.ID, targetUserID)
+		_ = s.modules.SharedProjects.RevokeProjectMember(request.Context(), member.ProjectID, member.SID)
 		writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
 		return
 	}

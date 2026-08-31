@@ -235,6 +235,50 @@ func TestInviteAcceptanceCanRollbackACLFailure(t *testing.T) {
 	acceptInvite(t, store, invite.ID, 2)
 }
 
+func TestACLStateTracksPendingFilesystemProjection(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, err := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginInviteAcceptance(t.Context(), invite.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	owner, members, err := store.ACLState(t.Context(), project.ID)
+	if err != nil || owner != ownerSID || len(members) != 1 || members[0] != memberSID {
+		t.Fatalf("pending ACL state = %q %#v, %v", owner, members, err)
+	}
+	rootMembers, err := store.OwnerRootACLState(t.Context(), ownerSID)
+	if err != nil || len(rootMembers) != 1 || rootMembers[0] != memberSID {
+		t.Fatalf("pending owner-root ACL state = %#v, %v", rootMembers, err)
+	}
+	if _, err := store.CompleteInviteAcceptance(t.Context(), invite.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	owner, members, err = store.ACLState(t.Context(), project.ID)
+	if err != nil || owner != ownerSID || len(members) != 0 {
+		t.Fatalf("removal-pending ACL state = %q %#v, %v", owner, members, err)
+	}
+	rootMembers, err = store.OwnerRootACLState(t.Context(), ownerSID)
+	if err != nil || len(rootMembers) != 0 {
+		t.Fatalf("removal-pending owner-root ACL state = %#v, %v", rootMembers, err)
+	}
+	if err := store.AbortMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	_, members, err = store.ACLState(t.Context(), project.ID)
+	if err != nil || len(members) != 1 || members[0] != memberSID {
+		t.Fatalf("restored ACL state = %#v, %v", members, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	return openStoreAt(t, ":memory:")

@@ -119,7 +119,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	gateway, err := newRuntimeGateway(directories.runtime, s.config.ManagedSkillsRoot, target, token, job)
+	gateway, err := newRuntimeGateway(directories.runtime, s.config.ManagedSkillsRoot, s.config.DataRoot, s.config.SID, target, token, job)
 	if err != nil {
 		s.Close()
 		return runtimeapi.Registration{}, err

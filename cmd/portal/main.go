@@ -119,7 +119,11 @@ func run() error {
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects})
+	sharedPlatform, err := portal.NewRuntimeSharedProjectPlatform(registry, sharedProjects)
+	if err != nil {
+		return err
+	}
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform})
 	if err != nil {
 		return err
 	}

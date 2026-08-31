@@ -294,6 +294,51 @@ func (s *Store) Members(ctx context.Context, projectID string, requesterID int64
 	return members, rows.Err()
 }
 
+// ACLState returns the exact filesystem authorization projection. Pending ACL
+// additions are included and removal-pending members are excluded so Portal can
+// compensate the database transition around one idempotent ACL operation.
+func (s *Store) ACLState(ctx context.Context, projectID string) (string, []string, error) {
+	var ownerSID string
+	if err := s.db.QueryRowContext(ctx, `SELECT owner_sid FROM shared_projects WHERE id=? AND state IN ('provisioning','active','transfer_pending')`, projectID).Scan(&ownerSID); errors.Is(err, sql.ErrNoRows) {
+		return "", nil, ErrNotFound
+	} else if err != nil {
+		return "", nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT sid FROM shared_members WHERE project_id=? AND role='member' AND state IN ('accepted','pending_acl') ORDER BY upper(sid)`, projectID)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	members := []string{}
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err != nil {
+			return "", nil, err
+		}
+		members = append(members, sid)
+	}
+	return ownerSID, members, rows.Err()
+}
+
+// OwnerRootACLState returns the union of principals that must retain traversal
+// access to an owner's shared root across every live project they own.
+func (s *Store) OwnerRootACLState(ctx context.Context, ownerSID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT m.sid FROM shared_members m JOIN shared_projects p ON p.id=m.project_id WHERE upper(p.owner_sid)=upper(?) AND p.state IN ('provisioning','active','transfer_pending') AND m.role='member' AND m.state IN ('accepted','pending_acl') ORDER BY upper(m.sid)`, ownerSID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	members := []string{}
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err != nil {
+			return nil, err
+		}
+		members = append(members, sid)
+	}
+	return members, rows.Err()
+}
+
 func (s *Store) CreateInvite(ctx context.Context, invite Invite) (Invite, error) {
 	if !stableIDPattern.MatchString(invite.ID) || invite.InviterUserID <= 0 || invite.TargetUserID <= 0 || invite.InviterUserID == invite.TargetUserID || !validSID(invite.TargetSID) || invite.ExpiresAt.IsZero() {
 		return Invite{}, errors.New("invalid shared invite")
