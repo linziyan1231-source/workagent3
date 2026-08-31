@@ -28,6 +28,12 @@ func TestSharedACLPoliciesApplyAndVerifyExactTree(t *testing.T) {
 	if err := ApplySharedProjectTree(projectRoot, ownerSID, []string{memberSID}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ApplySharedOwnerRoot(ownerRoot, ownerSID, nil); err != nil {
+		t.Fatalf("remove member from owner root ACL: %v", err)
+	}
+	if err := ApplySharedProjectTree(projectRoot, ownerSID, nil); err != nil {
+		t.Fatalf("remove member from project ACL: %v", err)
+	}
 }
 
 func TestSharedACLRejectsReparseRoot(t *testing.T) {

@@ -37,6 +37,8 @@ type CollaborationPort interface {
 	BeginOwnershipTransfer(context.Context, collaboration.OwnershipTransfer, int64) (collaboration.OwnershipTransfer, error)
 	CompleteOwnershipTransfer(context.Context, string) (collaboration.Project, error)
 	AbortOwnershipTransfer(context.Context, string) error
+	FinalizeOwnershipTransfer(context.Context, string) error
+	FinalizingOwnershipTransfers(context.Context) ([]collaboration.OwnershipTransfer, error)
 	CreateConversation(context.Context, collaboration.Conversation, int64) (collaboration.Conversation, error)
 	ConversationForUser(context.Context, string, int64, bool) (collaboration.Conversation, error)
 	ListConversations(context.Context, int64, bool) ([]collaboration.Conversation, error)
@@ -486,6 +488,10 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 		return
 	}
 	if err := s.modules.SharedProjects.FinalizeProjectOwnership(request.Context(), transfer.ProjectID, target.SID, true); err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
+		return
+	}
+	if err := s.modules.Collaboration.FinalizeOwnershipTransfer(request.Context(), transfer.ID); err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
 		return
 	}

@@ -155,6 +155,9 @@ func (m *sharedProjectManager) prepareTransfer(projectID string, request sharedP
 func (m *sharedProjectManager) finishTransfer(projectID string, commit bool) error {
 	journal, err := m.readTransferJournal(projectID)
 	if err != nil {
+		if commit && errors.Is(err, os.ErrNotExist) {
+			return requireNormalDirectory(filepath.Join(m.base, "shared", m.ownerSID, projectID))
+		}
 		return err
 	}
 	if !commit {

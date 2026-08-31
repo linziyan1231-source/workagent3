@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS shared_ownership_transfers (
   to_sid TEXT NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('pending','committed','aborted')),
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  finalized_at INTEGER
 );
 CREATE UNIQUE INDEX IF NOT EXISTS shared_pending_transfer
 ON shared_ownership_transfers(project_id) WHERE state='pending';
@@ -215,6 +216,36 @@ CREATE TABLE IF NOT EXISTS shared_ai_run_payers (
 `)
 	if err != nil {
 		return fmt.Errorf("migrate collaboration database: %w", err)
+	}
+	return s.ensureOwnershipTransferFinalizedColumn(ctx)
+}
+
+func (s *Store) ensureOwnershipTransferFinalizedColumn(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(shared_ownership_transfers)`)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "finalized_at" {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE shared_ownership_transfers ADD COLUMN finalized_at INTEGER`); err != nil {
+		return fmt.Errorf("add ownership transfer finalization marker: %w", err)
 	}
 	return nil
 }
@@ -732,6 +763,13 @@ func (s *Store) BeginOwnershipTransfer(ctx context.Context, transfer OwnershipTr
 	if state != "active" {
 		return OwnershipTransfer{}, ErrConflict
 	}
+	var unfinalized int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM shared_ownership_transfers WHERE project_id=? AND state='committed' AND finalized_at IS NULL`, transfer.ProjectID).Scan(&unfinalized); err != nil {
+		return OwnershipTransfer{}, err
+	}
+	if unfinalized != 0 {
+		return OwnershipTransfer{}, ErrTransferPending
+	}
 	var memberSID string
 	if err := tx.QueryRowContext(ctx, `SELECT sid FROM shared_members WHERE project_id=? AND user_id=? AND role='member' AND state='accepted'`, transfer.ProjectID, transfer.ToUserID).Scan(&memberSID); err != nil || !strings.EqualFold(memberSID, transfer.ToSID) {
 		return OwnershipTransfer{}, ErrForbidden
@@ -844,8 +882,25 @@ func (s *Store) OwnershipTransfer(ctx context.Context, id string) (OwnershipTran
 	return transfer, nil
 }
 
+func (s *Store) FinalizeOwnershipTransfer(ctx context.Context, transferID string) error {
+	stamp := s.now().UTC().UnixMilli()
+	result, err := s.db.ExecContext(ctx, `UPDATE shared_ownership_transfers SET finalized_at=COALESCE(finalized_at,?),updated_at=? WHERE id=? AND state='committed'`, stamp, stamp, transferID)
+	if err != nil {
+		return err
+	}
+	return requireOne(result, ErrConflict)
+}
+
+func (s *Store) FinalizingOwnershipTransfers(ctx context.Context) ([]OwnershipTransfer, error) {
+	return s.ownershipTransfersByQuery(ctx, `SELECT id FROM shared_ownership_transfers WHERE state='committed' AND finalized_at IS NULL ORDER BY updated_at,id`)
+}
+
 func (s *Store) PendingOwnershipTransfers(ctx context.Context) ([]OwnershipTransfer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM shared_ownership_transfers WHERE state='pending' ORDER BY created_at,id`)
+	return s.ownershipTransfersByQuery(ctx, `SELECT id FROM shared_ownership_transfers WHERE state='pending' ORDER BY created_at,id`)
+}
+
+func (s *Store) ownershipTransfersByQuery(ctx context.Context, query string) ([]OwnershipTransfer, error) {
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

@@ -58,4 +58,7 @@ func TestSharedProjectTransferJournalCommitsMovedProject(t *testing.T) {
 	if _, err := os.Stat(source); !os.IsNotExist(err) {
 		t.Fatalf("old project path still exists: %v", err)
 	}
+	if err := manager.Apply(context.Background(), projectID, sharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
+		t.Fatalf("replayed transfer commit was not idempotent: %v", err)
+	}
 }

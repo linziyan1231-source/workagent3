@@ -2,6 +2,7 @@ package collaboration
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,47 @@ const (
 	ownerSID   = "S-1-5-21-1000"
 	memberSID  = "S-1-5-21-2000"
 )
+
+func TestMigrationAddsOwnershipTransferFinalizationMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "collaboration.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE shared_ownership_transfers (
+id TEXT PRIMARY KEY, project_id TEXT NOT NULL, from_user_id INTEGER NOT NULL,
+to_user_id INTEGER NOT NULL, to_sid TEXT NOT NULL,
+state TEXT NOT NULL CHECK (state IN ('pending','committed','aborted')),
+created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	rows, err := store.db.Query(`PRAGMA table_info(shared_ownership_transfers)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		found = found || name == "finalized_at"
+	}
+	if !found {
+		t.Fatal("finalized_at column was not added")
+	}
+}
 
 func TestInvitationMembershipAndImmediateRemoval(t *testing.T) {
 	store := openTestStore(t)
@@ -190,6 +232,22 @@ func TestOwnershipTransferIsRecoverableAndAtomic(t *testing.T) {
 	formerOwner, err := reopened.ProjectForUser(t.Context(), project.ID, 1, true)
 	if err != nil || formerOwner.CurrentRole != "member" || formerOwner.OwnerUserID != 2 {
 		t.Fatalf("former owner = %#v, %v", formerOwner, err)
+	}
+	finalizing, err := reopened.FinalizingOwnershipTransfers(t.Context())
+	if err != nil || len(finalizing) != 1 || finalizing[0].ID != transfer.ID {
+		t.Fatalf("finalizing transfers = %#v, %v", finalizing, err)
+	}
+	if _, err := reopened.BeginOwnershipTransfer(t.Context(), OwnershipTransfer{ID: "transfer_followup_1234", ProjectID: project.ID, ToUserID: 1, ToSID: ownerSID}, 2); !errors.Is(err, ErrTransferPending) {
+		t.Fatalf("overlapping ownership transfer was accepted: %v", err)
+	}
+	if err := reopened.FinalizeOwnershipTransfer(t.Context(), transfer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.FinalizeOwnershipTransfer(t.Context(), transfer.ID); err != nil {
+		t.Fatalf("replayed database finalization was not idempotent: %v", err)
+	}
+	if finalizing, err := reopened.FinalizingOwnershipTransfers(t.Context()); err != nil || len(finalizing) != 0 {
+		t.Fatalf("finalized transfer remained recoverable: %#v, %v", finalizing, err)
 	}
 }
 

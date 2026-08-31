@@ -30,12 +30,15 @@ type fakeSharedProjectPlatform struct {
 	grantErr     error
 	revokeErr    error
 	transferErr  error
+	finalizeErr  error
 	provisioned  []string
 	granted      []string
 	revoked      []string
 	transferred  []string
+	finalized    []string
 	fileOwner    string
 	fileRequest  SharedFileRequest
+	fileRequests []SharedFileRequest
 	turnOwner    string
 	turnRequest  SharedTurnRequest
 	cancelRunID  string
@@ -61,13 +64,24 @@ func (p *fakeSharedProjectPlatform) TransferProjectOwnership(_ context.Context, 
 	return p.transferErr
 }
 
-func (p *fakeSharedProjectPlatform) FinalizeProjectOwnership(context.Context, string, string, bool) error {
-	return nil
+func (p *fakeSharedProjectPlatform) FinalizeProjectOwnership(_ context.Context, projectID, ownerSID string, commit bool) error {
+	p.finalized = append(p.finalized, projectID+":"+ownerSID+":"+strconv.FormatBool(commit))
+	return p.finalizeErr
 }
 
 func (p *fakeSharedProjectPlatform) Operate(_ context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
 	p.fileOwner, p.fileRequest = ownerSID, input
-	return json.RawMessage(`[{"name":"notes.md","type":"file"}]`), nil
+	p.fileRequests = append(p.fileRequests, input)
+	switch input.Operation {
+	case "metadata":
+		return json.RawMessage(`{"name":"notes.md","path":"shared://project_1234567890/notes.md","size":5,"type":"text/markdown; charset=utf-8","lastModified":1788000000000,"isDirectory":false}`), nil
+	case "read":
+		return json.RawMessage(`"hello"`), nil
+	case "write":
+		return json.RawMessage(`true`), nil
+	default:
+		return json.RawMessage(`[{"name":"notes.md","type":"file"}]`), nil
+	}
 }
 
 func (p *fakeSharedProjectPlatform) Run(_ context.Context, ownerSID string, input SharedTurnRequest) (SharedTurnResult, error) {
@@ -148,7 +162,7 @@ func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
 }
 
 func TestSharedFilesAuthorizeMembershipAndRouteToOwnerRuntime(t *testing.T) {
-	handler, _, platform, alice, bob := collaborationTestServer(t)
+	handler, collaborationData, platform, alice, bob := collaborationTestServer(t)
 	created := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects", `{"name":"Files"}`)
 	var createdBody struct {
 		Project sharedProjectDTO `json:"project"`
@@ -173,6 +187,41 @@ func TestSharedFilesAuthorizeMembershipAndRouteToOwnerRuntime(t *testing.T) {
 	forbidden := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-files", `{"project_id":"`+createdBody.Project.ID+`","operation":"list"}`)
 	if forbidden.Code != http.StatusNotFound || platform.fileOwner != alice.user.SID {
 		t.Fatalf("non-member response = %d %s", forbidden.Code, forbidden.Body.String())
+	}
+
+	invited := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+createdBody.Project.ID+"/invites", `{"targetUsername":"bob","expiresInHours":24}`)
+	var inviteBody struct {
+		Invite sharedInviteDTO `json:"invite"`
+	}
+	if invited.Code != http.StatusCreated || json.Unmarshal(invited.Body.Bytes(), &inviteBody) != nil {
+		t.Fatalf("invite response = %d %s", invited.Code, invited.Body.String())
+	}
+	if accepted := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`); accepted.Code != http.StatusOK {
+		t.Fatalf("accept response = %d %s", accepted.Code, accepted.Body.String())
+	}
+	for _, operation := range []string{"metadata", "read", "write"} {
+		body := `{"project_id":"` + createdBody.Project.ID + `","operation":"` + operation + `","path":"notes.md"`
+		if operation == "write" {
+			body += `,"data":"updated"`
+		}
+		response := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-files", body+`}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("member %s response = %d %s", operation, response.Code, response.Body.String())
+		}
+	}
+	if platform.fileOwner != alice.user.SID || len(platform.fileRequests) != 4 || platform.fileRequests[1].Operation != "metadata" || platform.fileRequests[2].Operation != "read" || platform.fileRequests[3].Data != "updated" {
+		t.Fatalf("member file routing = owner %q requests %#v", platform.fileOwner, platform.fileRequests)
+	}
+	removed := collaborationRequest(t, handler, alice.session, http.MethodDelete, "/api/portal/shared-projects/"+createdBody.Project.ID+"/members/"+strconv.FormatInt(bob.user.ID, 10), "")
+	if removed.Code != http.StatusNoContent {
+		t.Fatalf("remove response = %d %s", removed.Code, removed.Body.String())
+	}
+	if projects, err := collaborationData.ListProjects(t.Context(), bob.user.ID, true); err != nil || len(projects) != 0 {
+		t.Fatalf("removed member retained project access: %#v, %v", projects, err)
+	}
+	afterRemoval := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-files", `{"project_id":"`+createdBody.Project.ID+`","operation":"read","path":"notes.md"}`)
+	if afterRemoval.Code != http.StatusNotFound || len(platform.fileRequests) != 4 {
+		t.Fatalf("removed member file response = %d %s requests=%#v", afterRemoval.Code, afterRemoval.Body.String(), platform.fileRequests)
 	}
 }
 
