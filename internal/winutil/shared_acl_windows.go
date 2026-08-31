@@ -9,16 +9,93 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 const (
-	sharedSystemSID         = "S-1-5-18"
-	sharedAdministratorsSID = "S-1-5-32-544"
-	sharedOwnerRightsSID    = "S-1-3-4"
-	sharedModifyMask        = "0x001301bf"
+	sharedSystemSID                             = "S-1-5-18"
+	sharedAdministratorsSID                     = "S-1-5-32-544"
+	sharedOwnerRightsSID                        = "S-1-3-4"
+	sharedModifyMask                            = "0x001301bf"
+	sharedTraverseMask      windows.ACCESS_MASK = windows.FILE_TRAVERSE | windows.FILE_READ_ATTRIBUTES | windows.SYNCHRONIZE
 )
+
+// EnsureSharedOwnerLayout is called by the privileged employee provisioner.
+// It preserves unrelated shared-root ACEs while granting the employee only
+// metadata traversal, then creates their protected owner root.
+func EnsureSharedOwnerLayout(base, ownerSID string) error {
+	if !filepath.IsAbs(base) || validateCanonicalSID(ownerSID) != nil {
+		return errors.New("shared owner layout requires an absolute base and valid SID")
+	}
+	sharedRoot := filepath.Join(base, "shared")
+	ownerRoot := filepath.Join(sharedRoot, ownerSID)
+	if err := os.MkdirAll(ownerRoot, 0o700); err != nil {
+		return err
+	}
+	if err := setExactSharedRootTraverse(sharedRoot, ownerSID); err != nil {
+		return err
+	}
+	return ApplySharedOwnerRoot(ownerRoot, ownerSID, nil)
+}
+
+func setExactSharedRootTraverse(path, sidText string) error {
+	if err := rejectSharedReparsePoint(path); err != nil {
+		return err
+	}
+	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil || dacl == nil {
+		return errors.New("shared root DACL is missing")
+	}
+	sid, _ := windows.StringToSid(sidText)
+	updated, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{AccessPermissions: sharedTraverseMask, AccessMode: windows.SET_ACCESS, Inheritance: windows.NO_INHERITANCE, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(sid)}}}, dacl)
+	if err != nil {
+		return err
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, updated, nil); err != nil {
+		return err
+	}
+	actual, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	actualDACL, _, err := actual.DACL()
+	if err != nil || actualDACL == nil {
+		return errors.New("shared root DACL is missing after update")
+	}
+	header := (*sharedACLHeader)(unsafe.Pointer(actualDACL))
+	matches := 0
+	for index := uint32(0); index < uint32(header.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(actualDACL, index, &ace); err != nil {
+			return err
+		}
+		aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if aceSID != nil && aceSID.IsValid() && strings.EqualFold(aceSID.String(), sidText) {
+			matches++
+			if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 || ace.Mask != sharedTraverseMask {
+				return errors.New("shared root traversal ACE is not exact")
+			}
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("shared root requires one traversal ACE, found %d", matches)
+	}
+	return nil
+}
+
+type sharedACLHeader struct {
+	Revision byte
+	Sbz1     byte
+	Size     uint16
+	AceCount uint16
+	Sbz2     uint16
+}
 
 // ApplySharedOwnerRoot projects the WorkAgent2 shared-owner-root policy: the
 // owner, SYSTEM, and Administrators have full control while members receive

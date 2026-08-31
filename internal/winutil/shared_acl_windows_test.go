@@ -47,3 +47,14 @@ func TestSharedACLRejectsReparseRoot(t *testing.T) {
 		t.Fatal("reparse-point shared root was accepted")
 	}
 }
+
+func TestSharedRootTraversePreservesUnrelatedACLs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	employeeSID := "S-1-5-21-111111111-222222222-333333333-4444"
+	if err := setExactSharedRootTraverse(root, employeeSID); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -58,6 +58,9 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(_ context.Context, account Accou
 	if err := winutil.EnsurePrivateTree(root, account.SID); err != nil {
 		return "", err
 	}
+	if err := winutil.EnsureSharedOwnerLayout(p.config.DataRootBase, account.SID); err != nil {
+		return "", err
+	}
 	return root, nil
 }
 
