@@ -34,6 +34,7 @@ export class TeamStore {
   readonly #tasks = new Map<string, TeamTask>();
   readonly #messages = new Map<string, TeamMailboxMessage>();
   readonly #events = new Map<string, TeamEvent[]>();
+  readonly #quotaReconciledTaskIds = new Set<string>();
 
   constructor(dshHome: string, clock: Clock = defaultClock) {
     this.#path = join(dshHome, "workagent", "teams.json");
@@ -61,6 +62,8 @@ export class TeamStore {
       this.#messages.set(message.id, message);
     for (const event of document.events)
       this.#eventList(event.teamId).push(event);
+    for (const id of document.quotaReconciledTaskIds)
+      this.#quotaReconciledTaskIds.add(id);
     if (recovered) {
       for (const [id, team] of this.#teams)
         this.#teams.set(id, {
@@ -272,6 +275,27 @@ export class TeamStore {
       .filter((task) => task.status === "queued")
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
+  interruptedExecutions(): TeamExecution[] {
+    const executions: TeamExecution[] = [];
+    for (const task of this.#tasks.values()) {
+      if (task.status !== "failed" || task.error !== "runtime_restarted")
+        continue;
+      if (this.#quotaReconciledTaskIds.has(task.id)) continue;
+      const team = this.#requiredTeam(task.teamId);
+      const member = this.#requiredMember(team, task.memberId);
+      executions.push(this.#execution(task, team, member));
+    }
+    return executions.sort((left, right) =>
+      left.taskId.localeCompare(right.taskId),
+    );
+  }
+  acknowledgeInterruptedExecution(taskId: string): void {
+    const task = this.#requiredTask(taskId);
+    if (task.status !== "failed" || task.error !== "runtime_restarted")
+      throw new Error("team_task_not_interrupted");
+    this.#quotaReconciledTaskIds.add(taskId);
+    this.#save();
+  }
   beginTask(id: string): { task: TeamTask; member: TeamMember; team: Team } {
     const task = this.#requiredTask(id);
     if (task.status !== "queued") throw new Error("team_task_not_queued");
@@ -435,6 +459,18 @@ export class TeamStore {
     if (value === undefined) throw new Error("team_member_not_found");
     return value;
   }
+  #execution(task: TeamTask, team: Team, member: TeamMember): TeamExecution {
+    return {
+      taskId: task.id,
+      teamId: team.id,
+      memberId: member.id,
+      name: `${team.name} · ${member.name}`,
+      engine: member.engine,
+      presetId: member.presetId,
+      workspaceId: team.workspaceId,
+      input: task.input,
+    };
+  }
   #now(): string {
     return this.#clock.now().toISOString();
   }
@@ -443,7 +479,7 @@ export class TeamStore {
     const temporary = `${this.#path}.${process.pid}.tmp`;
     writeFileSync(
       temporary,
-      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: [...this.#events.values()].flat() }, null, 2)}\n`,
+      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: [...this.#events.values()].flat(), quotaReconciledTaskIds: [...this.#quotaReconciledTaskIds].sort() }, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     renameSync(temporary, this.#path);
@@ -465,18 +501,22 @@ export interface TeamRunnerPort {
     request: TeamExecution,
   ): Promise<{ sessionId: string; result?: string }>;
   cancelTeamTask?(taskId: string): Promise<void>;
+  reconcileInterruptedTeamTask?(request: TeamExecution): Promise<void>;
 }
 
 export class TeamOrchestrator {
   #ticking = false;
+  #recovered = false;
+  #recovering: Promise<void> | undefined;
   constructor(
     readonly store: TeamStore,
     readonly runner: TeamRunnerPort,
   ) {}
   start(): void {
-    void this.tick();
+    void this.tick().catch(() => undefined);
   }
   async tick(): Promise<void> {
+    await this.#recoverInterruptedTasks();
     if (this.#ticking) return;
     this.#ticking = true;
     try {
@@ -497,6 +537,23 @@ export class TeamOrchestrator {
     } finally {
       this.#ticking = false;
     }
+  }
+
+  async #recoverInterruptedTasks(): Promise<void> {
+    if (this.#recovered) return;
+    if (this.#recovering === undefined) {
+      this.#recovering = (async () => {
+        for (const request of this.store.interruptedExecutions()) {
+          if (this.runner.reconcileInterruptedTeamTask !== undefined)
+            await this.runner.reconcileInterruptedTeamTask(request);
+          this.store.acknowledgeInterruptedExecution(request.taskId);
+        }
+        this.#recovered = true;
+      })().finally(() => {
+        this.#recovering = undefined;
+      });
+    }
+    await this.#recovering;
   }
 
   async #execute(begun: ReturnType<TeamStore["beginTask"]>): Promise<void> {

@@ -74,6 +74,91 @@ describe("TeamStore", () => {
     expect(reopened.get(team.id)?.members[0]?.status).toBe("idle");
   });
 
+  it("reconciles interrupted quota before resuming queued work", async () => {
+    const home = root();
+    const store = new TeamStore(home);
+    const team = createTeam(store);
+    const interrupted = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Interrupted",
+      input: "Interrupted work",
+    });
+    store.beginTask(interrupted.id);
+    const queued = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Queued",
+      input: "Queued work",
+    });
+    const reopened = new TeamStore(home);
+    let releaseReconciliation!: () => void;
+    const reconcileInterruptedTeamTask = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseReconciliation = resolve;
+        }),
+    );
+    const executeTeamTask = vi
+      .fn()
+      .mockResolvedValue({ sessionId: "queued-session" });
+    const orchestrator = new TeamOrchestrator(reopened, {
+      executeTeamTask,
+      reconcileInterruptedTeamTask,
+    });
+
+    const tick = orchestrator.tick();
+    await vi.waitFor(() =>
+      expect(reconcileInterruptedTeamTask).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: interrupted.id }),
+      ),
+    );
+    expect(executeTeamTask).not.toHaveBeenCalled();
+    releaseReconciliation();
+    await tick;
+
+    expect(reopened.task(queued.id)?.status).toBe("succeeded");
+    expect(executeTeamTask).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: queued.id }),
+    );
+    expect(new TeamStore(home).interruptedExecutions()).toEqual([]);
+  });
+
+  it("retries interrupted quota reconciliation before releasing the queue", async () => {
+    const home = root();
+    const store = new TeamStore(home);
+    const team = createTeam(store);
+    const interrupted = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Interrupted",
+      input: "Interrupted work",
+    });
+    store.beginTask(interrupted.id);
+    const queued = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Queued",
+      input: "Queued work",
+    });
+    const reopened = new TeamStore(home);
+    const reconcileInterruptedTeamTask = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("quota_unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const executeTeamTask = vi
+      .fn()
+      .mockResolvedValue({ sessionId: "queued-session" });
+    const orchestrator = new TeamOrchestrator(reopened, {
+      executeTeamTask,
+      reconcileInterruptedTeamTask,
+    });
+
+    await expect(orchestrator.tick()).rejects.toThrow("quota_unavailable");
+    expect(reopened.task(queued.id)?.status).toBe("queued");
+    expect(executeTeamTask).not.toHaveBeenCalled();
+    await orchestrator.tick();
+
+    expect(reconcileInterruptedTeamTask).toHaveBeenCalledTimes(2);
+    expect(reopened.task(queued.id)?.status).toBe("succeeded");
+  });
+
   it("resumes durable queued work when the orchestrator starts", async () => {
     const home = root();
     const store = new TeamStore(home);

@@ -165,4 +165,37 @@ describe("QuotaTeamRunner", () => {
     await runner.cancelTeamTask(teamRequest.taskId);
     expect(cancelTeamTask).toHaveBeenCalledWith(teamRequest.taskId);
   });
+
+  it("conservatively reconciles an interrupted task reservation", async () => {
+    const reserve = vi.fn().mockResolvedValue({ status: "reserved" });
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const runner = new QuotaTeamRunner({ executeTeamTask: vi.fn() }, presets, {
+      reserve,
+      settle,
+    });
+
+    await runner.reconcileInterruptedTeamTask(teamRequest);
+
+    expect(reserve).toHaveBeenCalledWith({
+      runId: teamRequest.taskId,
+      modelId: "codex-model-1",
+      estimatedUnits: estimatedAutomationUnits(teamRequest.input),
+    });
+    expect(settle).toHaveBeenCalledWith({
+      runId: teamRequest.taskId,
+      actualUnits: estimatedAutomationUnits(teamRequest.input),
+    });
+  });
+
+  it("accepts an interrupted task that was already settled before the crash", async () => {
+    const settle = vi.fn();
+    const runner = new QuotaTeamRunner({ executeTeamTask: vi.fn() }, presets, {
+      reserve: vi.fn().mockResolvedValue({ status: "settled" }),
+      settle,
+    });
+
+    await runner.reconcileInterruptedTeamTask(teamRequest);
+
+    expect(settle).not.toHaveBeenCalled();
+  });
 });

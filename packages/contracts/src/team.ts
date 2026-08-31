@@ -97,4 +97,5 @@ export const teamDocumentSchema = z.object({
   tasks: z.array(teamTaskSchema),
   messages: z.array(teamMailboxMessageSchema),
   events: z.array(teamEventSchema),
+  quotaReconciledTaskIds: z.array(z.string().min(1)).default([]),
 });

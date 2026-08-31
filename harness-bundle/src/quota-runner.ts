@@ -102,6 +102,20 @@ export class QuotaTeamRunner implements TeamRunnerPort {
     }
   }
 
+  async reconcileInterruptedTeamTask(request: TeamExecution): Promise<void> {
+    const preset = this.presets.resolve(request.presetId);
+    const modelId =
+      preset.resolvedSnapshot.modelId ?? defaultModel[request.engine];
+    const units = estimatedAutomationUnits(request.input);
+    const reservation = await this.quota.reserve({
+      runId: request.taskId,
+      modelId,
+      estimatedUnits: units,
+    });
+    if (reservation.status === "settled") return;
+    await this.quota.settle({ runId: request.taskId, actualUnits: units });
+  }
+
   cancelTeamTask(taskId: string): Promise<void> {
     return this.inner.cancelTeamTask?.(taskId) ?? Promise.resolve();
   }
