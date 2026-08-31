@@ -39,6 +39,7 @@ import { AionSider } from "../../shared/ui/aionui/AionSider.js";
 import type { AutomationUiPort } from "../../shared/ui/aionui/AionAutomationPage.js";
 import { AionGuidEmptyState } from "../../shared/ui/aionui/AionGuidEmptyState.js";
 import { AionMessageList } from "../../shared/ui/aionui/AionMessageList.js";
+import { AionTeamPage } from "../../shared/ui/aionui/AionTeamPage.js";
 import RendererLayout from "@renderer/components/layout/Layout";
 import {
   WORKSPACE_STATE_EVENT,
@@ -465,10 +466,7 @@ export function ConversationPage({
         }));
         setStagedAssets((current) => ({
           ...current,
-          [uploadSession.id]: [
-            ...(current[uploadSession.id] ?? []),
-            asset.id,
-          ],
+          [uploadSession.id]: [...(current[uploadSession.id] ?? []), asset.id],
         }));
         uploadedNames.push(asset.name);
       }
@@ -595,6 +593,8 @@ export function ConversationPage({
       scheduledActive={scheduledOpen}
       onLogout={onLogout}
       onClose={() => setSidebarOpen(false)}
+      workspaceId={workspaceId ?? active?.workspaceId ?? "default"}
+      presetId={presetId}
     />
   );
 
@@ -670,7 +670,14 @@ export function ConversationPage({
             path="/settings/ext/:tabId"
             element={<AionExtensionSettingsPage />}
           />
-          <Route path="/settings" element={<Navigate to="/settings/model" replace />} />
+          <Route
+            path="/settings"
+            element={<Navigate to="/settings/model" replace />}
+          />
+          <Route
+            path="/team/:teamId"
+            element={<AionTeamPage presetId={presetId} />}
+          />
           <Route
             path="*"
             element={

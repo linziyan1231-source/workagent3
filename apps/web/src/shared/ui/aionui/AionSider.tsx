@@ -15,6 +15,7 @@ import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { Button, Input, Message, Modal } from "@arco-design/web-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AionTeamSiderSection } from "./AionTeamSiderSection.js";
 
 type Props = {
   sessions: RuntimeSession[];
@@ -35,6 +36,8 @@ type Props = {
   scheduledActive: boolean;
   onLogout: () => void;
   onClose: () => void;
+  workspaceId: string;
+  presetId: string;
 };
 
 export function AionSider(props: Props) {
@@ -53,9 +56,7 @@ export function AionSider(props: Props) {
   const visible = props.sessions.filter((session) =>
     session.title.toLocaleLowerCase().includes(props.query.toLocaleLowerCase()),
   );
-  const asRendererConversation = (
-    session: RuntimeSession,
-  ): TChatConversation =>
+  const asRendererConversation = (session: RuntimeSession): TChatConversation =>
     ({
       id: session.id,
       name: session.title,
@@ -188,6 +189,11 @@ export function AionSider(props: Props) {
           collapsed={false}
           siderTooltipProps={tooltipProps}
           onClick={props.onScheduled}
+        />
+        <AionTeamSiderSection
+          workspaceId={props.workspaceId}
+          presetId={props.presetId}
+          onSessionClick={props.onClose}
         />
         <div className="shrink-0 mt-6px mb-2px mx-10px h-1px bg-[var(--color-border-2)]" />
         {batchMode && (
