@@ -288,7 +288,7 @@ const toRendererConversation = (
   ({
     id: session.id,
     name: session.title,
-    type: session.engine === "codex" ? "codex" : "acp",
+    type: "acp",
     created_at: Date.parse(session.createdAt),
     modified_at: Date.parse(session.updatedAt),
     source: "workagent",

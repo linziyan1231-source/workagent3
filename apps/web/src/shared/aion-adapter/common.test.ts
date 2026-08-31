@@ -318,6 +318,23 @@ describe("production Renderer conversation adapter", () => {
                 resolvedSnapshot: { ...preset, resolvedAt: now },
               },
             },
+            {
+              id: "session-codex",
+              engine: "codex",
+              title: "Native Codex",
+              createdAt: now,
+              updatedAt: now,
+              workspaceId: "default",
+              preset: {
+                presetId: preset.id,
+                presetVersion: 1,
+                resolvedSnapshot: {
+                  ...preset,
+                  engine: "codex",
+                  resolvedAt: now,
+                },
+              },
+            },
           ]),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
@@ -333,6 +350,11 @@ describe("production Renderer conversation adapter", () => {
       name: "Project review",
       type: "acp",
       extra: { backend: "harness", workspace: "default" },
+    });
+    expect(result.items[1]).toMatchObject({
+      id: "session-codex",
+      type: "acp",
+      extra: { backend: "codex", workspace: "default" },
     });
   });
 
