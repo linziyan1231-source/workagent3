@@ -124,6 +124,8 @@ export function AionAutomationPage({ port, presets, workspaceId }: Props) {
         workspaceId,
         input: value.input,
         notificationPolicy: "on_failure",
+        executionMode: "new_conversation",
+        conversationId: null,
       };
       await port.create(mutation);
       setDialogVisible(false);
@@ -225,7 +227,9 @@ export function AionAutomationPage({ port, presets, workspaceId }: Props) {
                       <div className="mt-1px truncate text-12px leading-16px text-t-secondary">
                         {job.schedule.kind === "interval"
                           ? `${t("cron.page.custom.every")} ${job.schedule.everyMinutes} ${t("cron.page.custom.minutes")}`
-                          : `${job.schedule.timezone} · ${job.schedule.hour.toString().padStart(2, "0")}:${job.schedule.minute.toString().padStart(2, "0")}`}
+                          : job.schedule.kind === "weekly"
+                            ? `${job.schedule.timezone} · ${job.schedule.hour.toString().padStart(2, "0")}:${job.schedule.minute.toString().padStart(2, "0")}`
+                            : `${job.schedule.timezone} · ${job.schedule.expression || t("cron.page.freq.manual")}`}
                         <span className="mx-6px opacity-60">·</span>
                         {t("cron.nextRun")}：
                         {job.nextRunAt

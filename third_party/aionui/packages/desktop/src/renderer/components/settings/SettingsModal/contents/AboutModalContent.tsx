@@ -13,7 +13,6 @@ import classNames from 'classnames';
 import { useSettingsViewMode } from '../settingsViewContext';
 import brandLogo from '@/renderer/assets/logos/brand/app.png';
 import FeedbackReportModal from './FeedbackReportModal';
-import { ipcBridge } from '@/common';
 
 type LinkItem = {
   title: string;
@@ -26,26 +25,11 @@ const AboutModalContent: React.FC = () => {
   const viewMode = useSettingsViewMode();
   const isPageMode = viewMode === 'page';
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [versionLabel, setVersionLabel] = useState(t('settings.productVersion'));
-
-  React.useEffect(() => {
-    void ipcBridge.portal.getSystemStatus
-      .invoke()
-      .then((status) => {
-        const version = status.build.version.trim();
-        if (version) setVersionLabel(version.startsWith('v') ? version : `v${version}`);
-      })
-      .catch(() => undefined);
-  }, []);
 
   const linkItems: LinkItem[] = [
     {
       title: t('settings.helpDocumentation'),
       onClick: () => void navigate('/help'),
-    },
-    {
-      title: t('settings.healthCheck'),
-      onClick: () => void ipcBridge.portal.downloadDiagnostics.invoke(),
     },
     {
       title: t('settings.bugReport'),
@@ -71,7 +55,7 @@ const AboutModalContent: React.FC = () => {
               {t('settings.appDescription')}
             </Typography.Text>
             <span className='px-10px py-4px rd-6px text-13px bg-fill-2 text-t-primary font-500'>
-              {versionLabel}
+              {t('settings.productVersion')}
             </span>
           </div>
 

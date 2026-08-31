@@ -175,3 +175,16 @@ it("calculates a weekly schedule in its declared timezone", () => {
     ).toISOString(),
   ).toBe("2026-08-31T01:30:00.000Z");
 });
+
+it("calculates an arbitrary cron schedule in its declared timezone", () => {
+  expect(
+    nextScheduleTime(
+      {
+        kind: "cron",
+        expression: "15 9 * * MON-FRI",
+        timezone: "Asia/Shanghai",
+      },
+      new Date("2026-08-30T23:00:00.000Z"),
+    ).toISOString(),
+  ).toBe("2026-08-31T01:15:00.000Z");
+});

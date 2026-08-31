@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   modelCatalogEntrySchema,
@@ -90,16 +90,32 @@ export class ModelAccessStore {
 }
 
 export class CredentialStatusStore {
-  readonly #dshHome: string;
+  readonly #nativeHomes: { codex: string; kimi: string };
 
-  constructor(dshHome: string) {
-    this.#dshHome = dshHome;
+  constructor(
+    dshHome: string,
+    nativeHomes = {
+      codex: process.env.CODEX_HOME ?? join(dshHome, ".codex"),
+      kimi: process.env.KIMI_CODE_HOME ?? join(dshHome, ".kimi"),
+    },
+  ) {
+    this.#nativeHomes = nativeHomes;
   }
 
   listStatuses(): readonly CredentialStatus[] {
     return [
-      this.#native("codex-native", "codex_native", "Codex", ".codex"),
-      this.#native("kimi-native", "kimi_native", "Kimi", ".kimi"),
+      this.#native(
+        "codex-native",
+        "codex_native",
+        "Codex",
+        join(this.#nativeHomes.codex, "auth.json"),
+      ),
+      this.#native(
+        "kimi-native",
+        "kimi_native",
+        "Kimi",
+        join(this.#nativeHomes.kimi, "kimi.json"),
+      ),
     ];
   }
 
@@ -111,15 +127,18 @@ export class CredentialStatusStore {
     id: string,
     kind: "codex_native" | "kimi_native",
     label: string,
-    directory: string,
+    credentialFile: string,
   ): CredentialStatus {
+    let ready = false;
+    if (existsSync(credentialFile)) {
+      const status = lstatSync(credentialFile);
+      ready = !status.isSymbolicLink() && status.isFile();
+    }
     return {
       id,
       kind,
       label,
-      state: existsSync(join(this.#dshHome, directory))
-        ? "ready"
-        : "needs_auth",
+      state: ready ? "ready" : "needs_auth",
       updatedAt: null,
     };
   }

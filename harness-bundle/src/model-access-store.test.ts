@@ -39,10 +39,20 @@ describe("model access", () => {
 
   it("projects native credential state without credential material", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-credentials-"));
-    mkdirSync(join(home, ".codex"));
-    const statuses = new CredentialStatusStore(home).listStatuses();
+    const codex = join(home, "native", "codex");
+    const kimi = join(home, "native", "kimi");
+    mkdirSync(codex, { recursive: true });
+    mkdirSync(kimi, { recursive: true });
+    writeFileSync(join(codex, "auth.json"), "{}\n");
+    const statuses = new CredentialStatusStore(home, {
+      codex,
+      kimi,
+    }).listStatuses();
     expect(statuses.find((item) => item.id === "codex-native")?.state).toBe(
       "ready",
+    );
+    expect(statuses.find((item) => item.id === "kimi-native")?.state).toBe(
+      "needs_auth",
     );
     expect(JSON.stringify(statuses)).not.toMatch(/password|secret|token/i);
   });

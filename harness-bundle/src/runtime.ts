@@ -38,6 +38,19 @@ import type { ResolvedSkill } from "./skill-projection.js";
 import type { TeamExecution, TeamRunnerPort } from "./team-store.js";
 import type { InboxExecution, InboxRunnerPort } from "./inbox-api.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
+import type { CredentialStatusStore } from "./model-access-store.js";
+
+export const automationTargetSessionId = (
+  automationRunId: string,
+  definition: AutomationExecution["definition"],
+): string => {
+  if (definition.executionMode === "existing") {
+    if (definition.conversationId === null)
+      throw new Error("automation_conversation_required");
+    return definition.conversationId;
+  }
+  return `session-${automationRunId}`;
+};
 
 type SessionRecord = {
   createdAt: string;
@@ -200,6 +213,7 @@ export class RuntimeController
     string,
     Promise<{ sessionId: string; result?: string }>
   >();
+  readonly #automationTargets = new Map<string, string>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
@@ -207,6 +221,7 @@ export class RuntimeController
   readonly #presets: PresetStore;
   readonly #mcp: McpCatalogStore;
   readonly #skills: SkillCatalogStore;
+  readonly #credentials: CredentialStatusStore;
 
   constructor(
     ctx: Context,
@@ -215,6 +230,7 @@ export class RuntimeController
     presets: PresetStore,
     mcp: McpCatalogStore,
     skills: SkillCatalogStore,
+    credentials: CredentialStatusStore,
   ) {
     this.#ctx = ctx;
     this.#token = token;
@@ -227,6 +243,7 @@ export class RuntimeController
     this.#presets = presets;
     this.#mcp = mcp;
     this.#skills = skills;
+    this.#credentials = credentials;
     const defaultWorkspace = workspaces.ensureDefault();
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
@@ -257,8 +274,14 @@ export class RuntimeController
   ): Promise<{ sessionId: string; result?: string }> {
     const active = this.#automationExecutions.get(request.automationRunId);
     if (active !== undefined) return active;
+    const target = automationTargetSessionId(
+      request.automationRunId,
+      request.definition,
+    );
+    this.#automationTargets.set(request.automationRunId, target);
     const execution = this.#executeAutomation(request).finally(() => {
       this.#automationExecutions.delete(request.automationRunId);
+      this.#automationTargets.delete(request.automationRunId);
     });
     this.#automationExecutions.set(request.automationRunId, execution);
     return execution;
@@ -281,6 +304,8 @@ export class RuntimeController
         workspaceId: request.workspaceId,
         input: request.input,
         notificationPolicy: "none",
+        executionMode: "new_conversation",
+        conversationId: null,
         nextRunAt: null,
         lastRunAt: null,
         createdAt: now,
@@ -311,6 +336,8 @@ export class RuntimeController
       workspaceId,
       input: request.input,
       notificationPolicy: "none",
+      executionMode: "existing",
+      conversationId: request.sessionId,
       nextRunAt: null,
       lastRunAt: null,
       createdAt: now,
@@ -377,7 +404,9 @@ export class RuntimeController
   }
 
   async cancel(automationRunId: string): Promise<void> {
-    const sessionId = this.#automationSessionId(automationRunId);
+    const sessionId =
+      this.#automationTargets.get(automationRunId) ??
+      `session-${automationRunId}`;
     const record = this.#sessions.get(sessionId);
     if (record === undefined) return;
     await this.#activate(sessionId, record);
@@ -813,8 +842,20 @@ export class RuntimeController
     request: AutomationExecution,
   ): Promise<{ sessionId: string; result?: string }> {
     const definition = request.definition;
-    const sessionId = this.#automationSessionId(request.automationRunId);
-    const record = await this.#startAutomationSession(sessionId, request);
+    const sessionId =
+      this.#automationTargets.get(request.automationRunId) ??
+      automationTargetSessionId(request.automationRunId, definition);
+    if (definition.engine !== "harness") {
+      const credential = this.#credentials.statusFor(
+        `${definition.engine}-native`,
+      );
+      if (credential?.state !== "ready")
+        throw new Error(`credential_needs_auth:${definition.engine}`);
+    }
+    const record =
+      definition.executionMode === "existing"
+        ? await this.#existingAutomationSession(sessionId, definition)
+        : await this.#startAutomationSession(sessionId, request);
     const terminal = this.#waitForTerminal(sessionId);
     record.updatedAt = new Date().toISOString();
     try {
@@ -849,6 +890,24 @@ export class RuntimeController
     });
     this.#persist(sessionId, record);
     return terminal;
+  }
+
+  async #existingAutomationSession(
+    sessionId: string,
+    definition: AutomationExecution["definition"],
+  ): Promise<SessionRecord> {
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined)
+      throw new Error("automation_conversation_not_found");
+    if (record.engine !== definition.engine)
+      throw new Error("automation_conversation_engine_mismatch");
+    if (record.workspaceId !== definition.workspaceId)
+      throw new Error("automation_conversation_workspace_mismatch");
+    if (record.preset.presetId !== definition.presetId)
+      throw new Error("automation_conversation_preset_mismatch");
+    if (record.handle === undefined && record.native === undefined)
+      await this.#activate(sessionId, record);
+    return record;
   }
 
   async #startAutomationSession(
@@ -903,10 +962,6 @@ export class RuntimeController
     this.#sessions.set(publicId, record);
     this.#persist(publicId, record);
     return record;
-  }
-
-  #automationSessionId(automationRunId: string): string {
-    return `session-${automationRunId}`;
   }
 
   #waitForTerminal(

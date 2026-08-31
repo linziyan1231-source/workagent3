@@ -13,6 +13,11 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
     minute: z.number().int().min(0).max(59),
     timezone: z.string().min(1).max(100),
   }),
+  z.object({
+    kind: z.literal("cron"),
+    expression: z.string().max(200),
+    timezone: z.string().min(1).max(100),
+  }),
 ]);
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 
@@ -30,6 +35,10 @@ export const automationDefinitionSchema = z.object({
     .min(1)
     .max(64 * 1024),
   notificationPolicy: z.enum(["none", "on_failure", "always"]),
+  executionMode: z
+    .enum(["new_conversation", "existing"])
+    .default("new_conversation"),
+  conversationId: z.string().min(1).nullable().default(null),
   nextRunAt: z.iso.datetime({ offset: true }).nullable(),
   lastRunAt: z.iso.datetime({ offset: true }).nullable(),
   createdAt: z.iso.datetime({ offset: true }),
@@ -49,8 +58,10 @@ export const automationMutationSchema = automationDefinitionSchema.pick({
   workspaceId: true,
   input: true,
   notificationPolicy: true,
+  executionMode: true,
+  conversationId: true,
 });
-export type AutomationMutation = z.infer<typeof automationMutationSchema>;
+export type AutomationMutation = z.input<typeof automationMutationSchema>;
 
 export const automationRunSchema = z.object({
   id: z.string().min(1),

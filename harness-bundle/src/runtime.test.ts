@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Session, SessionEvent } from "@deepseek-ai/dsh-session";
-import { eventsAfterLastId, normalizeEvent } from "./runtime.js";
+import {
+  automationTargetSessionId,
+  eventsAfterLastId,
+  normalizeEvent,
+} from "./runtime.js";
+import type { AutomationDefinition } from "@workagent/contracts";
 
 const events = [
   { eventId: "session-with-hyphens-9" },
@@ -46,5 +51,34 @@ describe("terminal turn normalization", () => {
       type: "turn.failed",
       code: "turn_interrupted",
     });
+  });
+});
+
+describe("automation conversation targeting", () => {
+  const definition = {
+    executionMode: "new_conversation",
+    conversationId: null,
+  } as AutomationDefinition;
+
+  it("uses a stable run-owned session for new-conversation jobs", () => {
+    expect(automationTargetSessionId("run-1", definition)).toBe(
+      "session-run-1",
+    );
+  });
+
+  it("targets the configured conversation and rejects missing ownership", () => {
+    expect(
+      automationTargetSessionId("run-1", {
+        ...definition,
+        executionMode: "existing",
+        conversationId: "conversation-1",
+      }),
+    ).toBe("conversation-1");
+    expect(() =>
+      automationTargetSessionId("run-1", {
+        ...definition,
+        executionMode: "existing",
+      }),
+    ).toThrow("automation_conversation_required");
   });
 });

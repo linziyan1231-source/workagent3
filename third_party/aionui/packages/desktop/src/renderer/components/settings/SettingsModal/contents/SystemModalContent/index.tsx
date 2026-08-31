@@ -84,9 +84,6 @@ const SystemModalContent: React.FC = () => {
   const [restoringSharedProject, setRestoringSharedProject] = useState<string>();
   const [restoringSharedConversation, setRestoringSharedConversation] = useState<string>();
   const [restartingService, setRestartingService] = useState(false);
-  const { data: managedSystemStatus } = useSWR(!isDesktop ? 'workagent.system.status' : null, () =>
-    ipcBridge.portal.getSystemStatus.invoke()
-  );
 
   const refreshHiddenSharedProjects = useCallback(async () => {
     try {
@@ -839,16 +836,6 @@ const SystemModalContent: React.FC = () => {
 
           {!isDesktop && (
             <div className='px-[12px] md:px-[32px] py-16px bg-2 rd-16px'>
-              <div className='mb-12px flex flex-wrap gap-8px'>
-                {(managedSystemStatus?.components ?? []).map((component) => (
-                  <span
-                    key={component.id}
-                    className='px-8px py-4px rd-6px text-12px bg-fill-2 text-t-secondary'
-                  >
-                    {component.id} · {component.status}
-                  </span>
-                ))}
-              </div>
               <PreferenceRow
                 label={t('settings.serviceRestart.title')}
                 description={t('settings.serviceRestart.description')}

@@ -120,11 +120,12 @@ export function apply(ctx: Context): void {
   const skills = new SkillCatalogStore();
   const mcp = new McpCatalogStore();
   const presets = new PresetStore(dshHome, models, skills, mcp);
+  const credentials = new CredentialStatusStore(dshHome);
   new RuntimeServicesController(
     ctx,
     token,
     models,
-    new CredentialStatusStore(dshHome),
+    credentials,
     presets,
     skills,
     mcp,
@@ -136,6 +137,7 @@ export function apply(ctx: Context): void {
     presets,
     mcp,
     skills,
+    credentials,
   );
   runtime.mount();
   const automations = new AutomationStore(dshHome);

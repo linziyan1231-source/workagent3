@@ -1,4 +1,5 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
+import { automationPort } from "../../features/automation/automationPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
 import { presetPort } from "../../features/presets/presetPort.js";
@@ -12,6 +13,7 @@ import type {
   PortalUsageSummary,
 } from "./ipcBridge.js";
 import { getManagedAgents } from "./assistantHooks.js";
+import { cronBridge } from "./cronAdapter.js";
 import {
   displayConversationFilePath,
   materializeConversationFiles,
@@ -315,6 +317,7 @@ const createRendererConversation = async (input: {
 };
 
 export const ipcBridge = {
+  cron: cronBridge,
   theme: {
     requestCurrent: { invoke: async () => null },
     setActive: { invoke: async (_theme: unknown) => undefined },
@@ -558,6 +561,28 @@ export const ipcBridge = {
     },
   },
   conversation: {
+    listByCronJob: {
+      invoke: async ({ cron_job_id }: { cron_job_id: string }) => {
+        const runs = await automationPort.history(cron_job_id);
+        const sessionIds = [
+          ...new Set(
+            runs
+              .map((run) => run.sessionId)
+              .filter((id): id is string => id !== null),
+          ),
+        ];
+        return Promise.all(
+          sessionIds.map(async (id) => {
+            conversationExtras.set(id, {
+              ...(conversationExtras.get(id) ?? {}),
+              cron_job_id,
+              cronJobId: cron_job_id,
+            });
+            return toRendererConversation(await conversationPort.get(id));
+          }),
+        );
+      },
+    },
     create: { invoke: createRendererConversation },
     createWithConversation: {
       invoke: async ({ conversation }: { conversation: TChatConversation }) =>

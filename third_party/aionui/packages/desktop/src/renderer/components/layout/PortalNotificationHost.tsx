@@ -89,9 +89,8 @@ const PortalNotificationHost: React.FC = () => {
   }, [poll]);
 
   const current = queue[0];
-  const close = async () => {
+  const close = () => {
     if (!current) return;
-    await ipcBridge.portal.acknowledgeNotification.invoke({ id: current.id });
     seen.current.add(current.id);
     queuedIDs.current.delete(current.id);
     writeSeenNotifications(Array.from(seen.current));
@@ -105,7 +104,7 @@ const PortalNotificationHost: React.FC = () => {
       closable={false}
       maskClosable={false}
       footer={
-        <Button type='primary' onClick={() => void close()}>
+        <Button type='primary' onClick={close}>
           {t('common.confirm')}
         </Button>
       }

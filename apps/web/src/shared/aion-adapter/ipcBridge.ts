@@ -9,6 +9,14 @@ import { conversationPort } from "../../features/conversation/conversationPort.j
 import { presetPort } from "../../features/presets/presetPort.js";
 import { channelPort } from "../../features/channels/channelPort.js";
 import type { Assistant } from "@/common/types/agent/assistantTypes";
+export type {
+  CreateRendererCronJob as ICreateCronJobParams,
+  RendererCronAgentConfig as ICronAgentConfigRead,
+  RendererCronAgentConfig as ICronAgentConfigWrite,
+  RendererCronJob as ICronJob,
+  RendererCronSchedule as ICronSchedule,
+  UpdateRendererCronJob as ICronJobUpdateParams,
+} from "./cronAdapter.js";
 export type { PortalNotification } from "../../features/notifications/notificationPort.js";
 export type { SystemStatus } from "../../features/system/systemPort.js";
 
@@ -92,7 +100,30 @@ const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
 
 export const extensions = unavailableService;
 export const webui = unavailableService;
-export const systemSettings = unavailableService;
+let wakeLock: WakeLockSentinel | null = null;
+const supportedSystemSettings = {
+  getKeepAwake: command<void, boolean>(async () => wakeLock !== null),
+  setKeepAwake: command<{ enabled: boolean }, void>(async ({ enabled }) => {
+    if (!enabled) {
+      await wakeLock?.release();
+      wakeLock = null;
+      return;
+    }
+    if (!("wakeLock" in navigator))
+      throw new Error("screen_wake_lock_not_supported");
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => {
+      wakeLock = null;
+    });
+  }),
+};
+export const systemSettings = new Proxy(supportedSystemSettings, {
+  get: (target, key) => {
+    if (key in target) return target[key as keyof typeof target];
+    return unavailableCommand;
+  },
+}) as typeof supportedSystemSettings &
+  Record<string, typeof unavailableCommand>;
 export const assistants = {
   list: {
     provider: () => {},

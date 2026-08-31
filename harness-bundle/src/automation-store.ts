@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { Cron } from "croner";
 import {
   automationDocumentSchema,
   automationDefinitionSchema,
@@ -57,6 +58,17 @@ export const nextScheduleTime = (
   const parsed = automationScheduleSchema.parse(schedule);
   if (parsed.kind === "interval")
     return new Date(after.getTime() + parsed.everyMinutes * 60_000);
+
+  if (parsed.kind === "cron") {
+    if (!parsed.expression.trim())
+      throw new Error("automation_schedule_manual_only");
+    const next = new Cron(parsed.expression, {
+      paused: true,
+      timezone: parsed.timezone,
+    }).nextRun(after);
+    if (next === null) throw new Error("automation_schedule_has_no_next_run");
+    return next;
+  }
 
   new Intl.DateTimeFormat("en-US", { timeZone: parsed.timezone }).format(after);
   const candidate = new Date(
