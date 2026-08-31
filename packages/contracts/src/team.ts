@@ -75,6 +75,10 @@ export const teamSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 });
 export type Team = z.infer<typeof teamSchema>;
+export const teamListSchema = z.array(teamSchema);
+export const teamTaskListSchema = z.array(teamTaskSchema);
+export const teamMailboxMessageListSchema = z.array(teamMailboxMessageSchema);
+export const teamEventListSchema = z.array(teamEventSchema);
 
 export const teamCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
