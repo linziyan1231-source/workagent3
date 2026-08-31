@@ -64,11 +64,11 @@ func updateBatchLogonRight(sid string, add bool) error {
 		MaximumLength: uint16(len(rightBuffer) * 2),
 		Buffer:        &rightBuffer[0],
 	}
-	operation := lsaAddAccountRights
-	if !add {
-		operation = lsaRemoveAccountRights
+	if add {
+		status, _, _ = lsaAddAccountRights.Call(policy, uintptr(unsafe.Pointer(accountSID)), uintptr(unsafe.Pointer(&right)), 1)
+	} else {
+		status, _, _ = lsaRemoveAccountRights.Call(policy, uintptr(unsafe.Pointer(accountSID)), 0, uintptr(unsafe.Pointer(&right)), 1)
 	}
-	status, _, _ = operation.Call(policy, uintptr(unsafe.Pointer(accountSID)), uintptr(unsafe.Pointer(&right)), 1)
 	if status != 0 {
 		action := "grant batch logon right"
 		if !add {
