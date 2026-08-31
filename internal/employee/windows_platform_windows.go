@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
 )
@@ -172,6 +173,38 @@ func (p *WindowsPlatform) UpdateInstalledLimits(_ context.Context, sid string, l
 func (p *WindowsPlatform) RemoveInstalledRuntime(ctx context.Context, sid string) error {
 	script := `if (Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $env:WA3_TASK -Confirm:$false -ErrorAction Stop }`
 	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
+}
+
+func (p *WindowsPlatform) RepairInstalledRuntime(ctx context.Context, user store.User, password []byte) error {
+	account, err := p.EnsureAccount(ctx, user.Username, password)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(account.SID, user.SID) {
+		return errors.New("Windows account SID changed during repair")
+	}
+	if err := p.EnsureProfile(ctx, account, user.Username, password); err != nil {
+		return err
+	}
+	dataRoot, err := p.EnsurePrivateDataRoot(ctx, account)
+	if err != nil {
+		return err
+	}
+	credentialPath := filepath.Join(dataRoot, "runtime", "portal-registration.token")
+	credential, err := os.ReadFile(credentialPath)
+	if err != nil {
+		return fmt.Errorf("read retained Runtime registration credential: %w", err)
+	}
+	defer zero(credential)
+	registrationCredential := strings.TrimSpace(string(credential))
+	if registrationCredential == "" {
+		return errors.New("retained Runtime registration credential is empty")
+	}
+	spec := RuntimeSpec{SID: user.SID, CanonicalUsername: account.Canonical, DataRoot: dataRoot, RegistrationCredential: registrationCredential}
+	if err := p.InstallRuntime(ctx, spec, password); err != nil {
+		return err
+	}
+	return p.StartRuntime(ctx, spec)
 }
 
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {

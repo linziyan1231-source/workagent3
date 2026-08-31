@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
@@ -61,5 +62,9 @@ func (*WindowsPlatform) UpdateInstalledLimits(context.Context, string, winutil.J
 }
 
 func (*WindowsPlatform) RemoveInstalledRuntime(context.Context, string) error {
+	return errors.New("employee lifecycle is only available on Windows")
+}
+
+func (*WindowsPlatform) RepairInstalledRuntime(context.Context, store.User, []byte) error {
 	return errors.New("employee lifecycle is only available on Windows")
 }

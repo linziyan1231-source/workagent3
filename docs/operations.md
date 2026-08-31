@@ -17,13 +17,15 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action add -us
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action disable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action enable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action reset-password -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action repair -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action set-limits -username alice -memory-bytes 4294967296 -cpu-percent 50 -active-processes 64
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action offboard-retain -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action grant-admin -username manager
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-admin -username manager
 ```
 
-`add` and `reset-password` wait for a new Portal password on standard input.
+`add` and `reset-password` wait for a new Portal password on standard input;
+`repair` waits for the managed Windows account password on standard input.
 Use the deployment secret-input mechanism so the value is not retained in
 PowerShell history. `disable` atomically revokes active browser sessions before
 stopping the employee's scheduled UserHost. If the stop fails, the account
@@ -43,6 +45,13 @@ offboarded while preserving the Windows SID, private data root, Workspace, and
 native Codex/Kimi authentication. Ordinary `enable` cannot reopen an offboarded
 employee. Permanent data deletion is a separate high-risk workflow and is not
 implied by this command.
+
+`repair` rotates the managed Windows password, verifies that the account still
+maps to the original SID, recreates its Profile/private roots, reprojects the
+released Harness Profile, rebuilds the scheduled UserHost task, and waits for a
+healthy authenticated Runtime lease. Only then does it clear retained-offboard
+state and reopen Portal login. Missing retained Runtime registration material
+or any SID mismatch fails closed.
 
 For the formal browser administrator page, run Employee Manager as its own
 privileged service on loopback and point Portal at it. The token file must be an

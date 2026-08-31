@@ -141,6 +141,11 @@ func (s *Service) OffboardRetain(ctx context.Context, username string) error {
 	return err
 }
 
+func (s *Service) Repair(ctx context.Context, username string, password []byte) error {
+	_, err := s.Lifecycle.Repair(ctx, username, password)
+	return err
+}
+
 func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {
 	return contracts.KimiDatasourceGrant{}, fmt.Errorf("Kimi datasource policy is not configured")
 }

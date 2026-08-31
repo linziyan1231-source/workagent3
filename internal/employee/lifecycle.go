@@ -28,6 +28,11 @@ type RetentionPlatform interface {
 	RemoveInstalledRuntime(context.Context, string) error
 }
 
+type RepairPlatform interface {
+	LifecyclePlatform
+	RepairInstalledRuntime(context.Context, store.User, []byte) error
+}
+
 type LifecycleUserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	SetUserEnabled(context.Context, string, bool) error
@@ -192,5 +197,45 @@ func (l Lifecycle) OffboardRetain(ctx context.Context, username string) (store.U
 		return user, err
 	}
 	user.Offboarded = true
+	return user, nil
+}
+
+func (l Lifecycle) Repair(ctx context.Context, username string, windowsPassword []byte) (store.User, error) {
+	defer zero(windowsPassword)
+	platform, ok := l.Platform.(RepairPlatform)
+	if !ok || l.Users == nil {
+		return store.User{}, errors.New("employee repair dependencies are required")
+	}
+	if len(windowsPassword) == 0 {
+		return store.User{}, errors.New("Windows password is required for repair")
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return store.User{}, err
+	}
+	if !user.Disabled {
+		if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
+			return store.User{}, err
+		}
+		user.Disabled = true
+		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
+		}
+	}
+	if err := platform.RepairInstalledRuntime(ctx, user, windowsPassword); err != nil {
+		return user, fmt.Errorf("repair employee runtime: %w", err)
+	}
+	if user.Offboarded {
+		if err := l.Users.SetUserOffboarded(ctx, username, false); err != nil {
+			_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+			return user, err
+		}
+		user.Offboarded = false
+	}
+	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
+		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		return user, err
+	}
+	user.Disabled = false
 	return user, nil
 }

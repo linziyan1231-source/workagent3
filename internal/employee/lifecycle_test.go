@@ -20,6 +20,8 @@ type lifecyclePlatform struct {
 	limits    winutil.JobLimits
 	removes   int
 	removeErr error
+	repairs   int
+	repairErr error
 }
 
 type failingEnableStore struct{ *store.Store }
@@ -46,6 +48,13 @@ func (p *lifecyclePlatform) UpdateInstalledLimits(_ context.Context, _ string, l
 func (p *lifecyclePlatform) RemoveInstalledRuntime(context.Context, string) error {
 	p.removes++
 	return p.removeErr
+}
+func (p *lifecyclePlatform) RepairInstalledRuntime(_ context.Context, _ store.User, password []byte) error {
+	p.repairs++
+	if len(password) == 0 {
+		return errors.New("missing password")
+	}
+	return p.repairErr
 }
 
 func TestLifecycleDisableRevokesSessionsBeforeRuntimeStop(t *testing.T) {
@@ -192,5 +201,36 @@ func TestOffboardRetainFailureStillLeavesAccountDisabled(t *testing.T) {
 	stored, _ := data.UserByUsername(t.Context(), "alice")
 	if !stored.Disabled || stored.Offboarded {
 		t.Fatalf("partial offboarding state is not recoverable: %+v", stored)
+	}
+}
+
+func TestRepairRestoresRetainedEmployeeOnlyAfterRuntimeHealth(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.SetUserOffboarded(t.Context(), "alice", true)
+	platform := &lifecyclePlatform{}
+	password := []byte("windows repair password")
+	result, err := (Lifecycle{Platform: platform, Users: data}).Repair(t.Context(), "alice", password)
+	if err != nil || result.Disabled || result.Offboarded || platform.repairs != 1 {
+		t.Fatalf("repair did not restore employee: user=%+v platform=%+v err=%v", result, platform, err)
+	}
+	if string(password) != string(make([]byte, len(password))) {
+		t.Fatal("Windows repair password buffer was not cleared")
+	}
+}
+
+func TestRepairFailureKeepsRetainedEmployeeClosed(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.SetUserOffboarded(t.Context(), "alice", true)
+	platform := &lifecyclePlatform{repairErr: errors.New("task verification failed")}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).Repair(t.Context(), "alice", []byte("windows repair password")); err == nil {
+		t.Fatal("failed repair reopened employee")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || !stored.Offboarded {
+		t.Fatalf("failed repair changed retention state: %+v", stored)
 	}
 }
