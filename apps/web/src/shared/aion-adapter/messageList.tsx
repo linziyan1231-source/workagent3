@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { ipcBridge } from "./common.js";
 
 export type RendererMessage = Record<string, any> & {
   id: string;
@@ -105,6 +106,58 @@ export const useLoadPreviousMessagePage = () => async () => false;
 export const useLoadAnchorMessageWindow = () => async () => false;
 
 const messageKey = (message: RendererMessage) => message.msg_id ?? message.id;
+
+type LiveResponseMessage = Parameters<
+  typeof ipcBridge.acpConversation.responseStream.emit
+>[0];
+
+const toLiveRendererMessage = (
+  message: LiveResponseMessage,
+): RendererMessage | undefined => {
+  if (
+    message.type === "text" ||
+    message.type === "content" ||
+    message.type === "user_content"
+  ) {
+    return {
+      id: message.msg_id,
+      msg_id: message.msg_id,
+      conversation_id: message.conversation_id,
+      type: "text",
+      position:
+        message.position ??
+        (message.type === "user_content" ? "right" : "left"),
+      created_at: message.created_at ?? Date.now(),
+      status: message.status,
+      content: {
+        content:
+          typeof message.data === "string"
+            ? message.data
+            : JSON.stringify(message.data),
+        ...(message.replace === true ? { replace: true } : {}),
+      },
+    };
+  }
+  if (message.type === "error") {
+    const errorData = message.data as { message?: unknown } | null;
+    const content =
+      typeof message.data === "string"
+        ? message.data
+        : typeof errorData?.message === "string"
+          ? errorData.message
+          : JSON.stringify(message.data);
+    return {
+      id: message.msg_id,
+      msg_id: message.msg_id,
+      conversation_id: message.conversation_id,
+      type: "tips",
+      position: "center",
+      created_at: message.created_at ?? Date.now(),
+      content: { content, type: "error" },
+    };
+  }
+  return undefined;
+};
 
 const mergeMessage = (
   list: RendererMessage[],
@@ -205,4 +258,21 @@ export const useMessageLstCache = (conversationId: string) => {
       cancelled = true;
     };
   }, [conversationId, setLoading, update]);
+
+  useEffect(() => {
+    const subscribedAt = Date.now();
+    const off = ipcBridge.acpConversation.responseStream.on((message) => {
+      if (message.conversation_id !== conversationId) return;
+      if (
+        typeof message.created_at === "number" &&
+        message.created_at < subscribedAt - 1_000
+      )
+        return;
+      const transformed = toLiveRendererMessage(message);
+      if (transformed) update((list) => mergeMessage(list, transformed, false));
+    });
+    return () => {
+      off();
+    };
+  }, [conversationId, update]);
 };
