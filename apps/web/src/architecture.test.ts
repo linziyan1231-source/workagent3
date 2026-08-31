@@ -45,6 +45,7 @@ describe("Web feature boundaries", () => {
       "shared/ui/aionui/AionMessageList.tsx",
       "shared/ui/aionui/AionPresetPage.tsx",
       "shared/ui/aionui/AionSendBox.tsx",
+      "shared/ui/aionui/AionSettingsSider.tsx",
       "shared/ui/aionui/AionSider.tsx",
       "shared/ui/aionui/AionTeamCreateModal.tsx",
       "shared/ui/aionui/AionTeamPage.tsx",
@@ -68,6 +69,21 @@ describe("Web feature boundaries", () => {
       "@renderer/components/layout/Sider",
     ]) {
       expect(application).toContain(formalComponent);
+    }
+
+    const viteConfig = readFileSync(
+      join(sourceRoot, "..", "vite.config.ts"),
+      "utf8",
+    );
+    for (const formalVisualSurface of [
+      "@renderer/components/layout/Router",
+      "@renderer/components/layout/Sider",
+      "@renderer/pages/conversation",
+      "@renderer/pages/guid",
+      "@renderer/pages/login",
+    ]) {
+      expect(viteConfig).not.toContain(`find: "${formalVisualSurface}"`);
+      expect(viteConfig).not.toContain(`find: '${formalVisualSurface}'`);
     }
   });
 });
