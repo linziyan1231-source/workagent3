@@ -23,11 +23,17 @@ type CapacityPlatform interface {
 	UpdateInstalledLimits(context.Context, string, winutil.JobLimits) error
 }
 
+type RetentionPlatform interface {
+	LifecyclePlatform
+	RemoveInstalledRuntime(context.Context, string) error
+}
+
 type LifecycleUserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	SetUserEnabled(context.Context, string, bool) error
 	ResetUserPassword(context.Context, string, string) error
 	SetUserAdmin(context.Context, string, bool) error
+	SetUserOffboarded(context.Context, string, bool) error
 }
 
 // Lifecycle coordinates Portal account state with the SID-owned runtime. Its
@@ -152,5 +158,39 @@ func (l Lifecycle) SetLimits(ctx context.Context, username string, limits winuti
 		return user, err
 	}
 	user.Disabled = false
+	return user, nil
+}
+
+func (l Lifecycle) OffboardRetain(ctx context.Context, username string) (store.User, error) {
+	platform, ok := l.Platform.(RetentionPlatform)
+	if !ok || l.Users == nil {
+		return store.User{}, errors.New("employee retention dependencies are required")
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return store.User{}, err
+	}
+	if user.Admin {
+		return store.User{}, errors.New("administrator account cannot be offboarded as an employee")
+	}
+	if user.Offboarded {
+		return user, nil
+	}
+	if !user.Disabled {
+		if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
+			return store.User{}, err
+		}
+		user.Disabled = true
+		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
+		}
+	}
+	if err := platform.RemoveInstalledRuntime(ctx, user.SID); err != nil {
+		return user, fmt.Errorf("employee data retained but scheduled runtime removal failed: %w", err)
+	}
+	if err := l.Users.SetUserOffboarded(ctx, username, true); err != nil {
+		return user, err
+	}
+	user.Offboarded = true
 	return user, nil
 }

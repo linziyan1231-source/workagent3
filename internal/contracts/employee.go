@@ -7,6 +7,7 @@ type ManagedEmployee struct {
 	WindowsUsername string               `json:"windows_username"`
 	WindowsSID      string               `json:"windows_sid"`
 	Enabled         bool                 `json:"enabled"`
+	Offboarded      bool                 `json:"offboarded"`
 	CreatedAt       time.Time            `json:"created_at"`
 	LastLoginAt     *time.Time           `json:"last_login_at,omitempty"`
 	KimiDatasource  *KimiDatasourceGrant `json:"kimi_datasource,omitempty"`

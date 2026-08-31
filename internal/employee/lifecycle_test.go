@@ -18,6 +18,8 @@ type lifecyclePlatform struct {
 	stopErr   error
 	updateErr error
 	limits    winutil.JobLimits
+	removes   int
+	removeErr error
 }
 
 type failingEnableStore struct{ *store.Store }
@@ -40,6 +42,10 @@ func (p *lifecyclePlatform) StopInstalledRuntime(context.Context, string) error 
 func (p *lifecyclePlatform) UpdateInstalledLimits(_ context.Context, _ string, limits winutil.JobLimits) error {
 	p.limits = limits
 	return p.updateErr
+}
+func (p *lifecyclePlatform) RemoveInstalledRuntime(context.Context, string) error {
+	p.removes++
+	return p.removeErr
 }
 
 func TestLifecycleDisableRevokesSessionsBeforeRuntimeStop(t *testing.T) {
@@ -150,5 +156,41 @@ func TestLifecycleCapacityFailureLeavesEmployeeDisabled(t *testing.T) {
 	stored, _ := data.UserByUsername(t.Context(), "alice")
 	if !stored.Disabled {
 		t.Fatal("capacity failure reopened the Portal account")
+	}
+}
+
+func TestOffboardRetainFreezesEmployeeWithoutDeletingIdentity(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.CreateSession(t.Context(), "active", user.ID, time.Now().Add(time.Hour))
+	platform := &lifecyclePlatform{}
+	result, err := (Lifecycle{Platform: platform, Users: data}).OffboardRetain(t.Context(), "alice")
+	if err != nil || !result.Disabled || !result.Offboarded || platform.stops != 1 || platform.removes != 1 {
+		t.Fatalf("retained offboarding was incomplete: user=%+v platform=%+v err=%v", result, platform, err)
+	}
+	stored, err := data.UserByUsername(t.Context(), "alice")
+	if err != nil || stored.SID != user.SID || !stored.Offboarded {
+		t.Fatalf("retained identity was lost: %+v %v", stored, err)
+	}
+	if _, err := data.UserBySession(t.Context(), "active", time.Now()); err == nil {
+		t.Fatal("offboarded employee kept an active session")
+	}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).SetEnabled(t.Context(), "alice", true); err == nil {
+		t.Fatal("ordinary enable bypassed retained-offboard state")
+	}
+}
+
+func TestOffboardRetainFailureStillLeavesAccountDisabled(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	platform := &lifecyclePlatform{removeErr: errors.New("task scheduler unavailable")}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).OffboardRetain(t.Context(), "alice"); err == nil {
+		t.Fatal("scheduled runtime removal failure was hidden")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || stored.Offboarded {
+		t.Fatalf("partial offboarding state is not recoverable: %+v", stored)
 	}
 }

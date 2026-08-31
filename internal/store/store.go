@@ -24,6 +24,7 @@ type User struct {
 	PasswordHash         string     `json:"-"`
 	Disabled             bool       `json:"disabled"`
 	Admin                bool       `json:"admin"`
+	Offboarded           bool       `json:"-"`
 	CollaborationEnabled bool       `json:"collaboration_enabled"`
 	CollaborationCapable bool       `json:"collaboration_capable"`
 	CreatedAt            time.Time  `json:"-"`
@@ -61,7 +62,8 @@ CREATE TABLE IF NOT EXISTS users (
   admin INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1)),
   collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1)),
   created_at INTEGER NOT NULL DEFAULT 0,
-  last_login_at INTEGER
+  last_login_at INTEGER,
+  offboarded INTEGER NOT NULL DEFAULT 0 CHECK (offboarded IN (0, 1))
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -86,6 +88,7 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 		{name: "collaboration_enabled", ddl: `ALTER TABLE users ADD COLUMN collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))`},
 		{name: "created_at", ddl: `ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`},
 		{name: "last_login_at", ddl: `ALTER TABLE users ADD COLUMN last_login_at INTEGER`},
+		{name: "offboarded", ddl: `ALTER TABLE users ADD COLUMN offboarded INTEGER NOT NULL DEFAULT 0 CHECK (offboarded IN (0, 1))`},
 	} {
 		var exists int
 		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name=?)`, column.name).Scan(&exists); err != nil {
@@ -148,14 +151,15 @@ func (s *Store) createUser(ctx context.Context, username, sid, passwordHash stri
 
 func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
 	var user User
-	var disabled, admin, collaborationEnabled int
+	var disabled, admin, collaborationEnabled, offboarded int
 	var createdAt int64
 	var lastLoginAt sql.NullInt64
-	if err := scanner.Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt, &offboarded); err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
 	user.Admin = admin != 0
+	user.Offboarded = offboarded != 0
 	user.CollaborationEnabled = collaborationEnabled != 0
 	user.CollaborationCapable = true
 	user.CreatedAt = time.Unix(createdAt, 0).UTC()
@@ -167,15 +171,15 @@ func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE username = ?`, username))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE sid = ?`, sid))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE sid = ?`, sid))
 }
 
 func (s *Store) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -211,18 +215,29 @@ func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled boo
 		return fmt.Errorf("begin user state change: %w", err)
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET disabled = ? WHERE username = ?`, !enabled, username)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET disabled = ? WHERE username = ? AND (? = 0 OR offboarded = 0)`, !enabled, username, enabled)
 	if err != nil {
 		return fmt.Errorf("update user state: %w", err)
 	}
 	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
-		return errors.New("Portal user does not exist")
+		return errors.New("Portal user does not exist or is offboarded")
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit user state change: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SetUserOffboarded(ctx context.Context, username string, offboarded bool) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET offboarded=? WHERE username=? AND (?=0 OR disabled=1)`, offboarded, username, offboarded)
+	if err != nil {
+		return fmt.Errorf("update employee retention state: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("employee must be disabled before offboarding")
 	}
 	return nil
 }
@@ -293,7 +308,7 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, e
 
 func (s *Store) UserBySession(ctx context.Context, token string, now time.Time) (User, error) {
 	user, err := scanUser(s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled, u.created_at, u.last_login_at
+SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled, u.created_at, u.last_login_at, u.offboarded
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()))
 	if err != nil {

@@ -31,7 +31,7 @@ func ExportBackup(ctx context.Context, source, destination string) error {
 id INTEGER PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
 display_name TEXT NOT NULL, sid TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
 disabled INTEGER NOT NULL, admin INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL,
-created_at INTEGER NOT NULL, last_login_at INTEGER)`); err != nil {
+created_at INTEGER NOT NULL, last_login_at INTEGER, offboarded INTEGER NOT NULL)`); err != nil {
 		return err
 	}
 	expression := func(column, fallback string) (string, error) {
@@ -56,7 +56,11 @@ created_at INTEGER NOT NULL, last_login_at INTEGER)`); err != nil {
 	if err != nil {
 		return err
 	}
-	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,`+adminExpression+`,collaboration_enabled,`+createdExpression+`,`+lastLoginExpression+` FROM users ORDER BY id`)
+	offboardedExpression, err := expression("offboarded", "0")
+	if err != nil {
+		return err
+	}
+	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,`+adminExpression+`,collaboration_enabled,`+createdExpression+`,`+lastLoginExpression+`,`+offboardedExpression+` FROM users ORDER BY id`)
 	if err != nil {
 		return err
 	}
@@ -69,13 +73,13 @@ created_at INTEGER NOT NULL, last_login_at INTEGER)`); err != nil {
 	for rows.Next() {
 		var id int64
 		var username, displayName, sid, passwordHash string
-		var disabled, admin, collaborationEnabled int
+		var disabled, admin, collaborationEnabled, offboarded int
 		var createdAt int64
 		var lastLoginAt sql.NullInt64
-		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt); err != nil {
+		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt, &offboarded); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, admin, collaborationEnabled, createdAt, lastLoginAt); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, admin, collaborationEnabled, createdAt, lastLoginAt, offboarded); err != nil {
 			return err
 		}
 	}

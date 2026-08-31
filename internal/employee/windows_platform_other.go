@@ -59,3 +59,7 @@ func (*WindowsPlatform) StartInstalledRuntime(context.Context, string) error {
 func (*WindowsPlatform) UpdateInstalledLimits(context.Context, string, winutil.JobLimits) error {
 	return errors.New("employee lifecycle is only available on Windows")
 }
+
+func (*WindowsPlatform) RemoveInstalledRuntime(context.Context, string) error {
+	return errors.New("employee lifecycle is only available on Windows")
+}

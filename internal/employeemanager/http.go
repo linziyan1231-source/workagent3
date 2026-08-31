@@ -64,6 +64,8 @@ func Handler(service *Service, token string) http.Handler {
 			err = service.ResetPassword(r.Context(), input.Username, password)
 		case "set-limits":
 			err = service.SetLimits(r.Context(), input.Username, input.Limits)
+		case "offboard-retain":
+			err = service.OffboardRetain(r.Context(), input.Username)
 		case "kimi-datasource":
 			result, err = service.SetKimiDatasource(r.Context(), input.Username, input.Grant)
 		default:

@@ -38,5 +38,5 @@ func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName str
 }
 
 func (s *Store) UserByID(ctx context.Context, userID int64) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE id=?`, userID))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded FROM users WHERE id=?`, userID))
 }

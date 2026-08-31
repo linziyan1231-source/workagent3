@@ -169,6 +169,11 @@ func (p *WindowsPlatform) UpdateInstalledLimits(_ context.Context, sid string, l
 	return writeAtomic(configPath, append(payload, '\n'))
 }
 
+func (p *WindowsPlatform) RemoveInstalledRuntime(ctx context.Context, sid string) error {
+	script := `if (Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $env:WA3_TASK -Confirm:$false -ErrorAction Stop }`
+	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
+}
+
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {
 	endpoint := strings.TrimRight(portalURL, "/") + "/internal/runtime/lease?sid=" + url.QueryEscape(sid)
 	deadline := time.NewTimer(timeout)

@@ -46,7 +46,7 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
-	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, set-limits, grant-admin, or revoke-admin")
+	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, set-limits, offboard-retain, grant-admin, or revoke-admin")
 	username := flag.String("username", "", "Windows and Portal username")
 	memoryBytes := flag.Uint64("memory-bytes", 0, "Job Object memory limit for set-limits")
 	cpuPercent := flag.Uint("cpu-percent", 0, "Job Object CPU percent for set-limits")
@@ -107,6 +107,8 @@ func run() error {
 	case "set-limits":
 		limits := winutil.JobLimits{MemoryBytes: *memoryBytes, CPUPercent: uint32(*cpuPercent), ActiveProcesses: uint32(*activeProcesses)}
 		user, err = lifecycle.SetLimits(ctx, *username, limits)
+	case "offboard-retain":
+		user, err = lifecycle.OffboardRetain(ctx, *username)
 	case "grant-admin", "revoke-admin":
 		user, err = (employee.Lifecycle{Users: data}).SetPortalAdmin(ctx, *username, *action == "grant-admin")
 	default:

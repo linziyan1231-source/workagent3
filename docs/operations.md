@@ -18,6 +18,7 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action disable
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action enable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action reset-password -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action set-limits -username alice -memory-bytes 4294967296 -cpu-percent 50 -active-processes 64
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action offboard-retain -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action grant-admin -username manager
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-admin -username manager
 ```
@@ -35,6 +36,13 @@ SID-private UserHost configuration, starts a new Job Object, waits for a healthy
 lease, and only then re-enables the account. Invalid limits are rejected before
 the account changes. An update or health failure leaves the employee disabled
 for explicit repair.
+
+`offboard-retain` is the non-destructive departure action. It revokes login,
+stops the Runtime, unregisters the scheduled task, and records the employee as
+offboarded while preserving the Windows SID, private data root, Workspace, and
+native Codex/Kimi authentication. Ordinary `enable` cannot reopen an offboarded
+employee. Permanent data deletion is a separate high-risk workflow and is not
+implied by this command.
 
 For the formal browser administrator page, run Employee Manager as its own
 privileged service on loopback and point Portal at it. The token file must be an
