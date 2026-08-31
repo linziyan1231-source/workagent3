@@ -33,6 +33,50 @@ type ConversationListEvent = {
   source?: string;
 };
 
+type SharedProjectResponse = {
+  id: string;
+  ownerUserId: number;
+  name: string;
+  state: string;
+  currentRole: "owner" | "member";
+  hidden: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SharedInviteResponse = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  inviterName: string;
+  status: "pending";
+  createdAt: string;
+  expiresAt: string;
+};
+
+const toRendererSharedProject = (project: SharedProjectResponse) => ({
+  id: project.id,
+  name: project.name,
+  source_kind: "new" as const,
+  state: project.state,
+  role: project.currentRole,
+  owner_name: "",
+  member_count: 0,
+  hidden: project.hidden,
+  created_at: project.createdAt,
+  updated_at: project.updatedAt,
+});
+
+const toRendererSharedInvite = (invite: SharedInviteResponse) => ({
+  id: invite.id,
+  project_id: invite.projectId,
+  project_name: invite.projectName,
+  inviter_name: invite.inviterName,
+  status: invite.status,
+  created_at: invite.createdAt,
+  expires_at: invite.expiresAt,
+});
+
 const conversationListListeners = new Set<
   (event: ConversationListEvent) => void
 >();
@@ -183,9 +227,36 @@ export const ipcBridge = {
           { method: "DELETE" },
         ),
     },
-    listAllSharedProjects: { invoke: async () => ({ projects: [] }) },
+    listSharedProjects: {
+      invoke: async () => {
+        const result = await requestJson<{ projects: SharedProjectResponse[] }>(
+          "/api/portal/shared-projects",
+        );
+        return { projects: result.projects.map(toRendererSharedProject) };
+      },
+    },
+    listAllSharedProjects: {
+      invoke: async () => {
+        const result = await requestJson<{ projects: SharedProjectResponse[] }>(
+          "/api/portal/shared-projects?include_hidden=true",
+        );
+        return { projects: result.projects.map(toRendererSharedProject) };
+      },
+    },
     listAllSharedConversations: { invoke: async () => ({ conversations: [] }) },
-    setSharedProjectHidden: { invoke: async () => undefined },
+    setSharedProjectHidden: {
+      invoke: async (input: { project_id: string; hidden: boolean }) => {
+        await requestJson<void>(
+          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ hidden: input.hidden }),
+          },
+        );
+        return { success: true };
+      },
+    },
     setSharedConversationHidden: { invoke: async () => undefined },
     updateProfile: {
       invoke: async (input: {
@@ -199,9 +270,32 @@ export const ipcBridge = {
         }),
     },
     restartService: { invoke: async () => ({ reconnect_after_ms: 2000 }) },
-    listSharedInvites: { invoke: async () => ({ invites: [] }) },
-    acceptSharedInvite: { invoke: async () => ({ success: false }) },
-    declineSharedInvite: { invoke: async () => ({ success: false }) },
+    listSharedInvites: {
+      invoke: async () => {
+        const result = await requestJson<{ invites: SharedInviteResponse[] }>(
+          "/api/portal/shared-invites",
+        );
+        return { invites: result.invites.map(toRendererSharedInvite) };
+      },
+    },
+    acceptSharedInvite: {
+      invoke: async (input: { invite_id: string }) => {
+        await requestJson(
+          `/api/portal/shared-invites/${encodeURIComponent(input.invite_id)}/accept`,
+          { method: "POST" },
+        );
+        return { success: true };
+      },
+    },
+    declineSharedInvite: {
+      invoke: async (input: { invite_id: string }) => {
+        await requestJson<void>(
+          `/api/portal/shared-invites/${encodeURIComponent(input.invite_id)}/decline`,
+          { method: "POST" },
+        );
+        return { success: true };
+      },
+    },
   },
   assistants: {
     list: { invoke: async () => [] },

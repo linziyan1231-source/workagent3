@@ -47,6 +47,7 @@ type Member struct {
 type Invite struct {
 	ID            string     `json:"id"`
 	ProjectID     string     `json:"projectId"`
+	ProjectName   string     `json:"projectName"`
 	InviterUserID int64      `json:"inviterUserId"`
 	TargetUserID  int64      `json:"targetUserId"`
 	TargetSID     string     `json:"targetSid"`
@@ -323,7 +324,7 @@ func (s *Store) Invite(ctx context.Context, id string) (Invite, error) {
 	var invite Invite
 	var expires, created int64
 	var acted sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT id,project_id,inviter_user_id,target_user_id,target_sid,status,expires_at,created_at,acted_at FROM shared_invites WHERE id=?`, id).Scan(&invite.ID, &invite.ProjectID, &invite.InviterUserID, &invite.TargetUserID, &invite.TargetSID, &invite.Status, &expires, &created, &acted)
+	err := s.db.QueryRowContext(ctx, `SELECT i.id,i.project_id,p.name,i.inviter_user_id,i.target_user_id,i.target_sid,i.status,i.expires_at,i.created_at,i.acted_at FROM shared_invites i JOIN shared_projects p ON p.id=i.project_id WHERE i.id=?`, id).Scan(&invite.ID, &invite.ProjectID, &invite.ProjectName, &invite.InviterUserID, &invite.TargetUserID, &invite.TargetSID, &invite.Status, &expires, &created, &acted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Invite{}, ErrNotFound
 	}

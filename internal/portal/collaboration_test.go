@@ -73,6 +73,10 @@ func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
 	if err := json.Unmarshal(invited.Body.Bytes(), &inviteBody); err != nil {
 		t.Fatal(err)
 	}
+	pending := collaborationRequest(t, handler, bob.session, http.MethodGet, "/api/portal/shared-invites", "")
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"projectName":"Design"`) || !strings.Contains(pending.Body.String(), `"inviterName":"alice"`) || strings.Contains(pending.Body.String(), "S-1-") {
+		t.Fatalf("pending invites = %d %s", pending.Code, pending.Body.String())
+	}
 
 	platform.grantErr = errors.New("injected ACL failure")
 	failedAccept := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`)

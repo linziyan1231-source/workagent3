@@ -34,9 +34,13 @@ func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName str
 	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 		return User{}, errors.New("Portal user does not exist")
 	}
+	return s.UserByID(ctx, userID)
+}
+
+func (s *Store) UserByID(ctx context.Context, userID int64) (User, error) {
 	var user User
 	var disabled, collaboration int
-	err = s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE id=?`, userID).
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE id=?`, userID).
 		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaboration)
 	if err != nil {
 		return User{}, err

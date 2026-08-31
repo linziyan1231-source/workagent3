@@ -118,3 +118,58 @@ describe("production Renderer conversation adapter", () => {
     });
   });
 });
+
+describe("production Renderer collaboration adapter", () => {
+  it("maps Portal invite fields into the unchanged Web 78 contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            invites: [
+              {
+                id: "invite-1",
+                projectId: "project-1",
+                projectName: "Design",
+                inviterName: "Alice",
+                status: "pending",
+                createdAt: "2026-08-31T00:00:00Z",
+                expiresAt: "2026-09-01T00:00:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(ipcBridge.portal.listSharedInvites.invoke()).resolves.toEqual({
+      invites: [
+        expect.objectContaining({
+          id: "invite-1",
+          project_id: "project-1",
+          project_name: "Design",
+          inviter_name: "Alice",
+        }),
+      ],
+    });
+  });
+
+  it("routes hidden-project changes through the project resource", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.portal.setSharedProjectHidden.invoke({
+      project_id: "project/1",
+      hidden: true,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-projects/project%2F1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ hidden: true }),
+      }),
+    );
+  });
+});

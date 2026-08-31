@@ -68,6 +68,8 @@ type sharedMemberDTO struct {
 type sharedInviteDTO struct {
 	ID            string     `json:"id"`
 	ProjectID     string     `json:"projectId"`
+	ProjectName   string     `json:"projectName"`
+	InviterName   string     `json:"inviterName"`
 	InviterUserID int64      `json:"inviterUserId"`
 	TargetUserID  int64      `json:"targetUserId"`
 	Status        string     `json:"status"`
@@ -218,7 +220,7 @@ func (s *Server) sharedProjectInvites(writer http.ResponseWriter, request *http.
 		writeCollaborationError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite)})
+	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite, user.DisplayName)})
 }
 
 func (s *Server) sharedInvites(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -233,7 +235,12 @@ func (s *Server) sharedInvites(writer http.ResponseWriter, request *http.Request
 	}
 	values := make([]sharedInviteDTO, 0, len(invites))
 	for _, invite := range invites {
-		values = append(values, inviteDTO(invite))
+		inviter, err := s.store.UserByID(request.Context(), invite.InviterUserID)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "shared_invite_failed")
+			return
+		}
+		values = append(values, inviteDTO(invite, inviter.DisplayName))
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"invites": values})
 }
@@ -363,8 +370,8 @@ func projectDTO(project collaboration.Project) sharedProjectDTO {
 	return sharedProjectDTO{ID: project.ID, OwnerUserID: project.OwnerUserID, Name: project.Name, State: project.State, CurrentRole: project.CurrentRole, Hidden: project.Hidden, PendingOwnerID: project.PendingOwnerID, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt}
 }
 
-func inviteDTO(invite collaboration.Invite) sharedInviteDTO {
-	return sharedInviteDTO{ID: invite.ID, ProjectID: invite.ProjectID, InviterUserID: invite.InviterUserID, TargetUserID: invite.TargetUserID, Status: invite.Status, ExpiresAt: invite.ExpiresAt, CreatedAt: invite.CreatedAt, ActedAt: invite.ActedAt}
+func inviteDTO(invite collaboration.Invite, inviterName string) sharedInviteDTO {
+	return sharedInviteDTO{ID: invite.ID, ProjectID: invite.ProjectID, ProjectName: invite.ProjectName, InviterName: inviterName, InviterUserID: invite.InviterUserID, TargetUserID: invite.TargetUserID, Status: invite.Status, ExpiresAt: invite.ExpiresAt, CreatedAt: invite.CreatedAt, ActedAt: invite.ActedAt}
 }
 
 func writeCollaborationError(writer http.ResponseWriter, err error) {
