@@ -15,6 +15,7 @@ import WorkspaceContextMenu from "@renderer/pages/conversation/Workspace/compone
 import WorkspaceDialogs from "@renderer/pages/conversation/Workspace/components/WorkspaceDialogs";
 import WorkspaceTabBar from "@renderer/pages/conversation/Workspace/components/WorkspaceTabBar";
 import WorkspaceToolbar from "@renderer/pages/conversation/Workspace/components/WorkspaceToolbar";
+import { useMountedMessage } from "@renderer/hooks/mcp/useMountedMessage";
 import type {
   DeleteModalState,
   RenameModalState,
@@ -77,7 +78,8 @@ export function WorkspacePanel({
   onAssetAdded,
 }: Props) {
   const { t } = useTranslation();
-  const [messageApi, messageContext] = Message.useMessage();
+  const [rawMessageApi, messageContext] = Message.useMessage();
+  const messageApi = useMountedMessage(rawMessageApi);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [files, setFiles] = useState<IDirOrFile[]>([]);
   const [loading, setLoading] = useState(false);

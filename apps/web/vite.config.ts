@@ -145,8 +145,8 @@ export default defineConfig({
         replacement: adapter("officePlatform.ts"),
       },
       {
-        find: "@/renderer/hooks/context/ThemeContext",
-        replacement: adapter("themeContext.ts"),
+        find: "@/common/config/configService",
+        replacement: adapter("configService.ts"),
       },
       {
         find: "@/renderer/hooks/context/ConversationContext",

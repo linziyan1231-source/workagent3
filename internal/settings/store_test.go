@@ -46,3 +46,25 @@ func TestStoreRejectsKeysOwnedByOtherModules(t *testing.T) {
 		}
 	}
 }
+
+func TestStorePersistsRendererAppearanceWithoutCrossingModuleBoundaries(t *testing.T) {
+	data, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	values := map[string]json.RawMessage{
+		"theme.activeId":       json.RawMessage(`"light"`),
+		"theme.userThemes":     json.RawMessage(`[]`),
+		"ui.fontSize.chat":     json.RawMessage(`14`),
+		"ui.fontSize.markdown": json.RawMessage(`13`),
+		"ui.fontSize.code":     json.RawMessage(`12`),
+	}
+	if err := data.Put(t.Context(), "S-1-5-21-1", values); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := data.Get(t.Context(), "S-1-5-21-1", []string{"theme.activeId", "theme.userThemes", "ui.fontSize.chat", "ui.fontSize.markdown", "ui.fontSize.code"})
+	if err != nil || len(stored) != len(values) {
+		t.Fatalf("appearance settings = %#v, %v", stored, err)
+	}
+}

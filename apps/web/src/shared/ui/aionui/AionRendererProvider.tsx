@@ -1,5 +1,7 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useState } from "react";
+import { ConfigProvider } from "@arco-design/web-react";
 import { LayoutContext } from "@renderer/hooks/context/LayoutContext";
+import { ThemeProvider } from "@renderer/hooks/context/ThemeContext";
 
 /** WorkAgent3 host adapter for the unmodified AionUi Renderer context. */
 export function AionRendererProvider({ children }: { children: ReactNode }) {
@@ -14,11 +16,24 @@ export function AionRendererProvider({ children }: { children: ReactNode }) {
     return () => media.removeEventListener("change", update);
   }, []);
 
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.dataset.colorScheme = "default";
+    document.documentElement.style.setProperty("--chat-font-size", "14px");
+    document.documentElement.style.setProperty("--md-font-size", "13px");
+    document.documentElement.style.setProperty("--code-font-size", "12px");
+    document.body.setAttribute("arco-theme", "light");
+  }, []);
+
   return (
-    <LayoutContext.Provider
-      value={{ isMobile, siderCollapsed, setSiderCollapsed }}
-    >
-      {children}
-    </LayoutContext.Provider>
+    <ConfigProvider theme={{ primaryColor: "#4E5969" }}>
+      <ThemeProvider>
+        <LayoutContext.Provider
+          value={{ isMobile, siderCollapsed, setSiderCollapsed }}
+        >
+          {children}
+        </LayoutContext.Provider>
+      </ThemeProvider>
+    </ConfigProvider>
   );
 }

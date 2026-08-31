@@ -3,6 +3,7 @@ import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
+import type { Theme } from "@/common/theme/types";
 import type {
   PortalSkillMarketEntry,
   PortalUsageSummary,
@@ -60,8 +61,8 @@ const toRendererConversation = (
 export const ipcBridge = {
   theme: {
     requestCurrent: { invoke: async () => null },
-    setActive: { invoke: async () => undefined },
-    changed: { on: () => () => undefined },
+    setActive: { invoke: async (_theme: unknown) => undefined },
+    changed: { on: (_handler: (theme: Theme) => void) => () => undefined },
   },
   fs: {
     listAvailableSkills: {
@@ -137,6 +138,10 @@ export const ipcBridge = {
     devToolsStateChanged: { on: () => () => undefined },
     logStream: { on: () => () => undefined },
     writeRendererLog: { invoke: async () => undefined },
+    getZoomFactor: { invoke: async () => 1 },
+    setZoomFactor: {
+      invoke: async ({ factor }: { factor: number }) => factor,
+    },
   },
   systemSettings: {
     getCloseToTray: { invoke: async () => false },

@@ -77,8 +77,8 @@
       ],
       "@/common": ["src/shared/aion-adapter/common.ts"],
       "@office-ai/platform": ["src/shared/aion-adapter/officePlatform.ts"],
-      "@/renderer/hooks/context/ThemeContext": [
-        "src/shared/aion-adapter/themeContext.ts"
+      "@/common/config/configService": [
+        "src/shared/aion-adapter/configService.ts"
       ],
       "@/renderer/hooks/context/ConversationContext": [
         "src/shared/aion-adapter/conversationContext.tsx"

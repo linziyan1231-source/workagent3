@@ -16,6 +16,11 @@ var ErrUnsupportedKey = errors.New("unsupported client setting key")
 var allowedKeys = map[string]struct{}{
 	"acp.promptTimeout":    {},
 	"acp.agentIdleTimeout": {},
+	"theme.activeId":       {},
+	"theme.userThemes":     {},
+	"ui.fontSize.chat":     {},
+	"ui.fontSize.markdown": {},
+	"ui.fontSize.code":     {},
 }
 
 type Store struct {
