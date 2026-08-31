@@ -1,5 +1,5 @@
 import type { ConfigKey, ConfigKeyMap } from "@/common/config/configKeys";
-import { requestJson } from "../api/http.js";
+import { ApiError, requestJson } from "../api/http.js";
 
 type Subscriber = (value: unknown) => void;
 
@@ -11,14 +11,16 @@ const managedKeys: ConfigKey[] = [
   "ui.fontSize.code",
 ];
 
-class BrowserConfigService {
+export class BrowserConfigService {
   private cache = new Map<string, unknown>();
   private subscribers = new Map<string, Set<Subscriber>>();
   private initPromise: Promise<void> | null = null;
 
+  constructor(private readonly disabled = import.meta.env.MODE === "test") {}
+
   initialize(): Promise<void> {
     if (this.initPromise) return this.initPromise;
-    if (import.meta.env.MODE === "test") {
+    if (this.disabled) {
       this.initPromise = Promise.resolve();
       return this.initPromise;
     }
@@ -30,10 +32,20 @@ class BrowserConfigService {
     )
       .then((values) => {
         this.cache.clear();
-        for (const [key, value] of Object.entries(values ?? {}))
+        for (const [key, value] of Object.entries(values ?? {})) {
           this.cache.set(key, value);
+          this.notify(key as ConfigKey, value);
+        }
       })
       .catch((error) => {
+        if (
+          error instanceof ApiError &&
+          error.status === 401 &&
+          error.code === "authentication_required"
+        ) {
+          this.cache.clear();
+          return;
+        }
         this.initPromise = null;
         throw error;
       });
@@ -48,7 +60,10 @@ class BrowserConfigService {
     return this.cache.get(key) as ConfigKeyMap[K] | undefined;
   }
 
-  async set<K extends ConfigKey>(key: K, value: ConfigKeyMap[K]): Promise<void> {
+  async set<K extends ConfigKey>(
+    key: K,
+    value: ConfigKeyMap[K],
+  ): Promise<void> {
     this.cache.set(key, value);
     this.notify(key, value);
     await this.persist({ [key]: value });
@@ -84,6 +99,13 @@ class BrowserConfigService {
 
   isInitialized(): boolean {
     return this.initPromise !== null;
+  }
+
+  async reload(): Promise<void> {
+    await this.initPromise?.catch(() => undefined);
+    this.cache.clear();
+    this.initPromise = null;
+    await this.initialize();
   }
 
   reset(): void {

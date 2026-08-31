@@ -8,6 +8,7 @@ import { ConversationHistoryProvider } from "@renderer/hooks/context/Conversatio
 import { authPort, type AuthUser } from "../features/auth/authPort.js";
 import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
 import { WorkAgentAuthProvider } from "../shared/aion-adapter/authContext.js";
+import { hydrateRendererAppearance } from "../shared/aion-adapter/appearance.js";
 
 export function App() {
   if (window.location.pathname === "/oauth/mcp/callback") {
@@ -27,7 +28,12 @@ function AuthenticatedRenderer() {
   useEffect(() => {
     void authPort
       .currentUser()
-      .then(setUser)
+      .then(async (current) => {
+        await hydrateRendererAppearance().catch((error) =>
+          console.error("hydrate Renderer appearance failed", error),
+        );
+        setUser(current);
+      })
       .catch(() => setUser(null));
   }, []);
 
@@ -47,7 +53,11 @@ function AuthenticatedRenderer() {
       }
       login={async ({ username, password }) => {
         try {
-          setUser(await authPort.login(username, password));
+          const authenticated = await authPort.login(username, password);
+          await hydrateRendererAppearance().catch((error) =>
+            console.error("hydrate Renderer appearance failed", error),
+          );
+          setUser(authenticated);
           return { success: true };
         } catch (error) {
           return {

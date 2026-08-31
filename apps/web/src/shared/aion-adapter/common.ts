@@ -42,6 +42,8 @@ type ConversationListEvent = {
   source?: string;
 };
 
+const themeListeners = new Set<(theme: Theme) => void>();
+
 type SharedProjectResponse = {
   id: string;
   ownerUserId: number;
@@ -320,8 +322,17 @@ export const ipcBridge = {
   cron: cronBridge,
   theme: {
     requestCurrent: { invoke: async () => null },
-    setActive: { invoke: async (_theme: unknown) => undefined },
-    changed: { on: (_handler: (theme: Theme) => void) => () => undefined },
+    setActive: {
+      invoke: async (theme: Theme) => {
+        for (const listener of themeListeners) listener(theme);
+      },
+    },
+    changed: {
+      on: (handler: (theme: Theme) => void) => {
+        themeListeners.add(handler);
+        return () => themeListeners.delete(handler);
+      },
+    },
   },
   fs: {
     listAvailableSkills: {

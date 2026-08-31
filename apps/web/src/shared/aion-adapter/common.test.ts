@@ -4,6 +4,21 @@ import { FileService } from "./fileService.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("relays formal Renderer theme changes within the browser surface", async () => {
+  const listener = vi.fn();
+  const off = ipcBridge.theme.changed.on(listener);
+  const theme = { id: "dark", appearance: "dark" } as Parameters<
+    typeof listener
+  >[0];
+
+  await ipcBridge.theme.setActive.invoke(theme);
+  off();
+  await ipcBridge.theme.setActive.invoke(theme);
+
+  expect(listener).toHaveBeenCalledOnce();
+  expect(listener).toHaveBeenCalledWith(theme);
+});
+
 describe("production Renderer Skill Market adapter", () => {
   it("routes the original publish action through Portal", async () => {
     const fetch = vi.fn(
