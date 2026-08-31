@@ -27,10 +27,17 @@ func TestInvitationMembershipAndImmediateRemoval(t *testing.T) {
 	if err != nil || invite.Status != "pending" {
 		t.Fatalf("invite = %#v, %v", invite, err)
 	}
-	if _, err := store.AcceptInvite(t.Context(), invite.ID, 3); !errors.Is(err, ErrForbidden) {
+	if _, err := store.BeginInviteAcceptance(t.Context(), invite.ID, 3); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("another user accepted invite: %v", err)
 	}
-	joined, err := store.AcceptInvite(t.Context(), invite.ID, 2)
+	pending, err := store.BeginInviteAcceptance(t.Context(), invite.ID, 2)
+	if err != nil || pending.State != "pending_acl" {
+		t.Fatalf("pending member = %#v, %v", pending, err)
+	}
+	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pending ACL member gained access: %v", err)
+	}
+	joined, err := store.CompleteInviteAcceptance(t.Context(), invite.ID, 2)
 	if err != nil || joined.CurrentRole != "member" {
 		t.Fatalf("joined project = %#v, %v", joined, err)
 	}
@@ -38,7 +45,23 @@ func TestInvitationMembershipAndImmediateRemoval(t *testing.T) {
 	if err != nil || len(members) != 2 || members[0].Role != "owner" || members[1].Role != "member" {
 		t.Fatalf("members = %#v, %v", members, err)
 	}
-	if err := store.RemoveMember(t.Context(), project.ID, 1, 2); err != nil {
+	removing, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 2)
+	if err != nil || removing.State != "removal_pending" {
+		t.Fatalf("removing member = %#v, %v", removing, err)
+	}
+	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("removal-pending member retained access: %v", err)
+	}
+	if err := store.AbortMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); err != nil {
+		t.Fatalf("aborted removal did not restore access: %v", err)
+	}
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); !errors.Is(err, ErrNotFound) {
@@ -60,7 +83,7 @@ func TestInviteExpiryDoesNotCreateMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.now = func() time.Time { return time.Date(2026, 9, 1, 0, 2, 0, 0, time.UTC) }
-	if _, err := store.AcceptInvite(t.Context(), invite.ID, 2); !errors.Is(err, ErrInviteExpired) {
+	if _, err := store.BeginInviteAcceptance(t.Context(), invite.ID, 2); !errors.Is(err, ErrInviteExpired) {
 		t.Fatalf("expired invite result: %v", err)
 	}
 	stored, err := store.Invite(t.Context(), invite.ID)
@@ -109,13 +132,14 @@ func TestInviteDeclineRevokeAndMemberLeave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AcceptInvite(t.Context(), third.ID, 2); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.LeaveProject(t.Context(), project.ID, 1); !errors.Is(err, ErrForbidden) {
+	acceptInvite(t, store, third.ID, 2)
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 1); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("owner left project: %v", err)
 	}
-	if err := store.LeaveProject(t.Context(), project.ID, 2); err != nil {
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 2, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteMemberRemoval(t.Context(), project.ID, 2, 2); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); !errors.Is(err, ErrNotFound) {
@@ -134,9 +158,7 @@ func TestOwnershipTransferIsRecoverableAndAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AcceptInvite(t.Context(), invite.ID, 2); err != nil {
-		t.Fatal(err)
-	}
+	acceptInvite(t, store, invite.ID, 2)
 	transfer, err := store.BeginOwnershipTransfer(t.Context(), OwnershipTransfer{
 		ID: transferID, ProjectID: project.ID, ToUserID: 2, ToSID: memberSID,
 	}, 1)
@@ -187,6 +209,32 @@ func TestProjectVisibilityAndOwnerAuthorization(t *testing.T) {
 	}
 }
 
+func TestInviteAcceptanceCanRollbackACLFailure(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, err := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginInviteAcceptance(t.Context(), invite.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AbortInviteAcceptance(t.Context(), invite.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Invite(t.Context(), invite.ID)
+	if err != nil || stored.Status != "pending" {
+		t.Fatalf("rolled-back invite = %#v, %v", stored, err)
+	}
+	if _, err := store.ProjectForUser(t.Context(), project.ID, 2, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rolled-back acceptance retained access: %v", err)
+	}
+	acceptInvite(t, store, invite.ID, 2)
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	return openStoreAt(t, ":memory:")
@@ -215,6 +263,18 @@ func createActiveProject(t *testing.T, store *Store) Project {
 		t.Fatal(err)
 	}
 	project, err = store.ProjectForUser(context.Background(), project.ID, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return project
+}
+
+func acceptInvite(t *testing.T, store *Store, id string, userID int64) Project {
+	t.Helper()
+	if _, err := store.BeginInviteAcceptance(t.Context(), id, userID); err != nil {
+		t.Fatal(err)
+	}
+	project, err := store.CompleteInviteAcceptance(t.Context(), id, userID)
 	if err != nil {
 		t.Fatal(err)
 	}

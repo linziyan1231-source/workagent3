@@ -40,6 +40,7 @@ type Member struct {
 	UserID    int64     `json:"userId"`
 	SID       string    `json:"sid"`
 	Role      string    `json:"role"`
+	State     string    `json:"state"`
 	JoinedAt  time.Time `json:"joinedAt"`
 }
 
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS shared_members (
   user_id INTEGER NOT NULL,
   sid TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('owner','member')),
+  state TEXT NOT NULL CHECK (state IN ('pending_acl','accepted','removal_pending')),
   hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0,1)),
   joined_at INTEGER NOT NULL,
   PRIMARY KEY (project_id,user_id),
@@ -118,13 +120,13 @@ CREATE TABLE IF NOT EXISTS shared_invites (
   inviter_user_id INTEGER NOT NULL,
   target_user_id INTEGER NOT NULL,
   target_sid TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending','accepted','declined','revoked','expired')),
+  status TEXT NOT NULL CHECK (status IN ('pending','accepting','accepted','declined','revoked','expired')),
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   acted_at INTEGER
 );
 CREATE UNIQUE INDEX IF NOT EXISTS shared_pending_invite
-ON shared_invites(project_id,target_user_id) WHERE status='pending';
+ON shared_invites(project_id,target_user_id) WHERE status IN ('pending','accepting');
 CREATE TABLE IF NOT EXISTS shared_ownership_transfers (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
@@ -159,7 +161,7 @@ func (s *Store) CreateProject(ctx context.Context, project Project) (Project, er
 	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_projects(id,owner_user_id,owner_sid,name,state,created_at,updated_at) VALUES(?,?,?,?, 'provisioning',?,?)`, project.ID, project.OwnerUserID, project.OwnerSID, project.Name, stamp, stamp); err != nil {
 		return Project{}, fmt.Errorf("create shared project: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_members(project_id,user_id,sid,role,joined_at) VALUES(?,?,?,'owner',?)`, project.ID, project.OwnerUserID, project.OwnerSID, stamp); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_members(project_id,user_id,sid,role,state,joined_at) VALUES(?,?,?,'owner','accepted',?)`, project.ID, project.OwnerUserID, project.OwnerSID, stamp); err != nil {
 		return Project{}, fmt.Errorf("create shared project owner: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -180,13 +182,21 @@ func (s *Store) SetProvisioningResult(ctx context.Context, projectID string, act
 	return requireOne(result, ErrConflict)
 }
 
+func (s *Store) AbortProjectProvisioning(ctx context.Context, projectID string, ownerUserID int64) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM shared_projects WHERE id=? AND owner_user_id=? AND state IN ('provisioning','failed')`, strings.TrimSpace(projectID), ownerUserID)
+	if err != nil {
+		return err
+	}
+	return requireOne(result, ErrConflict)
+}
+
 func (s *Store) ProjectForUser(ctx context.Context, projectID string, userID int64, includeHidden bool) (Project, error) {
 	var project Project
 	var hidden int
 	var pending sql.NullInt64
 	var created, updated int64
 	err := s.db.QueryRowContext(ctx, `SELECT p.id,p.owner_user_id,p.owner_sid,p.name,p.state,m.role,m.hidden,p.pending_owner_user_id,p.created_at,p.updated_at
-FROM shared_projects p JOIN shared_members m ON m.project_id=p.id AND m.user_id=?
+FROM shared_projects p JOIN shared_members m ON m.project_id=p.id AND m.user_id=? AND m.state='accepted'
 WHERE p.id=?`, userID, strings.TrimSpace(projectID)).Scan(&project.ID, &project.OwnerUserID, &project.OwnerSID, &project.Name, &project.State, &project.CurrentRole, &hidden, &pending, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Project{}, ErrNotFound
@@ -207,7 +217,7 @@ WHERE p.id=?`, userID, strings.TrimSpace(projectID)).Scan(&project.ID, &project.
 }
 
 func (s *Store) ListProjects(ctx context.Context, userID int64, includeHidden bool) ([]Project, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id FROM shared_projects p JOIN shared_members m ON m.project_id=p.id AND m.user_id=? WHERE (? OR m.hidden=0) ORDER BY p.updated_at DESC,p.id`, userID, includeHidden)
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id FROM shared_projects p JOIN shared_members m ON m.project_id=p.id AND m.user_id=? AND m.state='accepted' WHERE (? OR m.hidden=0) ORDER BY p.updated_at DESC,p.id`, userID, includeHidden)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +264,7 @@ func (s *Store) RenameProject(ctx context.Context, projectID string, ownerUserID
 }
 
 func (s *Store) SetHidden(ctx context.Context, projectID string, userID int64, hidden bool) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE shared_members SET hidden=? WHERE project_id=? AND user_id=?`, hidden, projectID, userID)
+	result, err := s.db.ExecContext(ctx, `UPDATE shared_members SET hidden=? WHERE project_id=? AND user_id=? AND state='accepted'`, hidden, projectID, userID)
 	if err != nil {
 		return err
 	}
@@ -265,7 +275,7 @@ func (s *Store) Members(ctx context.Context, projectID string, requesterID int64
 	if _, err := s.ProjectForUser(ctx, projectID, requesterID, true); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id,user_id,sid,role,joined_at FROM shared_members WHERE project_id=? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,joined_at,user_id`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id,user_id,sid,role,state,joined_at FROM shared_members WHERE project_id=? AND state='accepted' ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END,joined_at,user_id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +284,7 @@ func (s *Store) Members(ctx context.Context, projectID string, requesterID int64
 	for rows.Next() {
 		var member Member
 		var joined int64
-		if err := rows.Scan(&member.ProjectID, &member.UserID, &member.SID, &member.Role, &joined); err != nil {
+		if err := rows.Scan(&member.ProjectID, &member.UserID, &member.SID, &member.Role, &member.State, &joined); err != nil {
 			return nil, err
 		}
 		member.JoinedAt = time.UnixMilli(joined).UTC()
@@ -328,41 +338,73 @@ func (s *Store) Invite(ctx context.Context, id string) (Invite, error) {
 	return invite, nil
 }
 
-func (s *Store) AcceptInvite(ctx context.Context, inviteID string, targetUserID int64) (Project, error) {
+func (s *Store) BeginInviteAcceptance(ctx context.Context, inviteID string, targetUserID int64) (Member, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Project{}, err
+		return Member{}, err
 	}
 	defer tx.Rollback()
 	var projectID, targetSID, status, projectState string
 	var expectedTarget, expires int64
 	err = tx.QueryRowContext(ctx, `SELECT i.project_id,i.target_user_id,i.target_sid,i.status,i.expires_at,p.state FROM shared_invites i JOIN shared_projects p ON p.id=i.project_id WHERE i.id=?`, inviteID).Scan(&projectID, &expectedTarget, &targetSID, &status, &expires, &projectState)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Project{}, ErrNotFound
+		return Member{}, ErrNotFound
 	}
 	if err != nil {
-		return Project{}, err
+		return Member{}, err
 	}
 	if expectedTarget != targetUserID {
-		return Project{}, ErrForbidden
+		return Member{}, ErrForbidden
 	}
 	if status != "pending" || projectState != "active" {
-		return Project{}, ErrConflict
+		return Member{}, ErrConflict
 	}
 	stamp := s.now().UTC()
 	if !stamp.Before(time.UnixMilli(expires)) {
 		if _, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status='expired',acted_at=? WHERE id=? AND status='pending'`, stamp.UnixMilli(), inviteID); err != nil {
-			return Project{}, err
+			return Member{}, err
 		}
 		if err := tx.Commit(); err != nil {
-			return Project{}, err
+			return Member{}, err
 		}
-		return Project{}, ErrInviteExpired
+		return Member{}, ErrInviteExpired
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_members(project_id,user_id,sid,role,joined_at) VALUES(?,?,?,'member',?)`, projectID, targetUserID, targetSID, stamp.UnixMilli()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO shared_members(project_id,user_id,sid,role,state,joined_at) VALUES(?,?,?,'member','pending_acl',?)`, projectID, targetUserID, targetSID, stamp.UnixMilli()); err != nil {
+		return Member{}, ErrConflict
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status='accepting' WHERE id=? AND status='pending'`, inviteID)
+	if err != nil {
+		return Member{}, err
+	}
+	if err := requireOne(result, ErrConflict); err != nil {
+		return Member{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Member{}, err
+	}
+	return Member{ProjectID: projectID, UserID: targetUserID, SID: targetSID, Role: "member", State: "pending_acl", JoinedAt: stamp}, nil
+}
+
+func (s *Store) CompleteInviteAcceptance(ctx context.Context, inviteID string, targetUserID int64) (Project, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Project{}, err
+	}
+	defer tx.Rollback()
+	var projectID string
+	if err := tx.QueryRowContext(ctx, `SELECT project_id FROM shared_invites WHERE id=? AND target_user_id=? AND status='accepting'`, inviteID, targetUserID).Scan(&projectID); errors.Is(err, sql.ErrNoRows) {
 		return Project{}, ErrConflict
+	} else if err != nil {
+		return Project{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status='accepted',acted_at=? WHERE id=? AND status='pending'`, stamp.UnixMilli(), inviteID)
+	result, err := tx.ExecContext(ctx, `UPDATE shared_members SET state='accepted' WHERE project_id=? AND user_id=? AND state='pending_acl'`, projectID, targetUserID)
+	if err != nil {
+		return Project{}, err
+	}
+	if err := requireOne(result, ErrConflict); err != nil {
+		return Project{}, err
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE shared_invites SET status='accepted',acted_at=? WHERE id=? AND target_user_id=? AND status='accepting'`, s.now().UTC().UnixMilli(), inviteID, targetUserID)
 	if err != nil {
 		return Project{}, err
 	}
@@ -373,6 +415,41 @@ func (s *Store) AcceptInvite(ctx context.Context, inviteID string, targetUserID 
 		return Project{}, err
 	}
 	return s.ProjectForUser(ctx, projectID, targetUserID, true)
+}
+
+func (s *Store) AbortInviteAcceptance(ctx context.Context, inviteID string, targetUserID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var projectID string
+	var expires int64
+	if err := tx.QueryRowContext(ctx, `SELECT project_id,expires_at FROM shared_invites WHERE id=? AND target_user_id=? AND status='accepting'`, inviteID, targetUserID).Scan(&projectID, &expires); errors.Is(err, sql.ErrNoRows) {
+		return ErrConflict
+	} else if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM shared_members WHERE project_id=? AND user_id=? AND state='pending_acl'`, projectID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if err := requireOne(result, ErrConflict); err != nil {
+		return err
+	}
+	status := "pending"
+	var acted any
+	if !s.now().UTC().Before(time.UnixMilli(expires)) {
+		status, acted = "expired", s.now().UTC().UnixMilli()
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE shared_invites SET status=?,acted_at=? WHERE id=? AND status='accepting'`, status, acted, inviteID)
+	if err != nil {
+		return err
+	}
+	if err := requireOne(result, ErrConflict); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) DeclineInvite(ctx context.Context, inviteID string, targetUserID int64) error {
@@ -419,42 +496,91 @@ func (s *Store) InvitesForTarget(ctx context.Context, targetUserID int64) ([]Inv
 	return invites, nil
 }
 
-func (s *Store) RemoveMember(ctx context.Context, projectID string, ownerUserID, targetUserID int64) error {
-	if ownerUserID == targetUserID {
-		return ErrForbidden
+func (s *Store) BeginMemberRemoval(ctx context.Context, projectID string, requesterUserID, targetUserID int64) (Member, error) {
+	if requesterUserID <= 0 || targetUserID <= 0 {
+		return Member{}, ErrForbidden
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return Member{}, err
 	}
 	defer tx.Rollback()
 	var owner int64
-	var state string
-	if err := tx.QueryRowContext(ctx, `SELECT owner_user_id,state FROM shared_projects WHERE id=?`, projectID).Scan(&owner, &state); err != nil {
-		return ErrNotFound
+	var projectState string
+	if err := tx.QueryRowContext(ctx, `SELECT owner_user_id,state FROM shared_projects WHERE id=?`, projectID).Scan(&owner, &projectState); errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrNotFound
+	} else if err != nil {
+		return Member{}, err
 	}
-	if owner != ownerUserID || state != "active" {
-		return ErrForbidden
+	if projectState != "active" || (requesterUserID != owner && requesterUserID != targetUserID) || targetUserID == owner {
+		return Member{}, ErrForbidden
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM shared_members WHERE project_id=? AND user_id=? AND role='member'`, projectID, targetUserID)
+	member, err := memberInTx(ctx, tx, projectID, targetUserID)
+	if err != nil || member.Role != "member" || member.State != "accepted" {
+		return Member{}, ErrNotFound
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE shared_members SET state='removal_pending' WHERE project_id=? AND user_id=? AND state='accepted'`, projectID, targetUserID)
 	if err != nil {
-		return err
+		return Member{}, err
 	}
-	if err := requireOne(result, ErrNotFound); err != nil {
-		return err
+	if err := requireOne(result, ErrConflict); err != nil {
+		return Member{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE shared_invites SET status='revoked',acted_at=? WHERE project_id=? AND target_user_id=? AND status='pending'`, s.now().UTC().UnixMilli(), projectID, targetUserID); err != nil {
-		return err
+	if err := tx.Commit(); err != nil {
+		return Member{}, err
 	}
-	return tx.Commit()
+	member.State = "removal_pending"
+	return member, nil
 }
 
-func (s *Store) LeaveProject(ctx context.Context, projectID string, userID int64) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM shared_members WHERE project_id=? AND user_id=? AND role='member' AND EXISTS(SELECT 1 FROM shared_projects p WHERE p.id=shared_members.project_id AND p.state='active')`, projectID, userID)
+func (s *Store) CompleteMemberRemoval(ctx context.Context, projectID string, requesterUserID, targetUserID int64) error {
+	if err := s.authorizeMemberRemoval(ctx, projectID, requesterUserID, targetUserID); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM shared_members WHERE project_id=? AND user_id=? AND role='member' AND state='removal_pending'`, projectID, targetUserID)
 	if err != nil {
 		return err
 	}
-	return requireOne(result, ErrForbidden)
+	return requireOne(result, ErrConflict)
+}
+
+func (s *Store) AbortMemberRemoval(ctx context.Context, projectID string, requesterUserID, targetUserID int64) error {
+	if err := s.authorizeMemberRemoval(ctx, projectID, requesterUserID, targetUserID); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE shared_members SET state='accepted' WHERE project_id=? AND user_id=? AND role='member' AND state='removal_pending'`, projectID, targetUserID)
+	if err != nil {
+		return err
+	}
+	return requireOne(result, ErrConflict)
+}
+
+func (s *Store) authorizeMemberRemoval(ctx context.Context, projectID string, requesterUserID, targetUserID int64) error {
+	var owner int64
+	var state string
+	if err := s.db.QueryRowContext(ctx, `SELECT owner_user_id,state FROM shared_projects WHERE id=?`, projectID).Scan(&owner, &state); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if state != "active" || targetUserID == owner || (requesterUserID != owner && requesterUserID != targetUserID) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func memberInTx(ctx context.Context, tx *sql.Tx, projectID string, userID int64) (Member, error) {
+	var member Member
+	var joined int64
+	err := tx.QueryRowContext(ctx, `SELECT project_id,user_id,sid,role,state,joined_at FROM shared_members WHERE project_id=? AND user_id=?`, projectID, userID).Scan(&member.ProjectID, &member.UserID, &member.SID, &member.Role, &member.State, &joined)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	member.JoinedAt = time.UnixMilli(joined).UTC()
+	return member, nil
 }
 
 func (s *Store) ArchiveProject(ctx context.Context, projectID string, ownerUserID int64) error {
@@ -489,7 +615,7 @@ func (s *Store) BeginOwnershipTransfer(ctx context.Context, transfer OwnershipTr
 		return OwnershipTransfer{}, ErrConflict
 	}
 	var memberSID string
-	if err := tx.QueryRowContext(ctx, `SELECT sid FROM shared_members WHERE project_id=? AND user_id=? AND role='member'`, transfer.ProjectID, transfer.ToUserID).Scan(&memberSID); err != nil || !strings.EqualFold(memberSID, transfer.ToSID) {
+	if err := tx.QueryRowContext(ctx, `SELECT sid FROM shared_members WHERE project_id=? AND user_id=? AND role='member' AND state='accepted'`, transfer.ProjectID, transfer.ToUserID).Scan(&memberSID); err != nil || !strings.EqualFold(memberSID, transfer.ToSID) {
 		return OwnershipTransfer{}, ErrForbidden
 	}
 	stamp := s.now().UTC().UnixMilli()
@@ -524,14 +650,14 @@ func (s *Store) CompleteOwnershipTransfer(ctx context.Context, transferID string
 		return Project{}, ErrConflict
 	}
 	stamp := s.now().UTC().UnixMilli()
-	result, err := tx.ExecContext(ctx, `UPDATE shared_members SET role='member' WHERE project_id=? AND user_id=? AND role='owner'`, projectID, fromUserID)
+	result, err := tx.ExecContext(ctx, `UPDATE shared_members SET role='member' WHERE project_id=? AND user_id=? AND role='owner' AND state='accepted'`, projectID, fromUserID)
 	if err != nil {
 		return Project{}, err
 	}
 	if err := requireOne(result, ErrConflict); err != nil {
 		return Project{}, err
 	}
-	result, err = tx.ExecContext(ctx, `UPDATE shared_members SET role='owner' WHERE project_id=? AND user_id=? AND role='member'`, projectID, toUserID)
+	result, err = tx.ExecContext(ctx, `UPDATE shared_members SET role='owner' WHERE project_id=? AND user_id=? AND role='member' AND state='accepted'`, projectID, toUserID)
 	if err != nil {
 		return Project{}, err
 	}
