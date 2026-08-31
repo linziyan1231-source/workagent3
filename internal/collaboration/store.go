@@ -140,6 +140,43 @@ CREATE TABLE IF NOT EXISTS shared_ownership_transfers (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS shared_pending_transfer
 ON shared_ownership_transfers(project_id) WHERE state='pending';
+CREATE TABLE IF NOT EXISTS shared_conversations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  assistant_id TEXT NOT NULL,
+  assistant_backend TEXT NOT NULL CHECK (assistant_backend IN ('codex','kimi')),
+  model_id TEXT NOT NULL,
+  thinking_effort TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'idle' CHECK (state IN ('idle','running','recovering','frozen')),
+  last_ai_message_seq INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),
+  pinned_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shared_conversations_project
+ON shared_conversations(project_id,updated_at DESC,id);
+CREATE TABLE IF NOT EXISTS shared_conversation_visibility (
+  conversation_id TEXT NOT NULL REFERENCES shared_conversations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  hidden INTEGER NOT NULL CHECK (hidden IN (0,1)),
+  PRIMARY KEY (conversation_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS shared_messages (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  conversation_id TEXT NOT NULL REFERENCES shared_conversations(id) ON DELETE CASCADE,
+  author_user_id INTEGER,
+  author_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('user','assistant','system')),
+  body TEXT NOT NULL,
+  mentions_json TEXT NOT NULL DEFAULT '[]',
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shared_messages_conversation
+ON shared_messages(conversation_id,seq);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate collaboration database: %w", err)

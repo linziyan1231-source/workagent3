@@ -25,13 +25,14 @@ const secureSessionCookie = "__Host-workagent-session"
 const developmentSessionCookie = "workagent-session"
 
 type Server struct {
-	store       *store.Store
-	runtimes    runtimeapi.EmployeeRuntimeRouter
-	now         func() time.Time
-	secure      bool
-	dummyHash   string
-	sessionLife time.Duration
-	modules     Modules
+	store        *store.Store
+	runtimes     runtimeapi.EmployeeRuntimeRouter
+	now          func() time.Time
+	secure       bool
+	dummyHash    string
+	sessionLife  time.Duration
+	modules      Modules
+	sharedEvents *sharedEventHub
 }
 
 type ModelAccessPort interface {
@@ -106,7 +107,7 @@ func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour, modules: modules}, nil
+	return &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour, modules: modules, sharedEvents: newSharedEventHub()}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -157,7 +158,16 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("/api/channels/", s.requireUser(s.externalIM))
 	mux.HandleFunc("GET /api/channel/weixin/login", s.requireUser(s.externalWeixinLogin))
 	mux.HandleFunc("GET /api/portal/shared-invites", s.requireUser(s.sharedInvites))
+	mux.HandleFunc("POST /api/portal/shared-invites", s.requireUser(s.sharedInviteByUserID))
 	mux.HandleFunc("POST /api/portal/shared-invites/{id}/{action}", s.requireUser(s.sharedInviteAction))
+	mux.HandleFunc("GET /api/portal/shared-users", s.requireUser(s.sharedUsers))
+	mux.HandleFunc("GET /api/portal/shared-members", s.requireUser(s.sharedMembers))
+	mux.HandleFunc("GET /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
+	mux.HandleFunc("POST /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
+	mux.HandleFunc("PATCH /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
+	mux.HandleFunc("GET /api/portal/shared-messages", s.requireUser(s.sharedMessages))
+	mux.HandleFunc("POST /api/portal/shared-messages", s.requireUser(s.sharedMessages))
+	mux.HandleFunc("GET /api/portal/shared-events", s.requireUser(s.sharedEventStream))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))

@@ -14,6 +14,7 @@ import (
 var tableOwner = map[string]string{
 	"users": "store", "sessions": "store", "runtime_credentials": "store",
 	"shared_projects": "collaboration", "shared_members": "collaboration", "shared_invites": "collaboration", "shared_ownership_transfers": "collaboration",
+	"shared_conversations": "collaboration", "shared_conversation_visibility": "collaboration", "shared_messages": "collaboration",
 	"quota_budgets": "quota", "quota_reservations": "quota",
 	"skill_market_entries": "skillmarket",
 	"notifications":        "notifications", "notification_receipts": "notifications",

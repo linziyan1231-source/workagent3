@@ -134,6 +134,56 @@ func TestCollaborationProjectProvisionFailureCompensates(t *testing.T) {
 	}
 }
 
+func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
+	handler, _, _, alice, bob := collaborationTestServer(t)
+	created := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects", `{"name":"Realtime"}`)
+	var projectBody struct {
+		Project sharedProjectDTO `json:"project"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &projectBody); err != nil {
+		t.Fatal(err)
+	}
+	invited := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectBody.Project.ID+"/invites", `{"targetUsername":"bob","expiresInHours":24}`)
+	var inviteBody struct {
+		Invite sharedInviteDTO `json:"invite"`
+	}
+	if err := json.Unmarshal(invited.Body.Bytes(), &inviteBody); err != nil {
+		t.Fatal(err)
+	}
+	if accepted := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`); accepted.Code != http.StatusOK {
+		t.Fatalf("accept = %d %s", accepted.Code, accepted.Body.String())
+	}
+	conversation := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-conversations", `{"project_id":"`+projectBody.Project.ID+`","name":"Review","assistant_id":"codex","assistant_backend":"codex","model_id":"gpt-5","thinking_effort":"medium"}`)
+	if conversation.Code != http.StatusCreated {
+		t.Fatalf("create conversation = %d %s", conversation.Code, conversation.Body.String())
+	}
+	var conversationBody struct {
+		Conversation sharedConversationDTO `json:"conversation"`
+	}
+	if err := json.Unmarshal(conversation.Body.Bytes(), &conversationBody); err != nil {
+		t.Fatal(err)
+	}
+	message := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-messages", `{"conversation_id":"`+conversationBody.Conversation.ID+`","body":"Hello Bob","mentions":[],"attachments":[]}`)
+	if message.Code != http.StatusCreated || !strings.Contains(message.Body.String(), `"ai_started":false`) {
+		t.Fatalf("create message = %d %s", message.Code, message.Body.String())
+	}
+	listed := collaborationRequest(t, handler, bob.session, http.MethodGet, "/api/portal/shared-messages?conversation_id="+conversationBody.Conversation.ID, "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"body":"Hello Bob"`) || strings.Contains(listed.Body.String(), `"is_current_user":true`) {
+		t.Fatalf("member messages = %d %s", listed.Code, listed.Body.String())
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	streamRequest := httptest.NewRequest(http.MethodGet, "/api/portal/shared-events", nil).WithContext(ctx)
+	streamRequest.Header.Set("Last-Event-ID", "0")
+	streamRequest.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: bob.session})
+	stream := httptest.NewRecorder()
+	handler.ServeHTTP(stream, streamRequest)
+	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), "id: 1\n") || !strings.Contains(stream.Body.String(), `"event":"message.stream"`) || !strings.Contains(stream.Body.String(), `shared:`+conversationBody.Conversation.ID) {
+		t.Fatalf("SSE replay = %d %s", stream.Code, stream.Body.String())
+	}
+}
+
 type collaborationTestUser struct {
 	user    store.User
 	session string

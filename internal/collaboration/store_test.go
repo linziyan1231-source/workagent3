@@ -279,6 +279,76 @@ func TestACLStateTracksPendingFilesystemProjection(t *testing.T) {
 	}
 }
 
+func TestSharedConversationMessagesReplayOnlyForCurrentMembers(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, err := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptInvite(t, store, invite.ID, 2)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{
+		ID: "conversation_123456789", ProjectID: project.ID, Name: "Review",
+		AssistantID: "codex", AssistantBackend: "codex", ModelID: "gpt-5", ThinkingEffort: "medium",
+	}, 1)
+	if err != nil || conversation.Role != "owner" || conversation.State != "idle" {
+		t.Fatalf("conversation = %#v, %v", conversation, err)
+	}
+	message, err := store.AddMessage(t.Context(), Message{
+		ID: "message_123456789012", Conversation: conversation.ID, AuthorName: "Owner", Kind: "user", Body: "Please review",
+		Mentions: []Mention{{Kind: "assistant", ID: "codex"}}, Attachments: []string{"spec.md"},
+	}, 1)
+	if err != nil || message.Seq != 1 || message.AuthorUserID == nil || *message.AuthorUserID != 1 {
+		t.Fatalf("message = %#v, %v", message, err)
+	}
+	replay, err := store.ListMessagesForUserAfter(t.Context(), 2, 0, 100)
+	if err != nil || len(replay) != 1 || replay[0].Body != "Please review" || len(replay[0].Mentions) != 1 {
+		t.Fatalf("member replay = %#v, %v", replay, err)
+	}
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	replay, err = store.ListMessagesForUserAfter(t.Context(), 2, 0, 100)
+	if err != nil || len(replay) != 0 {
+		t.Fatalf("removed member replay = %#v, %v", replay, err)
+	}
+	if _, err := store.ListMessages(t.Context(), conversation.ID, 3, 0, 100); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("outsider message access = %v", err)
+	}
+}
+
+func TestSharedConversationVisibilityIsPerMember(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, _ := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	acceptInvite(t, store, invite.ID, 2)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{
+		ID: "conversation_abcdefgh", ProjectID: project.ID, Name: "Hidden",
+		AssistantID: "kimi", AssistantBackend: "kimi", ModelID: "kimi-code", ThinkingEffort: "high",
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetConversationHidden(t.Context(), conversation.ID, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	if values, err := store.ListConversations(t.Context(), 2, false); err != nil || len(values) != 0 {
+		t.Fatalf("member visible conversations = %#v, %v", values, err)
+	}
+	if values, err := store.ListConversations(t.Context(), 1, false); err != nil || len(values) != 1 {
+		t.Fatalf("owner visible conversations = %#v, %v", values, err)
+	}
+	if values, err := store.ListConversations(t.Context(), 2, true); err != nil || len(values) != 1 || !values[0].Hidden {
+		t.Fatalf("member hidden conversations = %#v, %v", values, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	return openStoreAt(t, ":memory:")

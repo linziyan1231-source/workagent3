@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { collaborationPort } from "../../features/collaboration/collaborationPort.js";
 import { ipcBridge } from "./common.js";
 
 export type RendererMessage = Record<string, any> & {
@@ -114,6 +115,10 @@ type LiveResponseMessage = Parameters<
 const toLiveRendererMessage = (
   message: LiveResponseMessage,
 ): RendererMessage | undefined => {
+  if (message.type === "teammate_message") {
+    const data = message.data as RendererMessage;
+    return { ...data, id: data.id ?? message.msg_id };
+  }
   if (
     message.type === "text" ||
     message.type === "content" ||
@@ -201,21 +206,52 @@ export const useMessageLstCache = (conversationId: string) => {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    const shared = conversationId.startsWith("shared:");
+    const restoredMessages: Promise<RendererMessage[]> = shared
+      ? collaborationPort
+          .listMessages(conversationId.slice("shared:".length))
+          .then((messages) =>
+            messages.map((message) => ({
+              id: message.id,
+              msg_id: message.id,
+              conversation_id: conversationId,
+              type: "text",
+              position:
+                message.kind === "system"
+                  ? "center"
+                  : message.is_current_user
+                    ? "right"
+                    : "left",
+              created_at: Date.parse(message.created_at),
+              content: {
+                content: message.body,
+                teammateMessage: message.kind === "user",
+                senderName: message.author_name,
+                senderUserId: message.author_user_id
+                  ? String(message.author_user_id)
+                  : undefined,
+              },
+            })),
+          )
+      : conversationPort.messages(conversationId).then((messages) =>
+          messages.map((message) => ({
+            id: message.id,
+            msg_id: message.id,
+            conversation_id: message.sessionId,
+            type: "text",
+            position: message.role === "user" ? "right" : "left",
+            created_at: Date.parse(message.createdAt),
+            content: { content: message.text },
+          })),
+        );
     void Promise.all([
-      conversationPort.messages(conversationId),
-      conversationPort.pending(conversationId).catch(() => []),
+      restoredMessages,
+      shared
+        ? Promise.resolve([])
+        : conversationPort.pending(conversationId).catch(() => []),
     ])
-      .then(([messages, pending]) => {
+      .then(([restored, pending]) => {
         if (cancelled) return;
-        const restored: RendererMessage[] = messages.map((message) => ({
-          id: message.id,
-          msg_id: message.id,
-          conversation_id: message.sessionId,
-          type: "text",
-          position: message.role === "user" ? "right" : "left",
-          created_at: Date.parse(message.createdAt),
-          content: { content: message.text },
-        }));
         for (const interaction of pending) {
           restored.push({
             id: `confirmation:${interaction.id}`,

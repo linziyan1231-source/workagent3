@@ -37,6 +37,13 @@ type CollaborationPort interface {
 	BeginOwnershipTransfer(context.Context, collaboration.OwnershipTransfer, int64) (collaboration.OwnershipTransfer, error)
 	CompleteOwnershipTransfer(context.Context, string) (collaboration.Project, error)
 	AbortOwnershipTransfer(context.Context, string) error
+	CreateConversation(context.Context, collaboration.Conversation, int64) (collaboration.Conversation, error)
+	ConversationForUser(context.Context, string, int64, bool) (collaboration.Conversation, error)
+	ListConversations(context.Context, int64, bool) ([]collaboration.Conversation, error)
+	SetConversationHidden(context.Context, string, int64, bool) (collaboration.Conversation, error)
+	AddMessage(context.Context, collaboration.Message, int64) (collaboration.Message, error)
+	ListMessages(context.Context, string, int64, int64, int) ([]collaboration.Message, error)
+	ListMessagesForUserAfter(context.Context, int64, int64, int) ([]collaboration.Message, error)
 }
 
 // SharedProjectPlatformPort is implemented by the privileged Employee Manager
@@ -212,25 +219,96 @@ func (s *Server) sharedProjectInvites(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusInternalServerError, "shared_invite_failed")
 		return
 	}
+	s.createSharedInvite(writer, request, user, target, request.PathValue("id"), input.ExpiresInHours)
+}
+
+func (s *Server) createSharedInvite(writer http.ResponseWriter, request *http.Request, user, target store.User, projectID string, expiresInHours int) {
+	if target.Disabled || target.Offboarded || target.Admin || target.ID == user.ID {
+		writeError(writer, http.StatusNotFound, "invite_target_not_found")
+		return
+	}
 	id, err := auth.RandomToken(18)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "shared_invite_failed")
 		return
 	}
-	invite, err := s.modules.Collaboration.CreateInvite(request.Context(), collaboration.Invite{ID: id, ProjectID: request.PathValue("id"), InviterUserID: user.ID, TargetUserID: target.ID, TargetSID: target.SID, ExpiresAt: s.now().Add(time.Duration(input.ExpiresInHours) * time.Hour)})
+	invite, err := s.modules.Collaboration.CreateInvite(request.Context(), collaboration.Invite{ID: id, ProjectID: projectID, InviterUserID: user.ID, TargetUserID: target.ID, TargetSID: target.SID, ExpiresAt: s.now().Add(time.Duration(expiresInHours) * time.Hour)})
 	if err != nil {
 		writeCollaborationError(writer, err)
 		return
 	}
-	s.publishNotification(request.Context(), contracts.NotificationInput{
-		TargetSID: target.SID,
-		Kind:      "shared_invite",
-		Title:     "Shared project invitation",
-		Message:   user.DisplayName + " invited you to " + invite.ProjectName,
-		DeepLink:  "/",
-		ExpiresAt: &invite.ExpiresAt,
-	})
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_invite", Title: "Shared project invitation", Message: user.DisplayName + " invited you to " + invite.ProjectName, DeepLink: "/", ExpiresAt: &invite.ExpiresAt})
 	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite, user.DisplayName)})
+}
+
+func (s *Server) sharedInviteByUserID(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Collaboration == nil {
+		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
+		return
+	}
+	var input struct {
+		ProjectID    string `json:"project_id"`
+		TargetUserID int64  `json:"target_user_id"`
+	}
+	if !decodeJSON(request, &input, 8*1024) || input.TargetUserID <= 0 {
+		writeError(writer, http.StatusBadRequest, "invalid_shared_invite")
+		return
+	}
+	target, err := s.store.UserByID(request.Context(), input.TargetUserID)
+	if err != nil {
+		writeError(writer, http.StatusNotFound, "invite_target_not_found")
+		return
+	}
+	s.createSharedInvite(writer, request, user, target, input.ProjectID, 7*24)
+}
+
+func (s *Server) sharedUsers(writer http.ResponseWriter, request *http.Request, user store.User) {
+	query := strings.ToLower(strings.TrimSpace(request.URL.Query().Get("q")))
+	if query == "" || len(query) > 64 {
+		writeJSON(writer, http.StatusOK, map[string]any{"users": []any{}})
+		return
+	}
+	users, err := s.store.ListManagedUsers(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "shared_user_search_failed")
+		return
+	}
+	values := make([]map[string]any, 0, 20)
+	for _, candidate := range users {
+		if candidate.ID == user.ID || candidate.Disabled || candidate.Offboarded || !candidate.CollaborationEnabled {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(candidate.Username), query) && !strings.Contains(strings.ToLower(candidate.DisplayName), query) {
+			continue
+		}
+		values = append(values, map[string]any{"id": candidate.ID, "username": candidate.Username, "display_name": candidate.DisplayName})
+		if len(values) == 20 {
+			break
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"users": values})
+}
+
+func (s *Server) sharedMembers(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Collaboration == nil {
+		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
+		return
+	}
+	members, err := s.modules.Collaboration.Members(request.Context(), request.URL.Query().Get("project_id"), user.ID)
+	if err != nil {
+		writeCollaborationError(writer, err)
+		return
+	}
+	values := make([]map[string]any, 0, len(members))
+	for _, member := range members {
+		account, err := s.store.UserByID(request.Context(), member.UserID)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "shared_member_failed")
+			return
+		}
+		values = append(values, map[string]any{"id": account.ID, "username": account.Username, "display_name": account.DisplayName, "role": member.Role})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"members": values})
 }
 
 func (s *Server) sharedInvites(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -303,10 +381,14 @@ func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
 		return
 	}
-	targetUserID, err := strconv.ParseInt(request.PathValue("userID"), 10, 64)
-	if err != nil || targetUserID <= 0 {
-		writeError(writer, http.StatusBadRequest, "invalid_shared_member")
-		return
+	targetUserID := user.ID
+	var err error
+	if request.PathValue("userID") != "me" {
+		targetUserID, err = strconv.ParseInt(request.PathValue("userID"), 10, 64)
+		if err != nil || targetUserID <= 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_shared_member")
+			return
+		}
 	}
 	member, err := s.modules.Collaboration.BeginMemberRemoval(request.Context(), request.PathValue("id"), user.ID, targetUserID)
 	if err != nil {
@@ -334,12 +416,19 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 	}
 	var input struct {
 		TargetUsername string `json:"targetUsername"`
+		TargetUserID   int64  `json:"targetUserId"`
 	}
 	if !decodeJSON(request, &input, 8*1024) {
 		writeError(writer, http.StatusBadRequest, "invalid_ownership_transfer")
 		return
 	}
-	target, err := s.store.UserByUsername(request.Context(), input.TargetUsername)
+	var target store.User
+	var err error
+	if input.TargetUserID > 0 {
+		target, err = s.store.UserByID(request.Context(), input.TargetUserID)
+	} else {
+		target, err = s.store.UserByUsername(request.Context(), input.TargetUsername)
+	}
 	if err != nil || target.Disabled {
 		writeError(writer, http.StatusNotFound, "transfer_target_not_found")
 		return

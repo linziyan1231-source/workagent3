@@ -111,6 +111,10 @@ export default defineConfig({
         find: "@/common/adapter/ipcBridge",
         replacement: adapter("ipcBridge.ts"),
       },
+      {
+        find: "@/common/adapter/httpBridge",
+        replacement: adapter("httpBridge.ts"),
+      },
       { find: "classnames", replacement: `${webModules}/classnames` },
       { find: "dayjs", replacement: `${webModules}/dayjs` },
       { find: "croner", replacement: `${webModules}/croner` },

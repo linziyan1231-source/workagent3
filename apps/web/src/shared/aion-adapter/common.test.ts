@@ -301,43 +301,47 @@ describe("production Renderer conversation adapter", () => {
       createdAt: now,
       updatedAt: now,
     };
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify([
-            {
-              id: "session-1",
-              engine: "harness",
-              title: "Project review",
-              createdAt: now,
-              updatedAt: now,
-              workspaceId: "default",
-              preset: {
-                presetId: preset.id,
-                presetVersion: 1,
-                resolvedSnapshot: { ...preset, resolvedAt: now },
-              },
-            },
-            {
-              id: "session-codex",
-              engine: "codex",
-              title: "Native Codex",
-              createdAt: now,
-              updatedAt: now,
-              workspaceId: "default",
-              preset: {
-                presetId: preset.id,
-                presetVersion: 1,
-                resolvedSnapshot: {
-                  ...preset,
-                  engine: "codex",
-                  resolvedAt: now,
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/api/portal/shared-conversations")
+        ? new Response(JSON.stringify({ conversations: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(
+            JSON.stringify([
+              {
+                id: "session-1",
+                engine: "harness",
+                title: "Project review",
+                createdAt: now,
+                updatedAt: now,
+                workspaceId: "default",
+                preset: {
+                  presetId: preset.id,
+                  presetVersion: 1,
+                  resolvedSnapshot: { ...preset, resolvedAt: now },
                 },
               },
-            },
-          ]),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+              {
+                id: "session-codex",
+                engine: "codex",
+                title: "Native Codex",
+                createdAt: now,
+                updatedAt: now,
+                workspaceId: "default",
+                preset: {
+                  presetId: preset.id,
+                  presetVersion: 1,
+                  resolvedSnapshot: {
+                    ...preset,
+                    engine: "codex",
+                    resolvedAt: now,
+                  },
+                },
+              },
+            ]),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
     );
     vi.stubGlobal("fetch", fetch);
 

@@ -6,6 +6,11 @@ import { presetPort } from "../../features/presets/presetPort.js";
 import { notificationPort } from "../../features/notifications/notificationPort.js";
 import { systemPort } from "../../features/system/systemPort.js";
 import { workspacePort } from "../../features/workspace/workspacePort.js";
+import {
+  collaborationPort,
+  type SharedConversation,
+  type SharedStreamMessage,
+} from "../../features/collaboration/collaborationPort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
@@ -161,11 +166,101 @@ const emitResponse = (event: RendererResponseMessage) => {
   for (const listener of responseStreamListeners) listener(event);
 };
 
+collaborationPort.onStream((message: SharedStreamMessage) =>
+  emitResponse(message as RendererResponseMessage),
+);
+
+const sharedConversationPrefix = "shared:";
+const isSharedConversation = (id: string) =>
+  id.startsWith(sharedConversationPrefix);
+const rawSharedConversationId = (id: string) =>
+  id.slice(sharedConversationPrefix.length);
+
+const toRendererSharedConversation = (
+  value: SharedConversation,
+): TChatConversation =>
+  ({
+    id: `${sharedConversationPrefix}${value.id}`,
+    name: value.name,
+    type: "acp",
+    created_at: Date.parse(value.created_at),
+    modified_at: Date.parse(value.updated_at),
+    status: value.state === "running" ? "running" : "finished",
+    runtime: {
+      state: value.state === "running" ? "running" : "idle",
+      can_send_message: true,
+      has_task: value.state === "running",
+      is_processing: value.state === "running",
+      pending_confirmations: 0,
+      turn_id: null,
+    },
+    extra: {
+      backend: value.assistant_backend,
+      preset_assistant_id: value.assistant_id,
+      current_model_id: value.model_id,
+      thought_level: value.thinking_effort,
+      custom_workspace: true,
+      is_project_workspace: true,
+      workspace: `shared://${value.project_id}`,
+      shared_workspace: `shared://${value.project_id}`,
+      pinned: value.pinned,
+      pinned_at: value.pinned_at ? Date.parse(value.pinned_at) : undefined,
+      shared: {
+        conversation_id: value.id,
+        project_id: value.project_id,
+        project_name: value.project_name,
+        role: value.role,
+        assistant_id: value.assistant_id,
+        assistant_backend: value.assistant_backend,
+        model_id: value.model_id,
+        thinking_effort: value.thinking_effort,
+      },
+    },
+  }) as TChatConversation;
+
 const sendRendererMessage = async (input: {
   conversation_id: string;
   input: string;
   files?: string[];
+  mentions?: Array<{ kind: "assistant" | "member" | "file"; id: string }>;
 }) => {
+  if (isSharedConversation(input.conversation_id)) {
+    const result = await collaborationPort.sendMessage(
+      rawSharedConversationId(input.conversation_id),
+      input.input,
+      input.mentions,
+      input.files,
+    );
+    emitResponse({
+      type: "teammate_message",
+      data: {
+        id: result.message.id,
+        msg_id: result.message.id,
+        conversation_id: input.conversation_id,
+        type: "text",
+        position: "right",
+        status: "finish",
+        created_at: Date.parse(result.message.created_at),
+        content: {
+          content: result.message.body,
+          teammateMessage: true,
+          senderName: result.message.author_name,
+          senderUserId: result.message.author_user_id
+            ? String(result.message.author_user_id)
+            : undefined,
+        },
+      },
+      msg_id: result.message.id,
+      conversation_id: input.conversation_id,
+      created_at: Date.parse(result.message.created_at),
+      position: "right",
+    });
+    return {
+      msg_id: result.message.id,
+      turn_id: "",
+      runtime: { is_processing: result.ai_started, turn_id: null },
+    };
+  }
   ensureRuntimeSubscription(input.conversation_id);
   const replacements = await materializeConversationFiles(
     input.conversation_id,
@@ -655,35 +750,138 @@ export const ipcBridge = {
     },
     listSharedProjects: {
       invoke: async () => {
-        const result = await requestJson<{ projects: SharedProjectResponse[] }>(
-          "/api/portal/shared-projects",
-        );
-        return { projects: result.projects.map(toRendererSharedProject) };
+        const projects = await collaborationPort.listProjects();
+        return { projects: projects.map(toRendererSharedProject) };
       },
     },
     listAllSharedProjects: {
       invoke: async () => {
-        const result = await requestJson<{ projects: SharedProjectResponse[] }>(
-          "/api/portal/shared-projects?include_hidden=true",
-        );
-        return { projects: result.projects.map(toRendererSharedProject) };
+        const projects = await collaborationPort.listProjects(true);
+        return { projects: projects.map(toRendererSharedProject) };
       },
     },
-    listAllSharedConversations: { invoke: async () => ({ conversations: [] }) },
+    createSharedProject: {
+      invoke: async ({ name }: { name: string }) => ({
+        project: toRendererSharedProject(
+          await collaborationPort.createProject(name),
+        ),
+      }),
+    },
+    createSharedConversation: {
+      invoke: async (
+        input: Parameters<typeof collaborationPort.createConversation>[0],
+      ) => ({
+        conversation: await collaborationPort.createConversation(input),
+      }),
+    },
+    getSharedRuntimeOptions: {
+      invoke: async ({ backend }: { backend: "codex" | "kimi" }) => {
+        const models = (await modelAccessPort.snapshot()).models
+          .filter(
+            (model) =>
+              model.providerId === backend && model.authorization.authorized,
+          )
+          .map((model) => model.id);
+        const defaultModel = models[0] ?? "";
+        return {
+          backend,
+          models,
+          thinking_efforts: ["low", "medium", "high"],
+          default_model_id: defaultModel,
+          default_thinking_effort: "medium",
+          model_defaults: Object.fromEntries(
+            models.map((model) => [model, "medium"]),
+          ),
+        };
+      },
+    },
+    listAllSharedConversations: {
+      invoke: async () => ({
+        conversations: await collaborationPort.listConversations(true),
+      }),
+    },
     setSharedProjectHidden: {
       invoke: async (input: { project_id: string; hidden: boolean }) => {
-        await requestJson<void>(
-          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}`,
-          {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ hidden: input.hidden }),
-          },
+        await collaborationPort.setProjectHidden(
+          input.project_id,
+          input.hidden,
         );
         return { success: true };
       },
     },
-    setSharedConversationHidden: { invoke: async () => undefined },
+    setSharedConversationHidden: {
+      invoke: async (input: { conversation_id: string; hidden: boolean }) => ({
+        conversation: await collaborationPort.setConversationHidden(
+          input.conversation_id,
+          input.hidden,
+        ),
+      }),
+    },
+    searchSharedUsers: {
+      invoke: (input: { q: string }) =>
+        requestJson<{
+          users: Array<{
+            id: number;
+            username: string;
+            display_name: string;
+          }>;
+        }>(`/api/portal/shared-users?q=${encodeURIComponent(input.q)}`),
+    },
+    listSharedMembers: {
+      invoke: (input: { project_id: string }) =>
+        requestJson<{
+          members: Array<{
+            id: number;
+            username: string;
+            display_name: string;
+            role: "owner" | "member";
+          }>;
+        }>(
+          `/api/portal/shared-members?project_id=${encodeURIComponent(input.project_id)}`,
+        ),
+    },
+    createSharedInvite: {
+      invoke: (input: { project_id: string; target_user_id: number }) =>
+        requestJson("/api/portal/shared-invites", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+    },
+    removeSharedMember: {
+      invoke: async (input: { project_id: string; user_id: number }) => {
+        await requestJson<void>(
+          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}/members/${input.user_id}`,
+          { method: "DELETE" },
+        );
+        return { success: true };
+      },
+    },
+    leaveSharedProject: {
+      invoke: async (input: { project_id: string }) => {
+        await requestJson<void>(
+          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}/members/me`,
+          { method: "DELETE" },
+        );
+        return { success: true };
+      },
+    },
+    transferSharedProject: {
+      invoke: (input: { project_id: string; new_owner_user_id: number }) =>
+        requestJson(
+          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}/ownership`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ targetUserId: input.new_owner_user_id }),
+          },
+        ),
+    },
+    createSharedInviteLink: {
+      invoke: async () => {
+        throw new Error("shared_invite_links_not_available");
+      },
+    },
     updateProfile: {
       invoke: async (input: {
         display_name: string;
@@ -753,7 +951,8 @@ export const ipcBridge = {
           prompts_i18n: {},
           models: preset.modelId ? [preset.modelId] : [],
           agent_status: "online" as const,
-          team_selectable: false,
+          team_selectable:
+            preset.engine === "codex" || preset.engine === "kimi",
           deletable: preset.source === "user",
         })),
     },
@@ -799,6 +998,12 @@ export const ipcBridge = {
     },
     get: {
       invoke: async ({ id }: { id: string }) => {
+        if (isSharedConversation(id))
+          return toRendererSharedConversation(
+            await collaborationPort.getConversation(
+              rawSharedConversationId(id),
+            ),
+          );
         ensureRuntimeSubscription(id);
         return toRendererConversation(await conversationPort.get(id));
       },
@@ -813,6 +1018,17 @@ export const ipcBridge = {
         updates: { name?: string; extra?: Record<string, unknown> };
         merge_extra?: boolean;
       }) => {
+        if (isSharedConversation(id)) {
+          const hidden = updates.extra?.hidden;
+          if (typeof hidden === "boolean")
+            await collaborationPort.setConversationHidden(
+              rawSharedConversationId(id),
+              hidden,
+            );
+          for (const listener of conversationListListeners)
+            listener({ conversation_id: id, action: "updated" });
+          return true;
+        }
         if (updates.name !== undefined)
           await conversationPort.rename(id, updates.name);
         if (updates.extra !== undefined) {
@@ -1002,9 +1218,18 @@ export const ipcBridge = {
   database: {
     conversations: { invoke: async () => [] },
     getUserConversations: {
-      invoke: async (_input: { limit: number }) => ({
-        items: (await conversationPort.list()).map(toRendererConversation),
-      }),
+      invoke: async (_input: { limit: number }) => {
+        const [personal, shared] = await Promise.all([
+          conversationPort.list(),
+          collaborationPort.listConversations(),
+        ]);
+        return {
+          items: [
+            ...shared.map(toRendererSharedConversation),
+            ...personal.map(toRendererConversation),
+          ],
+        };
+      },
     },
     searchConversationMessages: {
       invoke: async () => ({ items: [], next_cursor: null }),
