@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/managedskills"
@@ -27,11 +28,21 @@ func main() {
 func run(arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("skill-migrate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	action := flags.String("action", "migrate", "inventory or migrate")
 	manifestPath := flags.String("manifest", "", "path to a credential-free migration inventory")
+	legacyDatabase := flags.String("legacy-db", "", "read-only WorkAgent2/AionUi SQLite database")
+	inventorySID := flags.String("sid", "", "employee SID recorded in an inventory")
+	inventoryOutput := flags.String("output", "", "new credential-free inventory JSON path")
 	runtimeDirectory := flags.String("runtime-dir", "", "stopped SID UserHost runtime directory")
 	releaseRoot := flags.String("release-skills-root", "", "WorkAgent3 released builtin Skill root")
 	if err := flags.Parse(arguments); err != nil {
 		return err
+	}
+	if *action == "inventory" {
+		return captureInventory(*legacyDatabase, *inventorySID, *inventoryOutput, output)
+	}
+	if *action != "migrate" {
+		return errors.New("action must be inventory or migrate")
 	}
 	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) {
 		return errors.New("manifest, runtime-dir, and optional release-skills-root must be absolute")
@@ -101,11 +112,37 @@ func run(arguments []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	results := append(mcpResults, skillResults...)
+	results := append(append(append([]skillmigration.Result{}, manifest.Results...), mcpResults...), skillResults...)
 	return json.NewEncoder(output).Encode(struct {
 		SID     string                  `json:"sid"`
 		Results []skillmigration.Result `json:"results"`
 	}{SID: manifest.SID, Results: results})
+}
+
+func captureInventory(databasePath, sid, outputPath string, output io.Writer) error {
+	if !filepath.IsAbs(databasePath) || !filepath.IsAbs(outputPath) {
+		return errors.New("legacy-db and output must be absolute")
+	}
+	manifest, err := skillmigration.CaptureLegacyInventory(context.Background(), databasePath, sid, time.Now())
+	if err != nil {
+		return err
+	}
+	payload, err := manifest.Marshal()
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(outputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create migration inventory: %w", err)
+	}
+	if _, err := file.Write(append(payload, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"sid": manifest.SID, "skills": len(manifest.Skills), "mcpServers": len(manifest.MCPServers), "skillBindings": len(manifest.SkillBindings), "mcpBindings": len(manifest.MCPBindings), "preclassifiedResults": len(manifest.Results)})
 }
 
 type catalogReadiness struct{ catalog *mcpruntime.Catalog }

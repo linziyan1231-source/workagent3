@@ -79,6 +79,37 @@ func TestBuiltinUsesReleasedPackageAndPreservesDisabledState(t *testing.T) {
 	}
 }
 
+func TestBuiltinMapsToReleasedSkillWithSameName(t *testing.T) {
+	ctx := context.Background()
+	release := writePackage(t, "release-by-name", "pdf", "released")
+	migration, skills := openMigration(t, map[string]string{"pdf": release})
+	if _, err := skills.InstallManaged(ctx, skillruntime.InstallInput{
+		Entry: skillruntime.Entry{ID: "managed-pdf", Name: "PDF", Version: "2", Source: "managed", Enabled: true}, SourceDirectory: release,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := migration.Migrate(ctx, validManifest(Asset{
+		OldID: "legacy-pdf", Name: "PDF", Version: "1", LegacySource: "builtin", Enabled: false, ContentPath: release,
+	}), nil)
+	if err != nil || results[0].Status != Ready || results[0].TargetID != "managed-pdf" {
+		t.Fatalf("builtin name mapping = %#v, %v", results, err)
+	}
+	entry, err := skills.Get(ctx, "managed-pdf")
+	if err != nil || entry.Enabled {
+		t.Fatalf("released state was not preserved: %#v, %v", entry, err)
+	}
+}
+
+func TestMissingLegacySkillSourceNeedsReview(t *testing.T) {
+	migration, _ := openMigration(t, nil)
+	results, err := migration.Migrate(context.Background(), validManifest(Asset{
+		OldID: "missing", Name: "Missing", Version: "1", LegacySource: "user", Enabled: true, ContentPath: filepath.Join(t.TempDir(), "gone"),
+	}), nil)
+	if err != nil || results[0].Status != NeedsReview || results[0].Reason != "source_path_missing" {
+		t.Fatalf("missing source state = %#v, %v", results, err)
+	}
+}
+
 func TestMigrationRecordsReviewFailureDeletionAndCollision(t *testing.T) {
 	ctx := context.Background()
 	migration, skills := openMigration(t, nil)

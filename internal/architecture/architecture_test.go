@@ -30,15 +30,23 @@ var tableOwner = map[string]string{
 
 var sqlTableReference = regexp.MustCompile(`(?i)\b(?:from|join|into|update|table|references)\s+(?:if\s+not\s+exists\s+)?[\x60\x22\x5b]?([a-z][a-z0-9_]*)`)
 
+var externalLegacyReaders = map[string]map[string]bool{
+	"skillmigration/inventory.go": {"skills": true, "mcp_servers": true},
+}
+
 func TestSQLTablesAreOnlyAccessedByTheirOwner(t *testing.T) {
 	internalRoot := internalDirectory(t)
 	var violations []string
 	walkGoSources(t, internalRoot, func(path, packageName, content string) {
+		relativePath := relative(internalRoot, path)
 		for _, match := range sqlTableReference.FindAllStringSubmatch(content, -1) {
 			table := strings.ToLower(match[1])
 			owner, owned := tableOwner[table]
+			if externalLegacyReaders[relativePath][table] {
+				continue
+			}
 			if owned && packageName != owner {
-				violations = append(violations, relative(internalRoot, path)+" accesses "+table+" owned by internal/"+owner)
+				violations = append(violations, relativePath+" accesses "+table+" owned by internal/"+owner)
 			}
 		}
 	})

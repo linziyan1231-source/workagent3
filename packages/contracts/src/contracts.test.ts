@@ -211,7 +211,14 @@ describe("migration inventory", () => {
         },
       ],
       mcpBindings: [],
-      results: [],
+      results: [
+        {
+          sourceId: "sb-1",
+          kind: "skill_binding" as const,
+          status: "needs_review" as const,
+          reason: "assistant_preset_projection_required",
+        },
+      ],
     };
     expect(skillMcpInventorySchema.parse(inventory).skills[0]?.oldId).toBe(
       "old-skill",

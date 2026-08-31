@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -264,6 +265,11 @@ func (s *Store) migrateOne(ctx context.Context, asset Asset, mcp MCPReadiness) R
 	if state != "" {
 		return s.record(ctx, asset, targetID, state, reason)
 	}
+	if existing, getErr := s.skills.GetByName(ctx, asset.Name); getErr == nil && existing.ID != targetID {
+		return s.record(ctx, asset, targetID, NeedsReview, "skill_name_conflict")
+	} else if getErr != nil && !errors.Is(getErr, skillruntime.ErrNotFound) {
+		return s.record(ctx, asset, targetID, Failed, "skill_catalog_lookup_failed")
+	}
 	dependencyStatus, dependencyReason := Ready, ""
 	if len(asset.RequiredMCPServerIDs) != 0 {
 		if mcp == nil {
@@ -466,6 +472,15 @@ func (s *Store) targetID(ctx context.Context, asset Asset) (string, error) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
+	if asset.LegacySource == "builtin" {
+		existing, getErr := s.skills.GetByName(ctx, asset.Name)
+		if getErr == nil && (existing.Source == "builtin" || existing.Source == "managed") {
+			return existing.ID, nil
+		}
+		if getErr != nil && !errors.Is(getErr, skillruntime.ErrNotFound) {
+			return "", getErr
+		}
+	}
 	if validID.MatchString(asset.OldID) {
 		existing, getErr := s.skills.Get(ctx, asset.OldID)
 		if errors.Is(getErr, skillruntime.ErrNotFound) || (getErr == nil && asset.LegacySource == "builtin" && (existing.Source == "builtin" || existing.Source == "managed") && strings.EqualFold(existing.Name, asset.Name)) {
@@ -487,8 +502,14 @@ func (s *Store) resolveSource(asset Asset) (string, string, Status, string) {
 		}
 		return path, "builtin", "", ""
 	case "user":
+		if info, err := os.Stat(asset.ContentPath); err != nil || !info.IsDir() {
+			return "", "", NeedsReview, "source_path_missing"
+		}
 		return asset.ContentPath, "user", "", ""
 	case "market":
+		if info, err := os.Stat(asset.ContentPath); err != nil || !info.IsDir() {
+			return "", "", NeedsReview, "source_path_missing"
+		}
 		return asset.ContentPath, "market", "", ""
 	case "extension", "cron":
 		return "", "", NeedsReview, "legacy_executable_source_requires_managed_replacement"

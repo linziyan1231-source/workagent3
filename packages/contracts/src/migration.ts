@@ -92,7 +92,13 @@ export const skillMcpMigrationResultSchema = z
   .object({
     sourceId: z.string().min(1),
     targetId: z.string().min(1).optional(),
-    kind: z.enum(["skill", "mcp_server", "mcp_binding", "oauth"]),
+    kind: z.enum([
+      "skill",
+      "mcp_server",
+      "skill_binding",
+      "mcp_binding",
+      "oauth",
+    ]),
     status: migrationStatusSchema,
     reason: z.string().min(1).optional(),
   })

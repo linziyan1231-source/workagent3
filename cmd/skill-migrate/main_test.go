@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,41 @@ import (
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
 )
+
+func TestRunCapturesCredentialFreeLegacyInventoryWithoutOverwrite(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "legacy.db")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE skills (id TEXT,name TEXT,description TEXT,path TEXT,source TEXT,enabled INTEGER,deleted_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(root, "inventory.json")
+	var output bytes.Buffer
+	arguments := []string{"--action", "inventory", "--legacy-db", databasePath, "--sid", "S-1-5-21-1", "--output", outputPath}
+	if err := run(arguments, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"skills":0`) {
+		t.Fatalf("unexpected inventory summary: %s", output.String())
+	}
+	payload, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest skillmigration.Manifest
+	if err := json.Unmarshal(payload, &manifest); err != nil || manifest.SID != "S-1-5-21-1" {
+		t.Fatalf("inventory = %#v, %v", manifest, err)
+	}
+	if err := run(arguments, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "file exists") {
+		t.Fatalf("inventory output was overwritten: %v", err)
+	}
+}
 
 func TestRunMigratesCredentialFreeManifest(t *testing.T) {
 	root := t.TempDir()
