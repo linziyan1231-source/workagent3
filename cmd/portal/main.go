@@ -173,6 +173,7 @@ func run() error {
 
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
+	root.Handle("/internal/runtime/quota/", quota.RuntimeHandler(quotas, data))
 	if token := os.Getenv("WORKAGENT_IM_DELIVERY_TOKEN"); token != "" {
 		imHandler, err := imdelivery.NewHandler(registry, token)
 		if err != nil {

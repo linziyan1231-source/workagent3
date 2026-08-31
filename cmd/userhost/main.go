@@ -54,8 +54,10 @@ func run() error {
 		SID: config.SID, DataRoot: config.DataRoot, Command: config.HarnessCommand,
 		CodexCommand: config.CodexCommand, KimiCommand: config.KimiCommand,
 		Arguments: config.HarnessArguments, Profile: config.Profile, Limits: config.Limits,
-		StartupTimeout:    time.Duration(config.StartupTimeoutSeconds) * time.Second,
-		ManagedSkillsRoot: config.ManagedSkillsRoot,
+		StartupTimeout:     time.Duration(config.StartupTimeoutSeconds) * time.Second,
+		ManagedSkillsRoot:  config.ManagedSkillsRoot,
+		PlatformURL:        config.PortalURL,
+		PlatformCredential: credential,
 	})
 	if err != nil {
 		return err

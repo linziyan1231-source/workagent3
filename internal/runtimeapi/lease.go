@@ -30,7 +30,7 @@ type LeaseAuthorizer interface {
 // with its own provisioning credential.
 func LeaseHandler(registry *Registry, authorizer LeaseAuthorizer) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if !isLoopbackRequest(request) {
+		if !IsLoopbackRequest(request) {
 			http.Error(writer, "loopback_required", http.StatusForbidden)
 			return
 		}
@@ -101,7 +101,10 @@ func equalDigest(left, right [32]byte) bool {
 	return subtle.ConstantTimeCompare(left[:], right[:]) == 1
 }
 
-func isLoopbackRequest(request *http.Request) bool {
+// IsLoopbackRequest validates the transport peer rather than trusting Host or
+// forwarding headers. Internal SID-runtime capability endpoints share this
+// boundary with the lease endpoint.
+func IsLoopbackRequest(request *http.Request) bool {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	return err == nil && net.ParseIP(host).IsLoopback()
 }

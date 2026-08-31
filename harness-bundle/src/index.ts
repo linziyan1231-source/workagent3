@@ -23,6 +23,8 @@ import { TeamController } from "./team-api.js";
 import { TeamOrchestrator, TeamStore } from "./team-store.js";
 import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
+import { PlatformQuotaClient } from "./quota-client.js";
+import { QuotaAutomationRunner } from "./quota-runner.js";
 
 export const name = "workagent-runtime-api";
 export const inject = [
@@ -141,11 +143,16 @@ export function apply(ctx: Context): void {
   );
   runtime.mount();
   const automations = new AutomationStore(dshHome);
+  const platformQuota = PlatformQuotaClient.fromEnvironment();
+  const automationRunner =
+    platformQuota === undefined
+      ? runtime
+      : new QuotaAutomationRunner(runtime, presets, platformQuota);
   new AutomationController(
     ctx,
     token,
     automations,
-    new AutomationScheduler(automations, runtime),
+    new AutomationScheduler(automations, automationRunner),
   );
   const teams = new TeamStore(dshHome);
   new TeamController(ctx, token, teams, new TeamOrchestrator(teams, runtime));

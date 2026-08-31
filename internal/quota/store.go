@@ -48,14 +48,14 @@ type ReserveRequest struct {
 }
 
 type Reservation struct {
-	RunID         string
-	SID           string
-	ModelID       string
-	Period        Period
-	PeriodKey     string
-	ReservedUnits int64
-	ActualUnits   *int64
-	Status        string
+	RunID         string `json:"runId"`
+	SID           string `json:"sid"`
+	ModelID       string `json:"modelId"`
+	Period        Period `json:"period"`
+	PeriodKey     string `json:"periodKey"`
+	ReservedUnits int64  `json:"reservedUnits"`
+	ActualUnits   *int64 `json:"actualUnits"`
+	Status        string `json:"status"`
 }
 
 type SettleRequest struct {
@@ -204,6 +204,19 @@ VALUES(?, ?, ?, ?, ?, ?, 'reserved', ?)`, request.RunID, request.SID, request.Mo
 }
 
 func (s *Store) Settle(ctx context.Context, request SettleRequest) error {
+	return s.settle(ctx, "", request)
+}
+
+// SettleForSID prevents a scoped Runtime credential from settling another
+// employee's reservation even if it learns a run ID.
+func (s *Store) SettleForSID(ctx context.Context, sid string, request SettleRequest) error {
+	if err := validateSID(sid); err != nil {
+		return err
+	}
+	return s.settle(ctx, sid, request)
+}
+
+func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) error {
 	if strings.TrimSpace(request.RunID) == "" {
 		return errors.New("quota run ID is required")
 	}
@@ -220,6 +233,9 @@ func (s *Store) Settle(ctx context.Context, request SettleRequest) error {
 		return err
 	}
 	if !found {
+		return ErrReservationNotFound
+	}
+	if sid != "" && reservation.SID != sid {
 		return ErrReservationNotFound
 	}
 	if reservation.Status == "settled" {

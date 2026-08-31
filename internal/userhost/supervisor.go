@@ -23,16 +23,18 @@ import (
 var ErrRestartRequested = errors.New("runtime restart requested")
 
 type Config struct {
-	SID               string
-	DataRoot          string
-	Command           string
-	CodexCommand      string
-	KimiCommand       string
-	Arguments         []string
-	Profile           string
-	Limits            winutil.JobLimits
-	StartupTimeout    time.Duration
-	ManagedSkillsRoot string
+	SID                string
+	DataRoot           string
+	Command            string
+	CodexCommand       string
+	KimiCommand        string
+	Arguments          []string
+	Profile            string
+	Limits             winutil.JobLimits
+	StartupTimeout     time.Duration
+	ManagedSkillsRoot  string
+	PlatformURL        string
+	PlatformCredential string
 }
 
 type Supervisor struct {
@@ -49,8 +51,8 @@ type Supervisor struct {
 }
 
 func New(config Config) (*Supervisor, error) {
-	if config.SID == "" || config.DataRoot == "" || config.Command == "" || config.Profile == "" {
-		return nil, errors.New("SID, data root, command, and profile are required")
+	if config.SID == "" || config.DataRoot == "" || config.Command == "" || config.Profile == "" || config.PlatformURL == "" || config.PlatformCredential == "" {
+		return nil, errors.New("SID, data root, command, profile, and Platform capability are required")
 	}
 	if !filepath.IsAbs(config.DataRoot) {
 		return nil, errors.New("data root must be absolute")
@@ -105,7 +107,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
-	command.Env = runtimeEnvironment(directories, token, port, s.config.CodexCommand, s.config.KimiCommand)
+	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand)
 	command.Stdout = harnessLog
 	command.Stderr = harnessLog
 	if err := command.Start(); err != nil {
@@ -260,7 +262,7 @@ func reserveLoopbackPort() (int, error) {
 	return port, nil
 }
 
-func runtimeEnvironment(directories privateDirectories, token string, port int, codexCommand, kimiCommand string) []string {
+func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand string) []string {
 	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
@@ -279,6 +281,9 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 		"KIMI_CODE_HOME="+filepath.Join(directories.native, "kimi"),
 		"WORKAGENT_RUNTIME_TOKEN="+token,
 		"WORKAGENT_RUNTIME_PORT="+strconv.Itoa(port),
+		"WORKAGENT_EMPLOYEE_SID="+sid,
+		"WORKAGENT_PLATFORM_URL="+strings.TrimRight(platformURL, "/"),
+		"WORKAGENT_PLATFORM_TOKEN="+platformCredential,
 	)
 	if codexCommand != "" {
 		environment = append(environment, "WORKAGENT_CODEX_BIN="+codexCommand)
