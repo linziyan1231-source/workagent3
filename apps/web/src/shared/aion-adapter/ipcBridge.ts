@@ -81,6 +81,34 @@ export type PortalUsageSummary = {
     shared: { remaining_bytes: number; limit_bytes: number };
   };
 };
+export type PortalManagedUser = {
+  username: string;
+  windows_username: string;
+  windows_sid: string;
+  enabled: boolean;
+  created_at: string;
+  last_login_at?: string;
+  resource_usage?: PortalUsageSummary;
+  resource_usage_unavailable?: boolean;
+  kimi_datasource?: PortalKimiDatasourceGrant;
+};
+export type PortalKimiDatasourceGrant = {
+  enabled: boolean;
+  allowed_sources: string[];
+  daily_limit: number;
+  monthly_limit: number;
+  daily_used: number;
+  monthly_used: number;
+};
+export type PortalProvisionJob = {
+  id: string;
+  username: string;
+  status: "running" | "succeeded" | "failed";
+  percent: number;
+  step: string;
+  error_code?: string;
+  error_message?: string;
+};
 
 const unavailableCommand = {
   provider: () => {},

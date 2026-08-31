@@ -28,6 +28,9 @@ func TestSessionResolvesSIDBoundUser(t *testing.T) {
 	if resolved.SID != "S-1-5-21-1000" {
 		t.Fatalf("resolved SID %q", resolved.SID)
 	}
+	if resolved.CreatedAt.IsZero() || resolved.LastLoginAt == nil {
+		t.Fatalf("employee lifecycle timestamps were not persisted: %+v", resolved)
+	}
 }
 
 func TestRuntimeRegistrationCredentialSurvivesPortalRestart(t *testing.T) {

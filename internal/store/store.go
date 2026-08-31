@@ -17,15 +17,17 @@ type Store struct {
 }
 
 type User struct {
-	ID                   int64  `json:"id"`
-	Username             string `json:"username"`
-	DisplayName          string `json:"display_name"`
-	SID                  string `json:"-"`
-	PasswordHash         string `json:"-"`
-	Disabled             bool   `json:"disabled"`
-	Admin                bool   `json:"admin"`
-	CollaborationEnabled bool   `json:"collaboration_enabled"`
-	CollaborationCapable bool   `json:"collaboration_capable"`
+	ID                   int64      `json:"id"`
+	Username             string     `json:"username"`
+	DisplayName          string     `json:"display_name"`
+	SID                  string     `json:"-"`
+	PasswordHash         string     `json:"-"`
+	Disabled             bool       `json:"disabled"`
+	Admin                bool       `json:"admin"`
+	CollaborationEnabled bool       `json:"collaboration_enabled"`
+	CollaborationCapable bool       `json:"collaboration_capable"`
+	CreatedAt            time.Time  `json:"-"`
+	LastLoginAt          *time.Time `json:"-"`
 }
 
 func Open(path string) (*Store, error) {
@@ -57,7 +59,9 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
   admin INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1)),
-  collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))
+  collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1)),
+  created_at INTEGER NOT NULL DEFAULT 0,
+  last_login_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -80,6 +84,8 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 		{name: "display_name", ddl: `ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`},
 		{name: "admin", ddl: `ALTER TABLE users ADD COLUMN admin INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1))`},
 		{name: "collaboration_enabled", ddl: `ALTER TABLE users ADD COLUMN collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))`},
+		{name: "created_at", ddl: `ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`},
+		{name: "last_login_at", ddl: `ALTER TABLE users ADD COLUMN last_login_at INTEGER`},
 	} {
 		var exists int
 		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name=?)`, column.name).Scan(&exists); err != nil {
@@ -128,7 +134,8 @@ func (s *Store) CreateDisabledUser(ctx context.Context, username, sid, passwordH
 }
 
 func (s *Store) createUser(ctx context.Context, username, sid, passwordHash string, disabled bool) (User, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, display_name, sid, password_hash, disabled) VALUES(?, ?, ?, ?, ?)`, username, username, sid, passwordHash, disabled)
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, display_name, sid, password_hash, disabled, created_at) VALUES(?, ?, ?, ?, ?, ?)`, username, username, sid, passwordHash, disabled, now.Unix())
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
@@ -136,37 +143,52 @@ func (s *Store) createUser(ctx context.Context, username, sid, passwordHash stri
 	if err != nil {
 		return User{}, fmt.Errorf("read created user id: %w", err)
 	}
-	return User{ID: id, Username: username, DisplayName: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled, CollaborationCapable: true}, nil
+	return User{ID: id, Username: username, DisplayName: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled, CollaborationCapable: true, CreatedAt: now}, nil
+}
+
+func scanUser(scanner interface{ Scan(...any) error }) (User, error) {
+	var user User
+	var disabled, admin, collaborationEnabled int
+	var createdAt int64
+	var lastLoginAt sql.NullInt64
+	if err := scanner.Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt); err != nil {
+		return User{}, err
+	}
+	user.Disabled = disabled != 0
+	user.Admin = admin != 0
+	user.CollaborationEnabled = collaborationEnabled != 0
+	user.CollaborationCapable = true
+	user.CreatedAt = time.Unix(createdAt, 0).UTC()
+	if lastLoginAt.Valid {
+		value := time.Unix(lastLoginAt.Int64, 0).UTC()
+		user.LastLoginAt = &value
+	}
+	return user, nil
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
-	var user User
-	var disabled, admin, collaborationEnabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled FROM users WHERE username = ?`, username).
-		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
-	if err != nil {
-		return User{}, err
-	}
-	user.Disabled = disabled != 0
-	user.Admin = admin != 0
-	user.CollaborationEnabled = collaborationEnabled != 0
-	user.CollaborationCapable = true
-	return user, nil
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
-	var user User
-	var disabled, admin, collaborationEnabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled FROM users WHERE sid = ?`, sid).
-		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE sid = ?`, sid))
+}
+
+func (s *Store) ListManagedUsers(ctx context.Context) ([]User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
 	if err != nil {
-		return User{}, err
+		return nil, err
 	}
-	user.Disabled = disabled != 0
-	user.Admin = admin != 0
-	user.CollaborationEnabled = collaborationEnabled != 0
-	user.CollaborationCapable = true
-	return user, nil
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		user, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
 }
 
 func (s *Store) SetUserCredentials(ctx context.Context, id int64, passwordHash string, disabled bool) error {
@@ -255,27 +277,28 @@ func (s *Store) SetUserAdmin(ctx context.Context, username string, admin bool) e
 }
 
 func (s *Store) CreateSession(ctx context.Context, token string, userID int64, expiresAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token, user_id, expires_at) VALUES(?, ?, ?)`, token, userID, expiresAt.Unix())
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin session: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(token, user_id, expires_at) VALUES(?, ?, ?)`, token, userID, expiresAt.Unix()); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET last_login_at=? WHERE id=?`, time.Now().UTC().Unix(), userID); err != nil {
+		return fmt.Errorf("record login: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UserBySession(ctx context.Context, token string, now time.Time) (User, error) {
-	var user User
-	var disabled, admin, collaborationEnabled int
-	err := s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled
+	user, err := scanUser(s.db.QueryRowContext(ctx, `
+SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled, u.created_at, u.last_login_at
 FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()).Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
+WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()))
 	if err != nil {
 		return User{}, err
 	}
-	user.Disabled = disabled != 0
-	user.Admin = admin != 0
-	user.CollaborationEnabled = collaborationEnabled != 0
-	user.CollaborationCapable = true
 	if user.Disabled {
 		return User{}, errors.New("user is disabled")
 	}

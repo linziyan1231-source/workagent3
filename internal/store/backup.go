@@ -30,18 +30,33 @@ func ExportBackup(ctx context.Context, source, destination string) error {
 	if _, err := output.ExecContext(ctx, `CREATE TABLE users (
 id INTEGER PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
 display_name TEXT NOT NULL, sid TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-disabled INTEGER NOT NULL, admin INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL)`); err != nil {
+disabled INTEGER NOT NULL, admin INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL,
+created_at INTEGER NOT NULL, last_login_at INTEGER)`); err != nil {
 		return err
 	}
-	adminExpression := "0"
-	var hasAdmin int
-	if err := input.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='admin')`).Scan(&hasAdmin); err != nil {
+	expression := func(column, fallback string) (string, error) {
+		var exists int
+		if err := input.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name=?)`, column).Scan(&exists); err != nil {
+			return "", err
+		}
+		if exists != 0 {
+			return column, nil
+		}
+		return fallback, nil
+	}
+	adminExpression, err := expression("admin", "0")
+	if err != nil {
 		return err
 	}
-	if hasAdmin != 0 {
-		adminExpression = "admin"
+	createdExpression, err := expression("created_at", "0")
+	if err != nil {
+		return err
 	}
-	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,`+adminExpression+`,collaboration_enabled FROM users ORDER BY id`)
+	lastLoginExpression, err := expression("last_login_at", "NULL")
+	if err != nil {
+		return err
+	}
+	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,`+adminExpression+`,collaboration_enabled,`+createdExpression+`,`+lastLoginExpression+` FROM users ORDER BY id`)
 	if err != nil {
 		return err
 	}
@@ -55,10 +70,12 @@ disabled INTEGER NOT NULL, admin INTEGER NOT NULL, collaboration_enabled INTEGER
 		var id int64
 		var username, displayName, sid, passwordHash string
 		var disabled, admin, collaborationEnabled int
-		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &admin, &collaborationEnabled); err != nil {
+		var createdAt int64
+		var lastLoginAt sql.NullInt64
+		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &admin, &collaborationEnabled, &createdAt, &lastLoginAt); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, admin, collaborationEnabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, admin, collaborationEnabled, createdAt, lastLoginAt); err != nil {
 			return err
 		}
 	}

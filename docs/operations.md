@@ -17,6 +17,8 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action add -us
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action disable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action enable -username alice
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action reset-password -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action grant-admin -username manager
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-admin -username manager
 ```
 
 `add` and `reset-password` wait for a new Portal password on standard input.
@@ -26,6 +28,28 @@ stopping the employee's scheduled UserHost. If the stop fails, the account
 remains disabled. `enable` starts the installed UserHost and waits for its
 authenticated Runtime lease before reopening the Portal account. A failed
 health check leaves the employee disabled.
+
+For the formal browser administrator page, run Employee Manager as its own
+privileged service on loopback and point Portal at it. The token file must be an
+absolute path readable only by the Employee Manager identity and Portal service
+identity; the token itself must not be placed in either command arguments or an
+environment variable.
+
+```powershell
+employee-manager.exe `
+  -config E:\WorkAgent3\employee-manager.json `
+  -listen 127.0.0.1:8091 `
+  -token-file E:\WorkAgent3\secrets\employee-manager.token
+
+$env:WORKAGENT_EMPLOYEE_MANAGER_URL = 'http://127.0.0.1:8091'
+$env:WORKAGENT_EMPLOYEE_MANAGER_TOKEN_FILE = 'E:\WorkAgent3\secrets\employee-manager.token'
+portal.exe # include the normal Portal arguments
+```
+
+Granting or revoking the administrator role invalidates that user's existing
+browser sessions. After signing in again, an administrator is routed by the
+formal WorkAgent Renderer to `/admin/accounts`; non-administrators receive 403
+from every employee-management route even if they call the HTTP API directly.
 
 ## Three-engine MCP acceptance
 

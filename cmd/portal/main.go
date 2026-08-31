@@ -150,6 +150,24 @@ func run() error {
 			return err
 		}
 	}
+	var employeeManager *portal.EmployeeManagerClient
+	if endpoint := strings.TrimSpace(os.Getenv("WORKAGENT_EMPLOYEE_MANAGER_URL")); endpoint != "" {
+		tokenPath := strings.TrimSpace(os.Getenv("WORKAGENT_EMPLOYEE_MANAGER_TOKEN_FILE"))
+		if !filepath.IsAbs(tokenPath) {
+			return errors.New("absolute Employee Manager token file is required")
+		}
+		token, readErr := os.ReadFile(tokenPath)
+		if readErr != nil {
+			return fmt.Errorf("read Employee Manager token: %w", readErr)
+		}
+		employeeManager, err = portal.NewEmployeeManagerClient(endpoint, string(token))
+		for index := range token {
+			token[index] = 0
+		}
+		if err != nil {
+			return err
+		}
+	}
 
 	registry := runtimeapi.NewRegistry()
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
@@ -159,7 +177,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy, Notifications: notificationStore, Audit: auditStore})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy, Notifications: notificationStore, Audit: auditStore, EmployeeManagement: employeeManager})
 	if err != nil {
 		return err
 	}

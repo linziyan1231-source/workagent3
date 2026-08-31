@@ -9,6 +9,9 @@ import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
 import type {
+  PortalKimiDatasourceGrant,
+  PortalManagedUser,
+  PortalProvisionJob,
   PortalSkillMarketEntry,
   PortalUsageSummary,
 } from "./ipcBridge.js";
@@ -431,6 +434,86 @@ export const ipcBridge = {
         as_of: new Date().toISOString(),
         providers: [],
       }),
+    },
+    listManagedUsers: {
+      invoke: async () =>
+        requestJson<{
+          success: boolean;
+          users: PortalManagedUser[];
+          kimi_datasource_sources?: string[];
+        }>("/api/portal/admin/users"),
+    },
+    addManagedUser: {
+      invoke: async (input: { username: string; portal_password: string }) =>
+        requestJson<{ success: boolean; job: PortalProvisionJob }>(
+          "/api/portal/admin/users",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
+    getManagedUserJob: {
+      invoke: async ({ id }: { id: string }) =>
+        requestJson<{ success: boolean; job: PortalProvisionJob }>(
+          `/api/portal/admin/user-jobs?id=${encodeURIComponent(id)}`,
+        ),
+    },
+    getManagedUsersUsage: {
+      invoke: async () =>
+        requestJson<{
+          success: boolean;
+          users: Array<{
+            username: string;
+            resource_usage?: PortalUsageSummary;
+            resource_usage_unavailable?: boolean;
+          }>;
+        }>("/api/portal/admin/users/usage"),
+    },
+    disableManagedUser: {
+      invoke: (input: { username: string }) =>
+        requestJson<{ success: boolean }>("/api/portal/admin/users/disable", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+    },
+    enableManagedUser: {
+      invoke: (input: { username: string }) =>
+        requestJson<{ success: boolean }>("/api/portal/admin/users/enable", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+    },
+    resetManagedUserPassword: {
+      invoke: (input: { username: string; portal_password: string }) =>
+        requestJson<{ success: boolean }>(
+          "/api/portal/admin/users/reset-password",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
+    setManagedUserKimiDatasource: {
+      invoke: (input: {
+        username: string;
+        enabled: boolean;
+        allowed_sources: string[];
+        daily_limit: number;
+        monthly_limit: number;
+      }) =>
+        requestJson<{
+          success: boolean;
+          kimi_datasource: PortalKimiDatasourceGrant;
+        }>("/api/portal/admin/users/kimi-datasource", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
     },
     listSkillMarket: {
       invoke: async () =>

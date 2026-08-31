@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"workagent3/internal/employee"
+	"workagent3/internal/employeemanager"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
@@ -44,16 +48,18 @@ func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
 	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, grant-admin, or revoke-admin")
 	username := flag.String("username", "", "Windows and Portal username")
+	listen := flag.String("listen", "", "serve the protected Employee Manager API on a 127.0.0.1 address")
+	tokenFile := flag.String("token-file", "", "absolute path to the protected Employee Manager API token")
 	flag.Parse()
-	if !filepath.IsAbs(*configPath) || *username == "" {
-		return errors.New("absolute --config and --username are required")
+	if !filepath.IsAbs(*configPath) || (*listen == "" && *username == "") {
+		return errors.New("absolute --config and either --username or --listen are required")
 	}
 	config, err := loadManagerConfig(*configPath)
 	if err != nil {
 		return err
 	}
 	var password []byte
-	if *action == "add" || *action == "reset-password" {
+	if *listen == "" && (*action == "add" || *action == "reset-password") {
 		password, err = io.ReadAll(io.LimitReader(os.Stdin, 257))
 		if err != nil {
 			return fmt.Errorf("read Portal password: %w", err)
@@ -79,13 +85,17 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
+	lifecycle := employee.Lifecycle{Platform: platform, Users: data}
+	if *listen != "" {
+		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data})
+	}
 	var user store.User
 	switch *action {
 	case "add":
-		provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
 		user, err = provisioner.Add(ctx, *username, password)
 	case "enable", "disable":
-		user, err = (employee.Lifecycle{Platform: platform, Users: data}).SetEnabled(ctx, *username, *action == "enable")
+		user, err = lifecycle.SetEnabled(ctx, *username, *action == "enable")
 	case "reset-password":
 		err = (employee.Lifecycle{Users: data}).ResetPortalPassword(ctx, *username, password)
 		if err == nil {
@@ -100,6 +110,36 @@ func run() error {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled, "admin": user.Admin})
+}
+
+func serveManager(ctx context.Context, address, tokenPath string, service *employeemanager.Service) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil || host != "127.0.0.1" {
+		return errors.New("Employee Manager must listen on an exact 127.0.0.1 address")
+	}
+	if !filepath.IsAbs(tokenPath) {
+		return errors.New("absolute --token-file is required in service mode")
+	}
+	token, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return fmt.Errorf("read Employee Manager token: %w", err)
+	}
+	secret := strings.TrimSpace(string(token))
+	zero(token)
+	if secret == "" {
+		return errors.New("Employee Manager token is empty")
+	}
+	server := &http.Server{Addr: address, Handler: employeemanager.Handler(service, secret), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+	}()
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 func loadManagerConfig(path string) (managerConfig, error) {
