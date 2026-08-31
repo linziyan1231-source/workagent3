@@ -36,6 +36,7 @@ import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
 import type { ResolvedSkill } from "./skill-projection.js";
 import type { TeamExecution, TeamRunnerPort } from "./team-store.js";
+import type { InboxExecution, InboxRunnerPort } from "./inbox-api.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
 
 type SessionRecord = {
@@ -184,7 +185,9 @@ export const normalizeEvent = (
   }
 };
 
-export class RuntimeController implements AutomationRunnerPort, TeamRunnerPort {
+export class RuntimeController
+  implements AutomationRunnerPort, TeamRunnerPort, InboxRunnerPort
+{
   readonly #ctx: Context;
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
@@ -284,6 +287,62 @@ export class RuntimeController implements AutomationRunnerPort, TeamRunnerPort {
         updatedAt: now,
       },
     });
+  }
+
+  async executeInbox(request: InboxExecution): Promise<{ sessionId: string }> {
+    const messageId = `message-${request.receiptId}`;
+    if (
+      this.#messages
+        .list(request.sessionId)
+        .some((message) => message.id === messageId)
+    ) {
+      return { sessionId: request.sessionId };
+    }
+    const now = new Date().toISOString();
+    const definition: AutomationExecution["definition"] = {
+      id: `inbox-${request.sessionId}`,
+      version: 1,
+      name: request.title,
+      enabled: false,
+      schedule: { kind: "interval", everyMinutes: 1 },
+      presetId: "builtin-general",
+      engine: "harness",
+      workspaceId: this.#workspaces.ensureDefault().id,
+      input: request.input,
+      notificationPolicy: "none",
+      nextRunAt: null,
+      lastRunAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const record = await this.#startAutomationSession(request.sessionId, {
+      automationRunId: request.receiptId,
+      definition,
+    });
+    if (record.handle === undefined && record.native === undefined)
+      await this.#activate(request.sessionId, record);
+    const terminal = this.#waitForTerminal(request.sessionId);
+    record.updatedAt = now;
+    if (record.handle !== undefined) {
+      record.handle.agent.followup(
+        createUserMessage({
+          content: [{ type: "text", text: request.input }],
+          source: { kind: "user" },
+        }),
+      );
+    } else {
+      await record.native!.send(request.input);
+    }
+    this.#messages.append({
+      id: messageId,
+      sessionId: request.sessionId,
+      role: "user",
+      text: request.input,
+      createdAt: now,
+    });
+    this.#persist(request.sessionId, record);
+    await terminal;
+    return { sessionId: request.sessionId };
   }
 
   cancelTeamTask(taskId: string): Promise<void> {

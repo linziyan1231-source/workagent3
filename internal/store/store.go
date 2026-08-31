@@ -150,6 +150,20 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (User, erro
 	return user, nil
 }
 
+func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
+	var user User
+	var disabled, collaborationEnabled int
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE sid = ?`, sid).
+		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
+	if err != nil {
+		return User{}, err
+	}
+	user.Disabled = disabled != 0
+	user.CollaborationEnabled = collaborationEnabled != 0
+	user.CollaborationCapable = true
+	return user, nil
+}
+
 func (s *Store) SetUserCredentials(ctx context.Context, id int64, passwordHash string, disabled bool) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ?, disabled = ? WHERE id = ?`, passwordHash, disabled, id)
 	if err != nil {

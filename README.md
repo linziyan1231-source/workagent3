@@ -38,6 +38,22 @@ file must be a non-symlink regular file containing at least 32 bytes and must
 also be configured in ChatForward for delegated-request verification. Portal
 removes browser credentials and sends only a short-lived signed user ID.
 
+The external IM Gateway is a separate process:
+
+```powershell
+$env:WORKAGENT_IM_DELIVERY_TOKEN = '<shared machine token, at least 32 bytes>'
+$env:WORKAGENT_IM_ADMIN_TOKEN = '<Gateway admin token, at least 32 bytes>'
+go run ./cmd/im-gateway -portal-url http://127.0.0.1:8080
+```
+
+Portal needs the same `WORKAGENT_IM_DELIVERY_TOKEN`. Connector credentials are
+regular, non-symlink files under the Gateway `-credential-root`; the Gateway
+database stores only their opaque filenames. The version-pinned Weixin
+connector uses the iLink `getupdates` and `sendmessage` protocols. Its public
+configuration and enable state are managed through the authenticated
+`/v1/connectors` API, while pairing approval validates the target employee SID
+against Portal before any message can reach that employee's Runtime.
+
 Speech input is disabled unless the Portal administrator sets both
 `WORKAGENT_SPEECH_URL` and `WORKAGENT_SPEECH_TOKEN`. The URL points to the
 private batch/WebSocket transcription adapter; the token is injected only by

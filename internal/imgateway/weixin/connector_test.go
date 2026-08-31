@@ -1,0 +1,110 @@
+package weixin
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"workagent3/internal/imgateway"
+)
+
+type credentialStub struct{ secret []byte }
+
+func (c credentialStub) Resolve(context.Context, string) ([]byte, error) {
+	return append([]byte(nil), c.secret...), nil
+}
+
+func TestConnectorPollsNormalizesAndSendsWithPrivateCredential(t *testing.T) {
+	var mu sync.Mutex
+	var pollCount int
+	var sent sendMessageRequest
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer private-weixin-token" || request.Header.Get("AuthorizationType") != "ilink_bot_token" || request.Header.Get("X-WECHAT-UIN") == "" {
+			t.Errorf("missing private Weixin headers: %v", request.Header)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ilink/bot/getupdates":
+			mu.Lock()
+			pollCount++
+			current := pollCount
+			mu.Unlock()
+			if current == 1 {
+				_, _ = io.WriteString(writer, `{"ret":0,"errcode":0,"get_updates_buf":"next","msgs":[{"from_user_id":"weixin-user-123456","context_token":"reply-context","msg_id":"wx-message-1","item_list":[{"type":1,"text_item":{"text":"hello from WeChat"}}]}]}`)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+			_, _ = io.WriteString(writer, `{"ret":0,"errcode":0,"get_updates_buf":"next","msgs":[]}`)
+		case "/ilink/bot/sendmessage":
+			if err := json.NewDecoder(request.Body).Decode(&sent); err != nil {
+				t.Error(err)
+			}
+			_, _ = io.WriteString(writer, `{"ret":0,"errcode":0}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer upstream.Close()
+
+	connector, err := New(credentialStub{secret: []byte("private-weixin-token")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := imgateway.ConnectorConfig{
+		Public:        json.RawMessage(`{"account_id":"bot-1","base_url":"` + upstream.URL + `"}`),
+		CredentialRef: "vault:weixin/bot-1",
+	}
+	runContext, cancel := context.WithCancel(t.Context())
+	received := make(chan imgateway.InboundMessage, 1)
+	if err := connector.Start(runContext, config, func(_ context.Context, message imgateway.InboundMessage) error {
+		received <- message
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Stop(context.Background())
+
+	var inbound imgateway.InboundMessage
+	select {
+	case inbound = <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Weixin poll did not emit message")
+	}
+	if inbound.ConnectorID != "weixin" || inbound.ExternalAccountID != "bot-1" || inbound.ExternalMessageID != "wx-message-1" || inbound.Text != "hello from WeChat" || inbound.ReplyCorrelation != "reply-context" {
+		t.Fatalf("unexpected normalized message: %#v", inbound)
+	}
+	receipt, err := connector.Send(t.Context(), imgateway.OutboundMessage{
+		ConnectorID: "weixin", ExternalAccountID: "bot-1",
+		ExternalConversationID: inbound.ExternalConversationID, Text: "reply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ExternalMessageID == "" || sent.Msg.ToUserID != inbound.ExternalConversationID || sent.Msg.ContextToken != "reply-context" || sent.Msg.ItemList[0].TextItem.Text != "reply" {
+		t.Fatalf("unexpected send request=%#v receipt=%#v", sent, receipt)
+	}
+	cancel()
+}
+
+func TestConnectorRejectsNonLoopbackPlainHTTPAndUnknownConfig(t *testing.T) {
+	connector, _ := New(credentialStub{secret: []byte("token")})
+	for _, public := range []string{
+		`{"account_id":"bot","base_url":"http://example.com"}`,
+		`{"account_id":"bot","unknown":true}`,
+	} {
+		err := connector.ValidateConfig(imgateway.ConnectorConfig{Public: json.RawMessage(public), CredentialRef: "vault:bot"})
+		if err == nil {
+			t.Fatalf("unsafe config accepted: %s", public)
+		}
+	}
+	encoded, _ := json.Marshal(connector.Descriptor())
+	if strings.Contains(string(encoded), "token") || strings.Contains(string(encoded), "vault") {
+		t.Fatal("connector descriptor exposed credentials")
+	}
+}

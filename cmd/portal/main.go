@@ -19,6 +19,7 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/chatforward"
 	"workagent3/internal/collaboration"
+	"workagent3/internal/imdelivery"
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
@@ -145,6 +146,18 @@ func run() error {
 
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
+	if token := os.Getenv("WORKAGENT_IM_DELIVERY_TOKEN"); token != "" {
+		imHandler, err := imdelivery.NewHandler(registry, token)
+		if err != nil {
+			return err
+		}
+		root.Handle("/internal/im/deliver", imHandler)
+		directoryHandler, err := imdelivery.NewDirectoryHandler(data, token)
+		if err != nil {
+			return err
+		}
+		root.Handle("/internal/im/employees/", directoryHandler)
+	}
 	root.Handle("/", server.HandlerWithWeb(portal.SPAHandler(web)))
 	httpServer := &http.Server{
 		Addr:              *address,

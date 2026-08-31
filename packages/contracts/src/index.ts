@@ -1,5 +1,6 @@
 export * from "./automation.js";
 export * from "./engine.js";
+export * from "./external-im.js";
 export * from "./capability.js";
 export * from "./interaction.js";
 export * from "./migration.js";

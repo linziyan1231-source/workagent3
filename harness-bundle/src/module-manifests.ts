@@ -176,10 +176,22 @@ export const RUNTIME_MODULES = [
       { id: "approval-bridge", contract: "ApprovalPort/v1" },
       { id: "automation", contract: "AutomationPort/v1" },
       { id: "ai-team", contract: "TeamPort/v1" },
+      { id: "im-inbox", contract: "InboxPort/v1" },
     ],
     configSchema: "workagent://schemas/runtime-api/v1",
     dataOwner: "none; routing and DTO projection only",
     healthCheck: "/health",
+  },
+  {
+    id: "im-inbox",
+    version: "1.0.0",
+    layer: "adapter",
+    required: true,
+    capabilities: ["im.receive", "im.deduplicate", "im.session-map"],
+    dependencies: [{ id: "personal-work", contract: "InboxRunnerPort/v1" }],
+    configSchema: "workagent://schemas/im-inbox/v1",
+    dataOwner: "employee SID private IM delivery receipts and session mapping",
+    healthCheck: "/v1/inbox/messages",
   },
 ] satisfies ModuleManifest[];
 
