@@ -67,7 +67,8 @@ disabled, non-administrator employee. The confirmation must exactly equal
 `DELETE <username>`. Employee Manager resolves the target to one direct SID
 child of the configured data root and rejects traversal, links, files, or any
 other target before unregistering the task. It then deletes only that SID data
-root and its verified WorkAgent3-managed local account, followed by the Portal
+root, removes the SID from `SeBatchLogonRight`, and deletes its verified
+WorkAgent3-managed local account, followed by the Portal
 mapping and Runtime registration credential. Never invoke this command as part
 of ordinary disable or retained offboarding.
 
