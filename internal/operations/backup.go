@@ -3,7 +3,6 @@ package operations
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,8 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 const BackupManifestName = "backup-manifest.json"
@@ -54,7 +51,11 @@ var defaultBackupExclusions = []string{
 type BackupSource struct {
 	Owner     DataOwner
 	TargetSID string
-	Path      string
+	Exporter  BackupExporter
+}
+
+type BackupExporter interface {
+	ExportBackup(context.Context, string) error
 }
 
 type BackupEntry struct {
@@ -134,11 +135,7 @@ func CreateBackup(ctx context.Context, backupRoot, applicationVersion string, so
 		seen[key] = true
 		file := fmt.Sprintf("%02d-%s.db", index+1, source.Owner)
 		destination := filepath.Join(staging, file)
-		if source.Owner == OwnerPortalAuth {
-			err = snapshotPortalAuth(ctx, source.Path, destination)
-		} else {
-			err = snapshotSQLite(ctx, source.Path, destination)
-		}
+		err = source.Exporter.ExportBackup(ctx, destination)
 		if err != nil {
 			return BackupManifest{}, "", fmt.Errorf("snapshot %s owner: %w", source.Owner, err)
 		}
@@ -246,8 +243,8 @@ func RestoreBackup(backupPath, restoreRoot, expectedApplicationVersion string, a
 }
 
 func validateBackupSource(source BackupSource) error {
-	if !filepath.IsAbs(source.Path) {
-		return errors.New("backup source paths must be absolute")
+	if source.Exporter == nil {
+		return errors.New("backup source exporter is required")
 	}
 	return validateBackupOwner(source.Owner, source.TargetSID)
 }
@@ -266,82 +263,6 @@ func validateBackupOwner(owner DataOwner, targetSID string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown or credential-bearing backup owner %q", owner)
-}
-
-func snapshotSQLite(ctx context.Context, source, destination string) error {
-	if err := ensureSourceDatabase(source); err != nil {
-		return err
-	}
-	database, err := sql.Open("sqlite", source)
-	if err != nil {
-		return err
-	}
-	defer database.Close()
-	if _, err := database.ExecContext(ctx, `VACUUM INTO ?`, destination); err != nil {
-		return fmt.Errorf("create consistent SQLite snapshot: %w", err)
-	}
-	return os.Chmod(destination, 0o600)
-}
-
-func snapshotPortalAuth(ctx context.Context, source, destination string) error {
-	if err := ensureSourceDatabase(source); err != nil {
-		return err
-	}
-	input, err := sql.Open("sqlite", source)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := sql.Open("sqlite", destination)
-	if err != nil {
-		return err
-	}
-	defer output.Close()
-	if _, err := output.ExecContext(ctx, `CREATE TABLE users (
-id INTEGER PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
-display_name TEXT NOT NULL, sid TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-disabled INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL)`); err != nil {
-		return err
-	}
-	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,collaboration_enabled FROM users ORDER BY id`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	tx, err := output.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for rows.Next() {
-		var id int64
-		var username, displayName, sid, passwordHash string
-		var disabled, collaborationEnabled int
-		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &collaborationEnabled); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, collaborationEnabled); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return os.Chmod(destination, 0o600)
-}
-
-func ensureSourceDatabase(path string) error {
-	if err := ensureNoReparseAncestors(path); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || isReparsePoint(info) {
-		return errors.New("backup source must be a non-reparse regular file")
-	}
-	return nil
 }
 
 func ensureNoReparseAncestors(path string) error {

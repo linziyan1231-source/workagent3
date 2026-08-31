@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"workagent3/internal/operations"
+	"workagent3/internal/sqlitebackup"
+	portalstore "workagent3/internal/store"
 )
 
 type repeatedFlag []string
@@ -102,8 +104,20 @@ func parseSources(values []string) ([]operations.BackupSource, error) {
 		if err != nil {
 			return nil, err
 		}
-		source.Path = path
+		source.Exporter = fileExporter{path: path, portal: source.Owner == operations.OwnerPortalAuth}
 		sources = append(sources, source)
 	}
 	return sources, nil
+}
+
+type fileExporter struct {
+	path   string
+	portal bool
+}
+
+func (exporter fileExporter) ExportBackup(ctx context.Context, destination string) error {
+	if exporter.portal {
+		return portalstore.ExportBackup(ctx, exporter.path, destination)
+	}
+	return sqlitebackup.Snapshot(ctx, exporter.path, destination)
 }

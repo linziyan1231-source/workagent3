@@ -1,12 +1,16 @@
 package operations
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"workagent3/internal/sqlitebackup"
+	portalstore "workagent3/internal/store"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,8 +24,8 @@ func TestBackupSanitizesPortalCredentialsAndRestoresOwnersToIsolation(t *testing
 	backupRoot := filepath.Join(root, "backups")
 	now := time.Date(2026, 8, 31, 3, 0, 0, 0, time.UTC)
 	manifest, backupPath, err := CreateBackup(t.Context(), backupRoot, "3.0.0", []BackupSource{
-		{Owner: OwnerPortalAuth, Path: portalPath},
-		{Owner: OwnerPreset, TargetSID: "S-1-5-21-1000", Path: presetPath},
+		{Owner: OwnerPortalAuth, Exporter: backupFileExporter{path: portalPath, portal: true}},
+		{Owner: OwnerPreset, TargetSID: "S-1-5-21-1000", Exporter: backupFileExporter{path: presetPath}},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +81,7 @@ func TestRestoreRejectsTamperingAndVersionMismatch(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "audit.db")
 	createSimpleDatabase(t, source, "events", "event-one")
-	manifest, backupPath, err := CreateBackup(t.Context(), filepath.Join(root, "backups"), "4.0.0", []BackupSource{{Owner: OwnerAudit, Path: source}}, time.Now())
+	manifest, backupPath, err := CreateBackup(t.Context(), filepath.Join(root, "backups"), "4.0.0", []BackupSource{{Owner: OwnerAudit, Exporter: backupFileExporter{path: source}}}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,13 +101,25 @@ func TestBackupRejectsCredentialOwnerAndInvalidSID(t *testing.T) {
 	database := filepath.Join(root, "source.db")
 	createSimpleDatabase(t, database, "data", "value")
 	for _, source := range []BackupSource{
-		{Owner: "credential-broker", Path: database},
-		{Owner: OwnerMCP, TargetSID: "alice", Path: database},
+		{Owner: "credential-broker", Exporter: backupFileExporter{path: database}},
+		{Owner: OwnerMCP, TargetSID: "alice", Exporter: backupFileExporter{path: database}},
 	} {
 		if _, _, err := CreateBackup(t.Context(), filepath.Join(root, "backups"), "1.0.0", []BackupSource{source}, time.Now()); err == nil {
 			t.Fatalf("unsafe backup source was accepted: %#v", source)
 		}
 	}
+}
+
+type backupFileExporter struct {
+	path   string
+	portal bool
+}
+
+func (exporter backupFileExporter) ExportBackup(ctx context.Context, destination string) error {
+	if exporter.portal {
+		return portalstore.ExportBackup(ctx, exporter.path, destination)
+	}
+	return sqlitebackup.Snapshot(ctx, exporter.path, destination)
 }
 
 func createPortalBackupSource(t *testing.T, path string) {
