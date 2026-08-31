@@ -64,6 +64,16 @@ Speech input is disabled unless the Portal administrator sets both
 private batch/WebSocket transcription adapter; the token is injected only by
 the Portal proxy and is never returned to the browser.
 
+Notifications are owned by the separate `notifications.db` module store and
+are scoped by employee SID, with global announcements represented by `*`.
+Portal exposes authenticated list/read/acknowledge and SSE endpoints and uses
+the formal WorkAgent2 notification modal. Administrators can publish a bounded
+announcement without accessing Portal/Auth tables:
+
+```powershell
+go run ./cmd/notification-publish -db data/notifications.db -kind maintenance -title "Maintenance" -message "The service will restart in 10 minutes." -expires-in 2h
+```
+
 The Go wrapper in `scripts/go.ps1` uses `go` from `PATH`, or the checksum-verified portable toolchain installed at `C:\Users\Administrator\.codex\tools\go1.26.5-verified` on this development machine.
 
 Runtime data, secrets, employee profiles, and `DSH_HOME` are never stored in this repository.

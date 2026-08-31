@@ -67,6 +67,14 @@ type IMPort interface {
 	ServeIM(http.ResponseWriter, *http.Request, string)
 }
 
+type NotificationsPort interface {
+	Publish(context.Context, contracts.NotificationInput) (contracts.Notification, error)
+	List(context.Context, string, int) ([]contracts.Notification, error)
+	MarkRead(context.Context, string, string) error
+	Acknowledge(context.Context, string, string) error
+	Subscribe(string) (<-chan struct{}, func(), error)
+}
+
 type Modules struct {
 	ModelAccess    ModelAccessPort
 	Quota          QuotaUsagePort
@@ -77,6 +85,7 @@ type Modules struct {
 	SharedProjects SharedProjectPlatformPort
 	ChatForward    ChatForwardPort
 	IM             IMPort
+	Notifications  NotificationsPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -105,6 +114,10 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
 	mux.HandleFunc("GET /api/portal/me/profile", s.requireUser(s.profile))
 	mux.HandleFunc("PATCH /api/portal/me/profile", s.requireUser(s.updateProfile))
+	mux.HandleFunc("GET /api/portal/me/notifications", s.requireUser(s.notifications))
+	mux.HandleFunc("GET /api/portal/me/notifications/stream", s.requireUser(s.notificationStream))
+	mux.HandleFunc("POST /api/portal/me/notifications/{id}/read", s.requireUser(s.readNotification))
+	mux.HandleFunc("POST /api/portal/me/notifications/{id}/acknowledge", s.requireUser(s.acknowledgeNotification))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))

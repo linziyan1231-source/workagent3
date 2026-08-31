@@ -10,6 +10,7 @@ import { skillPort } from "../features/skills/skillPort.js";
 import { automationPort } from "../features/automation/automationPort.js";
 import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
 import { WorkAgentAuthProvider } from "../shared/aion-adapter/authContext.js";
+import PortalNotificationHost from "@renderer/components/layout/PortalNotificationHost";
 
 const workspaceAssets = {
   list: workspacePort.assets,
@@ -85,6 +86,7 @@ function AuthenticatedApp() {
         )}
         onLogout={logout}
       />
+      <PortalNotificationHost />
     </WorkAgentAuthProvider>
   );
 }

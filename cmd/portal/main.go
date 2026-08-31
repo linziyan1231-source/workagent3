@@ -21,6 +21,7 @@ import (
 	"workagent3/internal/collaboration"
 	"workagent3/internal/imdelivery"
 	"workagent3/internal/modelaccess"
+	"workagent3/internal/notifications"
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
@@ -44,6 +45,7 @@ func run() error {
 	settingsPath := flag.String("settings-db", "", "Settings SQLite path (defaults beside Portal database)")
 	skillMarketPath := flag.String("skill-market-db", "", "Skill Market SQLite path (defaults beside Portal database)")
 	collaborationPath := flag.String("collaboration-db", "", "Collaboration SQLite path (defaults beside Portal database)")
+	notificationsPath := flag.String("notifications-db", "", "Notifications SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
@@ -74,7 +76,10 @@ func run() error {
 	if *collaborationPath == "" {
 		*collaborationPath = filepath.Join(filepath.Dir(*databasePath), "collaboration.db")
 	}
-	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath, *skillMarketPath, *collaborationPath} {
+	if *notificationsPath == "" {
+		*notificationsPath = filepath.Join(filepath.Dir(*databasePath), "notifications.db")
+	}
+	for _, path := range []string{*modelAccessPath, *quotaPath, *settingsPath, *skillMarketPath, *collaborationPath, *notificationsPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return fmt.Errorf("create module data directory: %w", err)
 		}
@@ -107,6 +112,11 @@ func run() error {
 		return err
 	}
 	defer sharedProjects.Close()
+	notificationStore, err := notifications.Open(*notificationsPath)
+	if err != nil {
+		return err
+	}
+	defer notificationStore.Close()
 	speechProxy, err := speech.NewProxy(
 		os.Getenv("WORKAGENT_SPEECH_URL"),
 		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
@@ -139,7 +149,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy, Notifications: notificationStore})
 	if err != nil {
 		return err
 	}

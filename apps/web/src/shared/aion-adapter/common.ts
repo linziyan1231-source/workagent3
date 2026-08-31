@@ -1,6 +1,7 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { notificationPort } from "../../features/notifications/notificationPort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
@@ -192,6 +193,10 @@ export const ipcBridge = {
     setCloseToTray: { invoke: async () => undefined },
   },
   portal: {
+    getNotifications: { invoke: notificationPort.list },
+    acknowledgeNotification: {
+      invoke: ({ id }: { id: string }) => notificationPort.acknowledge(id),
+    },
     getMyUsage: {
       invoke: async (): Promise<PortalUsageSummary> => ({
         as_of: new Date().toISOString(),

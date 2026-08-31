@@ -13,6 +13,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
+	"workagent3/internal/contracts"
 	"workagent3/internal/store"
 )
 
@@ -221,6 +222,14 @@ func (s *Server) sharedProjectInvites(writer http.ResponseWriter, request *http.
 		writeCollaborationError(writer, err)
 		return
 	}
+	s.publishNotification(request.Context(), contracts.NotificationInput{
+		TargetSID: target.SID,
+		Kind:      "shared_invite",
+		Title:     "Shared project invitation",
+		Message:   user.DisplayName + " invited you to " + invite.ProjectName,
+		DeepLink:  "/",
+		ExpiresAt: &invite.ExpiresAt,
+	})
 	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite, user.DisplayName)})
 }
 
@@ -280,6 +289,9 @@ func (s *Server) sharedInviteAction(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusInternalServerError, "shared_invite_failed")
 			return
 		}
+		if owner, lookupErr := s.store.UserByID(request.Context(), project.OwnerUserID); lookupErr == nil {
+			s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: owner.SID, Kind: "shared_member", Title: "Project member joined", Message: user.DisplayName + " joined " + project.Name, DeepLink: "/"})
+		}
 		writeJSON(writer, http.StatusOK, map[string]any{"project": projectDTO(project)})
 	default:
 		writeError(writer, http.StatusNotFound, "shared_invite_action_not_found")
@@ -311,6 +323,7 @@ func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusInternalServerError, "shared_member_failed")
 		return
 	}
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: member.SID, Kind: "shared_member", Title: "Shared project access changed", Message: "Your access to a shared project was removed", DeepLink: "/"})
 	writer.WriteHeader(http.StatusNoContent)
 }
 
@@ -366,7 +379,15 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
 		return
 	}
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_ownership", Title: "Project ownership transferred", Message: "You are now the owner of " + project.Name, DeepLink: "/"})
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: user.SID, Kind: "shared_ownership", Title: "Project ownership transferred", Message: target.DisplayName + " is now the owner of " + project.Name, DeepLink: "/"})
 	writeJSON(writer, http.StatusOK, map[string]any{"project": projectDTO(project)})
+}
+
+func (s *Server) publishNotification(ctx context.Context, input contracts.NotificationInput) {
+	if s.modules.Notifications != nil {
+		_, _ = s.modules.Notifications.Publish(ctx, input)
+	}
 }
 
 func decodeJSON(request *http.Request, value any, limit int64) bool {

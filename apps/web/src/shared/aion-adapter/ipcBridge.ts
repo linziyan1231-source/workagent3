@@ -9,6 +9,7 @@ import { conversationPort } from "../../features/conversation/conversationPort.j
 import { presetPort } from "../../features/presets/presetPort.js";
 import { channelPort } from "../../features/channels/channelPort.js";
 import type { Assistant } from "@/common/types/agent/assistantTypes";
+export type { PortalNotification } from "../../features/notifications/notificationPort.js";
 
 export interface IDirOrFile {
   name: string;
