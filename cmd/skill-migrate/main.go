@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,7 @@ func run(arguments []string, output io.Writer) error {
 	inventorySID := flags.String("sid", "", "employee SID recorded in an inventory")
 	inventoryOutput := flags.String("output", "", "new credential-free inventory JSON path")
 	runtimeDirectory := flags.String("runtime-dir", "", "stopped SID UserHost runtime directory")
+	dshHome := flags.String("dsh-home", "", "stopped SID Harness DSH_HOME for staged Preset migration")
 	releaseRoot := flags.String("release-skills-root", "", "WorkAgent3 released builtin Skill root")
 	if err := flags.Parse(arguments); err != nil {
 		return err
@@ -44,8 +46,8 @@ func run(arguments []string, output io.Writer) error {
 	if *action != "migrate" {
 		return errors.New("action must be inventory or migrate")
 	}
-	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) {
-		return errors.New("manifest, runtime-dir, and optional release-skills-root must be absolute")
+	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*dshHome != "" && !filepath.IsAbs(*dshHome)) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) {
+		return errors.New("manifest, runtime-dir, and optional dsh-home/release-skills-root must be absolute")
 	}
 	manifestFile, err := os.Open(*manifestPath)
 	if err != nil {
@@ -112,11 +114,63 @@ func run(arguments []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	results := append(append(append([]skillmigration.Result{}, manifest.Results...), mcpResults...), skillResults...)
+	presetProjection, presetResults, err := skillmigration.ProjectPresets(manifest, skillResults, mcpResults)
+	if err != nil {
+		return err
+	}
+	if len(presetProjection.Presets) != 0 {
+		if *dshHome == "" {
+			for index := range presetResults {
+				presetResults[index].Status = skillmigration.NeedsReview
+				presetResults[index].Reason = "preset_ingress_not_configured"
+			}
+		} else {
+			if err := stagePresetProjection(*dshHome, presetProjection); err != nil {
+				return err
+			}
+			for index := range presetResults {
+				if presetResults[index].Status == skillmigration.Ready {
+					presetResults[index].Status = skillmigration.NeedsReview
+					presetResults[index].Reason = "preset_runtime_import_pending"
+				}
+			}
+		}
+	}
+	results := append(append(append(append([]skillmigration.Result{}, manifest.Results...), mcpResults...), skillResults...), presetResults...)
 	return json.NewEncoder(output).Encode(struct {
 		SID     string                  `json:"sid"`
 		Results []skillmigration.Result `json:"results"`
 	}{SID: manifest.SID, Results: results})
+}
+
+func stagePresetProjection(dshHome string, projection skillmigration.PresetProjection) error {
+	directory := filepath.Join(dshHome, "workagent")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create Preset migration ingress: %w", err)
+	}
+	payload, err := json.MarshalIndent(projection, "", "  ")
+	if err != nil {
+		return err
+	}
+	payload = append(payload, '\n')
+	path := filepath.Join(directory, "preset-migration.json")
+	if existing, readErr := os.ReadFile(path); readErr == nil {
+		if bytes.Equal(existing, payload) {
+			return nil
+		}
+		return errors.New("different Preset migration ingress already exists")
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create Preset migration ingress: %w", err)
+	}
+	if _, err := file.Write(payload); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func captureInventory(databasePath, sid, outputPath string, output io.Writer) error {
@@ -142,7 +196,7 @@ func captureInventory(databasePath, sid, outputPath string, output io.Writer) er
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"sid": manifest.SID, "skills": len(manifest.Skills), "mcpServers": len(manifest.MCPServers), "skillBindings": len(manifest.SkillBindings), "mcpBindings": len(manifest.MCPBindings), "preclassifiedResults": len(manifest.Results)})
+	return json.NewEncoder(output).Encode(map[string]any{"sid": manifest.SID, "skills": len(manifest.Skills), "mcpServers": len(manifest.MCPServers), "skillBindings": len(manifest.SkillBindings), "mcpBindings": len(manifest.MCPBindings), "presets": len(manifest.Presets), "preclassifiedResults": len(manifest.Results)})
 }
 
 type catalogReadiness struct{ catalog *mcpruntime.Catalog }

@@ -88,6 +88,38 @@ export const skillBindingSchema = z
   .strict();
 export type SkillBinding = z.infer<typeof skillBindingSchema>;
 
+export const legacyPresetAssetSchema = z
+  .object({
+    oldId: z.string().min(1),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().max(1000),
+    avatar: z.string().max(2048).nullable(),
+    engine: engineIdSchema,
+    modelId: z.string().min(1).nullable(),
+    systemPrompt: z.string().max(50_000),
+    enabled: z.boolean(),
+    skillIds: z.array(z.string().min(1)),
+    mcpServerIds: z.array(z.string().min(1)),
+    skillBindingIds: z.array(z.string().min(1)).default([]),
+    mcpBindingIds: z.array(z.string().min(1)).default([]),
+    approvalPolicy: z.enum(["always_ask", "on_risk", "never"]),
+    migrationIssues: z.array(z.string().min(1)),
+  })
+  .strict();
+export type LegacyPresetAsset = z.infer<typeof legacyPresetAssetSchema>;
+
+export const legacyPresetProjectionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    sid: z.string().regex(/^S-1-/),
+    capturedAt: z.iso.datetime({ offset: true }),
+    presets: z.array(legacyPresetAssetSchema),
+  })
+  .strict();
+export type LegacyPresetProjection = z.infer<
+  typeof legacyPresetProjectionSchema
+>;
+
 export const skillMcpMigrationResultSchema = z
   .object({
     sourceId: z.string().min(1),
@@ -97,6 +129,7 @@ export const skillMcpMigrationResultSchema = z
       "mcp_server",
       "skill_binding",
       "mcp_binding",
+      "preset",
       "oauth",
     ]),
     status: migrationStatusSchema,
@@ -123,6 +156,7 @@ export const skillMcpInventorySchema = z
     mcpServers: z.array(mcpServerSchema),
     skillBindings: z.array(skillBindingSchema),
     mcpBindings: z.array(mcpBindingSchema),
+    presets: z.array(legacyPresetAssetSchema).default([]),
     results: z.array(skillMcpMigrationResultSchema),
   })
   .strict();

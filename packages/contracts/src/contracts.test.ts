@@ -211,6 +211,22 @@ describe("migration inventory", () => {
         },
       ],
       mcpBindings: [],
+      presets: [
+        {
+          oldId: "assistant-1",
+          name: "Migrated assistant",
+          description: "Legacy definition",
+          avatar: null,
+          engine: "harness" as const,
+          modelId: null,
+          systemPrompt: "Be concise.",
+          enabled: true,
+          skillIds: ["old-skill"],
+          mcpServerIds: ["mcp-1"],
+          approvalPolicy: "on_risk" as const,
+          migrationIssues: [],
+        },
+      ],
       results: [
         {
           sourceId: "sb-1",

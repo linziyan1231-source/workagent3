@@ -20,6 +20,7 @@ type legacyAssistant struct {
 	skills  []string
 	mcpMode string
 	mcps    []string
+	preset  PresetAsset
 }
 
 func CaptureLegacyInventory(ctx context.Context, databasePath, sid string, capturedAt time.Time) (Manifest, error) {
@@ -38,13 +39,19 @@ func CaptureLegacyInventory(ctx context.Context, databasePath, sid string, captu
 	if err := database.PingContext(ctx); err != nil {
 		return Manifest{}, fmt.Errorf("open legacy database read-only: %w", err)
 	}
-	manifest := Manifest{SchemaVersion: 1, SID: sid, CapturedAt: capturedAt.UTC(), Skills: []Asset{}, MCPServers: []MCPServer{}, SkillBindings: []Binding{}, MCPBindings: []Binding{}, Results: []Result{}}
+	manifest := Manifest{SchemaVersion: 1, SID: sid, CapturedAt: capturedAt.UTC(), Skills: []Asset{}, MCPServers: []MCPServer{}, SkillBindings: []Binding{}, MCPBindings: []Binding{}, Presets: []PresetAsset{}, Results: []Result{}}
 	if err := captureLegacySkills(ctx, database, &manifest); err != nil {
 		return Manifest{}, err
 	}
 	assistants, err := captureLegacyAssistants(ctx, database)
 	if err != nil {
 		return Manifest{}, err
+	}
+	for _, assistant := range assistants {
+		preset := assistant.preset
+		preset.SkillBindingIDs = []string{}
+		preset.MCPBindingIDs = []string{}
+		manifest.Presets = append(manifest.Presets, preset)
 	}
 	captureLegacySkillBindings(&manifest, assistants)
 	if err := captureLegacyMCP(ctx, database, &manifest, assistants); err != nil {
@@ -112,13 +119,17 @@ func captureLegacyAssistants(ctx context.Context, database *sql.DB) ([]legacyAss
 			return nil, err
 		}
 		names := append(parseStringList(enabled.String), parseStringList(custom.String)...)
-		result = append(result, legacyAssistant{id: id, engine: legacyEngine(agentType), skills: uniqueStrings(names), mcpMode: "auto", mcps: []string{}})
+		engine := legacyEngine(agentType)
+		result = append(result, legacyAssistant{
+			id: id, engine: engine, skills: uniqueStrings(names), mcpMode: "auto", mcps: []string{},
+			preset: PresetAsset{OldID: id, Name: id, Description: "", Engine: engine, Enabled: true, SkillIDs: uniqueStrings(names), MCPServerIDs: []string{}, ApprovalPolicy: "on_risk", MigrationIssues: []string{"legacy_assistant_metadata_projection_required"}},
+		})
 	}
 	return result, rows.Err()
 }
 
 func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([]legacyAssistant, bool, error) {
-	rows, err := database.QueryContext(ctx, `SELECT assistant_id,agent_id,default_skill_ids,custom_skill_names,default_mcps_mode,default_mcp_ids FROM assistant_definitions WHERE deleted_at IS NULL ORDER BY assistant_id`)
+	rows, err := database.QueryContext(ctx, `SELECT assistant_id,name,COALESCE(description,''),avatar_type,avatar_value,agent_id,rule_resource_type,rule_inline_content,default_model_mode,default_model_value,default_permission_mode,default_permission_value,default_skill_ids,custom_skill_names,default_mcps_mode,default_mcp_ids FROM assistant_definitions WHERE deleted_at IS NULL ORDER BY assistant_id`)
 	if err != nil {
 		if legacyTableMissing(err) {
 			return nil, false, nil
@@ -128,14 +139,76 @@ func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([
 	defer rows.Close()
 	result := []legacyAssistant{}
 	for rows.Next() {
-		var id, agentID, skillIDs, customNames, mcpMode, mcpIDs string
-		if err := rows.Scan(&id, &agentID, &skillIDs, &customNames, &mcpMode, &mcpIDs); err != nil {
+		var id, name, description, avatarType, agentID, ruleType, modelMode, permissionMode, skillIDs, customNames, mcpMode, mcpIDs string
+		var avatarValue, ruleInline, modelValue, permissionValue sql.NullString
+		if err := rows.Scan(&id, &name, &description, &avatarType, &avatarValue, &agentID, &ruleType, &ruleInline, &modelMode, &modelValue, &permissionMode, &permissionValue, &skillIDs, &customNames, &mcpMode, &mcpIDs); err != nil {
 			return nil, true, err
 		}
 		skills := append(parseStringList(skillIDs), parseStringList(customNames)...)
-		result = append(result, legacyAssistant{id: id, engine: legacyEngine(agentID), skills: uniqueStrings(skills), mcpMode: strings.ToLower(mcpMode), mcps: uniqueStrings(parseStringList(mcpIDs))})
+		skills = uniqueStrings(skills)
+		mcps := uniqueStrings(parseStringList(mcpIDs))
+		engine := legacyEngine(agentID)
+		issues := []string{}
+		systemPrompt := ""
+		if strings.EqualFold(ruleType, "inline") {
+			systemPrompt = ruleInline.String
+		} else if !strings.EqualFold(ruleType, "none") {
+			issues = append(issues, "rule_resource_projection_required")
+		}
+		var avatar *string
+		if !strings.EqualFold(avatarType, "none") && avatarValue.Valid && strings.TrimSpace(avatarValue.String) != "" {
+			avatar, issues = legacyAvatar(avatarType, avatarValue.String, issues)
+		}
+		var modelID *string
+		if strings.EqualFold(modelMode, "fixed") && modelValue.Valid && strings.TrimSpace(modelValue.String) != "" {
+			value := modelValue.String
+			modelID = &value
+		}
+		approvalPolicy, permissionIssue := legacyApprovalPolicy(permissionMode, permissionValue.String)
+		if permissionIssue != "" {
+			issues = append(issues, permissionIssue)
+		}
+		result = append(result, legacyAssistant{
+			id: id, engine: engine, skills: skills, mcpMode: strings.ToLower(mcpMode), mcps: mcps,
+			preset: PresetAsset{OldID: id, Name: name, Description: description, Avatar: avatar, Engine: engine, ModelID: modelID, SystemPrompt: systemPrompt, Enabled: true, SkillIDs: skills, MCPServerIDs: mcps, ApprovalPolicy: approvalPolicy, MigrationIssues: uniqueStrings(issues)},
+		})
 	}
 	return result, true, rows.Err()
+}
+
+func legacyAvatar(kind, value string, issues []string) (*string, []string) {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(kind, "url") {
+		parsed, err := url.Parse(value)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return nil, append(issues, "avatar_resource_projection_required")
+		}
+		parsed.User = nil
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		clean := parsed.String()
+		return &clean, issues
+	}
+	clean := filepath.ToSlash(filepath.Clean(value))
+	if filepath.IsAbs(value) || clean == ".." || strings.HasPrefix(clean, "../") || len(clean) > 2048 {
+		return nil, append(issues, "avatar_resource_projection_required")
+	}
+	issues = append(issues, "avatar_resource_projection_required")
+	return &clean, issues
+}
+
+func legacyApprovalPolicy(mode, value string) (string, string) {
+	if !strings.EqualFold(mode, "fixed") {
+		return "on_risk", ""
+	}
+	value = strings.ToLower(value)
+	if strings.Contains(value, "full") || strings.Contains(value, "bypass") {
+		return "never", ""
+	}
+	if strings.Contains(value, "ask") || strings.Contains(value, "plan") {
+		return "always_ask", ""
+	}
+	return "on_risk", "permission_projection_required"
 }
 
 func captureLegacySkillBindings(manifest *Manifest, assistants []legacyAssistant) {
@@ -145,18 +218,25 @@ func captureLegacySkillBindings(manifest *Manifest, assistants []legacyAssistant
 		byNameOrID[strings.ToLower(manifest.Skills[index].OldID)] = index
 	}
 	for _, assistant := range assistants {
+		resolvedSkillIDs := []string{}
 		for _, name := range assistant.skills {
+			bindingID := "legacy-skill-binding-" + assistant.id + "-" + safeInventoryID(name)
 			index, ok := byNameOrID[strings.ToLower(name)]
 			if !ok {
-				manifest.Results = append(manifest.Results, Result{SourceID: "legacy-skill-binding-" + assistant.id + "-" + safeInventoryID(name), Kind: "skill_binding", Status: NeedsReview, Reason: "bound_skill_not_found:" + name})
+				manifest.Results = append(manifest.Results, Result{SourceID: bindingID, Kind: "skill_binding", Status: NeedsReview, Reason: "bound_skill_not_found:" + name})
+				resolvedSkillIDs = append(resolvedSkillIDs, name)
+				appendPresetBindingID(manifest, assistant.id, bindingID, true)
 				continue
 			}
 			asset := &manifest.Skills[index]
+			resolvedSkillIDs = append(resolvedSkillIDs, asset.OldID)
 			asset.BindingObjectIDs = append(asset.BindingObjectIDs, assistant.id)
 			binding := Binding{ID: "legacy-skill-binding-" + assistant.id + "-" + asset.OldID, SkillID: asset.OldID, Engine: assistant.engine, SubjectID: assistant.id, SubjectType: "assistant"}
 			manifest.SkillBindings = append(manifest.SkillBindings, binding)
 			manifest.Results = append(manifest.Results, Result{SourceID: binding.ID, Kind: "skill_binding", Status: NeedsReview, Reason: "assistant_preset_projection_required"})
+			appendPresetBindingID(manifest, assistant.id, binding.ID, true)
 		}
+		setPresetSkillIDs(manifest, assistant.id, uniqueStrings(resolvedSkillIDs))
 	}
 }
 
@@ -204,9 +284,43 @@ func captureLegacyMCP(ctx context.Context, database *sql.DB, manifest *Manifest,
 			binding := Binding{ID: "legacy-mcp-binding-" + assistant.id + "-" + id, ServerID: id, Engine: assistant.engine, SubjectID: assistant.id, SubjectType: "assistant"}
 			manifest.MCPBindings = append(manifest.MCPBindings, binding)
 			manifest.Results = append(manifest.Results, Result{SourceID: binding.ID, Kind: "mcp_binding", Status: NeedsReview, Reason: "assistant_preset_projection_required"})
+			appendPresetMCPID(manifest, assistant.id, id)
+			appendPresetBindingID(manifest, assistant.id, binding.ID, false)
 		}
 	}
 	return rows.Err()
+}
+
+func appendPresetBindingID(manifest *Manifest, assistantID, bindingID string, skill bool) {
+	for index := range manifest.Presets {
+		if manifest.Presets[index].OldID != assistantID {
+			continue
+		}
+		if skill {
+			manifest.Presets[index].SkillBindingIDs = uniqueStrings(append(manifest.Presets[index].SkillBindingIDs, bindingID))
+		} else {
+			manifest.Presets[index].MCPBindingIDs = uniqueStrings(append(manifest.Presets[index].MCPBindingIDs, bindingID))
+		}
+		return
+	}
+}
+
+func setPresetSkillIDs(manifest *Manifest, assistantID string, ids []string) {
+	for index := range manifest.Presets {
+		if manifest.Presets[index].OldID == assistantID {
+			manifest.Presets[index].SkillIDs = ids
+			return
+		}
+	}
+}
+
+func appendPresetMCPID(manifest *Manifest, assistantID, serverID string) {
+	for index := range manifest.Presets {
+		if manifest.Presets[index].OldID == assistantID {
+			manifest.Presets[index].MCPServerIDs = uniqueStrings(append(manifest.Presets[index].MCPServerIDs, serverID))
+			return
+		}
+	}
 }
 
 func containsFold(values []string, target string) bool {

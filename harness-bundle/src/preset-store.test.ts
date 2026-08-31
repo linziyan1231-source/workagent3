@@ -7,6 +7,130 @@ import { PresetStore } from "./preset-store.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 describe("SID-private preset store", () => {
+  it("imports a legacy Preset projection idempotently", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      new SkillCatalogStore(),
+      new McpCatalogStore(),
+    );
+    const projection = {
+      schemaVersion: 1 as const,
+      sid: "S-1-5-21-1",
+      capturedAt: "2026-09-01T00:00:00.000Z",
+      presets: [
+        {
+          oldId: "assistant/one",
+          name: "Legacy assistant",
+          description: "Migrated",
+          avatar: null,
+          engine: "harness" as const,
+          modelId: null,
+          systemPrompt: "Keep the original rules.",
+          enabled: true,
+          skillIds: [],
+          mcpServerIds: [],
+          skillBindingIds: ["legacy-skill-binding"],
+          mcpBindingIds: ["legacy-mcp-binding"],
+          approvalPolicy: "on_risk" as const,
+          migrationIssues: [],
+        },
+      ],
+    };
+
+    const importedResults = store.importLegacy(projection).results;
+    expect(importedResults[0]).toMatchObject({
+      sourceId: "assistant/one",
+      status: "ready",
+    });
+    expect(importedResults.map((result) => result.kind)).toEqual([
+      "preset",
+      "skill_binding",
+      "mcp_binding",
+    ]);
+    const target = store
+      .list()
+      .find((preset) => preset.name === "Legacy assistant")!;
+    expect(target).toMatchObject({
+      enabled: true,
+      version: 1,
+      systemPrompt: "Keep the original rules.",
+    });
+    store.importLegacy(projection);
+    expect(store.get(target.id)?.version).toBe(1);
+  });
+
+  it("keeps an unauthorized migrated Preset disabled until recovery", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const mcp = new McpCatalogStore();
+    const server = {
+      id: "legacy-mcp",
+      name: "Legacy MCP",
+      source: "user",
+      enabled: true,
+      transport: {
+        kind: "http",
+        url: "https://example.test/mcp",
+        headerCredentialIds: {},
+      },
+      toolPolicy: "all",
+      allowedTools: [],
+      oauthState: "needs_auth",
+      health: "unknown",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    } as const;
+    mcp.replace({
+      servers: [{ server, environment: {}, headers: {}, state: "needs_auth" }],
+    });
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      new SkillCatalogStore(),
+      mcp,
+    );
+    const projection = {
+      schemaVersion: 1 as const,
+      sid: "S-1-5-21-1",
+      capturedAt: "2026-09-01T00:00:00.000Z",
+      presets: [
+        {
+          oldId: "assistant",
+          name: "Needs auth",
+          description: "",
+          avatar: null,
+          engine: "harness" as const,
+          modelId: null,
+          systemPrompt: "",
+          enabled: true,
+          skillIds: [],
+          mcpServerIds: [server.id],
+          approvalPolicy: "on_risk" as const,
+          migrationIssues: [],
+        },
+      ],
+    };
+
+    expect(store.importLegacy(projection).results[0]?.status).toBe(
+      "needs_auth",
+    );
+    const target = store.list().find((preset) => preset.name === "Needs auth")!;
+    expect(target.enabled).toBe(false);
+    mcp.replace({
+      servers: [
+        {
+          server: { ...server, oauthState: "none", health: "healthy" },
+          environment: {},
+          headers: {},
+          state: "ready",
+        },
+      ],
+    });
+    expect(store.importLegacy(projection).results[0]?.status).toBe("ready");
+    expect(store.get(target.id)).toMatchObject({ enabled: true, version: 2 });
+  });
+
   it("keeps immutable versions and resolves a stable session snapshot", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const store = new PresetStore(home, new ModelAccessStore(home));

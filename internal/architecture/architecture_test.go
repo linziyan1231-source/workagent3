@@ -26,6 +26,7 @@ var tableOwner = map[string]string{
 	"releases": "operations", "active_components": "operations", "activation_journal": "operations",
 	"skills": "skillruntime", "mcp_servers": "mcpruntime",
 	"skill_migrations": "skillmigration", "mcp_migrations": "skillmigration",
+	"preset_migrations": "skillmigration",
 }
 
 var sqlTableReference = regexp.MustCompile(`(?i)\b(?:from|join|into|update|table|references)\s+(?:if\s+not\s+exists\s+)?[\x60\x22\x5b]?([a-z][a-z0-9_]*)`)

@@ -99,10 +99,10 @@ func TestCaptureLegacyInventoryUsesLatestAssistantDefinitions(t *testing.T) {
 	}
 	if _, err := database.Exec(`
 CREATE TABLE skills (id TEXT,name TEXT,description TEXT,path TEXT,source TEXT,enabled INTEGER,deleted_at INTEGER);
-CREATE TABLE assistant_definitions (assistant_id TEXT,agent_id TEXT,default_skill_ids TEXT,custom_skill_names TEXT,default_mcps_mode TEXT,default_mcp_ids TEXT,deleted_at INTEGER);
+CREATE TABLE assistant_definitions (assistant_id TEXT,name TEXT,description TEXT,avatar_type TEXT,avatar_value TEXT,agent_id TEXT,rule_resource_type TEXT,rule_inline_content TEXT,default_model_mode TEXT,default_model_value TEXT,default_permission_mode TEXT,default_permission_value TEXT,default_skill_ids TEXT,custom_skill_names TEXT,default_mcps_mode TEXT,default_mcp_ids TEXT,deleted_at INTEGER);
 CREATE TABLE mcp_servers (id TEXT,name TEXT,description TEXT,enabled INTEGER,transport_type TEXT,transport_config TEXT,tools TEXT,builtin INTEGER,deleted_at INTEGER);
 INSERT INTO skills VALUES ('skill-id','Skill name','', 'C:/legacy/skill','user',1,NULL);
-INSERT INTO assistant_definitions VALUES ('assistant','codex','["skill-id"]','[]','fixed','["fixed-mcp"]',NULL);
+INSERT INTO assistant_definitions VALUES ('assistant','Latest assistant','Migrated','url','https://user:password@example.test/avatar.png?token=secret#fragment','codex','inline','Keep it concise','fixed','codex-native','fixed','plan','["skill-id"]','[]','fixed','["fixed-mcp"]',NULL);
 INSERT INTO mcp_servers VALUES ('fixed-mcp','Fixed','',0,'http','{"url":"https://example.test/path"}','[]',0,NULL);
 INSERT INTO mcp_servers VALUES ('unbound-mcp','Unbound','',1,'http','{"url":"https://example.test/path"}','[]',0,NULL);
 `); err != nil {
@@ -120,5 +120,11 @@ INSERT INTO mcp_servers VALUES ('unbound-mcp','Unbound','',1,'http','{"url":"htt
 	}
 	if len(manifest.MCPBindings) != 1 || manifest.MCPBindings[0].ServerID != "fixed-mcp" {
 		t.Fatalf("latest MCP bindings = %#v", manifest.MCPBindings)
+	}
+	if len(manifest.Presets) != 1 || manifest.Presets[0].Name != "Latest assistant" || manifest.Presets[0].SystemPrompt != "Keep it concise" || manifest.Presets[0].ApprovalPolicy != "always_ask" || len(manifest.Presets[0].SkillIDs) != 1 || manifest.Presets[0].SkillIDs[0] != "skill-id" || len(manifest.Presets[0].MCPServerIDs) != 1 || manifest.Presets[0].MCPServerIDs[0] != "fixed-mcp" {
+		t.Fatalf("latest preset = %#v", manifest.Presets)
+	}
+	if manifest.Presets[0].Avatar == nil || *manifest.Presets[0].Avatar != "https://example.test/avatar.png" {
+		t.Fatalf("sanitized avatar = %#v", manifest.Presets[0].Avatar)
 	}
 }

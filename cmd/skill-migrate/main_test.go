@@ -65,7 +65,8 @@ func TestRunMigratesCredentialFreeManifest(t *testing.T) {
 		Skills: []skillmigration.Asset{{
 			OldID: "legacy", Name: "Legacy", Description: "Legacy skill", Version: "1", LegacySource: "user", Enabled: true, ContentPath: source,
 		}},
-		MCPServers: []skillmigration.MCPServer{}, SkillBindings: []skillmigration.Binding{}, MCPBindings: []skillmigration.Binding{}, Results: []skillmigration.Result{},
+		MCPServers: []skillmigration.MCPServer{}, SkillBindings: []skillmigration.Binding{}, MCPBindings: []skillmigration.Binding{},
+		Presets: []skillmigration.PresetAsset{{OldID: "assistant", Name: "Assistant", Engine: "harness", Enabled: true, SkillIDs: []string{"legacy"}, MCPServerIDs: []string{}, ApprovalPolicy: "on_risk", MigrationIssues: []string{}}}, Results: []skillmigration.Result{},
 	}
 	manifestPath := filepath.Join(root, "manifest.json")
 	encoded, _ := json.Marshal(manifest)
@@ -73,12 +74,17 @@ func TestRunMigratesCredentialFreeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeDirectory := filepath.Join(root, "runtime")
+	dshHome := filepath.Join(root, "dsh-home")
 	var output bytes.Buffer
-	if err := run([]string{"--manifest", manifestPath, "--runtime-dir", runtimeDirectory}, &output); err != nil {
+	if err := run([]string{"--manifest", manifestPath, "--runtime-dir", runtimeDirectory, "--dsh-home", dshHome}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"status":"ready"`) {
 		t.Fatalf("unexpected report: %s", output.String())
+	}
+	projection, err := os.ReadFile(filepath.Join(dshHome, "workagent", "preset-migration.json"))
+	if err != nil || !strings.Contains(string(projection), `"new-skill"`) && !strings.Contains(string(projection), `"legacy"`) {
+		t.Fatalf("Preset ingress was not staged: %s, %v", projection, err)
 	}
 	store, err := skillruntime.Open(filepath.Join(runtimeDirectory, "skill-catalog.db"), filepath.Join(runtimeDirectory, "skills"))
 	if err != nil {

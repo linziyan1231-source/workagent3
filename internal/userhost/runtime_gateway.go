@@ -31,7 +31,7 @@ type runtimeGateway struct {
 	oauth       *mcpOAuthManager
 }
 
-func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -72,6 +72,14 @@ func newRuntimeGateway(runtimeDirectory, managedSkillsRoot, dataRoot, ownerSID s
 	}
 	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	if err := skillPublisher.Publish(context.Background()); err != nil {
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	presetPublisher := &harnessPresetMigrationPublisher{path: filepath.Join(dshHome, "workagent", "preset-migration.json"), target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}, migration: migration}
+	if err := presetPublisher.Publish(context.Background()); err != nil {
 		migration.Close()
 		skills.Close()
 		credentials.Close()
@@ -307,7 +315,12 @@ func listSkillMCPMigration(migration *skillmigration.Store) http.HandlerFunc {
 			writeRuntimeError(writer, http.StatusInternalServerError, "migration_journal_failed")
 			return
 		}
-		writeRuntimeJSON(writer, http.StatusOK, map[string]any{"results": append(mcp, skills...)})
+		presets, err := migration.PresetResults(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "migration_journal_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, map[string]any{"results": append(append(mcp, skills...), presets...)})
 	}
 }
 

@@ -2,6 +2,7 @@ package skillmigration
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -155,6 +156,60 @@ func TestInterruptedJournalRequiresRetry(t *testing.T) {
 	results, err := migration.Results(context.Background())
 	if err != nil || len(results) != 1 || results[0].Status != NeedsReview || results[0].Reason != "migration_interrupted_retry_required" {
 		t.Fatalf("unexpected interrupted journal: %#v, %v", results, err)
+	}
+}
+
+func TestPresetMigrationResultsAreReplacedAtomically(t *testing.T) {
+	migration, _ := openMigration(t, nil)
+	ctx := context.Background()
+	if err := migration.ReplacePresetResults(ctx, []Result{{SourceID: "old", TargetID: "new", Kind: "preset", Status: NeedsReview, Reason: "binding_not_ready"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := migration.ReplacePresetResults(ctx, []Result{{SourceID: "old", TargetID: "new", Kind: "preset", Status: Ready}}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := migration.PresetResults(ctx)
+	if err != nil || len(results) != 1 || results[0].Status != Ready {
+		t.Fatalf("Preset results = %#v, %v", results, err)
+	}
+	if err := migration.ReplacePresetResults(ctx, []Result{{SourceID: "bad", Kind: "skill", Status: Ready}}); err == nil {
+		t.Fatal("invalid Preset result was accepted")
+	}
+	results, err = migration.PresetResults(ctx)
+	if err != nil || len(results) != 1 || results[0].SourceID != "old" {
+		t.Fatalf("invalid replacement changed journal: %#v, %v", results, err)
+	}
+}
+
+func TestPresetMigrationJournalAddsBindingKindToExistingDatabase(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "migration.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE preset_migrations (source_id TEXT PRIMARY KEY,target_id TEXT NOT NULL,status TEXT NOT NULL,reason TEXT NOT NULL,updated_at INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	skills, err := skillruntime.Open(filepath.Join(root, "skills.db"), filepath.Join(root, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer skills.Close()
+	migration, err := Open(path, skills, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migration.Close()
+	if err := migration.ReplacePresetResults(context.Background(), []Result{{SourceID: "binding", TargetID: "preset", Kind: "skill_binding", Status: Ready}}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := migration.PresetResults(context.Background())
+	if err != nil || results[0].Kind != "skill_binding" {
+		t.Fatalf("migrated journal = %#v, %v", results, err)
 	}
 }
 

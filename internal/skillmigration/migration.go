@@ -44,14 +44,32 @@ type Asset struct {
 }
 
 type Manifest struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	SID           string      `json:"sid"`
-	CapturedAt    time.Time   `json:"capturedAt"`
-	Skills        []Asset     `json:"skills"`
-	MCPServers    []MCPServer `json:"mcpServers"`
-	SkillBindings []Binding   `json:"skillBindings"`
-	MCPBindings   []Binding   `json:"mcpBindings"`
-	Results       []Result    `json:"results"`
+	SchemaVersion int           `json:"schemaVersion"`
+	SID           string        `json:"sid"`
+	CapturedAt    time.Time     `json:"capturedAt"`
+	Skills        []Asset       `json:"skills"`
+	MCPServers    []MCPServer   `json:"mcpServers"`
+	SkillBindings []Binding     `json:"skillBindings"`
+	MCPBindings   []Binding     `json:"mcpBindings"`
+	Presets       []PresetAsset `json:"presets"`
+	Results       []Result      `json:"results"`
+}
+
+type PresetAsset struct {
+	OldID           string   `json:"oldId"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Avatar          *string  `json:"avatar"`
+	Engine          string   `json:"engine"`
+	ModelID         *string  `json:"modelId"`
+	SystemPrompt    string   `json:"systemPrompt"`
+	Enabled         bool     `json:"enabled"`
+	SkillIDs        []string `json:"skillIds"`
+	MCPServerIDs    []string `json:"mcpServerIds"`
+	SkillBindingIDs []string `json:"skillBindingIds"`
+	MCPBindingIDs   []string `json:"mcpBindingIds"`
+	ApprovalPolicy  string   `json:"approvalPolicy"`
+	MigrationIssues []string `json:"migrationIssues"`
 }
 
 type MCPServer struct {
@@ -134,10 +152,23 @@ CREATE TABLE IF NOT EXISTS mcp_migrations (
   status TEXT NOT NULL CHECK (status IN ('running','ready','needs_auth','needs_review','failed')),
   reason TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS preset_migrations (
+  source_id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('preset','skill_binding','mcp_binding')),
+  status TEXT NOT NULL CHECK (status IN ('ready','needs_auth','needs_review','failed')),
+  reason TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
 );`)
 	if err != nil {
 		database.Close()
 		return nil, fmt.Errorf("migrate skill migration journal: %w", err)
+	}
+	_, alterPresetErr := database.Exec(`ALTER TABLE preset_migrations ADD COLUMN kind TEXT NOT NULL DEFAULT 'preset' CHECK (kind IN ('preset','skill_binding','mcp_binding'))`)
+	if alterPresetErr != nil && !strings.Contains(strings.ToLower(alterPresetErr.Error()), "duplicate column name") {
+		database.Close()
+		return nil, fmt.Errorf("migrate Preset migration journal: %w", alterPresetErr)
 	}
 	return &Store{db: database, skills: skills, releases: releasedBuiltinPaths, now: time.Now, newID: randomID}, nil
 }
@@ -193,6 +224,48 @@ func (s *Store) MCPResults(ctx context.Context) ([]Result, error) {
 		if result.Status == running {
 			result.Status = NeedsReview
 			result.Reason = "migration_interrupted_retry_required"
+		}
+		results = append(results, result)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) ReplacePresetResults(ctx context.Context, results []Result) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM preset_migrations`); err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for _, result := range results {
+		if strings.TrimSpace(result.SourceID) == "" || strings.TrimSpace(result.TargetID) == "" || (result.Kind != "preset" && result.Kind != "skill_binding" && result.Kind != "mcp_binding") || (result.Status != Ready && result.Status != NeedsAuth && result.Status != NeedsReview && result.Status != Failed) {
+			return errors.New("invalid Preset migration result")
+		}
+		if _, duplicate := seen[result.SourceID]; duplicate {
+			return errors.New("duplicate Preset migration result")
+		}
+		seen[result.SourceID] = struct{}{}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO preset_migrations(source_id,target_id,kind,status,reason,updated_at) VALUES(?,?,?,?,?,?)`, result.SourceID, result.TargetID, result.Kind, result.Status, result.Reason, s.now().UTC().UnixMilli()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) PresetResults(ctx context.Context) ([]Result, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT source_id,target_id,kind,status,reason FROM preset_migrations ORDER BY source_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := []Result{}
+	for rows.Next() {
+		var result Result
+		if err := rows.Scan(&result.SourceID, &result.TargetID, &result.Kind, &result.Status, &result.Reason); err != nil {
+			return nil, err
 		}
 		results = append(results, result)
 	}

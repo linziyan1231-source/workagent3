@@ -9,10 +9,12 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
   presetDefinitionSchema,
+  legacyPresetProjectionSchema,
   presetMutationSchema,
   type PresetBinding,
   type PresetDefinition,
   type PresetMutation,
+  type LegacyPresetAsset,
 } from "@workagent/contracts";
 import type { ModelAccessStore } from "./model-access-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
@@ -177,6 +179,139 @@ export class PresetStore {
           (id) => this.#mcp!.getServer(id)!,
         ),
       },
+    };
+  }
+
+  importLegacy(input: unknown): {
+    results: Array<{
+      sourceId: string;
+      targetId: string;
+      kind: "preset" | "skill_binding" | "mcp_binding";
+      status: "ready" | "needs_auth" | "needs_review" | "failed";
+      reason?: string;
+    }>;
+  } {
+    const projection = legacyPresetProjectionSchema.parse(input);
+    const presetResults = projection.presets.map((asset) => {
+      const targetId = `legacy-preset:${encodeURIComponent(asset.oldId)}`;
+      const existing = this.get(targetId);
+      if (existing !== undefined) {
+        if (
+          existing.source !== "user" ||
+          existing.createdAt !== projection.capturedAt
+        )
+          return {
+            sourceId: asset.oldId,
+            targetId,
+            kind: "preset" as const,
+            status: "needs_review" as const,
+            reason: "preset_id_conflict",
+          };
+        const result = this.#legacyResult(asset, existing);
+        if (
+          result.status === "ready" &&
+          asset.enabled &&
+          !existing.enabled &&
+          existing.version === 1 &&
+          existing.updatedAt === projection.capturedAt
+        ) {
+          this.#versions.get(targetId)!.push({
+            ...existing,
+            version: 2,
+            enabled: true,
+            updatedAt: new Date().toISOString(),
+          });
+          this.#save();
+        }
+        return result;
+      }
+      const now = projection.capturedAt;
+      const candidate = presetDefinitionSchema.parse({
+        id: targetId,
+        version: 1,
+        source: "user",
+        name: asset.name,
+        description: asset.description,
+        avatar: asset.avatar,
+        enabled: false,
+        engine: asset.engine,
+        modelId: asset.modelId,
+        systemPrompt: asset.systemPrompt,
+        workspacePolicy: "default",
+        skillIds: asset.skillIds,
+        mcpServerIds: asset.mcpServerIds,
+        toolAllowlist: [],
+        approvalPolicy: asset.approvalPolicy,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const result = this.#legacyResult(asset, candidate);
+      const imported = {
+        ...candidate,
+        enabled: asset.enabled && result.status === "ready",
+      };
+      this.#versions.set(targetId, [imported]);
+      this.#save();
+      return result.status === "ready" && !asset.enabled
+        ? { ...result, status: "ready" as const }
+        : result;
+    });
+    const results = presetResults.flatMap((result, index) => {
+      const asset = projection.presets[index]!;
+      return [
+        result,
+        ...asset.skillBindingIds.map((sourceId) => ({
+          ...result,
+          sourceId,
+          kind: "skill_binding" as const,
+        })),
+        ...asset.mcpBindingIds.map((sourceId) => ({
+          ...result,
+          sourceId,
+          kind: "mcp_binding" as const,
+        })),
+      ];
+    });
+    return { results };
+  }
+
+  #legacyResult(asset: LegacyPresetAsset, preset: PresetDefinition) {
+    const issues = [...asset.migrationIssues];
+    try {
+      this.#validate({ ...preset, enabled: asset.enabled });
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "invalid_preset");
+    }
+    if (preset.version > 1) {
+      try {
+        this.#validate(preset);
+        if (preset.enabled || !asset.enabled)
+          return {
+            sourceId: asset.oldId,
+            targetId: preset.id,
+            kind: "preset" as const,
+            status: "ready" as const,
+          };
+      } catch {
+        // The current user-edited version remains reviewable below.
+      }
+    }
+    const uniqueIssues = [...new Set(issues)].sort();
+    if (uniqueIssues.length === 0)
+      return {
+        sourceId: asset.oldId,
+        targetId: preset.id,
+        kind: "preset" as const,
+        status: "ready" as const,
+      };
+    return {
+      sourceId: asset.oldId,
+      targetId: preset.id,
+      kind: "preset" as const,
+      status: uniqueIssues.some((issue) => issue.includes("needs_auth"))
+        ? ("needs_auth" as const)
+        : ("needs_review" as const),
+      reason: uniqueIssues.join(","),
     };
   }
 

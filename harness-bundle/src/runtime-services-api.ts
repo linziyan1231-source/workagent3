@@ -21,11 +21,18 @@ const json = (
   response.end(JSON.stringify(value));
 };
 
-const body = async (request: IncomingMessage): Promise<unknown> => {
+const body = async (
+  request: IncomingMessage,
+  limit = 64 * 1024,
+): Promise<unknown> => {
   let value = "";
+  let size = 0;
   for await (const chunk of request) {
+    size += Buffer.isBuffer(chunk)
+      ? chunk.length
+      : Buffer.byteLength(String(chunk), "utf8");
     value += String(chunk);
-    if (value.length > 64 * 1024) throw new Error("request_too_large");
+    if (size > limit) throw new Error("request_too_large");
   }
   return JSON.parse(value);
 };
@@ -105,6 +112,21 @@ export class RuntimeServicesController {
         json(response, 400, {
           error:
             error instanceof Error ? error.message : "invalid_skill_projection",
+        });
+      }
+    });
+    route("/internal/preset-migration", async (request, response) => {
+      if (request.method !== "PUT") return this.#method(response, "PUT");
+      try {
+        json(
+          response,
+          200,
+          presets.importLegacy(await body(request, 16 * 1024 * 1024)),
+        );
+      } catch (error) {
+        json(response, 400, {
+          error:
+            error instanceof Error ? error.message : "invalid_preset_migration",
         });
       }
     });

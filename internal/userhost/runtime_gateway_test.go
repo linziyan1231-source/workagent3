@@ -206,6 +206,9 @@ func TestRuntimeGatewayExposesCredentialFreeMigrationResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer migration.Close()
+	if err := migration.ReplacePresetResults(context.Background(), []skillmigration.Result{{SourceID: "assistant", TargetID: "legacy-preset:assistant", Kind: "preset", Status: skillmigration.NeedsReview, Reason: "binding_not_ready"}}); err != nil {
+		t.Fatal(err)
+	}
 	_, err = migration.Migrate(context.Background(), skillmigration.Manifest{
 		SchemaVersion: 1, SID: "S-1-5-21-1", CapturedAt: time.Now(),
 		Skills: []skillmigration.Asset{{OldID: "legacy", Name: "Legacy", Version: "1", LegacySource: "user", Enabled: true, ContentPath: `C:\private\legacy`}},
@@ -219,7 +222,7 @@ func TestRuntimeGatewayExposesCredentialFreeMigrationResults(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"sourceId":"legacy"`) || strings.Contains(response.Body.String(), `C:\private`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"sourceId":"legacy"`) || !strings.Contains(response.Body.String(), `"sourceId":"assistant"`) || strings.Contains(response.Body.String(), `C:\private`) {
 		t.Fatalf("migration response %d: %s", response.Code, response.Body.String())
 	}
 }
