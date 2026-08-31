@@ -160,6 +160,13 @@ func TestSharedFilesAuthorizeMembershipAndRouteToOwnerRuntime(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"notes.md"`) {
 		t.Fatalf("shared file response = %d %s", response.Code, response.Body.String())
 	}
+	var fileResponse struct {
+		Success bool                     `json:"success"`
+		Data    []map[string]interface{} `json:"data"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &fileResponse) != nil || !fileResponse.Success || len(fileResponse.Data) != 1 || fileResponse.Data[0]["name"] != "notes.md" {
+		t.Fatalf("shared file response was not preserved as structured JSON: %s", response.Body.String())
+	}
 	if platform.fileOwner != alice.user.SID || platform.fileRequest.ProjectID != createdBody.Project.ID {
 		t.Fatalf("owner routing = %q %#v", platform.fileOwner, platform.fileRequest)
 	}

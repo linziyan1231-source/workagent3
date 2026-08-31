@@ -828,4 +828,64 @@ describe("production Renderer shared-file adapter", () => {
       }),
     );
   });
+
+  it("loads shared text preview metadata and content through the Portal port", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        operation: string;
+      };
+      const data =
+        request.operation === "metadata"
+          ? {
+              name: "notes.md",
+              path: "shared://project_1234567890/notes.md",
+              size: 5,
+              type: "text/markdown; charset=utf-8",
+              lastModified: 1_788_000_000_000,
+              isDirectory: false,
+            }
+          : "hello";
+      return new Response(JSON.stringify({ success: true, data }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const input = {
+      workspace: "shared://project_1234567890",
+      path: "shared://project_1234567890/notes.md",
+    };
+    await expect(ipcBridge.fs.getFileMetadata.invoke(input)).resolves.toEqual(
+      expect.objectContaining({
+        name: "notes.md",
+        size: 5,
+        isDirectory: false,
+      }),
+    );
+    await expect(ipcBridge.fs.readFile.invoke(input)).resolves.toBe("hello");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/portal/shared-files",
+      expect.objectContaining({
+        body: JSON.stringify({
+          project_id: "project_1234567890",
+          operation: "metadata",
+          path: "notes.md",
+        }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/portal/shared-files",
+      expect.objectContaining({
+        body: JSON.stringify({
+          project_id: "project_1234567890",
+          operation: "read",
+          path: "notes.md",
+        }),
+      }),
+    );
+  });
 });
