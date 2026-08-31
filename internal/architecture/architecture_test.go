@@ -14,7 +14,8 @@ import (
 var tableOwner = map[string]string{
 	"users": "store", "sessions": "store", "runtime_credentials": "store",
 	"shared_projects": "collaboration", "shared_members": "collaboration", "shared_invites": "collaboration", "shared_ownership_transfers": "collaboration",
-	"shared_conversations": "collaboration", "shared_conversation_visibility": "collaboration", "shared_messages": "collaboration",
+	"shared_conversations": "collaboration", "shared_conversation_visibility": "collaboration", "shared_conversation_user_state": "collaboration", "shared_messages": "collaboration",
+	"shared_ai_runs": "collaboration", "shared_ai_run_payers": "collaboration",
 	"quota_budgets": "quota", "quota_reservations": "quota",
 	"skill_market_entries": "skillmarket",
 	"notifications":        "notifications", "notification_receipts": "notifications",
@@ -30,6 +31,7 @@ var tableOwner = map[string]string{
 }
 
 var sqlTableReference = regexp.MustCompile(`(?i)\b(?:from|join|into|update|table|references)\s+(?:if\s+not\s+exists\s+)?[\x60\x22\x5b]?([a-z][a-z0-9_]*)`)
+var sqlTableDefinition = regexp.MustCompile(`(?i)\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[\x60\x22\x5b]?([a-z][a-z0-9_]*)`)
 
 var externalLegacyReaders = map[string]map[string]bool{
 	"skillmigration/inventory.go": {"skills": true, "mcp_servers": true},
@@ -57,12 +59,42 @@ func TestSQLTablesAreOnlyAccessedByTheirOwner(t *testing.T) {
 	}
 }
 
+func TestEveryProductionTableHasOneDeclaredOwner(t *testing.T) {
+	internalRoot := internalDirectory(t)
+	defined := make(map[string]bool)
+	var violations []string
+	walkGoSources(t, internalRoot, func(path, packageName, content string) {
+		for _, match := range sqlTableDefinition.FindAllStringSubmatch(content, -1) {
+			table := strings.ToLower(match[1])
+			defined[table] = true
+			owner, declared := tableOwner[table]
+			if !declared {
+				violations = append(violations, relative(internalRoot, path)+" defines undeclared table "+table)
+				continue
+			}
+			if packageName != owner {
+				violations = append(violations, relative(internalRoot, path)+" defines "+table+" owned by internal/"+owner)
+			}
+		}
+	})
+	for table, owner := range tableOwner {
+		if !defined[table] {
+			violations = append(violations, "declared owner internal/"+owner+" has no production definition for "+table)
+		}
+	}
+	sort.Strings(violations)
+	if len(violations) != 0 {
+		t.Fatalf("data-owner declarations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
 func TestDataOwnersDoNotDependOnProcessOrchestration(t *testing.T) {
 	internalRoot := internalDirectory(t)
 	owners := map[string]bool{
 		"audit": true, "collaboration": true, "credentialbroker": true, "imgateway": true,
 		"modelaccess": true, "notifications": true, "operations": true, "quota": true,
-		"settings": true, "skillmarket": true, "store": true,
+		"settings": true, "skillmarket": true, "store": true, "skillruntime": true,
+		"mcpruntime": true, "skillmigration": true,
 	}
 	forbidden := []string{
 		"workagent3/internal/portal", "workagent3/internal/userhost", "workagent3/internal/employee",
