@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,10 @@ type SkillMarketPort interface {
 	PublishPackage(context.Context, contracts.SkillMarketPublishInput, []byte) (contracts.SkillMarketEntry, error)
 }
 
+type ChatForwardPort interface {
+	ServeChatForward(http.ResponseWriter, *http.Request, contracts.ChatForwardDelegation)
+}
+
 type Modules struct {
 	ModelAccess    ModelAccessPort
 	Quota          QuotaUsagePort
@@ -66,6 +71,7 @@ type Modules struct {
 	SkillMarket    SkillMarketPort
 	Collaboration  CollaborationPort
 	SharedProjects SharedProjectPlatformPort
+	ChatForward    ChatForwardPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -111,6 +117,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/shared-projects/{id}/invites", s.requireUser(s.sharedProjectInvites))
 	mux.HandleFunc("DELETE /api/portal/shared-projects/{id}/members/{userID}", s.requireUser(s.sharedProjectMember))
 	mux.HandleFunc("POST /api/portal/shared-projects/{id}/ownership", s.requireUser(s.sharedProjectOwnership))
+	mux.HandleFunc("/chatgpt", s.requireUser(s.chatForward))
+	mux.HandleFunc("/chatgpt/", s.requireUser(s.chatForward))
 	mux.HandleFunc("GET /api/portal/shared-invites", s.requireUser(s.sharedInvites))
 	mux.HandleFunc("POST /api/portal/shared-invites/{id}/{action}", s.requireUser(s.sharedInviteAction))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
@@ -118,6 +126,21 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
+}
+
+func (s *Server) chatForward(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.ChatForward == nil {
+		writeError(writer, http.StatusServiceUnavailable, "chatforward_unavailable")
+		return
+	}
+	if request.URL.Path == "/chatgpt" {
+		http.Redirect(writer, request, "/chatgpt/", http.StatusPermanentRedirect)
+		return
+	}
+	s.modules.ChatForward.ServeChatForward(writer, request, contracts.ChatForwardDelegation{
+		UserID:  strconv.FormatInt(user.ID, 10),
+		NowUnix: s.now().Unix(),
+	})
 }
 
 func (s *Server) skillMarket(writer http.ResponseWriter, request *http.Request, user store.User) {

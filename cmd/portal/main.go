@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/chatforward"
 	"workagent3/internal/collaboration"
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/portal"
@@ -114,6 +115,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var chatForwardProxy *chatforward.Proxy
+	if endpoint := strings.TrimSpace(os.Getenv("WORKAGENT_CHATFORWARD_URL")); endpoint != "" {
+		chatForwardProxy, err = chatforward.NewProxy(endpoint, os.Getenv("WORKAGENT_CHATFORWARD_SECRET_FILE"))
+		if err != nil {
+			return err
+		}
+	}
 
 	registry := runtimeapi.NewRegistry()
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
@@ -123,7 +131,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy})
 	if err != nil {
 		return err
 	}

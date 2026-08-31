@@ -32,6 +32,12 @@ those values in source control. `WORKAGENT_RUNTIME_URL`,
 `WORKAGENT_RUNTIME_TOKEN`, and `WORKAGENT_RUNTIME_SID` register a loopback
 development runtime. Production runtime registration is owned by UserHost.
 
+To mount the separately deployed ChatForward service at `/chatgpt/`, set
+`WORKAGENT_CHATFORWARD_URL` and `WORKAGENT_CHATFORWARD_SECRET_FILE`. The secret
+file must be a non-symlink regular file containing at least 32 bytes and must
+also be configured in ChatForward for delegated-request verification. Portal
+removes browser credentials and sends only a short-lived signed user ID.
+
 Speech input is disabled unless the Portal administrator sets both
 `WORKAGENT_SPEECH_URL` and `WORKAGENT_SPEECH_TOKEN`. The URL points to the
 private batch/WebSocket transcription adapter; the token is injected only by
