@@ -92,6 +92,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
+	mux.HandleFunc("GET /api/portal/me/profile", s.requireUser(s.profile))
+	mux.HandleFunc("PATCH /api/portal/me/profile", s.requireUser(s.updateProfile))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("GET /api/speech/capability", s.requireUser(s.speechCapability))

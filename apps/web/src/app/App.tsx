@@ -9,6 +9,7 @@ import { mcpPort } from "../features/mcp/mcpPort.js";
 import { skillPort } from "../features/skills/skillPort.js";
 import { automationPort } from "../features/automation/automationPort.js";
 import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
+import { WorkAgentAuthProvider } from "../shared/aion-adapter/authContext.js";
 
 const workspaceAssets = {
   list: workspacePort.assets,
@@ -51,31 +52,39 @@ function AuthenticatedApp() {
       />
     );
   }
+  const logout = async () => {
+    await authPort.logout();
+    setUser(null);
+  };
   return (
-    <ConversationPage
-      user={user}
-      workspaceId={workspaceId}
-      onWorkspaceSelect={setWorkspaceId}
-      assetPort={workspaceAssets}
-      presetPort={presetPort}
-      capabilityPort={capabilities}
-      automationPort={automationPort}
-      workspacePanel={({
-        workspaceId: selectedWorkspaceId,
-        sessionId,
-        onAssetAdded,
-      }) => (
-        <WorkspacePanel
-          selectedId={selectedWorkspaceId}
-          sessionId={sessionId}
-          onSelect={setWorkspaceId}
-          onAssetAdded={onAssetAdded}
-        />
-      )}
-      onLogout={async () => {
-        await authPort.logout();
-        setUser(null);
-      }}
-    />
+    <WorkAgentAuthProvider
+      user={{ ...user, admin: false }}
+      login={async () => ({ success: true })}
+      logout={logout}
+      refresh={async () => setUser(await authPort.currentUser())}
+    >
+      <ConversationPage
+        user={user}
+        workspaceId={workspaceId}
+        onWorkspaceSelect={setWorkspaceId}
+        assetPort={workspaceAssets}
+        presetPort={presetPort}
+        capabilityPort={capabilities}
+        automationPort={automationPort}
+        workspacePanel={({
+          workspaceId: selectedWorkspaceId,
+          sessionId,
+          onAssetAdded,
+        }) => (
+          <WorkspacePanel
+            selectedId={selectedWorkspaceId}
+            sessionId={sessionId}
+            onSelect={setWorkspaceId}
+            onAssetAdded={onAssetAdded}
+          />
+        )}
+        onLogout={logout}
+      />
+    </WorkAgentAuthProvider>
   );
 }

@@ -187,7 +187,17 @@ export const ipcBridge = {
     listAllSharedConversations: { invoke: async () => ({ conversations: [] }) },
     setSharedProjectHidden: { invoke: async () => undefined },
     setSharedConversationHidden: { invoke: async () => undefined },
-    updateProfile: { invoke: async () => ({ profile: {} }) },
+    updateProfile: {
+      invoke: async (input: {
+        display_name: string;
+        collaboration_enabled: boolean;
+      }) =>
+        requestJson("/api/portal/me/profile", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+    },
     restartService: { invoke: async () => ({ reconnect_after_ms: 2000 }) },
     listSharedInvites: { invoke: async () => ({ invites: [] }) },
     acceptSharedInvite: { invoke: async () => ({ success: false }) },
@@ -287,7 +297,9 @@ export const ipcBridge = {
       getManagedAgents: { invoke: getManagedAgents },
       checkManagedAgentHealthById: {
         invoke: async ({ id }: { id: string }) => {
-          const agent = (await getManagedAgents()).find((item) => item.id === id);
+          const agent = (await getManagedAgents()).find(
+            (item) => item.id === id,
+          );
           if (!agent) throw new Error("engine_not_found");
           return agent;
         },

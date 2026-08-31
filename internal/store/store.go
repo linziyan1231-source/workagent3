@@ -17,11 +17,14 @@ type Store struct {
 }
 
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	SID          string `json:"-"`
-	PasswordHash string `json:"-"`
-	Disabled     bool   `json:"disabled"`
+	ID                   int64  `json:"id"`
+	Username             string `json:"username"`
+	DisplayName          string `json:"display_name"`
+	SID                  string `json:"-"`
+	PasswordHash         string `json:"-"`
+	Disabled             bool   `json:"disabled"`
+	CollaborationEnabled bool   `json:"collaboration_enabled"`
+	CollaborationCapable bool   `json:"collaboration_capable"`
 }
 
 func Open(path string) (*Store, error) {
@@ -48,9 +51,11 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  display_name TEXT NOT NULL DEFAULT '',
   sid TEXT NOT NULL UNIQUE CHECK (sid LIKE 'S-1-%'),
   password_hash TEXT NOT NULL,
-  disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1))
+  disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+  collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))
 );
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
@@ -65,6 +70,26 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 `)
 	if err != nil {
 		return fmt.Errorf("migrate portal database: %w", err)
+	}
+	for _, column := range []struct {
+		name string
+		ddl  string
+	}{
+		{name: "display_name", ddl: `ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`},
+		{name: "collaboration_enabled", ddl: `ALTER TABLE users ADD COLUMN collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))`},
+	} {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name=?)`, column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect Portal user schema: %w", err)
+		}
+		if exists == 0 {
+			if _, err := s.db.ExecContext(ctx, column.ddl); err != nil {
+				return fmt.Errorf("add Portal user %s: %w", column.name, err)
+			}
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=username WHERE trim(display_name)=''`); err != nil {
+		return fmt.Errorf("backfill Portal user display names: %w", err)
 	}
 	return nil
 }
@@ -100,7 +125,7 @@ func (s *Store) CreateDisabledUser(ctx context.Context, username, sid, passwordH
 }
 
 func (s *Store) createUser(ctx context.Context, username, sid, passwordHash string, disabled bool) (User, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, sid, password_hash, disabled) VALUES(?, ?, ?, ?)`, username, sid, passwordHash, disabled)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO users(username, display_name, sid, password_hash, disabled) VALUES(?, ?, ?, ?, ?)`, username, username, sid, passwordHash, disabled)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
 	}
@@ -108,18 +133,20 @@ func (s *Store) createUser(ctx context.Context, username, sid, passwordHash stri
 	if err != nil {
 		return User{}, fmt.Errorf("read created user id: %w", err)
 	}
-	return User{ID: id, Username: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled}, nil
+	return User{ID: id, Username: username, DisplayName: username, SID: sid, PasswordHash: passwordHash, Disabled: disabled, CollaborationCapable: true}, nil
 }
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
 	var user User
-	var disabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, sid, password_hash, disabled FROM users WHERE username = ?`, username).
-		Scan(&user.ID, &user.Username, &user.SID, &user.PasswordHash, &disabled)
+	var disabled, collaborationEnabled int
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE username = ?`, username).
+		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.CollaborationEnabled = collaborationEnabled != 0
+	user.CollaborationCapable = true
 	return user, nil
 }
 
@@ -144,15 +171,17 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, e
 
 func (s *Store) UserBySession(ctx context.Context, token string, now time.Time) (User, error) {
 	var user User
-	var disabled int
+	var disabled, collaborationEnabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.sid, u.password_hash, u.disabled
+SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.collaboration_enabled
 FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()).Scan(&user.ID, &user.Username, &user.SID, &user.PasswordHash, &disabled)
+WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()).Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.CollaborationEnabled = collaborationEnabled != 0
+	user.CollaborationCapable = true
 	if user.Disabled {
 		return User{}, errors.New("user is disabled")
 	}
