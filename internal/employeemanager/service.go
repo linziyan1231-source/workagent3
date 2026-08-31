@@ -151,6 +151,10 @@ func (s *Service) RenameWindowsAccount(ctx context.Context, username, newWindows
 	return err
 }
 
+func (s *Service) DeleteRetainedEmployee(ctx context.Context, username, confirmation string) error {
+	return s.Lifecycle.DeleteRetainedEmployee(ctx, username, confirmation)
+}
+
 func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {
 	return contracts.KimiDatasourceGrant{}, fmt.Errorf("Kimi datasource policy is not configured")
 }

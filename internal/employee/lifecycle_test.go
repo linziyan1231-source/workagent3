@@ -24,6 +24,8 @@ type lifecyclePlatform struct {
 	repairErr error
 	renames   int
 	renameErr error
+	deletes   int
+	deleteErr error
 }
 
 type failingEnableStore struct{ *store.Store }
@@ -67,6 +69,10 @@ func (p *lifecyclePlatform) RenameInstalledAccount(_ context.Context, user store
 		return "", errors.New("invalid rename input")
 	}
 	return `WORKSTATION\` + newUsername, nil
+}
+func (p *lifecyclePlatform) DeleteRetainedEmployee(context.Context, store.User) error {
+	p.deletes++
+	return p.deleteErr
 }
 
 func TestLifecycleDisableRevokesSessionsBeforeRuntimeStop(t *testing.T) {
@@ -274,5 +280,41 @@ func TestRenameWindowsAccountFailureLeavesPortalClosed(t *testing.T) {
 	stored, _ := data.UserByUsername(t.Context(), "alice")
 	if !stored.Disabled || stored.WindowsUsername != "alice" {
 		t.Fatalf("failed rename was not recoverable: %+v", stored)
+	}
+}
+
+func TestPermanentEmployeeDeletionRequiresRetainedStateAndExactConfirmation(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.SetUserOffboarded(t.Context(), "alice", true)
+	_ = data.AuthorizeRuntime(t.Context(), user.SID, "registration-secret")
+	platform := &lifecyclePlatform{}
+	lifecycle := Lifecycle{Platform: platform, Users: data}
+	if err := lifecycle.DeleteRetainedEmployee(t.Context(), "alice", "alice"); err == nil || platform.deletes != 0 {
+		t.Fatal("weak confirmation reached destructive platform operation")
+	}
+	if err := lifecycle.DeleteRetainedEmployee(t.Context(), "alice", "DELETE alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := data.UserByUsername(t.Context(), "alice"); err == nil {
+		t.Fatal("deleted employee mapping survived")
+	}
+	if data.RuntimeRegistrationAuthorized(t.Context(), user.SID, "registration-secret") {
+		t.Fatal("deleted employee Runtime credential survived")
+	}
+}
+
+func TestPermanentEmployeeDeletionPlatformFailureRetainsMapping(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	_ = data.SetUserOffboarded(t.Context(), "alice", true)
+	platform := &lifecyclePlatform{deleteErr: errors.New("data root busy")}
+	if err := (Lifecycle{Platform: platform, Users: data}).DeleteRetainedEmployee(t.Context(), "alice", "DELETE alice"); err == nil {
+		t.Fatal("platform deletion failure was hidden")
+	}
+	if user, err := data.UserByUsername(t.Context(), "alice"); err != nil || !user.Offboarded {
+		t.Fatalf("failed deletion lost recoverable mapping: %+v %v", user, err)
 	}
 }

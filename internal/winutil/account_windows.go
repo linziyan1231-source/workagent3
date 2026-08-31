@@ -28,6 +28,7 @@ const (
 
 var netUserAdd = windows.NewLazySystemDLL("netapi32.dll").NewProc("NetUserAdd")
 var netUserSetInfo = windows.NewLazySystemDLL("netapi32.dll").NewProc("NetUserSetInfo")
+var netUserDel = windows.NewLazySystemDLL("netapi32.dll").NewProc("NetUserDel")
 var netUserGetLocalGroups = windows.NewLazySystemDLL("netapi32.dll").NewProc("NetUserGetLocalGroups")
 
 type userInfo1 struct {
@@ -130,6 +131,35 @@ func setLocalPassword(username string, password []byte) error {
 	status, _, _ := netUserSetInfo.Call(0, uintptr(unsafe.Pointer(name)), 1003, uintptr(unsafe.Pointer(&info)), uintptr(unsafe.Pointer(&parameterError)))
 	if status != 0 {
 		return fmt.Errorf("rotate Windows account password: Windows error %d (parameter %d)", status, parameterError)
+	}
+	return nil
+}
+
+func DeleteManagedLocalAccount(username, expectedSID string) error {
+	if err := ValidateLocalUsername(username); err != nil {
+		return err
+	}
+	exists, comment, _, err := localAccountState(username)
+	if err != nil || !exists {
+		return err
+	}
+	if comment != managedAccountComment {
+		return errors.New("refusing to delete unmanaged Windows account")
+	}
+	sid, _, err := LookupAccount(`.\` + username)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(sid, expectedSID) {
+		return errors.New("refusing to delete Windows account with unexpected SID")
+	}
+	name, err := windows.UTF16PtrFromString(username)
+	if err != nil {
+		return err
+	}
+	status, _, _ := netUserDel.Call(0, uintptr(unsafe.Pointer(name)))
+	if status != 0 && status != nerrUserNotFound {
+		return fmt.Errorf("delete managed Windows account: Windows error %d", status)
 	}
 	return nil
 }

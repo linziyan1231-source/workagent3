@@ -250,6 +250,43 @@ func localWindowsUsername(user store.User) string {
 	return value
 }
 
+func (p *WindowsPlatform) DeleteRetainedEmployee(ctx context.Context, user store.User) error {
+	target, err := retainedEmployeeDataRoot(p.config.DataRootBase, user.SID)
+	if err != nil {
+		return err
+	}
+	if err := p.RemoveInstalledRuntime(ctx, user.SID); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("employee data root is not a normal directory")
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("delete retained employee data: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return winutil.DeleteManagedLocalAccount(localWindowsUsername(user), user.SID)
+}
+
+func retainedEmployeeDataRoot(baseRoot, sid string) (string, error) {
+	base, err := filepath.Abs(filepath.Clean(baseRoot))
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(base, sid))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(base, target)
+	if err != nil || relative != sid || filepath.Dir(target) != base || !strings.HasPrefix(sid, "S-1-") {
+		return "", errors.New("employee data root is not an exact SID child")
+	}
+	return target, nil
+}
+
 func waitForRuntimeLease(ctx context.Context, portalURL, sid, credential string, timeout time.Duration) error {
 	endpoint := strings.TrimRight(portalURL, "/") + "/internal/runtime/lease?sid=" + url.QueryEscape(sid)
 	deadline := time.NewTimer(timeout)

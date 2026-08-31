@@ -45,6 +45,7 @@ func Handler(service *Service, token string) http.Handler {
 			Password           string                        `json:"portal_password"`
 			WindowsPassword    string                        `json:"windows_password"`
 			NewWindowsUsername string                        `json:"new_windows_username"`
+			Confirmation       string                        `json:"confirmation"`
 			Grant              contracts.KimiDatasourceGrant `json:"grant"`
 			Limits             winutil.JobLimits             `json:"limits"`
 		}
@@ -78,6 +79,8 @@ func Handler(service *Service, token string) http.Handler {
 			input.WindowsPassword = ""
 			defer zero(password)
 			err = service.RenameWindowsAccount(r.Context(), input.Username, input.NewWindowsUsername, password)
+		case "offboard-delete":
+			err = service.DeleteRetainedEmployee(r.Context(), input.Username, input.Confirmation)
 		case "kimi-datasource":
 			result, err = service.SetKimiDatasource(r.Context(), input.Username, input.Grant)
 		default:

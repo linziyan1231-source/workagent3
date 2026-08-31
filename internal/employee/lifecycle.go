@@ -38,6 +38,11 @@ type RenamePlatform interface {
 	RenameInstalledAccount(context.Context, store.User, string, []byte) (string, error)
 }
 
+type DeletionPlatform interface {
+	LifecyclePlatform
+	DeleteRetainedEmployee(context.Context, store.User) error
+}
+
 type LifecycleUserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	SetUserEnabled(context.Context, string, bool) error
@@ -45,6 +50,7 @@ type LifecycleUserStore interface {
 	SetUserAdmin(context.Context, string, bool) error
 	SetUserOffboarded(context.Context, string, bool) error
 	SetWindowsUsername(context.Context, int64, string) error
+	DeleteOffboardedUser(context.Context, string) error
 }
 
 // Lifecycle coordinates Portal account state with the SID-owned runtime. Its
@@ -293,4 +299,25 @@ func (l Lifecycle) RenameWindowsAccount(ctx context.Context, username, newWindow
 	}
 	user.Disabled = false
 	return user, nil
+}
+
+func (l Lifecycle) DeleteRetainedEmployee(ctx context.Context, username, confirmation string) error {
+	platform, ok := l.Platform.(DeletionPlatform)
+	if !ok || l.Users == nil {
+		return errors.New("employee deletion dependencies are required")
+	}
+	if confirmation != "DELETE "+username {
+		return errors.New("exact employee deletion confirmation is required")
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return err
+	}
+	if user.Admin || !user.Disabled || !user.Offboarded {
+		return errors.New("only a retained offboarded employee can be deleted")
+	}
+	if err := platform.DeleteRetainedEmployee(ctx, user); err != nil {
+		return fmt.Errorf("delete retained employee data: %w", err)
+	}
+	return l.Users.DeleteOffboardedUser(ctx, username)
 }

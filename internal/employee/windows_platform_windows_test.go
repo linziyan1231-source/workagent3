@@ -59,6 +59,17 @@ func TestLocalWindowsUsernameSeparatesPortalAndWindowsIdentity(t *testing.T) {
 	}
 }
 
+func TestRetainedEmployeeDataRootRejectsTraversalBeforeDeletion(t *testing.T) {
+	base := t.TempDir()
+	if _, err := retainedEmployeeDataRoot(base, `..\outside`); err == nil {
+		t.Fatal("employee deletion accepted a traversal target")
+	}
+	target, err := retainedEmployeeDataRoot(base, "S-1-5-21-1000")
+	if err != nil || filepath.Dir(target) != base {
+		t.Fatalf("valid SID root was rejected: %q %v", target, err)
+	}
+}
+
 func TestTaskPowerShellEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "must-not-leak")
 	environment := strings.Join(restrictedEnvironment(map[string]string{"WA3_TASK": "WorkAgent3-test"}), "\n")

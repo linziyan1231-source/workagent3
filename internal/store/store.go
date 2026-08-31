@@ -259,6 +259,25 @@ func (s *Store) SetUserOffboarded(ctx context.Context, username string, offboard
 	return nil
 }
 
+func (s *Store) DeleteOffboardedUser(ctx context.Context, username string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin employee deletion: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runtime_credentials WHERE sid=(SELECT sid FROM users WHERE username=? AND disabled=1 AND offboarded=1 AND admin=0)`, username); err != nil {
+		return fmt.Errorf("delete Runtime registration credential: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE username=? AND disabled=1 AND offboarded=1 AND admin=0`, username)
+	if err != nil {
+		return fmt.Errorf("delete retained employee mapping: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("only a retained offboarded employee can be deleted")
+	}
+	return tx.Commit()
+}
+
 // ResetUserPassword rotates only the Portal password. The employee's Windows
 // logon secret remains owned by Employee Manager and is never exposed to the
 // Portal or browser.

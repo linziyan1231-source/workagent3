@@ -21,6 +21,7 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action repair 
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action rename-windows -username alice -new-windows-username alice2
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action set-limits -username alice -memory-bytes 4294967296 -cpu-percent 50 -active-processes 64
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action offboard-retain -username alice
+employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action offboard-delete -username alice -confirm-delete "DELETE alice"
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action grant-admin -username manager
 employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-admin -username manager
 ```
@@ -60,6 +61,15 @@ access, renames only the managed local Windows account, verifies the new name
 resolves to the original SID, rebuilds the SID task with the supplied Windows
 credential, and commits the new canonical Windows name only after the Runtime
 is healthy. A partial attempt is safe to repeat with the same target name.
+
+`offboard-delete` is irreversible and accepts only an already retained,
+disabled, non-administrator employee. The confirmation must exactly equal
+`DELETE <username>`. Employee Manager resolves the target to one direct SID
+child of the configured data root and rejects traversal, links, files, or any
+other target before unregistering the task. It then deletes only that SID data
+root and its verified WorkAgent3-managed local account, followed by the Portal
+mapping and Runtime registration credential. Never invoke this command as part
+of ordinary disable or retained offboarding.
 
 For the formal browser administrator page, run Employee Manager as its own
 privileged service on loopback and point Portal at it. The token file must be an
