@@ -251,5 +251,6 @@ export class TeamController {
         ctx.webServer.register({ kind: "prefix", path: "/v1/teams", handler }),
       "workagent-ai-team: routes",
     );
+    orchestrator.start();
   }
 }

@@ -3,6 +3,7 @@ import type {
   AutomationRunnerPort,
 } from "./automation-store.js";
 import type { AutomationQuotaPort } from "./quota-client.js";
+import type { TeamExecution, TeamRunnerPort } from "./team-store.js";
 
 export interface AutomationPresetResolverPort {
   resolve(id: string): {
@@ -64,5 +65,44 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
 
   cancel(automationRunId: string): Promise<void> {
     return this.inner.cancel?.(automationRunId) ?? Promise.resolve();
+  }
+}
+
+export class QuotaTeamRunner implements TeamRunnerPort {
+  constructor(
+    readonly inner: TeamRunnerPort,
+    readonly presets: AutomationPresetResolverPort,
+    readonly quota: AutomationQuotaPort,
+  ) {}
+
+  async executeTeamTask(request: TeamExecution) {
+    const preset = this.presets.resolve(request.presetId);
+    const modelId =
+      preset.resolvedSnapshot.modelId ?? defaultModel[request.engine];
+    const units = estimatedAutomationUnits(request.input);
+    await this.quota.reserve({
+      runId: request.taskId,
+      modelId,
+      estimatedUnits: units,
+    });
+    try {
+      const result = await this.inner.executeTeamTask(request);
+      await this.quota.settle({ runId: request.taskId, actualUnits: units });
+      return result;
+    } catch (error) {
+      try {
+        await this.quota.settle({ runId: request.taskId, actualUnits: 0 });
+      } catch (settlementError) {
+        throw new AggregateError(
+          [error, settlementError],
+          "team_task_failed_and_quota_settlement_failed",
+        );
+      }
+      throw error;
+    }
+  }
+
+  cancelTeamTask(taskId: string): Promise<void> {
+    return this.inner.cancelTeamTask?.(taskId) ?? Promise.resolve();
   }
 }

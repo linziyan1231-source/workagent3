@@ -473,41 +473,53 @@ export class TeamOrchestrator {
     readonly store: TeamStore,
     readonly runner: TeamRunnerPort,
   ) {}
+  start(): void {
+    void this.tick();
+  }
   async tick(): Promise<void> {
     if (this.#ticking) return;
     this.#ticking = true;
     try {
-      for (const queued of this.store.claimQueued()) {
-        let begun;
-        try {
-          begun = this.store.beginTask(queued.id);
-        } catch {
-          continue;
+      for (;;) {
+        const executions: Promise<void>[] = [];
+        for (const queued of this.store.claimQueued()) {
+          let begun;
+          try {
+            begun = this.store.beginTask(queued.id);
+          } catch {
+            continue;
+          }
+          executions.push(this.#execute(begun));
         }
-        try {
-          const result = await this.runner.executeTeamTask({
-            taskId: begun.task.id,
-            teamId: begun.team.id,
-            memberId: begun.member.id,
-            name: `${begun.team.name} · ${begun.member.name}`,
-            engine: begun.member.engine,
-            presetId: begun.member.presetId,
-            workspaceId: begun.team.workspaceId,
-            input: begun.task.input,
-          });
-          this.store.finishTask(begun.task.id, {
-            status: "succeeded",
-            ...result,
-          });
-        } catch (error) {
-          this.store.finishTask(begun.task.id, {
-            status: "failed",
-            error: error instanceof Error ? error.message : "team_task_failed",
-          });
-        }
+        if (executions.length === 0) return;
+        await Promise.all(executions);
       }
     } finally {
       this.#ticking = false;
+    }
+  }
+
+  async #execute(begun: ReturnType<TeamStore["beginTask"]>): Promise<void> {
+    try {
+      const result = await this.runner.executeTeamTask({
+        taskId: begun.task.id,
+        teamId: begun.team.id,
+        memberId: begun.member.id,
+        name: `${begun.team.name} · ${begun.member.name}`,
+        engine: begun.member.engine,
+        presetId: begun.member.presetId,
+        workspaceId: begun.team.workspaceId,
+        input: begun.task.input,
+      });
+      this.store.finishTask(begun.task.id, {
+        status: "succeeded",
+        ...result,
+      });
+    } catch (error) {
+      this.store.finishTask(begun.task.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "team_task_failed",
+      });
     }
   }
   async cancel(teamId: string, taskId: string): Promise<TeamTask> {

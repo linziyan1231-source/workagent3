@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AutomationExecution } from "./automation-store.js";
 import {
   QuotaAutomationRunner,
+  QuotaTeamRunner,
   estimatedAutomationUnits,
 } from "./quota-runner.js";
 
@@ -102,5 +103,66 @@ describe("QuotaAutomationRunner", () => {
       runId: request.automationRunId,
       actualUnits: 0,
     });
+  });
+});
+
+describe("QuotaTeamRunner", () => {
+  const teamRequest = {
+    taskId: "team-task-1",
+    teamId: "team-1",
+    memberId: "member-1",
+    name: "Launch · Reviewer",
+    engine: "codex" as const,
+    presetId: "preset-1",
+    workspaceId: "workspace-default",
+    input: "Review launch",
+  };
+
+  it("attributes a successful member task to its durable task id", async () => {
+    const reserve = vi.fn().mockResolvedValue({});
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const executeTeamTask = vi
+      .fn()
+      .mockResolvedValue({ sessionId: "team-session-1", result: "done" });
+    const runner = new QuotaTeamRunner({ executeTeamTask }, presets, {
+      reserve,
+      settle,
+    });
+
+    await expect(runner.executeTeamTask(teamRequest)).resolves.toEqual({
+      sessionId: "team-session-1",
+      result: "done",
+    });
+    expect(reserve).toHaveBeenCalledWith({
+      runId: teamRequest.taskId,
+      modelId: "codex-model-1",
+      estimatedUnits: estimatedAutomationUnits(teamRequest.input),
+    });
+    expect(settle).toHaveBeenCalledWith({
+      runId: teamRequest.taskId,
+      actualUnits: estimatedAutomationUnits(teamRequest.input),
+    });
+  });
+
+  it("releases a failed member task reservation and delegates cancellation", async () => {
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const cancelTeamTask = vi.fn().mockResolvedValue(undefined);
+    const failure = new Error("member_engine_failed");
+    const runner = new QuotaTeamRunner(
+      {
+        executeTeamTask: vi.fn().mockRejectedValue(failure),
+        cancelTeamTask,
+      },
+      presets,
+      { reserve: vi.fn().mockResolvedValue({}), settle },
+    );
+
+    await expect(runner.executeTeamTask(teamRequest)).rejects.toBe(failure);
+    expect(settle).toHaveBeenCalledWith({
+      runId: teamRequest.taskId,
+      actualUnits: 0,
+    });
+    await runner.cancelTeamTask(teamRequest.taskId);
+    expect(cancelTeamTask).toHaveBeenCalledWith(teamRequest.taskId);
   });
 });

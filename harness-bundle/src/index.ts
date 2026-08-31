@@ -24,7 +24,7 @@ import { TeamOrchestrator, TeamStore } from "./team-store.js";
 import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
-import { QuotaAutomationRunner } from "./quota-runner.js";
+import { QuotaAutomationRunner, QuotaTeamRunner } from "./quota-runner.js";
 import { SharedTurnController } from "./shared-turn-api.js";
 
 export const name = "workagent-runtime-api";
@@ -157,7 +157,16 @@ export function apply(ctx: Context): void {
     new AutomationScheduler(automations, automationRunner),
   );
   const teams = new TeamStore(dshHome);
-  new TeamController(ctx, token, teams, new TeamOrchestrator(teams, runtime));
+  const teamRunner =
+    platformQuota === undefined
+      ? runtime
+      : new QuotaTeamRunner(runtime, presets, platformQuota);
+  new TeamController(
+    ctx,
+    token,
+    teams,
+    new TeamOrchestrator(teams, teamRunner),
+  );
   new InboxController(ctx, token, new InboxStore(dshHome), runtime);
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),

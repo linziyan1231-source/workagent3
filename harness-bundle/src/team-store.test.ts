@@ -74,6 +74,33 @@ describe("TeamStore", () => {
     expect(reopened.get(team.id)?.members[0]?.status).toBe("idle");
   });
 
+  it("resumes durable queued work when the orchestrator starts", async () => {
+    const home = root();
+    const store = new TeamStore(home);
+    const team = createTeam(store);
+    const task = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Draft",
+      input: "Draft launch",
+    });
+    const reopened = new TeamStore(home);
+    const orchestrator = new TeamOrchestrator(reopened, {
+      executeTeamTask: vi.fn().mockResolvedValue({
+        sessionId: "recovered-session",
+        result: "recovered",
+      }),
+    });
+
+    orchestrator.start();
+    await vi.waitFor(() =>
+      expect(reopened.task(task.id)?.status).toBe("succeeded"),
+    );
+    expect(reopened.task(task.id)).toMatchObject({
+      sessionId: "recovered-session",
+      result: "recovered",
+    });
+  });
+
   it("runs tasks through the public engine runner and supports cancellation", async () => {
     const store = new TeamStore(root());
     const team = createTeam(store);
@@ -111,6 +138,68 @@ describe("TeamStore", () => {
     });
     await orchestrator.cancel(team.id, queued.id);
     expect(store.task(queued.id)?.status).toBe("cancelled");
+  });
+
+  it("runs separate members in parallel and drains tasks queued while active", async () => {
+    const store = new TeamStore(root());
+    let team = createTeam(store);
+    team = store.addMember(team.id, {
+      name: "Reviewer",
+      engine: "codex",
+      presetId: "preset-review",
+    });
+    const releases = new Map<
+      string,
+      (result: { sessionId: string; result: string }) => void
+    >();
+    const executeTeamTask = vi.fn(
+      (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
+        new Promise<{ sessionId: string; result: string }>((resolve) => {
+          releases.set(request.taskId, resolve);
+        }),
+    );
+    const orchestrator = new TeamOrchestrator(store, { executeTeamTask });
+    const leadTask = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Draft",
+      input: "Draft launch",
+    });
+    const reviewTask = store.queueTask(team.id, {
+      memberId: team.members[1]!.id,
+      title: "Review",
+      input: "Review launch",
+    });
+
+    const tick = orchestrator.tick();
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(2));
+    expect(store.task(leadTask.id)?.status).toBe("running");
+    expect(store.task(reviewTask.id)?.status).toBe("running");
+
+    const followup = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Revise",
+      input: "Apply review",
+    });
+    await orchestrator.tick();
+    releases.get(leadTask.id)?.({ sessionId: "lead-session", result: "draft" });
+    releases.get(reviewTask.id)?.({
+      sessionId: "review-session",
+      result: "review",
+    });
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(3));
+    releases.get(followup.id)?.({
+      sessionId: "followup-session",
+      result: "revised",
+    });
+    await tick;
+
+    expect(store.tasks(team.id).map((task) => task.status)).toEqual([
+      "succeeded",
+      "succeeded",
+      "succeeded",
+    ]);
+    expect(executeTeamTask.mock.calls[0]?.[0].engine).toBe("harness");
+    expect(executeTeamTask.mock.calls[1]?.[0].engine).toBe("codex");
   });
 
   it("protects lead and active members from removal", () => {
