@@ -48,7 +48,8 @@ func TestHarnessSkillProjectionKeepsRootsOnPrivateRoute(t *testing.T) {
 	if err := publisher.Publish(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(received, `"id":"drawing-review"`) || !strings.Contains(received, `"root":`) || !strings.Contains(received, filepath.Base(store.RootFor(entry))) {
+	if !strings.Contains(received, `"id":"drawing-review"`) || !strings.Contains(received, `"root":`) || !strings.Contains(received, filepath.Base(store.RootFor(entry))) ||
+		!strings.Contains(received, `"requiredMcpServerIds":[]`) || !strings.Contains(received, `"requiredCommands":[]`) {
 		t.Fatalf("projection did not contain installed skill root: %s", received)
 	}
 }

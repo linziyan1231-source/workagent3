@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,38 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSkillDependencyCollectionsStayJSONArrays(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	writeSkillPackage(t, source)
+	store, err := Open(filepath.Join(root, "catalog.db"), filepath.Join(root, "installed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	installed, err := store.Install(t.Context(), InstallInput{
+		Entry:           Entry{ID: "array-contract", Name: "Array Contract", Version: "1", Source: "user", Enabled: true},
+		SourceDirectory: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE skills SET required_mcp_server_ids_json='null', required_commands_json='null' WHERE id=?`, installed.ID); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Get(t.Context(), installed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"requiredMcpServerIds":[]`) || !strings.Contains(string(payload), `"requiredCommands":[]`) {
+		t.Fatalf("dependency collections were not normalized: %s", payload)
+	}
+}
 
 func TestInstallListDisableAndRemove(t *testing.T) {
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import { conversationPort } from "../../features/conversation/conversationPort.j
 import { presetPort } from "../../features/presets/presetPort.js";
 import { notificationPort } from "../../features/notifications/notificationPort.js";
 import { systemPort } from "../../features/system/systemPort.js";
+import { workspacePort } from "../../features/workspace/workspacePort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { Theme } from "@/common/theme/types";
@@ -301,6 +302,18 @@ const toRendererConversation = (
     },
   }) as TChatConversation;
 
+const rendererWorkspacePath = (workspace: { id: string; name: string }) =>
+  `workagent-workspace:${workspace.id}\\${workspace.name}`;
+
+const runtimeWorkspaceId = (workspace: string | undefined) => {
+  if (!workspace?.startsWith("workagent-workspace:"))
+    return workspace || "default";
+  const separator = workspace.indexOf("\\");
+  return separator === -1
+    ? workspace.slice("workagent-workspace:".length)
+    : workspace.slice("workagent-workspace:".length, separator);
+};
+
 const createRendererConversation = async (input: {
   name?: string;
   assistant?: { id?: string };
@@ -313,7 +326,7 @@ const createRendererConversation = async (input: {
   const session = await conversationPort.create({
     engine: preset?.engine ?? "harness",
     title: input.name?.trim().slice(0, 200) || "New conversation",
-    workspace: input.extra?.workspace || "default",
+    workspace: runtimeWorkspaceId(input.extra?.workspace),
     ...(presetId ? { presetId } : {}),
   });
   for (const listener of conversationListListeners)
@@ -364,6 +377,25 @@ export const ipcBridge = {
     },
     listWorkspaceFiles: { invoke: async () => [] },
     getImageBase64: { invoke: async () => "" },
+  },
+  workspaceOfficeWatch: {
+    start: { invoke: async () => undefined },
+    stop: { invoke: async () => undefined },
+    fileAdded: { on: () => () => undefined },
+  },
+  fileSnapshot: {
+    init: {
+      invoke: async () => ({ mode: "snapshot" as const, branch: null }),
+    },
+    dispose: { invoke: async () => undefined },
+    compare: { invoke: async () => ({ staged: [], unstaged: [] }) },
+    stageFile: { invoke: async () => undefined },
+    stageAll: { invoke: async () => undefined },
+    unstageFile: { invoke: async () => undefined },
+    unstageAll: { invoke: async () => undefined },
+    discardFile: { invoke: async () => undefined },
+    resetFile: { invoke: async () => undefined },
+    getBaselineContent: { invoke: async () => "" },
   },
   dialog: {
     showOpen: {
@@ -434,6 +466,20 @@ export const ipcBridge = {
         as_of: new Date().toISOString(),
         providers: [],
       }),
+    },
+    listProjects: {
+      invoke: async () => ({
+        projects: (await workspacePort.list()).map((workspace) => ({
+          project_id: workspace.id,
+          name: workspace.name,
+        })),
+      }),
+    },
+    createProject: {
+      invoke: async ({ name }: { name: string }) => {
+        const workspace = await workspacePort.create(name);
+        return { path: rendererWorkspacePath(workspace) };
+      },
     },
     listManagedUsers: {
       invoke: async () =>
@@ -868,6 +914,56 @@ export const ipcBridge = {
     activeLease: { invoke: async () => null },
     getAssociateConversation: { invoke: async () => null },
     getSlashCommands: { invoke: async () => [] },
+    listArtifacts: { invoke: async () => [] },
+    artifactStream: { on: () => () => undefined },
+    getWorkspace: {
+      invoke: async ({
+        workspace,
+        path,
+        search,
+      }: {
+        conversation_id: string;
+        workspace: string;
+        path: string;
+        search?: string;
+      }) => {
+        const normalizedPath = path.replaceAll("\\", "/");
+        const normalizedWorkspace = workspace.replaceAll("\\", "/");
+        const relativePath =
+          normalizedPath === normalizedWorkspace || normalizedPath === ""
+            ? ""
+            : normalizedPath.startsWith(`${normalizedWorkspace}/`)
+              ? normalizedPath.slice(normalizedWorkspace.length + 1)
+              : normalizedPath;
+        const entries = (await workspacePort.files(workspace, relativePath))
+          .filter(
+            (entry) =>
+              !search ||
+              entry.name
+                .toLocaleLowerCase()
+                .includes(search.toLocaleLowerCase()),
+          )
+          .map((entry) => ({
+            name: entry.name,
+            fullPath: `${workspace}/${entry.path}`,
+            relativePath: entry.path,
+            isDir: entry.kind === "directory",
+            isFile: entry.kind === "file",
+          }));
+        const name = relativePath.split("/").pop() || workspace;
+        return [
+          {
+            name,
+            fullPath: relativePath ? `${workspace}/${relativePath}` : workspace,
+            relativePath,
+            isDir: true,
+            isFile: false,
+            children: entries,
+          },
+        ];
+      },
+    },
+    responseSearchWorkSpace: { provider: () => () => undefined },
     responseStream: {
       emit: emitResponse,
       on: (listener: (event: RendererResponseMessage) => void) => {

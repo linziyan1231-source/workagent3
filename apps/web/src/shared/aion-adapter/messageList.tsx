@@ -148,9 +148,11 @@ export const useMessageLstCache = (conversationId: string) => {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void conversationPort
-      .messages(conversationId)
-      .then((messages) => {
+    void Promise.all([
+      conversationPort.messages(conversationId),
+      conversationPort.pending(conversationId).catch(() => []),
+    ])
+      .then(([messages, pending]) => {
         if (cancelled) return;
         const restored: RendererMessage[] = messages.map((message) => ({
           id: message.id,
@@ -161,6 +163,28 @@ export const useMessageLstCache = (conversationId: string) => {
           created_at: Date.parse(message.createdAt),
           content: { content: message.text },
         }));
+        for (const interaction of pending) {
+          restored.push({
+            id: `confirmation:${interaction.id}`,
+            msg_id: `confirmation:${interaction.id}`,
+            conversation_id: conversationId,
+            type: "permission",
+            position: "left",
+            created_at: Date.parse(interaction.createdAt),
+            content: {
+              id: interaction.id,
+              call_id: interaction.id,
+              title: interaction.tool,
+              action: "exec",
+              description: interaction.summary,
+              command_type: interaction.tool,
+              options: [
+                { label: "Allow once", value: "allow_once" },
+                { label: "Decline", value: "decline" },
+              ],
+            },
+          });
+        }
         update((current) => {
           let next = restored;
           for (const message of current)

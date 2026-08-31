@@ -142,8 +142,8 @@ func (s *Store) Install(ctx context.Context, input InstallInput) (Entry, error) 
 			_ = os.RemoveAll(destination)
 		}
 	}()
-	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
-	requiredCommands, _ := json.Marshal(input.RequiredCommands)
+	requiredMCP, _ := json.Marshal(nonNilStrings(input.RequiredMCPServerIDs))
+	requiredCommands, _ := json.Marshal(nonNilStrings(input.RequiredCommands))
 	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	stamp := s.now().UTC().UnixMilli()
 	_, err = s.db.ExecContext(ctx, `INSERT INTO skills
@@ -239,8 +239,8 @@ func (s *Store) installOrReplace(ctx context.Context, input InstallInput, replac
 			_ = os.RemoveAll(destination)
 		}
 	}()
-	requiredMCP, _ := json.Marshal(input.RequiredMCPServerIDs)
-	requiredCommands, _ := json.Marshal(input.RequiredCommands)
+	requiredMCP, _ := json.Marshal(nonNilStrings(input.RequiredMCPServerIDs))
+	requiredCommands, _ := json.Marshal(nonNilStrings(input.RequiredCommands))
 	relativePath := filepath.ToSlash(filepath.Join(safeSegment(input.ID), bundleName, filepath.FromSlash(input.SkillSubdirectory)))
 	transaction, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -434,8 +434,17 @@ func scanEntry(row scanner) (Entry, error) {
 	if err := json.Unmarshal([]byte(requiredCommandsJSON), &entry.RequiredCommands); err != nil {
 		return Entry{}, fmt.Errorf("decode skill command dependencies: %w", err)
 	}
+	entry.RequiredMCPServerIDs = nonNilStrings(entry.RequiredMCPServerIDs)
+	entry.RequiredCommands = nonNilStrings(entry.RequiredCommands)
 	entry.Enabled = enabled == 1
 	return entry, nil
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func validateInstall(input InstallInput) error {

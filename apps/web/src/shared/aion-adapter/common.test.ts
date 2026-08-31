@@ -77,6 +77,132 @@ describe("production Renderer Skill Market adapter", () => {
   });
 });
 
+describe("production Renderer project adapter", () => {
+  it("creates the formal guide project through the Runtime workspace port", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "workspace-1",
+            name: "Browser QA",
+            createdAt: now,
+          }),
+          {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.portal.createProject.invoke({ name: "Browser QA" }),
+    ).resolves.toEqual({
+      path: "workagent-workspace:workspace-1\\Browser QA",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Browser QA" }),
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("resolves the formal project path back to the Runtime workspace id", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const fetch = vi.fn(
+      async (input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify(
+            String(input) === "/api/runtime/v1/presets"
+              ? []
+              : {
+                  id: "session-1",
+                  engine: "harness",
+                  title: "New conversation",
+                  createdAt: now,
+                  updatedAt: now,
+                  workspaceId: "workspace-1",
+                  preset: {
+                    presetId: "builtin-general",
+                    presetVersion: 1,
+                    resolvedSnapshot: {
+                      id: "builtin-general",
+                      version: 1,
+                      source: "builtin",
+                      name: "General",
+                      description: "",
+                      avatar: null,
+                      enabled: true,
+                      engine: "harness",
+                      modelId: null,
+                      systemPrompt: "",
+                      workspacePolicy: "default",
+                      skillIds: [],
+                      mcpServerIds: [],
+                      toolAllowlist: [],
+                      approvalPolicy: "on_risk",
+                      createdAt: now,
+                      updatedAt: now,
+                      resolvedAt: now,
+                    },
+                  },
+                },
+          ),
+          {
+            status: String(input) === "/api/runtime/v1/presets" ? 200 : 201,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.conversation.create.invoke({
+      name: "New conversation",
+      extra: {
+        workspace: "workagent-workspace:workspace-1\\Browser QA",
+      },
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"workspace":"workspace-1"'),
+      }),
+    );
+  });
+
+  it("maps Runtime workspaces into the formal project picker contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: "workspace-1",
+                name: "Browser QA",
+                createdAt: "2026-08-31T06:00:00.000Z",
+              },
+            ]),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      ),
+    );
+
+    await expect(ipcBridge.portal.listProjects.invoke()).resolves.toEqual({
+      projects: [{ project_id: "workspace-1", name: "Browser QA" }],
+    });
+  });
+});
+
 describe("production Renderer employee lifecycle adapter", () => {
   it("routes every extended administrator action through its explicit Portal endpoint", async () => {
     const fetch = vi.fn(
