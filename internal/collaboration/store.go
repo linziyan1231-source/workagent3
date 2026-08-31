@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS shared_conversation_visibility (
   hidden INTEGER NOT NULL CHECK (hidden IN (0,1)),
   PRIMARY KEY (conversation_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS shared_conversation_user_state (
+  conversation_id TEXT NOT NULL REFERENCES shared_conversations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),
+  pinned_at INTEGER,
+  PRIMARY KEY (conversation_id,user_id)
+);
 CREATE TABLE IF NOT EXISTS shared_messages (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   id TEXT NOT NULL UNIQUE,

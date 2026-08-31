@@ -347,6 +347,25 @@ func TestSharedConversationVisibilityIsPerMember(t *testing.T) {
 	if values, err := store.ListConversations(t.Context(), 2, true); err != nil || len(values) != 1 || !values[0].Hidden {
 		t.Fatalf("member hidden conversations = %#v, %v", values, err)
 	}
+	name, pinned := "Renamed", true
+	memberView, err := store.UpdateConversationMetadata(t.Context(), conversation.ID, 2, &name, &pinned, nil)
+	if err != nil || memberView.Name != name || !memberView.Pinned || memberView.PinnedAt == nil {
+		t.Fatalf("member metadata update = %#v, %v", memberView, err)
+	}
+	ownerView, err := store.ConversationForUser(t.Context(), conversation.ID, 1, true)
+	if err != nil || ownerView.Name != name || ownerView.Pinned || ownerView.PinnedAt != nil {
+		t.Fatalf("owner metadata view = %#v, %v", ownerView, err)
+	}
+	updated, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 2, "kimi-next", "medium")
+	if err != nil || updated.ModelID != "kimi-next" || updated.ThinkingEffort != "medium" {
+		t.Fatalf("runtime update = %#v, %v", updated, err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE shared_conversations SET state='running' WHERE id=?`, conversation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 2, "kimi-late", "low"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("running runtime update = %v", err)
+	}
 }
 
 func openTestStore(t *testing.T) *Store {

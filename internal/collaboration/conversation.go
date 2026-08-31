@@ -72,11 +72,12 @@ func (s *Store) ConversationForUser(ctx context.Context, conversationID string, 
 	var hidden, pinned int
 	var pinnedAt sql.NullInt64
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT c.id,c.project_id,p.name,m.role,c.name,c.assistant_id,c.assistant_backend,c.model_id,c.thinking_effort,c.state,c.last_ai_message_seq,c.pinned,c.pinned_at,COALESCE(v.hidden,0),c.created_at,c.updated_at
+	err := s.db.QueryRowContext(ctx, `SELECT c.id,c.project_id,p.name,m.role,c.name,c.assistant_id,c.assistant_backend,c.model_id,c.thinking_effort,c.state,c.last_ai_message_seq,COALESCE(us.pinned,0),us.pinned_at,COALESCE(v.hidden,0),c.created_at,c.updated_at
 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id
 JOIN shared_members m ON m.project_id=p.id AND m.user_id=? AND m.state='accepted'
 LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=?
-WHERE c.id=? AND p.state IN ('active','transfer_pending')`, userID, userID, strings.TrimSpace(conversationID)).Scan(&value.ID, &value.ProjectID, &value.ProjectName, &value.Role, &value.Name, &value.AssistantID, &value.AssistantBackend, &value.ModelID, &value.ThinkingEffort, &value.State, &value.LastAIMessageSeq, &pinned, &pinnedAt, &hidden, &created, &updated)
+LEFT JOIN shared_conversation_user_state us ON us.conversation_id=c.id AND us.user_id=?
+WHERE c.id=? AND p.state IN ('active','transfer_pending')`, userID, userID, userID, strings.TrimSpace(conversationID)).Scan(&value.ID, &value.ProjectID, &value.ProjectName, &value.Role, &value.Name, &value.AssistantID, &value.AssistantBackend, &value.ModelID, &value.ThinkingEffort, &value.State, &value.LastAIMessageSeq, &pinned, &pinnedAt, &hidden, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Conversation{}, ErrNotFound
 	}
@@ -96,7 +97,7 @@ WHERE c.id=? AND p.state IN ('active','transfer_pending')`, userID, userID, stri
 }
 
 func (s *Store) ListConversations(ctx context.Context, userID int64, includeHidden bool) ([]Conversation, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.id FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=? WHERE (? OR COALESCE(v.hidden,0)=0) ORDER BY c.pinned DESC,c.pinned_at DESC,c.updated_at DESC,c.id`, userID, userID, includeHidden)
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=? LEFT JOIN shared_conversation_user_state us ON us.conversation_id=c.id AND us.user_id=? WHERE (? OR COALESCE(v.hidden,0)=0) ORDER BY COALESCE(us.pinned,0) DESC,us.pinned_at DESC,c.updated_at DESC,c.id`, userID, userID, userID, includeHidden)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +130,70 @@ func (s *Store) SetConversationHidden(ctx context.Context, conversationID string
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO shared_conversation_visibility(conversation_id,user_id,hidden) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET hidden=excluded.hidden`, conversationID, userID, hidden)
 	if err != nil {
+		return Conversation{}, err
+	}
+	return s.ConversationForUser(ctx, conversationID, userID, true)
+}
+
+func (s *Store) UpdateConversationMetadata(ctx context.Context, conversationID string, userID int64, name *string, pinned *bool, hidden *bool) (Conversation, error) {
+	if name == nil && pinned == nil && hidden == nil {
+		return Conversation{}, errors.New("shared conversation update is empty")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	var nextName string
+	if name != nil {
+		nextName = strings.TrimSpace(*name)
+		if nextName == "" || len(nextName) > 128 {
+			return Conversation{}, errors.New("shared conversation name is invalid")
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Conversation{}, err
+	}
+	defer tx.Rollback()
+	var authorized int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' WHERE c.id=?)`, userID, conversationID).Scan(&authorized); err != nil {
+		return Conversation{}, err
+	}
+	if authorized == 0 {
+		return Conversation{}, ErrNotFound
+	}
+	if name != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE shared_conversations SET name=?,updated_at=? WHERE id=?`, nextName, s.now().UTC().UnixMilli(), conversationID); err != nil {
+			return Conversation{}, err
+		}
+	}
+	if pinned != nil {
+		var pinnedAt any
+		if *pinned {
+			pinnedAt = s.now().UTC().UnixMilli()
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO shared_conversation_user_state(conversation_id,user_id,pinned,pinned_at) VALUES(?,?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET pinned=excluded.pinned,pinned_at=excluded.pinned_at`, conversationID, userID, *pinned, pinnedAt); err != nil {
+			return Conversation{}, err
+		}
+	}
+	if hidden != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO shared_conversation_visibility(conversation_id,user_id,hidden) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET hidden=excluded.hidden`, conversationID, userID, *hidden); err != nil {
+			return Conversation{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Conversation{}, err
+	}
+	return s.ConversationForUser(ctx, conversationID, userID, true)
+}
+
+func (s *Store) UpdateConversationRuntime(ctx context.Context, conversationID string, userID int64, modelID, thinkingEffort string) (Conversation, error) {
+	modelID, thinkingEffort = strings.TrimSpace(modelID), strings.TrimSpace(thinkingEffort)
+	if modelID == "" || len(modelID) > 256 || thinkingEffort == "" || len(thinkingEffort) > 32 {
+		return Conversation{}, errors.New("shared conversation runtime configuration is invalid")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE shared_conversations SET model_id=?,thinking_effort=?,updated_at=? WHERE id=? AND state='idle' AND EXISTS(SELECT 1 FROM shared_members m WHERE m.project_id=shared_conversations.project_id AND m.user_id=? AND m.state='accepted')`, modelID, thinkingEffort, s.now().UTC().UnixMilli(), strings.TrimSpace(conversationID), userID)
+	if err != nil {
+		return Conversation{}, err
+	}
+	if err := requireOne(result, ErrConflict); err != nil {
 		return Conversation{}, err
 	}
 	return s.ConversationForUser(ctx, conversationID, userID, true)

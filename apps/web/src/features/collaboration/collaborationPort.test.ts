@@ -103,4 +103,32 @@ describe("collaboration HTTP/SSE client port", () => {
     offMessage();
     release();
   });
+
+  it("updates formal shared conversation metadata through one resource", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ conversation: { id: "conversation-1" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await collaborationPort.updateConversation("conversation-1", {
+      name: "Renamed",
+      pinned: true,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-conversations",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          conversation_id: "conversation-1",
+          name: "Renamed",
+          pinned: true,
+        }),
+      }),
+    );
+  });
 });

@@ -159,6 +159,27 @@ export const collaborationPort = {
       )
     ).conversation;
   },
+  async updateConversation(
+    conversationId: string,
+    updates: {
+      name?: string;
+      pinned?: boolean;
+      hidden?: boolean;
+      model_id?: string;
+      thinking_effort?: string;
+    },
+  ) {
+    return (
+      await requestJson<{ conversation: SharedConversation }>(
+        "/api/portal/shared-conversations",
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ conversation_id: conversationId, ...updates }),
+        },
+      )
+    ).conversation;
+  },
   async listMessages(conversationId: string) {
     return (
       await requestJson<{ messages: SharedMessage[] }>(

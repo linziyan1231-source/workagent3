@@ -15,8 +15,15 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
+	"workagent3/internal/contracts"
 	"workagent3/internal/store"
 )
+
+type collaborationModelAccess struct{}
+
+func (collaborationModelAccess) ListAuthorized(context.Context, string) ([]contracts.AuthorizedModel, error) {
+	return []contracts.AuthorizedModel{{Model: contracts.Model{ID: "gpt-5", ProviderID: "codex"}, Authorization: contracts.ModelAuthorization{ModelID: "gpt-5", Authorized: true}}}, nil
+}
 
 type fakeSharedProjectPlatform struct {
 	provisionErr error
@@ -200,6 +207,18 @@ func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"body":"Hello Bob"`) || strings.Contains(listed.Body.String(), `"is_current_user":true`) {
 		t.Fatalf("member messages = %d %s", listed.Code, listed.Body.String())
 	}
+	updated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","name":"Renamed","pinned":true}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Renamed"`) || !strings.Contains(updated.Body.String(), `"pinned":true`) {
+		t.Fatalf("updated conversation = %d %s", updated.Code, updated.Body.String())
+	}
+	ownerView := collaborationRequest(t, handler, alice.session, http.MethodGet, "/api/portal/shared-conversations?id="+conversationBody.Conversation.ID, "")
+	if ownerView.Code != http.StatusOK || strings.Contains(ownerView.Body.String(), `"pinned":true`) {
+		t.Fatalf("member pin leaked to owner = %d %s", ownerView.Code, ownerView.Body.String())
+	}
+	runtimeUpdated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","model_id":"gpt-5","thinking_effort":"high"}`)
+	if runtimeUpdated.Code != http.StatusOK || !strings.Contains(runtimeUpdated.Body.String(), `"thinking_effort":"high"`) {
+		t.Fatalf("updated shared runtime = %d %s", runtimeUpdated.Code, runtimeUpdated.Body.String())
+	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
@@ -247,7 +266,7 @@ func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, 
 	alice := create("alice", "S-1-5-21-1000", "alice-collaboration-session")
 	bob := create("bob", "S-1-5-21-2000", "bob-collaboration-session")
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform})
+	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform})
 	if err != nil {
 		t.Fatal(err)
 	}

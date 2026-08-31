@@ -41,6 +41,8 @@ type CollaborationPort interface {
 	ConversationForUser(context.Context, string, int64, bool) (collaboration.Conversation, error)
 	ListConversations(context.Context, int64, bool) ([]collaboration.Conversation, error)
 	SetConversationHidden(context.Context, string, int64, bool) (collaboration.Conversation, error)
+	UpdateConversationMetadata(context.Context, string, int64, *string, *bool, *bool) (collaboration.Conversation, error)
+	UpdateConversationRuntime(context.Context, string, int64, string, string) (collaboration.Conversation, error)
 	AddMessage(context.Context, collaboration.Message, int64) (collaboration.Message, error)
 	ListMessages(context.Context, string, int64, int64, int) ([]collaboration.Message, error)
 	ListMessagesForUserAfter(context.Context, int64, int64, int) ([]collaboration.Message, error)

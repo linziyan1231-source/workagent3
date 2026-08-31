@@ -1012,6 +1012,25 @@ export const ipcBridge = {
         ),
       }),
     },
+    updateSharedConversationModel: {
+      invoke: async (input: {
+        conversation_id: string;
+        model_id?: string;
+        thinking_effort?: string;
+      }) => ({
+        conversation: await collaborationPort.updateConversation(
+          input.conversation_id,
+          {
+            ...(input.model_id === undefined
+              ? {}
+              : { model_id: input.model_id }),
+            ...(input.thinking_effort === undefined
+              ? {}
+              : { thinking_effort: input.thinking_effort }),
+          },
+        ),
+      }),
+    },
     searchSharedUsers: {
       invoke: (input: { q: string }) =>
         requestJson<{
@@ -1214,11 +1233,21 @@ export const ipcBridge = {
         merge_extra?: boolean;
       }) => {
         if (isSharedConversation(id)) {
-          const hidden = updates.extra?.hidden;
-          if (typeof hidden === "boolean")
-            await collaborationPort.setConversationHidden(
+          const sharedUpdates: {
+            name?: string;
+            pinned?: boolean;
+            hidden?: boolean;
+          } = {};
+          if (typeof updates.name === "string")
+            sharedUpdates.name = updates.name;
+          if (typeof updates.extra?.pinned === "boolean")
+            sharedUpdates.pinned = updates.extra.pinned;
+          if (typeof updates.extra?.hidden === "boolean")
+            sharedUpdates.hidden = updates.extra.hidden;
+          if (Object.keys(sharedUpdates).length > 0)
+            await collaborationPort.updateConversation(
               rawSharedConversationId(id),
-              hidden,
+              sharedUpdates,
             );
           for (const listener of conversationListListeners)
             listener({ conversation_id: id, action: "updated" });

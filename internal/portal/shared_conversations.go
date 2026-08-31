@@ -97,14 +97,66 @@ func (s *Server) sharedConversations(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusCreated, map[string]any{"conversation": conversationDTO(value)})
 	case http.MethodPatch:
 		var input struct {
-			ConversationID string `json:"conversation_id"`
-			Hidden         *bool  `json:"hidden"`
+			ConversationID string  `json:"conversation_id"`
+			Name           *string `json:"name"`
+			Pinned         *bool   `json:"pinned"`
+			Hidden         *bool   `json:"hidden"`
+			ModelID        *string `json:"model_id"`
+			ThinkingEffort *string `json:"thinking_effort"`
 		}
-		if !decodeJSON(request, &input, 16*1024) || input.Hidden == nil {
+		if !decodeJSON(request, &input, 16*1024) || strings.TrimSpace(input.ConversationID) == "" {
 			writeError(writer, http.StatusBadRequest, "invalid_shared_conversation_update")
 			return
 		}
-		value, err := s.modules.Collaboration.SetConversationHidden(request.Context(), input.ConversationID, user.ID, *input.Hidden)
+		runtimeUpdate := input.ModelID != nil || input.ThinkingEffort != nil
+		metadataUpdate := input.Name != nil || input.Pinned != nil || input.Hidden != nil
+		if runtimeUpdate == metadataUpdate {
+			writeError(writer, http.StatusBadRequest, "invalid_shared_conversation_update")
+			return
+		}
+		var value collaboration.Conversation
+		var err error
+		if metadataUpdate {
+			value, err = s.modules.Collaboration.UpdateConversationMetadata(request.Context(), input.ConversationID, user.ID, input.Name, input.Pinned, input.Hidden)
+		} else {
+			current, lookupErr := s.modules.Collaboration.ConversationForUser(request.Context(), input.ConversationID, user.ID, true)
+			if lookupErr != nil {
+				writeCollaborationError(writer, lookupErr)
+				return
+			}
+			modelID, effort := current.ModelID, current.ThinkingEffort
+			if input.ModelID != nil {
+				modelID = strings.TrimSpace(*input.ModelID)
+			}
+			if input.ThinkingEffort != nil {
+				effort = strings.TrimSpace(*input.ThinkingEffort)
+			}
+			if effort != "low" && effort != "medium" && effort != "high" {
+				writeError(writer, http.StatusBadRequest, "invalid_shared_runtime")
+				return
+			}
+			if s.modules.ModelAccess == nil {
+				writeError(writer, http.StatusServiceUnavailable, "model_access_unavailable")
+				return
+			}
+			models, modelErr := s.modules.ModelAccess.ListAuthorized(request.Context(), user.SID)
+			if modelErr != nil {
+				writeError(writer, http.StatusInternalServerError, "model_access_failed")
+				return
+			}
+			authorized := false
+			for _, model := range models {
+				if model.ID == modelID && model.ProviderID == current.AssistantBackend && model.Authorization.Authorized {
+					authorized = true
+					break
+				}
+			}
+			if !authorized {
+				writeError(writer, http.StatusForbidden, "shared_runtime_not_authorized")
+				return
+			}
+			value, err = s.modules.Collaboration.UpdateConversationRuntime(request.Context(), input.ConversationID, user.ID, modelID, effort)
+		}
 		if err != nil {
 			writeCollaborationError(writer, err)
 			return

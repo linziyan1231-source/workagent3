@@ -700,6 +700,37 @@ describe("production Renderer collaboration adapter", () => {
       }),
     );
   });
+
+  it("preserves the formal conversation rename and pin actions for shared sessions", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ conversation: { id: "conversation-1" } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.conversation.update.invoke({
+      id: "shared:conversation-1",
+      updates: { name: "Renamed", extra: { pinned: true } },
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-conversations",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          conversation_id: "conversation-1",
+          name: "Renamed",
+          pinned: true,
+        }),
+      }),
+    );
+  });
 });
 
 describe("production Renderer shared-file adapter", () => {
