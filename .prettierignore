@@ -5,3 +5,7 @@ node_modules/
 .cache/
 dist/
 coverage/
+# Pinned upstream Renderer snapshot; preserve its source formatting byte-for-byte.
+third_party/
+# Copied managed release payloads retain their canonical package formatting.
+release/managed-skills/

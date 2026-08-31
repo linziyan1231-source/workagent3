@@ -65,7 +65,8 @@ describe("UserHost-owned skill projection", () => {
 
   it("keeps private roots out of the public catalog", () => {
     const store = new SkillCatalogStore();
-    const root = process.platform === "win32" ? "C:\\private\\skills" : "/private/skills";
+    const root =
+      process.platform === "win32" ? "C:\\private\\skills" : "/private/skills";
     store.replace({ skills: [{ entry, root }] });
     expect(store.getSkill(entry.id)).toEqual(entry);
     expect(JSON.stringify(store.listSkills())).not.toContain("private/skills");

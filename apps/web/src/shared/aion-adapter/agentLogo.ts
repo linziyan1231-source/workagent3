@@ -11,7 +11,10 @@ export function resolveAgentAvatar(
 ) {
   const icon = options.icon?.trim();
   if (!icon) return { kind: "fallback" as const };
-  if (/^(https?:|data:|\/)/i.test(icon) || /\.(svg|png|jpe?g|webp|gif)$/i.test(icon)) {
+  if (
+    /^(https?:|data:|\/)/i.test(icon) ||
+    /\.(svg|png|jpe?g|webp|gif)$/i.test(icon)
+  ) {
     return { kind: "image" as const, value: icon };
   }
   return { kind: "emoji" as const, value: icon };

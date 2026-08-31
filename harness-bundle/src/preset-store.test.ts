@@ -74,7 +74,8 @@ describe("SID-private preset store", () => {
   it("rejects a skill whose SID command dependency is unavailable", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const skills = new SkillCatalogStore();
-    const root = process.platform === "win32" ? "C:\\private\\office" : "/private/office";
+    const root =
+      process.platform === "win32" ? "C:\\private\\office" : "/private/office";
     skills.replace({
       skills: [
         {

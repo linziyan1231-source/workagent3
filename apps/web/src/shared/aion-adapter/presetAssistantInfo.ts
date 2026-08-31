@@ -10,5 +10,8 @@ export type PresetAssistantInfo = {
 };
 
 export function usePresetAssistantInfo(_conversation?: TChatConversation) {
-  return { info: undefined as PresetAssistantInfo | undefined, isLoading: false };
+  return {
+    info: undefined as PresetAssistantInfo | undefined,
+    isLoading: false,
+  };
 }

@@ -36,8 +36,7 @@ const readBody = async (request: IncomingMessage): Promise<unknown> => {
   let value = "";
   for await (const chunk of request) {
     value += String(chunk);
-    if (value.length > 32 * 1024 * 1024)
-      throw new Error("request_too_large");
+    if (value.length > 32 * 1024 * 1024) throw new Error("request_too_large");
   }
   return JSON.parse(value);
 };

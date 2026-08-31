@@ -13,8 +13,7 @@ export const systemPort = {
   diagnosticsUrl: "/api/system/diagnostics",
   status: () => requestJson<SystemStatus>("/api/system/status"),
   restartRuntime: () =>
-    requestJson<{ reconnect_after_ms: number }>(
-      "/api/system/runtime/restart",
-      { method: "POST" },
-    ),
+    requestJson<{ reconnect_after_ms: number }>("/api/system/runtime/restart", {
+      method: "POST",
+    }),
 };

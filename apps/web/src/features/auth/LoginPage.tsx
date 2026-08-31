@@ -16,7 +16,10 @@ export function LoginPage({ onLogin }: Props) {
           await onLogin(username, password);
           return { success: true };
         } catch (reason) {
-          if (reason instanceof ApiError && reason.code === "invalid_credentials") {
+          if (
+            reason instanceof ApiError &&
+            reason.code === "invalid_credentials"
+          ) {
             return { success: false, code: "invalidCredentials" };
           }
           return { success: false, code: "networkError" };

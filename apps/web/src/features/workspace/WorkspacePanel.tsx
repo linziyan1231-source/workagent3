@@ -65,7 +65,8 @@ function filterNodes(nodes: IDirOrFile[], query: string): IDirOrFile[] {
     const children = node.children
       ? filterNodes(node.children, normalized)
       : undefined;
-    return node.name.toLocaleLowerCase().includes(normalized) || children?.length
+    return node.name.toLocaleLowerCase().includes(normalized) ||
+      children?.length
       ? [{ ...node, children }]
       : [];
   });
@@ -339,7 +340,11 @@ export function WorkspacePanel({
               }}
               openRenameModal={(node) => {
                 closeContextMenu();
-                setRenameModal({ visible: true, value: node.name, target: node });
+                setRenameModal({
+                  visible: true,
+                  value: node.name,
+                  target: node,
+                });
               }}
               closeContextMenu={closeContextMenu}
             />

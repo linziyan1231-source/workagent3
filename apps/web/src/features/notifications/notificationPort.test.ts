@@ -23,9 +23,7 @@ test("notification port uses same-origin authenticated endpoints", async () => {
   await notificationPort.list();
   await notificationPort.acknowledge("notice/unsafe");
 
-  expect(fetchMock.mock.calls[0]?.[0]).toBe(
-    "/api/portal/me/notifications",
-  );
+  expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/portal/me/notifications");
   expect(fetchMock.mock.calls[1]?.[0]).toBe(
     "/api/portal/me/notifications/notice%2Funsafe/acknowledge",
   );

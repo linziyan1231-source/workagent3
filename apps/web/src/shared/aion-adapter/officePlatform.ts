@@ -30,11 +30,18 @@ export const storage = {
   buildStorage<TRecord extends object>(namespace: string) {
     const keyFor = (key: keyof TRecord) => `${namespace}:${String(key)}`;
     return {
-      async get<TKey extends keyof TRecord>(key: TKey): Promise<TRecord[TKey] | undefined> {
+      async get<TKey extends keyof TRecord>(
+        key: TKey,
+      ): Promise<TRecord[TKey] | undefined> {
         const value = localStorage.getItem(keyFor(key));
-        return value === null ? undefined : (JSON.parse(value) as TRecord[TKey]);
+        return value === null
+          ? undefined
+          : (JSON.parse(value) as TRecord[TKey]);
       },
-      async set<TKey extends keyof TRecord>(key: TKey, value: TRecord[TKey]): Promise<void> {
+      async set<TKey extends keyof TRecord>(
+        key: TKey,
+        value: TRecord[TKey],
+      ): Promise<void> {
         localStorage.setItem(keyFor(key), JSON.stringify(value));
       },
       async remove<TKey extends keyof TRecord>(key: TKey): Promise<void> {

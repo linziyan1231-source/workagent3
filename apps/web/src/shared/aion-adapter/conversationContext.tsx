@@ -12,7 +12,9 @@ export type ConversationContextValue = {
   assistantId?: string;
 };
 
-const ConversationContext = createContext<ConversationContextValue | null>(null);
+const ConversationContext = createContext<ConversationContextValue | null>(
+  null,
+);
 
 export function ConversationProvider({
   value,

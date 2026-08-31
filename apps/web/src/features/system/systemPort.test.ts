@@ -24,9 +24,7 @@ test("system port reads status and requests the current SID runtime restart", as
   await systemPort.restartRuntime();
 
   expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/system/status");
-  expect(fetchMock.mock.calls[1]?.[0]).toBe(
-    "/api/system/runtime/restart",
-  );
+  expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/system/runtime/restart");
   expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
     method: "POST",
     credentials: "same-origin",

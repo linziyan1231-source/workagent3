@@ -1,7 +1,4 @@
-import type {
-  PendingInteraction,
-  RuntimeMessage,
-} from "@workagent/contracts";
+import type { PendingInteraction, RuntimeMessage } from "@workagent/contracts";
 import MessageList from "@renderer/pages/conversation/Messages/MessageList";
 import { ConversationProvider } from "../../aion-adapter/conversationContext.js";
 import {
