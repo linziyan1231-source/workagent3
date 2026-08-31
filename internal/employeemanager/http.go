@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"workagent3/internal/contracts"
-	"workagent3/internal/winutil"
 )
 
 func Handler(service *Service, token string) http.Handler {
@@ -41,13 +40,13 @@ func Handler(service *Service, token string) http.Handler {
 	})
 	mux.HandleFunc("POST /v1/users/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Username           string                        `json:"username"`
-			Password           string                        `json:"portal_password"`
-			WindowsPassword    string                        `json:"windows_password"`
-			NewWindowsUsername string                        `json:"new_windows_username"`
-			Confirmation       string                        `json:"confirmation"`
-			Grant              contracts.KimiDatasourceGrant `json:"grant"`
-			Limits             winutil.JobLimits             `json:"limits"`
+			Username           string                           `json:"username"`
+			Password           string                           `json:"portal_password"`
+			WindowsPassword    string                           `json:"windows_password"`
+			NewWindowsUsername string                           `json:"new_windows_username"`
+			Confirmation       string                           `json:"confirmation"`
+			Grant              contracts.KimiDatasourceGrant    `json:"grant"`
+			Limits             contracts.EmployeeResourceLimits `json:"limits"`
 		}
 		if !decode(r, &input) {
 			http.Error(w, "invalid request", http.StatusBadRequest)

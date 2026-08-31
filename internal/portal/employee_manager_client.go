@@ -106,6 +106,21 @@ func (c *EmployeeManagerClient) SetEnabled(ctx context.Context, username string,
 func (c *EmployeeManagerClient) ResetPassword(ctx context.Context, username string, password []byte) error {
 	return c.call(ctx, http.MethodPost, "/v1/users/reset-password", map[string]string{"username": username, "portal_password": string(password)}, nil)
 }
+func (c *EmployeeManagerClient) Repair(ctx context.Context, username string, password []byte) error {
+	return c.call(ctx, http.MethodPost, "/v1/users/repair", map[string]string{"username": username, "windows_password": string(password)}, nil)
+}
+func (c *EmployeeManagerClient) RenameWindowsAccount(ctx context.Context, username, newWindowsUsername string, password []byte) error {
+	return c.call(ctx, http.MethodPost, "/v1/users/rename-windows", map[string]string{"username": username, "new_windows_username": newWindowsUsername, "windows_password": string(password)}, nil)
+}
+func (c *EmployeeManagerClient) SetLimits(ctx context.Context, username string, limits contracts.EmployeeResourceLimits) error {
+	return c.call(ctx, http.MethodPost, "/v1/users/set-limits", map[string]any{"username": username, "limits": limits}, nil)
+}
+func (c *EmployeeManagerClient) OffboardRetain(ctx context.Context, username string) error {
+	return c.call(ctx, http.MethodPost, "/v1/users/offboard-retain", map[string]string{"username": username}, nil)
+}
+func (c *EmployeeManagerClient) DeleteRetainedEmployee(ctx context.Context, username, confirmation string) error {
+	return c.call(ctx, http.MethodPost, "/v1/users/offboard-delete", map[string]string{"username": username, "confirmation": confirmation}, nil)
+}
 func (c *EmployeeManagerClient) SetKimiDatasource(ctx context.Context, username string, grant KimiDatasourceGrant) (KimiDatasourceGrant, error) {
 	var result contracts.KimiDatasourceGrant
 	err := c.call(ctx, http.MethodPost, "/v1/users/kimi-datasource", map[string]any{"username": username, "grant": grant}, &result)

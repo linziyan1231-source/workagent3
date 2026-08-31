@@ -131,8 +131,10 @@ func (s *Service) ResetPassword(ctx context.Context, username string, password [
 	return s.Lifecycle.ResetPortalPassword(ctx, username, password)
 }
 
-func (s *Service) SetLimits(ctx context.Context, username string, limits winutil.JobLimits) error {
-	_, err := s.Lifecycle.SetLimits(ctx, username, limits)
+func (s *Service) SetLimits(ctx context.Context, username string, limits contracts.EmployeeResourceLimits) error {
+	_, err := s.Lifecycle.SetLimits(ctx, username, winutil.JobLimits{
+		MemoryBytes: limits.MemoryBytes, CPUPercent: limits.CPUPercent, ActiveProcesses: limits.ActiveProcesses,
+	})
 	return err
 }
 

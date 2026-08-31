@@ -92,6 +92,12 @@ Granting or revoking the administrator role invalidates that user's existing
 browser sessions. After signing in again, an administrator is routed by the
 formal WorkAgent Renderer to `/admin/accounts`; non-administrators receive 403
 from every employee-management route even if they call the HTTP API directly.
+Portal exposes the same lifecycle boundary at
+`POST /api/portal/admin/users/{action}` for `repair`, `rename-windows`,
+`set-limits`, `offboard-retain`, and `offboard-delete`. These routes require an
+administrator session and same-origin request; Portal forwards them only to the
+authenticated loopback Employee Manager. Permanent deletion additionally
+requires the JSON confirmation value to exactly equal `DELETE <username>`.
 
 ## Three-engine MCP acceptance
 

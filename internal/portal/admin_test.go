@@ -2,12 +2,14 @@ package portal
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"workagent3/internal/contracts"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/store"
 )
@@ -15,6 +17,55 @@ import (
 type fakeEmployeeManagement struct {
 	startedUsername string
 	startedPassword string
+	action          string
+	actionUsername  string
+	actionValue     string
+}
+
+func TestAdministratorExtendedEmployeeActionsUsePort(t *testing.T) {
+	data, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	admin, _ := data.CreateUser(t.Context(), "manager", "S-1-5-21-9000", "hash")
+	_ = data.SetUserAdmin(t.Context(), admin.Username, true)
+	_ = data.CreateSession(t.Context(), "admin-session", admin.ID, time.Now().Add(time.Hour))
+	port := &fakeEmployeeManagement{}
+	server, _ := NewWithModules(data, StaticRouter{}, false, Modules{EmployeeManagement: port})
+
+	tests := []struct {
+		action string
+		body   string
+		want   string
+	}{
+		{"repair", `{"username":"alice","windows_password":"secret"}`, "secret"},
+		{"rename-windows", `{"username":"alice","new_windows_username":"alice2","windows_password":"secret"}`, "alice2:secret"},
+		{"set-limits", `{"username":"alice","limits":{"memory_bytes":536870912,"cpu_percent":50,"active_processes":8}}`, "536870912"},
+		{"offboard-retain", `{"username":"alice"}`, ""},
+		{"offboard-delete", `{"username":"alice","confirmation":"DELETE alice"}`, "DELETE alice"},
+	}
+	for _, test := range tests {
+		t.Run(test.action, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/admin/users/"+test.action, strings.NewReader(test.body))
+			request.Header.Set("Origin", "http://portal.test")
+			request.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "admin-session"})
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusOK || port.action != test.action || port.actionUsername != "alice" || port.actionValue != test.want {
+				t.Fatalf("action was not forwarded: status=%d port=%#v body=%s", response.Code, port, response.Body.String())
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/admin/users/offboard-delete", strings.NewReader(`{"username":"alice","confirmation":"alice"}`))
+	request.Header.Set("Origin", "http://portal.test")
+	request.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "admin-session"})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe delete confirmation status %d: %s", response.Code, response.Body.String())
+	}
 }
 
 func (f *fakeEmployeeManagement) ListManagedUsers(context.Context) ([]ManagedUser, []string, error) {
@@ -32,6 +83,26 @@ func (*fakeEmployeeManagement) ManagedUsersUsage(context.Context) ([]ManagedUser
 }
 func (*fakeEmployeeManagement) SetEnabled(context.Context, string, bool) error      { return nil }
 func (*fakeEmployeeManagement) ResetPassword(context.Context, string, []byte) error { return nil }
+func (f *fakeEmployeeManagement) Repair(_ context.Context, username string, password []byte) error {
+	f.action, f.actionUsername, f.actionValue = "repair", username, string(password)
+	return nil
+}
+func (f *fakeEmployeeManagement) RenameWindowsAccount(_ context.Context, username, newWindowsUsername string, password []byte) error {
+	f.action, f.actionUsername, f.actionValue = "rename-windows", username, newWindowsUsername+":"+string(password)
+	return nil
+}
+func (f *fakeEmployeeManagement) SetLimits(_ context.Context, username string, limits contracts.EmployeeResourceLimits) error {
+	f.action, f.actionUsername, f.actionValue = "set-limits", username, fmt.Sprint(limits.MemoryBytes)
+	return nil
+}
+func (f *fakeEmployeeManagement) OffboardRetain(_ context.Context, username string) error {
+	f.action, f.actionUsername, f.actionValue = "offboard-retain", username, ""
+	return nil
+}
+func (f *fakeEmployeeManagement) DeleteRetainedEmployee(_ context.Context, username, confirmation string) error {
+	f.action, f.actionUsername, f.actionValue = "offboard-delete", username, confirmation
+	return nil
+}
 func (*fakeEmployeeManagement) SetKimiDatasource(_ context.Context, _ string, grant KimiDatasourceGrant) (KimiDatasourceGrant, error) {
 	return grant, nil
 }

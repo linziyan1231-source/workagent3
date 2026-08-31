@@ -37,3 +37,9 @@ type ManagedEmployeeUsage struct {
 	ResourceUsage            *QuotaUsage `json:"resource_usage,omitempty"`
 	ResourceUsageUnavailable bool        `json:"resource_usage_unavailable,omitempty"`
 }
+
+type EmployeeResourceLimits struct {
+	MemoryBytes     uint64 `json:"memory_bytes"`
+	CPUPercent      uint32 `json:"cpu_percent"`
+	ActiveProcesses uint32 `json:"active_processes"`
+}

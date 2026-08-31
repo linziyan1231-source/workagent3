@@ -22,6 +22,11 @@ type EmployeeManagementPort interface {
 	ManagedUsersUsage(context.Context) ([]ManagedUserUsage, error)
 	SetEnabled(context.Context, string, bool) error
 	ResetPassword(context.Context, string, []byte) error
+	Repair(context.Context, string, []byte) error
+	RenameWindowsAccount(context.Context, string, string, []byte) error
+	SetLimits(context.Context, string, contracts.EmployeeResourceLimits) error
+	OffboardRetain(context.Context, string) error
+	DeleteRetainedEmployee(context.Context, string, string) error
 	SetKimiDatasource(context.Context, string, KimiDatasourceGrant) (KimiDatasourceGrant, error)
 }
 
@@ -93,8 +98,12 @@ func (s *Server) adminUsersUsage(writer http.ResponseWriter, request *http.Reque
 
 func (s *Server) adminUserAction(writer http.ResponseWriter, request *http.Request, _ store.User) {
 	var input struct {
-		Username string `json:"username"`
-		Password string `json:"portal_password"`
+		Username           string                           `json:"username"`
+		Password           string                           `json:"portal_password"`
+		WindowsPassword    string                           `json:"windows_password"`
+		NewWindowsUsername string                           `json:"new_windows_username"`
+		Limits             contracts.EmployeeResourceLimits `json:"limits"`
+		Confirmation       string                           `json:"confirmation"`
 	}
 	if !decodeJSON(request, &input, 8*1024) || strings.TrimSpace(input.Username) == "" {
 		writeError(writer, http.StatusBadRequest, "invalid_employee_action")
@@ -115,6 +124,34 @@ func (s *Server) adminUserAction(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		err = s.modules.EmployeeManagement.ResetPassword(request.Context(), input.Username, password)
+	case "repair":
+		password := []byte(input.WindowsPassword)
+		input.WindowsPassword = ""
+		defer zeroBytes(password)
+		if len(password) == 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_windows_password")
+			return
+		}
+		err = s.modules.EmployeeManagement.Repair(request.Context(), input.Username, password)
+	case "rename-windows":
+		password := []byte(input.WindowsPassword)
+		input.WindowsPassword = ""
+		defer zeroBytes(password)
+		if strings.TrimSpace(input.NewWindowsUsername) == "" || len(password) == 0 {
+			writeError(writer, http.StatusBadRequest, "invalid_windows_account")
+			return
+		}
+		err = s.modules.EmployeeManagement.RenameWindowsAccount(request.Context(), input.Username, input.NewWindowsUsername, password)
+	case "set-limits":
+		err = s.modules.EmployeeManagement.SetLimits(request.Context(), input.Username, input.Limits)
+	case "offboard-retain":
+		err = s.modules.EmployeeManagement.OffboardRetain(request.Context(), input.Username)
+	case "offboard-delete":
+		if input.Confirmation != "DELETE "+input.Username {
+			writeError(writer, http.StatusBadRequest, "invalid_delete_confirmation")
+			return
+		}
+		err = s.modules.EmployeeManagement.DeleteRetainedEmployee(request.Context(), input.Username, input.Confirmation)
 	default:
 		writeError(writer, http.StatusNotFound, "not_found")
 		return
