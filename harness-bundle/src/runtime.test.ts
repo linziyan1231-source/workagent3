@@ -3,6 +3,7 @@ import type { Session, SessionEvent } from "@deepseek-ai/dsh-session";
 import {
   automationTargetSessionId,
   eventsAfterLastId,
+  nativeCredentialError,
   normalizeEvent,
 } from "./runtime.js";
 import type { AutomationDefinition } from "@workagent/contracts";
@@ -80,5 +81,35 @@ describe("automation conversation targeting", () => {
         executionMode: "existing",
       }),
     ).toThrow("automation_conversation_required");
+  });
+});
+
+describe("native engine credential gate", () => {
+  it("requires SID-private credentials before native session startup", () => {
+    expect(nativeCredentialError("kimi", undefined)).toBe(
+      "credential_needs_auth:kimi",
+    );
+    expect(
+      nativeCredentialError("codex", {
+        id: "codex-native",
+        kind: "codex_native",
+        label: "Codex",
+        state: "needs_auth",
+        updatedAt: null,
+      }),
+    ).toBe("credential_needs_auth:codex");
+  });
+
+  it("does not couple Harness or ready native engines to the gate", () => {
+    expect(nativeCredentialError("harness", undefined)).toBeUndefined();
+    expect(
+      nativeCredentialError("kimi", {
+        id: "kimi-native",
+        kind: "kimi_native",
+        label: "Kimi",
+        state: "ready",
+        updatedAt: null,
+      }),
+    ).toBeUndefined();
   });
 });

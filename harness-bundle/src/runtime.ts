@@ -30,7 +30,7 @@ import type {
   AutomationExecution,
   AutomationRunnerPort,
 } from "./automation-store.js";
-import type { PresetBinding } from "@workagent/contracts";
+import type { CredentialStatus, PresetBinding } from "@workagent/contracts";
 import type { PresetStore } from "./preset-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
@@ -51,6 +51,14 @@ export const automationTargetSessionId = (
   }
   return `session-${automationRunId}`;
 };
+
+export const nativeCredentialError = (
+  engine: "harness" | "codex" | "kimi",
+  credential: CredentialStatus | undefined,
+): string | undefined =>
+  engine === "harness" || credential?.state === "ready"
+    ? undefined
+    : `credential_needs_auth:${engine}`;
 
 type SessionRecord = {
   createdAt: string;
@@ -807,6 +815,14 @@ export class RuntimeController
           resolvedSkills,
         );
       } else {
+        const credentialError = nativeCredentialError(
+          input.engine,
+          this.#credentials.statusFor(`${input.engine}-native`),
+        );
+        if (credentialError !== undefined) {
+          writeJson(response, 409, { error: credentialError });
+          return;
+        }
         const bridge = this.#bridges.get(input.engine);
         if (bridge === undefined) {
           writeJson(response, 503, { error: "engine_unavailable" });
@@ -846,11 +862,11 @@ export class RuntimeController
       this.#automationTargets.get(request.automationRunId) ??
       automationTargetSessionId(request.automationRunId, definition);
     if (definition.engine !== "harness") {
-      const credential = this.#credentials.statusFor(
-        `${definition.engine}-native`,
+      const credentialError = nativeCredentialError(
+        definition.engine,
+        this.#credentials.statusFor(`${definition.engine}-native`),
       );
-      if (credential?.state !== "ready")
-        throw new Error(`credential_needs_auth:${definition.engine}`);
+      if (credentialError !== undefined) throw new Error(credentialError);
     }
     const record =
       definition.executionMode === "existing"
