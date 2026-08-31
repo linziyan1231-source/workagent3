@@ -574,8 +574,38 @@ func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request,
 	proxy.ErrorHandler = func(response http.ResponseWriter, _ *http.Request, _ error) {
 		writeError(response, http.StatusBadGateway, "runtime_proxy_failed")
 	}
+	if request.Method == http.MethodPost && strings.HasSuffix(strings.TrimRight(request.URL.Path, "/"), "/v1/workspaces") {
+		// Released DSH hosts can collapse writeHead(201) to 200. Normalize the
+		// final write so the public Workspace creation contract stays stable.
+		writer = &workspaceCreateStatusWriter{ResponseWriter: writer}
+	}
 	proxy.ServeHTTP(writer, request)
 }
+
+type workspaceCreateStatusWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *workspaceCreateStatusWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if status == http.StatusOK {
+		status = http.StatusCreated
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *workspaceCreateStatusWriter) Write(value []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(value)
+}
+
+func (w *workspaceCreateStatusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

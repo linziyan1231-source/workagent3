@@ -12,9 +12,9 @@ import (
 	"workagent3/internal/store"
 )
 
-func TestRuntimeProxyPreservesCreatedStatus(t *testing.T) {
+func TestRuntimeProxyNormalizesWorkspaceCreatedStatus(t *testing.T) {
 	runtime := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.WriteHeader(http.StatusCreated)
+		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte(`{"id":"workspace-1"}`))
 	}))
 	defer runtime.Close()
@@ -43,6 +43,6 @@ func TestRuntimeProxyPreservesCreatedStatus(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
-		t.Fatalf("runtime proxy changed status 201 to %d", response.Code)
+		t.Fatalf("runtime proxy did not normalize workspace creation to 201: %d", response.Code)
 	}
 }
