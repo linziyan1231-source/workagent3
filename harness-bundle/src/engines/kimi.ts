@@ -188,7 +188,7 @@ class KimiClient implements Client {
   }
 }
 
-class KimiSession implements BridgeSession {
+export class KimiSession implements BridgeSession {
   readonly nativeId: string;
   readonly #connection: ClientSideConnection;
   readonly #emit: (event: BridgeEvent) => void;
@@ -221,6 +221,7 @@ class KimiSession implements BridgeSession {
         prompt: [{ type: "text", text: content }],
       })
       .then((result) => {
+        if (this.#activeTurn === turnId) this.#activeTurn = undefined;
         if (result.stopReason === "cancelled") {
           this.#emit({ type: "turn.cancelled", turnId });
         } else if (result.stopReason === "end_turn") {
@@ -240,15 +241,13 @@ class KimiSession implements BridgeSession {
         }
       })
       .catch((error: unknown) => {
+        if (this.#activeTurn === turnId) this.#activeTurn = undefined;
         this.#emit({
           type: "turn.failed",
           turnId,
           code: "kimi_failed",
           message: error instanceof Error ? error.message : String(error),
         });
-      })
-      .finally(() => {
-        if (this.#activeTurn === turnId) this.#activeTurn = undefined;
       });
   }
 

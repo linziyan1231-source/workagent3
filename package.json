@@ -16,6 +16,7 @@
     "profile:smoke": "pnpm profile:dump && node scripts/smoke-harness.mjs",
     "mcp:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-mcp-engines.mjs",
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
+    "native:task-smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engine-tasks.mjs",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm --filter @workagent/contracts build && pnpm -r --if-present typecheck"
   },
