@@ -26,7 +26,9 @@ const SharedConversationCreateModal: React.FC<Props> = ({ visible, projectID, pr
   const assistants = useMemo(() => presetAssistants.filter(isSharedAssistant), [presetAssistants]);
   const assistant = assistants.find((item) => item.id === assistantID);
   const backend = assistant
-    ? ((assistant.agent?.acp_backend || assistant.agent?.type || '').toLowerCase().includes('kimi') ? 'kimi' : 'codex')
+    ? (assistant.agent?.acp_backend || assistant.agent?.type || '').toLowerCase().includes('kimi')
+      ? 'kimi'
+      : 'codex'
     : undefined;
   const { options } = useSharedRuntimeOptions(backend);
   useEffect(() => {
@@ -107,7 +109,13 @@ const SharedConversationCreateModal: React.FC<Props> = ({ visible, projectID, pr
           </Select>
         </Form.Item>
         <Form.Item label={t('common.model', { defaultValue: 'Model' })} required>
-          <Select value={modelID} onChange={(value) => { setModelID(value); setThinkingEffort(options?.model_defaults[value] || thinkingEffort); }}>
+          <Select
+            value={modelID}
+            onChange={(value) => {
+              setModelID(value);
+              setThinkingEffort(options?.model_defaults[value] || thinkingEffort);
+            }}
+          >
             {(options?.models ?? []).map((model) => (
               <Select.Option key={model} value={model}>
                 {model}

@@ -73,7 +73,7 @@
     "installLinkText": "打开 officecli 安装说明",
     "errors": {
       "officecliNotFound": "未安装 officecli。",
-      "installFailed": "自动安装 officecli 失败，请检查后端日志后重试。",
+      "officecliIncompatible": "已安装的 officecli 不兼容。请按照公开设置指南检查版本后重试。",
       "portTimeout": "预览服务启动后未在预期时间内就绪，请重试。",
       "startFailed": "启动 Office 预览服务失败。",
       "outsideSandbox": "该文件不在当前项目沙箱范围内。",
@@ -83,7 +83,7 @@
       "busy": "已有 Office 文件正在预览或转换，请关闭当前预览后重试。"
     },
     "serverInstall": {
-      "hint": "Puxin AI 运行在服务器上，预览组件需要安装在该服务器上。请在服务器执行以下命令后重试：",
+      "hint": "CLIENTNAME 运行在服务器上，预览组件需要安装在该服务器上。请在服务器执行以下命令后重试：",
       "icuNote": "若安装后仍无法启动，请在服务器安装 ICU 库（Debian/Ubuntu：apt-get install -y libicu-dev）。"
     }
   },
@@ -96,7 +96,7 @@
       "loading": "正在加载 Word 文档...",
       "installing": "正在安装 officecli...",
       "startFailed": "启动 Word 预览失败",
-      "installHint": "需要 officecli，将自动安装。"
+      "installHint": "请从官方 iOfficeAI/OfficeCLI releases 页面安装 OfficeCLI"
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "正在加载 Excel 文件...",
       "installing": "正在安装 officecli...",
       "startFailed": "启动 Excel 预览失败",
-      "installHint": "需要 officecli，将自动安装。"
+      "installHint": "请从官方 iOfficeAI/OfficeCLI releases 页面安装 OfficeCLI"
     }
   },
   "pdf": {

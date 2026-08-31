@@ -73,7 +73,7 @@
     "installLinkText": "Open officecli install guide",
     "errors": {
       "officecliNotFound": "officecli is not installed.",
-      "installFailed": "Failed to install officecli automatically. Check backend logs and retry.",
+      "officecliIncompatible": "The installed officecli is incompatible. Follow the public setup guide, verify its version, and retry.",
       "portTimeout": "Preview service started but did not become ready in time. Retry.",
       "startFailed": "Failed to start the Office preview service.",
       "outsideSandbox": "This file is outside the current project sandbox.",
@@ -83,7 +83,7 @@
       "busy": "Another Office file is being previewed or converted. Close the current preview and retry."
     },
     "serverInstall": {
-      "hint": "Puxin AI is running on a server. Install the preview component on that server, then retry:",
+      "hint": "CLIENTNAME is running on a server. Install the preview component on that server, then retry:",
       "icuNote": "If it still fails to start, install the ICU library on the server (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -96,7 +96,7 @@
       "loading": "Loading Word document...",
       "installing": "Installing officecli...",
       "startFailed": "Failed to start Word preview",
-      "installHint": "Requires officecli. It will be installed automatically."
+      "installHint": "Install OfficeCLI from the official iOfficeAI/OfficeCLI releases page"
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "Loading Excel file...",
       "installing": "Installing officecli...",
       "startFailed": "Failed to start Excel preview",
-      "installHint": "Requires officecli. It will be installed automatically."
+      "installHint": "Install OfficeCLI from the official iOfficeAI/OfficeCLI releases page"
     }
   },
   "pdf": {

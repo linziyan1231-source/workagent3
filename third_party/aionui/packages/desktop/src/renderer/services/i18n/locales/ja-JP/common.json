@@ -64,10 +64,10 @@
   "more": "その他",
   "refresh": "更新",
   "readOnly": "読み取り専用",
-  "tray.showWindow": "Puxin AI を表示",
+  "tray.showWindow": "CLIENTNAME を表示",
   "tray.newChat": "新しいチャット",
   "tray.closeToTray": "トレイに隠す",
-  "tray.about": "Puxin AI について",
+  "tray.about": "CLIENTNAME について",
   "tray.restart": "アプリを再起動",
   "tray.quit": "終了",
   "tray.runningTasks": "実行中のタスク",
@@ -78,26 +78,26 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "このシステムは同梱バックエンドに対応していません",
-      "description": "Puxin AI は開きましたが、ローカルの AionCore バックエンドはこの Linux バージョンでは実行できません。対応している Linux ディストリビューションにアップグレードしてから Puxin AI を再起動してください。",
+      "description": "CLIENTNAME は開きましたが、ローカルの AionCore バックエンドはこの Linux バージョンでは実行できません。対応している Linux ディストリビューションにアップグレードしてから CLIENTNAME を再起動してください。",
       "requiredVersions": "必要なランタイムシンボル: {{versions}}"
     },
     "incompleteInstallation": {
-      "title": "Puxin AI のインストールが不完全です",
-      "description": "このインストールには必要なローカルリソースが不足しているため、AionCore を起動できません。最新の Puxin AI をダウンロードして再インストールしてください。再インストール後も問題が再発する場合は、セキュリティソフトまたはウイルス対策ソフトが AionCore を隔離していないか確認してください。",
+      "title": "CLIENTNAME のインストールが不完全です",
+      "description": "このインストールには必要なローカルリソースが不足しているため、AionCore を起動できません。最新の CLIENTNAME をダウンロードして再インストールしてください。再インストール後も問題が再発する場合は、セキュリティソフトまたはウイルス対策ソフトが AionCore を隔離していないか確認してください。",
       "downloadLatest": "最新版をダウンロード",
       "sendDiagnostics": "診断レポートを送信",
       "diagnosticsSent": "診断レポートを送信済み",
       "diagnosticsReportSuccess": "診断レポートを送信しました",
       "diagnosticsReportFailed": "診断レポートの送信に失敗しました",
-      "runtimeComponentDescription": "このインストールには必要な組み込み実行コンポーネントが不足しているため、{{resource}} を起動できません。最新版の Puxin AI パッケージを再インストールしてください。再インストール後も続く場合は、セキュリティソフトまたはウイルス対策ソフトが Puxin AI コンポーネントを隔離していないか確認してください。"
+      "runtimeComponentDescription": "このインストールには必要な組み込み実行コンポーネントが不足しているため、{{resource}} を起動できません。最新版の CLIENTNAME パッケージを再インストールしてください。再インストール後も続く場合は、セキュリティソフトまたはウイルス対策ソフトが CLIENTNAME コンポーネントを隔離していないか確認してください。"
     },
     "packageArchitectureMismatch": {
-      "title": "Puxin AI package architecture mismatch",
-      "description": "This Puxin AI package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
+      "title": "CLIENTNAME package architecture mismatch",
+      "description": "This CLIENTNAME package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "Puxin AI opened, but AionCore stopped while initializing local data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "CLIENTNAME opened, but AionCore stopped while initializing local data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -105,7 +105,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "Puxin AI opened, but AionCore stopped while repairing local agent cache data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "CLIENTNAME opened, but AionCore stopped while repairing local agent cache data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -113,7 +113,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "ローカルデータが破損しています",
-      "description": "ローカルデータベースの破損を検出したため、Puxin AI は起動を続行できません。確認後、古いデータベースをバックアップし、新しいローカルデータベースを作成して起動を続行します。過去のローカルデータは当面表示されず、古いデータベースはバックアップとして保持されます。",
+      "description": "ローカルデータベースの破損を検出したため、CLIENTNAME は起動を続行できません。確認後、古いデータベースをバックアップし、新しいローカルデータベースを作成して起動を続行します。過去のローカルデータは当面表示されず、古いデータベースはバックアップとして保持されます。",
       "confirmRebuild": "古いDBをバックアップして新しいDBを再作成",
       "sendDiagnostics": "診断レポートを送信",
       "diagnosticsHint": "診断レポートの送信ではローカルデータベースは変更されません。",

@@ -1,5 +1,5 @@
 const LOG_PREFIX = '[FeedbackReport]';
-const FEEDBACK_ENDPOINT = '/api/puxin/feedback';
+const FEEDBACK_ENDPOINT = '/api/CLIENTNAME/feedback';
 type FeedbackLogLevel = 'info' | 'warn' | 'error';
 type FeedbackLogAttachmentStatus = 'collected' | 'empty' | 'failed' | 'skipped' | 'unavailable';
 

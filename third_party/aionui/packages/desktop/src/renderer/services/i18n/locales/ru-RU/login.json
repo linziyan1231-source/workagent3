@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI — Вход",
-  "brand": "Puxin AI",
+  "pageTitle": "CLIENTNAME — Вход",
+  "brand": "CLIENTNAME",
   "subtitle": "Добро пожаловать! Войдите в свой аккаунт",
   "username": "Имя пользователя",
   "usernamePlaceholder": "Введите имя пользователя",
@@ -17,7 +17,7 @@
   "footerSecondary": "Современно и эффективно",
   "changePassword": {
     "link": "Изменить пароль",
-    "pageTitle": "Puxin AI — Изменение пароля",
+    "pageTitle": "CLIENTNAME — Изменение пароля",
     "title": "Изменить пароль",
     "subtitle": "Подтвердите текущий пароль и задайте новый",
     "currentPassword": "Текущий пароль",

@@ -262,9 +262,7 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
     (entry: PortalSkillMarketEntry) => {
       const replaces = availableSkills.some((skill) => skill.name.toLowerCase() === entry.name.toLowerCase());
       Modal.confirm({
-        title: replaces
-          ? t('settings.skillsHub.marketReplaceTitle')
-          : t('settings.skillsHub.marketInstallTitle'),
+        title: replaces ? t('settings.skillsHub.marketReplaceTitle') : t('settings.skillsHub.marketInstallTitle'),
         content: t('settings.skillsHub.marketInstallWarning', { name: entry.name }),
         onOk: async () => {
           await ipcBridge.portal.installMarketSkill.invoke({ id: entry.id });
@@ -765,37 +763,37 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
                     <div className='shrink-0 sm:self-center flex items-center justify-end gap-6px mt-12px sm:mt-0 pl-4px'>
                       {skill.source === 'custom' && (
                         <>
-                        {canUseMarket && (
-                          <Button
-                            data-testid={`btn-publish-${normalizeTestId(skill.name)}`}
-                            type='primary'
-                            size='small'
-                            className='!h-32px !rounded-8px !px-14px'
-                            onClick={() => void publishSkill(skill.name)}
+                          {canUseMarket && (
+                            <Button
+                              data-testid={`btn-publish-${normalizeTestId(skill.name)}`}
+                              type='primary'
+                              size='small'
+                              className='!h-32px !rounded-8px !px-14px'
+                              onClick={() => void publishSkill(skill.name)}
+                            >
+                              {t('settings.skillsHub.marketPublish')}
+                            </Button>
+                          )}
+                          <button
+                            data-testid={`btn-delete-${normalizeTestId(skill.name)}`}
+                            className='p-8px hover:bg-danger-1 hover:text-danger-6 text-t-tertiary rd-6px outline-none flex items-center justify-center border border-transparent cursor-pointer transition-colors shadow-sm bg-base sm:bg-transparent sm:shadow-none'
+                            onClick={() => {
+                              Modal.confirm({
+                                title: t('settings.skillsHub.deleteConfirmTitle', { defaultValue: 'Delete Skill' }),
+                                content: t('settings.skillsHub.deleteConfirmContent', {
+                                  name: skill.name,
+                                  defaultValue: `Are you sure you want to delete "${skill.name}"?`,
+                                }),
+                                okButtonProps: { status: 'danger' },
+                                okText: t('common.delete', { defaultValue: 'Delete' }),
+                                onOk: () => void handleDelete(skill.name),
+                                wrapClassName: 'modal-delete-skill',
+                              });
+                            }}
+                            title={t('common.delete', { defaultValue: 'Delete' })}
                           >
-                            {t('settings.skillsHub.marketPublish')}
-                          </Button>
-                        )}
-                        <button
-                          data-testid={`btn-delete-${normalizeTestId(skill.name)}`}
-                          className='p-8px hover:bg-danger-1 hover:text-danger-6 text-t-tertiary rd-6px outline-none flex items-center justify-center border border-transparent cursor-pointer transition-colors shadow-sm bg-base sm:bg-transparent sm:shadow-none'
-                          onClick={() => {
-                            Modal.confirm({
-                              title: t('settings.skillsHub.deleteConfirmTitle', { defaultValue: 'Delete Skill' }),
-                              content: t('settings.skillsHub.deleteConfirmContent', {
-                                name: skill.name,
-                                defaultValue: `Are you sure you want to delete "${skill.name}"?`,
-                              }),
-                              okButtonProps: { status: 'danger' },
-                              okText: t('common.delete', { defaultValue: 'Delete' }),
-                              onOk: () => void handleDelete(skill.name),
-                              wrapClassName: 'modal-delete-skill',
-                            });
-                          }}
-                          title={t('common.delete', { defaultValue: 'Delete' })}
-                        >
-                          <Delete size={16} />
-                        </button>
+                            <Delete size={16} />
+                          </button>
                         </>
                       )}
                     </div>
@@ -937,21 +935,31 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
               <div className='flex flex-col gap-8px'>
                 {marketSkills.map((entry) => (
                   <div key={entry.id} className='flex items-center gap-12px p-14px border border-border-1 rd-10px'>
-                    <div className={`w-40px h-40px rd-10px flex items-center justify-center font-bold ${getAvatarColorClass(entry.name)}`}>
+                    <div
+                      className={`w-40px h-40px rd-10px flex items-center justify-center font-bold ${getAvatarColorClass(entry.name)}`}
+                    >
                       {entry.name.charAt(0).toUpperCase()}
                     </div>
                     <div className='flex-1 min-w-0'>
                       <div className='font-semibold text-t-primary'>{entry.name}</div>
                       <div className='text-13px text-t-secondary line-clamp-2'>{entry.description}</div>
                       <div className='text-12px text-t-tertiary mt-4px'>
-                        {entry.publisher.display_name} (@{entry.publisher.username}) · {new Date(entry.updated_at).toLocaleString()}
+                        {entry.publisher.display_name} (@{entry.publisher.username}) ·{' '}
+                        {new Date(entry.updated_at).toLocaleString()}
                       </div>
                     </div>
-                    <button className='px-12px py-7px border-none bg-primary-6 text-white rd-6px cursor-pointer' onClick={() => installMarketSkill(entry)}>
+                    <button
+                      className='px-12px py-7px border-none bg-primary-6 text-white rd-6px cursor-pointer'
+                      onClick={() => installMarketSkill(entry)}
+                    >
                       {t('settings.skillsHub.marketInstall')}
                     </button>
                     {entry.can_delete && (
-                      <button className='p-8px border-none bg-transparent text-danger-6 cursor-pointer' onClick={() => deleteMarketSkill(entry)} aria-label={t('common.delete')}>
+                      <button
+                        className='p-8px border-none bg-transparent text-danger-6 cursor-pointer'
+                        onClick={() => deleteMarketSkill(entry)}
+                        aria-label={t('common.delete')}
+                      >
                         <Delete size={16} />
                       </button>
                     )}

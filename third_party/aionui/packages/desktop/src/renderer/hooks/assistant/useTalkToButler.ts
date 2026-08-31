@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { mutate as swrMutate } from 'swr';
 
-/** Backend manifest id of the built-in Puxin AI Butler assistant. */
+/** Backend manifest id of the built-in CLIENTNAME Butler assistant. */
 const BUTLER_ASSISTANT_ID = 'aionui-assistant';
 
 export type TalkToButlerArgs = {
@@ -35,7 +35,7 @@ const findButler = (assistants: Assistant[]): Assistant | undefined => {
 
 /**
  * Shared entry point behind every "via chat" action: jump to the home page,
- * select the Puxin AI Butler, and pre-fill the chat input with a ready-made
+ * select the CLIENTNAME Butler, and pre-fill the chat input with a ready-made
  * prompt (and optional attachments). Auto-enables the Butler if the user has
  * disabled it, since clicking the action is an explicit intent to use it.
  *
@@ -60,7 +60,7 @@ export const useTalkToButler = (): ((args: TalkToButlerArgs) => Promise<void>) =
             await ipcBridge.assistants.setState.invoke({ id: butler.id, enabled: true });
             await swrMutate('assistants.list');
             Message.success(
-              t('settings.talkToButler.enabledToast', { defaultValue: 'Enabled the Puxin AI Butler for you' })
+              t('settings.talkToButler.enabledToast', { defaultValue: 'Enabled the CLIENTNAME Butler for you' })
             );
           }
         }

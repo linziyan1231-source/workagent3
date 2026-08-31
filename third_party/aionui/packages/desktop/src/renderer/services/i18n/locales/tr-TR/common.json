@@ -64,10 +64,10 @@
   "more": "Daha Fazla",
   "refresh": "Yenile",
   "readOnly": "Salt okunur",
-  "tray.showWindow": "Puxin AI'yi Göster",
+  "tray.showWindow": "CLIENTNAME'yi Göster",
   "tray.newChat": "Yeni Sohbet",
   "tray.closeToTray": "Tepsiye Gizle",
-  "tray.about": "Puxin AI Hakkında",
+  "tray.about": "CLIENTNAME Hakkında",
   "tray.restart": "Uygulamayı Yeniden Başlat",
   "tray.quit": "Çıkış",
   "tray.runningTasks": "Çalışan Görevler",
@@ -78,26 +78,26 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "Bu sistem paketlenmiş backend tarafından desteklenmiyor",
-      "description": "Puxin AI açıldı, ancak yerel AionCore backend bu Linux sürümünde çalışamaz. Desteklenen bir Linux dağıtımına yükseltip Puxin AI'yi yeniden başlatın.",
+      "description": "CLIENTNAME açıldı, ancak yerel AionCore backend bu Linux sürümünde çalışamaz. Desteklenen bir Linux dağıtımına yükseltip CLIENTNAME'yi yeniden başlatın.",
       "requiredVersions": "Gerekli çalışma zamanı sembolleri: {{versions}}"
     },
     "incompleteInstallation": {
-      "title": "Puxin AI kurulumu eksik",
-      "description": "Bu kurulumda gerekli yerel kaynaklar eksik, bu yüzden AionCore başlatılamıyor. Lütfen en son Puxin AI sürümünü indirip yeniden kurun. Yeniden kurulumdan sonra sorun tekrarlarsa güvenlik veya antivirüs yazılımının AionCore'u karantinaya alıp almadığını kontrol edin.",
+      "title": "CLIENTNAME kurulumu eksik",
+      "description": "Bu kurulumda gerekli yerel kaynaklar eksik, bu yüzden AionCore başlatılamıyor. Lütfen en son CLIENTNAME sürümünü indirip yeniden kurun. Yeniden kurulumdan sonra sorun tekrarlarsa güvenlik veya antivirüs yazılımının AionCore'u karantinaya alıp almadığını kontrol edin.",
       "downloadLatest": "Son sürümü indir",
       "sendDiagnostics": "Tanı raporu gönder",
       "diagnosticsSent": "Tanı raporu gönderildi",
       "diagnosticsReportSuccess": "Tanı raporu gönderildi",
       "diagnosticsReportFailed": "Tanı raporu gönderilemedi",
-      "runtimeComponentDescription": "Bu kurulumda gerekli yerleşik çalışma zamanı bileşenleri eksik olduğu için {{resource}} başlatılamıyor. En son Puxin AI paketini yeniden yükleyin. Yeniden yükledikten sonra da devam ederse güvenlik veya antivirüs yazılımının Puxin AI bileşenlerini karantinaya alıp almadığını kontrol edin."
+      "runtimeComponentDescription": "Bu kurulumda gerekli yerleşik çalışma zamanı bileşenleri eksik olduğu için {{resource}} başlatılamıyor. En son CLIENTNAME paketini yeniden yükleyin. Yeniden yükledikten sonra da devam ederse güvenlik veya antivirüs yazılımının CLIENTNAME bileşenlerini karantinaya alıp almadığını kontrol edin."
     },
     "packageArchitectureMismatch": {
-      "title": "Puxin AI package architecture mismatch",
-      "description": "This Puxin AI package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
+      "title": "CLIENTNAME package architecture mismatch",
+      "description": "This CLIENTNAME package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "Puxin AI opened, but AionCore stopped while initializing local data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "CLIENTNAME opened, but AionCore stopped while initializing local data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -105,7 +105,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "Puxin AI opened, but AionCore stopped while repairing local agent cache data. Reinstalling Puxin AI may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "CLIENTNAME opened, but AionCore stopped while repairing local agent cache data. Reinstalling CLIENTNAME may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -113,7 +113,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "Yerel veriler bozulmuş",
-      "description": "Puxin AI yerel veritabanının bozulduğunu algıladı ve başlatmaya devam edemiyor. Onaydan sonra eski veritabanı yedeklenecek ve başlatmaya devam etmek için yeni bir yerel veritabanı oluşturulacak. Geçmiş yerel veriler şimdilik gösterilmeyecek, eski veritabanı yedek olarak saklanacak.",
+      "description": "CLIENTNAME yerel veritabanının bozulduğunu algıladı ve başlatmaya devam edemiyor. Onaydan sonra eski veritabanı yedeklenecek ve başlatmaya devam etmek için yeni bir yerel veritabanı oluşturulacak. Geçmiş yerel veriler şimdilik gösterilmeyecek, eski veritabanı yedek olarak saklanacak.",
       "confirmRebuild": "Eski DB'yi yedekle ve yeni DB oluştur",
       "sendDiagnostics": "Tanılama gönder",
       "diagnosticsHint": "Tanılama göndermek yerel veritabanını değiştirmez.",

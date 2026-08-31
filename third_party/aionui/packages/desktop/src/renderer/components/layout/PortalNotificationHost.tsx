@@ -10,13 +10,34 @@ import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import type { PortalNotification } from '@/common/adapter/ipcBridge';
 
+const SEEN_STORAGE_KEY = 'CLIENTNAME-portal-notification-seen-v1';
 const POLL_INTERVAL_MS = 60_000;
+const MAX_SEEN_NOTIFICATIONS = 200;
+
+function readSeenNotifications(): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SEEN_STORAGE_KEY) ?? '[]') as unknown;
+    return Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === 'string').slice(-MAX_SEEN_NOTIFICATIONS)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSeenNotifications(ids: string[]): void {
+  try {
+    window.localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(ids.slice(-MAX_SEEN_NOTIFICATIONS)));
+  } catch {
+    // Storage may be unavailable in private or constrained browser contexts.
+  }
+}
 
 const PortalNotificationHost: React.FC = () => {
   const { t } = useTranslation();
   const [queue, setQueue] = useState<PortalNotification[]>([]);
   const requestInFlight = useRef(false);
-  const seen = useRef(new Set<string>());
+  const seen = useRef(new Set(readSeenNotifications()));
   const queuedIDs = useRef(new Set<string>());
 
   const poll = useCallback(async () => {
@@ -73,6 +94,7 @@ const PortalNotificationHost: React.FC = () => {
     await ipcBridge.portal.acknowledgeNotification.invoke({ id: current.id });
     seen.current.add(current.id);
     queuedIDs.current.delete(current.id);
+    writeSeenNotifications(Array.from(seen.current));
     setQueue((notifications) => notifications.slice(1));
   };
 

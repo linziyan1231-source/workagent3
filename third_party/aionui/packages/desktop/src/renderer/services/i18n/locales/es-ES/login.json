@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI - Iniciar sesión",
-  "brand": "Puxin AI",
+  "pageTitle": "CLIENTNAME - Iniciar sesión",
+  "brand": "CLIENTNAME",
   "subtitle": "Bienvenido de nuevo, inicia sesión en tu cuenta",
   "username": "Usuario",
   "usernamePlaceholder": "Ingresa tu usuario",
@@ -17,7 +17,7 @@
   "footerSecondary": "Moderno y eficiente",
   "changePassword": {
     "link": "Cambiar contraseña",
-    "pageTitle": "Puxin AI - Cambiar contraseña",
+    "pageTitle": "CLIENTNAME - Cambiar contraseña",
     "title": "Cambiar contraseña",
     "subtitle": "Verifica tu contraseña actual y elige una nueva",
     "currentPassword": "Contraseña actual",

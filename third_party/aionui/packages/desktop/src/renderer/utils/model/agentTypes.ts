@@ -193,6 +193,9 @@ export function formatManagedAgentDiagnosticMessage(t: TFunction, agent: Managed
     case 'bridge_missing':
     case 'primary_missing':
     case 'command_missing':
+    case 'external_cli_missing':
+    case 'external_bridge_missing':
+    case 'external_cli_incompatible':
       return t(`settings.agentManagement.errorCodes.${agent.last_check_error_code}`, {
         command,
         defaultValue: fallback,

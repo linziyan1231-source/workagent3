@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI - Giriş Yap",
-  "brand": "Puxin AI",
+  "pageTitle": "CLIENTNAME - Giriş Yap",
+  "brand": "CLIENTNAME",
   "subtitle": "Tekrar hoş geldiniz, lütfen hesabınıza giriş yapın",
   "username": "Kullanıcı Adı",
   "usernamePlaceholder": "Kullanıcı adınızı girin",
@@ -17,7 +17,7 @@
   "footerSecondary": "Modern ve Verimli",
   "changePassword": {
     "link": "Şifreyi değiştir",
-    "pageTitle": "Puxin AI - Şifreyi Değiştir",
+    "pageTitle": "CLIENTNAME - Şifreyi Değiştir",
     "title": "Şifreyi Değiştir",
     "subtitle": "Mevcut şifrenizi doğrulayın ve yeni bir şifre belirleyin",
     "currentPassword": "Mevcut şifre",

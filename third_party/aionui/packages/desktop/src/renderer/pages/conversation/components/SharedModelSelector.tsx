@@ -68,7 +68,10 @@ const SharedModelSelector: React.FC<Props> = ({
         <Menu>
           <Menu.ItemGroup title={t('common.model')}>
             {options.models.map((model) => (
-              <Menu.Item key={`model:${model}`} onClick={() => void select(model, options.model_defaults[model] || thinkingEffort)}>
+              <Menu.Item
+                key={`model:${model}`}
+                onClick={() => void select(model, options.model_defaults[model] || thinkingEffort)}
+              >
                 {model === modelID ? `✓ ${model}` : model}
               </Menu.Item>
             ))}

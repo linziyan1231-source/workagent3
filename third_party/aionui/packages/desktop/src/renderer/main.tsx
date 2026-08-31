@@ -187,9 +187,6 @@ function resolveRuntimeResourceLabel(event: IRuntimeStatusEvent, t: TFunction): 
   if (event.resource_id === 'codex-acp') {
     return t('settings.runtimeResource.codexAcp');
   }
-  if (event.resource_id === 'claude-agent-acp') {
-    return t('settings.runtimeResource.claudeAgentAcp');
-  }
   return t('settings.runtimeResource.acpTool');
 }
 

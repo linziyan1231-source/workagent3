@@ -3,12 +3,12 @@ import { initReactI18next } from "react-i18next";
 import enUS from "@renderer/services/i18n/locales/en-US";
 import zhCN from "@renderer/services/i18n/locales/zh-CN";
 
-function applyWorkAgentBrand<T>(resource: T): T {
+function applyPuxinBrand<T>(resource: T): T {
   return JSON.parse(
     JSON.stringify(resource)
-      .replaceAll("CLIENTNAME", "WorkAgent")
-      .replaceAll("AionUi", "WorkAgent")
-      .replaceAll("AionUI", "WorkAgent"),
+      .replaceAll("CLIENTNAME", "Puxin AI")
+      .replaceAll("AionUi", "Puxin AI")
+      .replaceAll("AionUI", "Puxin AI"),
   ) as T;
 }
 
@@ -22,8 +22,8 @@ const language =
 
 void i18n.use(initReactI18next).init({
   resources: {
-    "en-US": { translation: applyWorkAgentBrand(enUS) },
-    "zh-CN": { translation: applyWorkAgentBrand(zhCN) },
+    "en-US": { translation: applyPuxinBrand(enUS) },
+    "zh-CN": { translation: applyPuxinBrand(zhCN) },
   },
   lng: language,
   fallbackLng: "en-US",

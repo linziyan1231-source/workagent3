@@ -198,17 +198,14 @@ export const useGuidAssistantSelection = ({
   const selectedAssistantId = selectedAssistant?.id ?? null;
   const selectedAssistantBackend = assistantRuntimeKey(selectedAssistant);
   const selectedAssistantModels = selectedAssistant?.models ?? [];
-  const selectedManagedAgentRuntimeCatalog = useMemo(
-    () => {
-      const exact = selectedAssistant?.agent_id
-        ? managedAgentRuntimeCatalog.find((agent) => agent.id === selectedAssistant.agent_id)
-        : undefined;
-      if (exact) return exact;
-      const backendMatches = managedAgentRuntimeCatalog.filter((agent) => agent.backend === selectedAssistantBackend);
-      return backendMatches.length === 1 ? backendMatches[0] : undefined;
-    },
-    [managedAgentRuntimeCatalog, selectedAssistant?.agent_id, selectedAssistantBackend]
-  );
+  const selectedManagedAgentRuntimeCatalog = useMemo(() => {
+    const exact = selectedAssistant?.agent_id
+      ? managedAgentRuntimeCatalog.find((agent) => agent.id === selectedAssistant.agent_id)
+      : undefined;
+    if (exact) return exact;
+    const backendMatches = managedAgentRuntimeCatalog.filter((agent) => agent.backend === selectedAssistantBackend);
+    return backendMatches.length === 1 ? backendMatches[0] : undefined;
+  }, [managedAgentRuntimeCatalog, selectedAssistant?.agent_id, selectedAssistantBackend]);
   const selectedAgentRuntimeModelInfo = useMemo(
     () => buildAgentRuntimeModelInfo(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]

@@ -18,7 +18,7 @@ interface ChannelConflictWarningProps {
 }
 
 /**
- * Warning component when OpenClaw channel conflicts with Puxin AI Channels
+ * Warning component when OpenClaw channel conflicts with CLIENTNAME Channels
  */
 export const ChannelConflictWarning: React.FC<ChannelConflictWarningProps> = ({
   platform,
@@ -37,14 +37,14 @@ export const ChannelConflictWarning: React.FC<ChannelConflictWarningProps> = ({
       content={
         <Space direction='vertical' size='medium' style={{ width: '100%' }}>
           <Paragraph>
-            <Text bold>OpenClaw is handling {platformName} messages, not Puxin AI.</Text>
+            <Text bold>OpenClaw is handling {platformName} messages, not CLIENTNAME.</Text>
           </Paragraph>
 
           <Paragraph>
             Your {platformName} bot credentials are also configured in OpenClaw. This means:
             <ul>
               <li>
-                <Text type='error'>✗ Switching agents in Puxin AI will have no effect</Text>
+                <Text type='error'>✗ Switching agents in CLIENTNAME will have no effect</Text>
               </li>
               <li>
                 <Text type='error'>✗ Messages are processed by OpenClaw's agent</Text>
@@ -56,7 +56,7 @@ export const ChannelConflictWarning: React.FC<ChannelConflictWarningProps> = ({
           </Paragraph>
 
           <Paragraph>
-            <Text bold>To use Puxin AI Channels and switch agents:</Text>
+            <Text bold>To use CLIENTNAME Channels and switch agents:</Text>
           </Paragraph>
 
           <Paragraph>
@@ -66,19 +66,19 @@ export const ChannelConflictWarning: React.FC<ChannelConflictWarningProps> = ({
             <br />
             Set: <Text code>{`channels.${channelKey}.enabled = false`}</Text>
             <br />
-            Then restart OpenClaw and Puxin AI.
+            Then restart OpenClaw and CLIENTNAME.
           </Paragraph>
 
           <Paragraph>
             <Text type='secondary'>Option 2: Use a different bot</Text>
             <br />
-            Create a new {platformName} bot with different credentials for Puxin AI.
+            Create a new {platformName} bot with different credentials for CLIENTNAME.
           </Paragraph>
 
           <Paragraph>
             <Text type='secondary'>Option 3: Keep using OpenClaw</Text>
             <br />
-            Disable {platformName} in Puxin AI Channels and continue using OpenClaw's integration.
+            Disable {platformName} in CLIENTNAME Channels and continue using OpenClaw's integration.
           </Paragraph>
 
           <Space>

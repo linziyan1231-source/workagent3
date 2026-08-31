@@ -73,7 +73,7 @@
     "installLinkText": "officecli のインストール手順を開く",
     "errors": {
       "officecliNotFound": "officecli がインストールされていません。",
-      "installFailed": "officecli の自動インストールに失敗しました。バックエンドログを確認して再試行してください。",
+      "officecliIncompatible": "インストール済みの officecli は互換性がありません。公開セットアップガイドでバージョンを確認して再試行してください。",
       "portTimeout": "プレビューサービスは起動しましたが、時間内に準備完了になりませんでした。再試行してください。",
       "startFailed": "Office プレビューサービスの起動に失敗しました。",
       "outsideSandbox": "このファイルは現在のプロジェクトサンドボックスの外にあります。",
@@ -83,7 +83,7 @@
       "busy": "別の Office ファイルをプレビューまたは変換中です。現在のプレビューを閉じて再試行してください。"
     },
     "serverInstall": {
-      "hint": "Puxin AI はサーバー上で動作しています。プレビューコンポーネントはそのサーバーにインストールする必要があります。サーバーで次のコマンドを実行してから再試行してください：",
+      "hint": "CLIENTNAME はサーバー上で動作しています。プレビューコンポーネントはそのサーバーにインストールする必要があります。サーバーで次のコマンドを実行してから再試行してください：",
       "icuNote": "それでも起動しない場合は、サーバーに ICU ライブラリをインストールしてください（Debian/Ubuntu：apt-get install -y libicu-dev）。"
     }
   },
@@ -96,7 +96,7 @@
       "loading": "Word ドキュメントを読み込み中...",
       "installing": "officecli をインストール中...",
       "startFailed": "Word プレビューの起動に失敗しました",
-      "installHint": "officecli が必要です。自動的にインストールされます。"
+      "installHint": "公式 iOfficeAI/OfficeCLI releases ページから OfficeCLI をインストールしてください"
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "Excel ファイルを読み込み中...",
       "installing": "officecli をインストール中...",
       "startFailed": "Excel プレビューの起動に失敗しました",
-      "installHint": "officecli が必要です。自動的にインストールされます。"
+      "installHint": "公式 iOfficeAI/OfficeCLI releases ページから OfficeCLI をインストールしてください"
     }
   },
   "pdf": {

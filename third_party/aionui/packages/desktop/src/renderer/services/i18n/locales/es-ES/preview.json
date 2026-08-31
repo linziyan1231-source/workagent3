@@ -73,7 +73,7 @@
     "installLinkText": "Abrir guía de instalación de officecli",
     "errors": {
       "officecliNotFound": "officecli no está instalado.",
-      "installFailed": "Error al instalar officecli automáticamente. Revisa los registros del backend y reintenta.",
+      "officecliIncompatible": "El officecli instalado no es compatible. Sigue la guía pública, comprueba la versión y vuelve a intentarlo.",
       "portTimeout": "El servicio de vista previa inició pero no estuvo listo a tiempo. Reintenta.",
       "startFailed": "Error al iniciar el servicio de vista previa de Office.",
       "outsideSandbox": "Este archivo está fuera del sandbox del proyecto actual.",
@@ -83,7 +83,7 @@
       "busy": "Otro archivo de Office se está previsualizando o convirtiendo. Cierra la vista previa actual y reintenta."
     },
     "serverInstall": {
-      "hint": "Puxin AI se está ejecutando en un servidor. Instala el componente de vista previa en ese servidor y reintenta:",
+      "hint": "CLIENTNAME se está ejecutando en un servidor. Instala el componente de vista previa en ese servidor y reintenta:",
       "icuNote": "Si sigue sin iniciar, instala la biblioteca ICU en el servidor (Debian/Ubuntu: apt-get install -y libicu-dev)."
     }
   },
@@ -96,7 +96,7 @@
       "loading": "Cargando documento Word...",
       "installing": "Instalando officecli...",
       "startFailed": "Error al iniciar la vista previa de Word",
-      "installHint": "Requiere officecli. Se instalará automáticamente."
+      "installHint": "Instala OfficeCLI desde la página oficial de versiones de iOfficeAI/OfficeCLI"
     }
   },
   "excel": {
@@ -113,7 +113,7 @@
       "loading": "Cargando archivo Excel...",
       "installing": "Instalando officecli...",
       "startFailed": "Error al iniciar la vista previa de Excel",
-      "installHint": "Requiere officecli. Se instalará automáticamente."
+      "installHint": "Instala OfficeCLI desde la página oficial de versiones de iOfficeAI/OfficeCLI"
     }
   },
   "pdf": {

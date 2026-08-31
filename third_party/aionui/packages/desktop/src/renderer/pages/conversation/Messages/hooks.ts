@@ -687,11 +687,7 @@ const preferPersistedOrLiveMessage = (persisted: TMessage, live: TMessage): TMes
   return persisted;
 };
 
-export function mergeLoadedPageWithCurrent(
-  conversationId: string,
-  messages: TMessage[],
-  currentList: TMessage[]
-): TMessage[] {
+function mergeLoadedPageWithCurrent(conversationId: string, messages: TMessage[], currentList: TMessage[]): TMessage[] {
   if (!currentList.length) return messages;
 
   const sameConversation = currentList.filter((message) => message.conversation_id === conversationId);
@@ -706,18 +702,11 @@ export function mergeLoadedPageWithCurrent(
     const live = currentById.get(message.id) ?? currentByKey.get(getMessageMergeKey(message));
     return live ? preferPersistedOrLiveMessage(message, live) : message;
   });
-  const isLoadedMessage = (message: TMessage) =>
-    loadedIds.has(message.id) || loadedKeys.has(getMessageMergeKey(message));
-  const firstLoadedCurrentIndex = sameConversation.findIndex(isLoadedMessage);
+  const liveOnly = sameConversation.filter(
+    (message) => !loadedIds.has(message.id) && !loadedKeys.has(getMessageMergeKey(message))
+  );
 
-  if (firstLoadedCurrentIndex === -1) {
-    return [...mergedMessages, ...sameConversation];
-  }
-
-  const liveBefore = sameConversation.slice(0, firstLoadedCurrentIndex).filter((message) => !isLoadedMessage(message));
-  const liveAfter = sameConversation.slice(firstLoadedCurrentIndex).filter((message) => !isLoadedMessage(message));
-
-  return [...liveBefore, ...mergedMessages, ...liveAfter];
+  return liveOnly.length ? [...mergedMessages, ...liveOnly] : mergedMessages;
 }
 
 export function prependHistoryMessages(currentList: TMessage[], messages: TMessage[]): TMessage[] {

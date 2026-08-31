@@ -1,6 +1,6 @@
 {
-  "pageTitle": "Puxin AI - 登录",
-  "brand": "Puxin AI",
+  "pageTitle": "CLIENTNAME - 登录",
+  "brand": "CLIENTNAME",
   "subtitle": "欢迎回来，请登录您的账户",
   "username": "用户名",
   "usernamePlaceholder": "请输入用户名",
@@ -17,7 +17,7 @@
   "footerSecondary": "无需下载 • 开箱即用",
   "changePassword": {
     "link": "修改密码",
-    "pageTitle": "Puxin AI - 修改密码",
+    "pageTitle": "CLIENTNAME - 修改密码",
     "title": "修改密码",
     "subtitle": "验证当前密码后设置新密码",
     "currentPassword": "旧密码",
