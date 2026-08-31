@@ -45,6 +45,7 @@ type SharedProjectPlatformPort interface {
 	GrantProjectMember(context.Context, string, string) error
 	RevokeProjectMember(context.Context, string, string) error
 	TransferProjectOwnership(context.Context, string, string, string, []string) error
+	FinalizeProjectOwnership(context.Context, string, string, bool) error
 }
 
 type sharedProjectDTO struct {
@@ -356,7 +357,13 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 	}
 	project, err := s.modules.Collaboration.CompleteOwnershipTransfer(request.Context(), transfer.ID)
 	if err != nil {
+		_ = s.modules.SharedProjects.FinalizeProjectOwnership(context.Background(), transfer.ProjectID, target.SID, false)
+		_ = s.modules.Collaboration.AbortOwnershipTransfer(context.Background(), transfer.ID)
 		writeError(writer, http.StatusInternalServerError, "ownership_transfer_failed")
+		return
+	}
+	if err := s.modules.SharedProjects.FinalizeProjectOwnership(request.Context(), transfer.ProjectID, target.SID, true); err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"project": projectDTO(project)})

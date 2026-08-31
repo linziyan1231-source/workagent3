@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"workagent3/internal/runtimeapi"
@@ -64,15 +65,63 @@ func (p *RuntimeSharedProjectPlatform) reconcile(ctx context.Context, projectID 
 }
 
 func (p *RuntimeSharedProjectPlatform) TransferProjectOwnership(ctx context.Context, projectID, oldOwnerSID, newOwnerSID string, memberSIDs []string) error {
-	return p.apply(ctx, newOwnerSID, projectID, sharedRuntimeRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: memberSIDs})
+	actualOwner, oldMembers, err := p.state.ACLState(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if actualOwner != oldOwnerSID {
+		return errors.New("shared-project transfer owner changed")
+	}
+	previousRootMembers, err := p.state.OwnerRootACLState(ctx, newOwnerSID)
+	if err != nil {
+		return err
+	}
+	newMembers := withoutSID(memberSIDs, newOwnerSID)
+	rootMembers := unionSIDs(previousRootMembers, newMembers)
+	return p.apply(ctx, newOwnerSID, projectID, sharedRuntimeRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: newMembers, OldMemberSIDs: oldMembers, RootMemberSIDs: rootMembers, PreviousRootMemberSIDs: previousRootMembers})
+}
+
+func (p *RuntimeSharedProjectPlatform) FinalizeProjectOwnership(ctx context.Context, projectID, ownerSID string, commit bool) error {
+	action := "transfer_rollback"
+	if commit {
+		action = "transfer_commit"
+	}
+	return p.apply(ctx, ownerSID, projectID, sharedRuntimeRequest{Action: action, OwnerSID: ownerSID, MemberSIDs: []string{}, RootMemberSIDs: []string{}})
 }
 
 type sharedRuntimeRequest struct {
-	Action         string   `json:"action"`
-	OwnerSID       string   `json:"ownerSid"`
-	OldOwnerSID    string   `json:"oldOwnerSid,omitempty"`
-	MemberSIDs     []string `json:"memberSids"`
-	RootMemberSIDs []string `json:"rootMemberSids"`
+	Action                 string   `json:"action"`
+	OwnerSID               string   `json:"ownerSid"`
+	OldOwnerSID            string   `json:"oldOwnerSid,omitempty"`
+	MemberSIDs             []string `json:"memberSids"`
+	RootMemberSIDs         []string `json:"rootMemberSids"`
+	OldMemberSIDs          []string `json:"oldMemberSids,omitempty"`
+	PreviousRootMemberSIDs []string `json:"previousRootMemberSids,omitempty"`
+}
+
+func withoutSID(values []string, excluded string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if !strings.EqualFold(value, excluded) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func unionSIDs(left, right []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, values := range [][]string{left, right} {
+		for _, value := range values {
+			key := strings.ToUpper(value)
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, value)
+			}
+		}
+	}
+	return result
 }
 
 func (p *RuntimeSharedProjectPlatform) apply(ctx context.Context, sid, projectID string, input sharedRuntimeRequest) error {

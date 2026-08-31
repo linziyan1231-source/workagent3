@@ -49,6 +49,10 @@ func (p *fakeSharedProjectPlatform) TransferProjectOwnership(_ context.Context, 
 	return p.transferErr
 }
 
+func (p *fakeSharedProjectPlatform) FinalizeProjectOwnership(context.Context, string, string, bool) error {
+	return nil
+}
+
 func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
 	handler, collaborationData, platform, alice, bob := collaborationTestServer(t)
 

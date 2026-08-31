@@ -15,6 +15,7 @@ import (
 type sharedACLStateStub struct {
 	owner   string
 	members []string
+	root    []string
 }
 
 func (s sharedACLStateStub) ACLState(context.Context, string) (string, []string, error) {
@@ -22,6 +23,9 @@ func (s sharedACLStateStub) ACLState(context.Context, string) (string, []string,
 }
 
 func (s sharedACLStateStub) OwnerRootACLState(context.Context, string) ([]string, error) {
+	if s.root != nil {
+		return s.root, nil
+	}
 	return s.members, nil
 }
 
@@ -72,5 +76,43 @@ func TestRuntimeSharedProjectPlatformFailsClosedWithoutOwnerRuntime(t *testing.T
 	}
 	if err := platform.ProvisionProject(t.Context(), "project_1234567890", "S-1-5-21-1000"); !errors.Is(err, runtimeapi.ErrRuntimeUnavailable) {
 		t.Fatalf("missing runtime error = %v", err)
+	}
+}
+
+func TestRuntimeSharedProjectPlatformTransfersWithRecoveryState(t *testing.T) {
+	requests := make(chan sharedRuntimeRequest, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer new-owner-token" {
+			t.Fatalf("authorization = %q", request.Header.Get("Authorization"))
+		}
+		var input sharedRuntimeRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			t.Fatal(err)
+		}
+		requests <- input
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	registry := runtimeapi.NewRegistry()
+	if err := registry.Register(runtimeapi.Registration{SID: "S-1-5-21-2000", BaseURL: server.URL, Token: "new-owner-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	state := sharedACLStateStub{owner: "S-1-5-21-1000", members: []string{"S-1-5-21-2000", "S-1-5-21-3000"}, root: []string{"S-1-5-21-4000"}}
+	platform, err := NewRuntimeSharedProjectPlatform(registry, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platform.TransferProjectOwnership(t.Context(), "project_1234567890", "S-1-5-21-1000", "S-1-5-21-2000", []string{"S-1-5-21-1000", "S-1-5-21-2000", "S-1-5-21-3000"}); err != nil {
+		t.Fatal(err)
+	}
+	prepared := <-requests
+	if prepared.Action != "transfer" || len(prepared.MemberSIDs) != 2 || len(prepared.OldMemberSIDs) != 2 || len(prepared.PreviousRootMemberSIDs) != 1 || len(prepared.RootMemberSIDs) != 3 {
+		t.Fatalf("transfer projection = %#v", prepared)
+	}
+	if err := platform.FinalizeProjectOwnership(t.Context(), "project_1234567890", "S-1-5-21-2000", true); err != nil {
+		t.Fatal(err)
+	}
+	if finalized := <-requests; finalized.Action != "transfer_commit" {
+		t.Fatalf("finalize projection = %#v", finalized)
 	}
 }
