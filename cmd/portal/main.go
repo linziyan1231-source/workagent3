@@ -177,7 +177,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy, Notifications: notificationStore, Audit: auditStore, EmployeeManagement: employeeManager})
+	modules := portal.Modules{
+		ModelAccess: models, Quota: quotas, Speech: speechProxy,
+		Settings: clientSettings, SkillMarket: market,
+		Collaboration: sharedProjects, SharedProjects: sharedPlatform,
+		Notifications: notificationStore, Audit: auditStore,
+	}
+	if chatForwardProxy != nil {
+		modules.ChatForward = chatForwardProxy
+	}
+	if imGatewayProxy != nil {
+		modules.IM = imGatewayProxy
+	}
+	if employeeManager != nil {
+		modules.EmployeeManagement = employeeManager
+	}
+	server, err := portal.NewWithModules(data, registry, *secureCookie, modules)
 	if err != nil {
 		return err
 	}
