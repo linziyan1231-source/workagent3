@@ -12,6 +12,10 @@ import type {
   PortalUsageSummary,
 } from "./ipcBridge.js";
 import { getManagedAgents } from "./assistantHooks.js";
+import {
+  displayConversationFilePath,
+  materializeConversationFiles,
+} from "./fileService.js";
 
 const toRendererSkill = (
   skill: Awaited<ReturnType<typeof skillPort.list>>[number],
@@ -147,6 +151,45 @@ const confirmationDecision = (data: unknown): "allow" | "reject" => {
 
 const emitResponse = (event: RendererResponseMessage) => {
   for (const listener of responseStreamListeners) listener(event);
+};
+
+const sendRendererMessage = async (input: {
+  conversation_id: string;
+  input: string;
+  files?: string[];
+}) => {
+  ensureRuntimeSubscription(input.conversation_id);
+  const replacements = await materializeConversationFiles(
+    input.conversation_id,
+    input.files ?? [],
+  );
+  let runtimeInput = input.input;
+  let displayInput = input.input;
+  for (const [stagedPath, privatePath] of replacements) {
+    runtimeInput = runtimeInput.split(stagedPath).join(privatePath);
+    displayInput = displayInput
+      .split(stagedPath)
+      .join(displayConversationFilePath(stagedPath));
+  }
+  const msgId = crypto.randomUUID();
+  emitResponse({
+    type: "user_content",
+    data: displayInput,
+    msg_id: msgId,
+    conversation_id: input.conversation_id,
+    created_at: Date.now(),
+    position: "right",
+  });
+  await conversationPort.send(
+    input.conversation_id,
+    runtimeInput,
+    replacements.size === 0 ? undefined : displayInput,
+  );
+  return {
+    msg_id: msgId,
+    turn_id: `pending:${msgId}`,
+    runtime: { is_processing: true, turn_id: `pending:${msgId}` },
+  };
 };
 
 const ensureRuntimeSubscription = (sessionId: string) => {
@@ -626,28 +669,7 @@ export const ipcBridge = {
       },
     },
     sendMessage: {
-      invoke: async (input: {
-        conversation_id: string;
-        input: string;
-        files?: string[];
-      }) => {
-        ensureRuntimeSubscription(input.conversation_id);
-        const msgId = crypto.randomUUID();
-        emitResponse({
-          type: "user_content",
-          data: input.input,
-          msg_id: msgId,
-          conversation_id: input.conversation_id,
-          created_at: Date.now(),
-          position: "right",
-        });
-        await conversationPort.send(input.conversation_id, input.input);
-        return {
-          msg_id: msgId,
-          turn_id: `pending:${msgId}`,
-          runtime: { is_processing: true, turn_id: `pending:${msgId}` },
-        };
-      },
+      invoke: sendRendererMessage,
     },
     stop: {
       invoke: async ({ conversation_id }: { conversation_id: string }) => {
@@ -729,31 +751,7 @@ export const ipcBridge = {
   acpConversation: new Proxy(
     {
       sendMessage: {
-        invoke: async (input: {
-          conversation_id: string;
-          input: string;
-          files?: string[];
-        }) => {
-          ensureRuntimeSubscription(input.conversation_id);
-          const msgId = crypto.randomUUID();
-          emitResponse({
-            type: "user_content",
-            data: input.input,
-            msg_id: msgId,
-            conversation_id: input.conversation_id,
-            created_at: Date.now(),
-            position: "right",
-          });
-          await conversationPort.send(input.conversation_id, input.input);
-          return {
-            msg_id: msgId,
-            turn_id: `pending:${msgId}`,
-            runtime: {
-              is_processing: true,
-              turn_id: `pending:${msgId}`,
-            },
-          };
-        },
+        invoke: sendRendererMessage,
       },
       responseStream: {
         emit: emitResponse,

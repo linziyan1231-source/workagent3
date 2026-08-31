@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipcBridge } from "./common.js";
+import { FileService } from "./fileService.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -313,6 +314,92 @@ describe("production Renderer conversation adapter", () => {
         conversation_id: "session-1",
       }),
     );
+  });
+
+  it("materializes pre-conversation SendBox files inside the session workspace", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const staged = await FileService.processDroppedFiles([
+      new File(["private brief"], "brief.txt", { type: "text/plain" }),
+    ]);
+    const stagedPath = staged[0]!.path!;
+    const privatePath =
+      ".workagent/sessions/session-1/attachments/asset-1-brief.txt";
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "session-1",
+            engine: "harness",
+            title: "Review",
+            workspaceId: "workspace-1",
+            preset: {
+              presetId: "builtin-general",
+              presetVersion: 1,
+              resolvedSnapshot: {
+                id: "builtin-general",
+                version: 1,
+                source: "builtin",
+                name: "Puxin AI",
+                description: "",
+                avatar: null,
+                enabled: true,
+                engine: "harness",
+                modelId: null,
+                systemPrompt: "",
+                workspacePolicy: "default",
+                skillIds: [],
+                mcpServerIds: [],
+                toolAllowlist: [],
+                approvalPolicy: "on_risk",
+                createdAt: now,
+                updatedAt: now,
+                resolvedAt: now,
+              },
+            },
+            createdAt: now,
+            updatedAt: now,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "asset-1",
+            workspaceId: "workspace-1",
+            sessionId: "session-1",
+            kind: "attachment",
+            name: "brief.txt",
+            path: privatePath,
+            mediaType: "text/plain",
+            size: 13,
+            createdAt: now,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.acpConversation.sendMessage.invoke({
+      conversation_id: "session-1",
+      input: `Review this file\n\n${stagedPath}`,
+      files: [stagedPath],
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/runtime/v1/workspaces/workspace-1/attachments?sessionId=session-1&name=brief.txt",
+      expect.objectContaining({ method: "PUT", body: expect.any(File) }),
+    );
+    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        content: `Review this file\n\n${privatePath}`,
+        displayContent: "Review this file\n\nbrief.txt",
+      }),
+    });
   });
 });
 

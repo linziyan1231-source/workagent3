@@ -1,3 +1,6 @@
+import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { workspacePort } from "../../features/workspace/workspacePort.js";
+
 export type FileMetadata = {
   name: string;
   path?: string;
@@ -88,16 +91,86 @@ export function formatFileSize(bytes: number, decimals = 2) {
   return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : decimals)} ${units[unit]}`;
 }
 
-export async function uploadFileViaHttp(): Promise<string> {
-  throw new Error("workspace_upload_not_available");
+type UploadFileOptions = { signal?: AbortSignal };
+
+const stagedFiles = new Map<string, File>();
+const stagedPrefix = "workagent-upload://";
+
+export const displayConversationFilePath = (path: string) => {
+  if (!path.startsWith(stagedPrefix)) return path;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) throw new Error(UPLOAD_ABORTED_ERROR);
+};
+
+const attachToConversation = async (conversationId: string, file: File) => {
+  const session = await conversationPort.get(conversationId);
+  return workspacePort.attach(session.workspaceId, conversationId, file);
+};
+
+export async function uploadFileViaHttp(
+  file: File,
+  conversationId = "",
+  onProgress?: (percent: number) => void,
+  fileName?: string,
+  options?: UploadFileOptions,
+): Promise<string> {
+  throwIfAborted(options?.signal);
+  const upload =
+    fileName && fileName !== file.name
+      ? new File([file], fileName, {
+          type: file.type,
+          lastModified: file.lastModified,
+        })
+      : file;
+  if (conversationId) {
+    const asset = await attachToConversation(conversationId, upload);
+    throwIfAborted(options?.signal);
+    onProgress?.(100);
+    return asset.path;
+  }
+
+  const token = `${stagedPrefix}${crypto.randomUUID()}/${encodeURIComponent(upload.name)}`;
+  stagedFiles.set(token, upload);
+  onProgress?.(100);
+  return token;
+}
+
+export async function materializeConversationFiles(
+  conversationId: string,
+  paths: readonly string[],
+): Promise<Map<string, string>> {
+  const replacements = new Map<string, string>();
+  for (const path of paths) {
+    const file = stagedFiles.get(path);
+    if (!file) continue;
+    const asset = await attachToConversation(conversationId, file);
+    stagedFiles.delete(path);
+    replacements.set(path, asset.path);
+  }
+  return replacements;
 }
 
 export const FileService = {
-  async processDroppedFiles(files: FileList | File[]) {
-    return Array.from(files).map((file) => ({
-      name: file.name,
-      path: file.name,
-      file,
-    }));
+  async processDroppedFiles(files: FileList | File[], conversationId?: string) {
+    const processed: FileMetadata[] = [];
+    for (const file of Array.from(files)) {
+      const path = await uploadFileViaHttp(file, conversationId);
+      processed.push({
+        name: file.name,
+        path,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      });
+    }
+    return processed;
   },
 };
