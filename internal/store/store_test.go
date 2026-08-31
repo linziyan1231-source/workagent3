@@ -55,3 +55,28 @@ func TestRuntimeRegistrationCredentialSurvivesPortalRestart(t *testing.T) {
 		t.Fatal("runtime credential was not scoped to the exact SID and secret")
 	}
 }
+
+func TestAdministratorRoleChangeRevokesSessions(t *testing.T) {
+	data, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	user, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := data.CreateSession(t.Context(), "token", user.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := data.SetUserAdmin(t.Context(), user.Username, true); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := data.UserByUsername(t.Context(), user.Username)
+	if err != nil || !updated.Admin {
+		t.Fatalf("administrator role was not stored: %+v, %v", updated, err)
+	}
+	if _, err := data.UserBySession(t.Context(), "token", time.Now()); err == nil {
+		t.Fatal("browser session survived administrator role change")
+	}
+}

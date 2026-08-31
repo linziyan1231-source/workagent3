@@ -21,6 +21,7 @@ type LifecycleUserStore interface {
 	UserByUsername(context.Context, string) (store.User, error)
 	SetUserEnabled(context.Context, string, bool) error
 	ResetUserPassword(context.Context, string, string) error
+	SetUserAdmin(context.Context, string, bool) error
 }
 
 // Lifecycle coordinates Portal account state with the SID-owned runtime. Its
@@ -85,4 +86,22 @@ func (l Lifecycle) ResetPortalPassword(ctx context.Context, username string, pas
 		return err
 	}
 	return l.Users.ResetUserPassword(ctx, username, hash)
+}
+
+func (l Lifecycle) SetPortalAdmin(ctx context.Context, username string, admin bool) (store.User, error) {
+	if l.Users == nil {
+		return store.User{}, errors.New("employee lifecycle user store is required")
+	}
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return store.User{}, err
+	}
+	if user.Admin == admin {
+		return user, nil
+	}
+	if err := l.Users.SetUserAdmin(ctx, username, admin); err != nil {
+		return store.User{}, err
+	}
+	user.Admin = admin
+	return user, nil
 }

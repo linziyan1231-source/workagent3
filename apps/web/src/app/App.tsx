@@ -46,11 +46,7 @@ function AuthenticatedRenderer() {
 
   return (
     <WorkAgentAuthProvider
-      user={
-        user === null || user === undefined
-          ? undefined
-          : { ...user, admin: false }
-      }
+      user={user === null || user === undefined ? undefined : user}
       login={async ({ username, password }) => {
         try {
           const authenticated = await authPort.login(username, password);

@@ -30,10 +30,18 @@ func ExportBackup(ctx context.Context, source, destination string) error {
 	if _, err := output.ExecContext(ctx, `CREATE TABLE users (
 id INTEGER PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
 display_name TEXT NOT NULL, sid TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-disabled INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL)`); err != nil {
+disabled INTEGER NOT NULL, admin INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL)`); err != nil {
 		return err
 	}
-	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,collaboration_enabled FROM users ORDER BY id`)
+	adminExpression := "0"
+	var hasAdmin int
+	if err := input.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='admin')`).Scan(&hasAdmin); err != nil {
+		return err
+	}
+	if hasAdmin != 0 {
+		adminExpression = "admin"
+	}
+	rows, err := input.QueryContext(ctx, `SELECT id,username,display_name,sid,password_hash,disabled,`+adminExpression+`,collaboration_enabled FROM users ORDER BY id`)
 	if err != nil {
 		return err
 	}
@@ -46,11 +54,11 @@ disabled INTEGER NOT NULL, collaboration_enabled INTEGER NOT NULL)`); err != nil
 	for rows.Next() {
 		var id int64
 		var username, displayName, sid, passwordHash string
-		var disabled, collaborationEnabled int
-		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &collaborationEnabled); err != nil {
+		var disabled, admin, collaborationEnabled int
+		if err := rows.Scan(&id, &username, &displayName, &sid, &passwordHash, &disabled, &admin, &collaborationEnabled); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, collaborationEnabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users VALUES(?,?,?,?,?,?,?,?)`, id, username, displayName, sid, passwordHash, disabled, admin, collaborationEnabled); err != nil {
 			return err
 		}
 	}

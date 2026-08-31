@@ -43,6 +43,10 @@ func TestBackupSanitizesPortalCredentialsAndRestoresOwnersToIsolation(t *testing
 	if err := snapshot.QueryRow(`SELECT username FROM users`).Scan(&username); err != nil || username != "alice" {
 		t.Fatalf("sanitized user snapshot missing: %q %v", username, err)
 	}
+	var admin int
+	if err := snapshot.QueryRow(`SELECT admin FROM users WHERE username='alice'`).Scan(&admin); err != nil || admin != 0 {
+		t.Fatalf("legacy backup did not receive the safe non-admin default: %d %v", admin, err)
+	}
 	for _, table := range []string{"sessions", "runtime_credentials"} {
 		var exists int
 		if err := snapshot.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil || exists != 0 {

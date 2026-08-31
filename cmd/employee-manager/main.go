@@ -42,7 +42,7 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
-	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, or reset-password")
+	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, grant-admin, or revoke-admin")
 	username := flag.String("username", "", "Windows and Portal username")
 	flag.Parse()
 	if !filepath.IsAbs(*configPath) || *username == "" {
@@ -91,13 +91,15 @@ func run() error {
 		if err == nil {
 			user, err = data.UserByUsername(ctx, *username)
 		}
+	case "grant-admin", "revoke-admin":
+		user, err = (employee.Lifecycle{Users: data}).SetPortalAdmin(ctx, *username, *action == "grant-admin")
 	default:
-		return errors.New("action must be add, enable, disable, or reset-password")
+		return errors.New("unsupported employee lifecycle action")
 	}
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled, "admin": user.Admin})
 }
 
 func loadManagerConfig(path string) (managerConfig, error) {

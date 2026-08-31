@@ -23,6 +23,7 @@ type User struct {
 	SID                  string `json:"-"`
 	PasswordHash         string `json:"-"`
 	Disabled             bool   `json:"disabled"`
+	Admin                bool   `json:"admin"`
 	CollaborationEnabled bool   `json:"collaboration_enabled"`
 	CollaborationCapable bool   `json:"collaboration_capable"`
 }
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS users (
   sid TEXT NOT NULL UNIQUE CHECK (sid LIKE 'S-1-%'),
   password_hash TEXT NOT NULL,
   disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+  admin INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1)),
   collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS runtime_credentials (
 		ddl  string
 	}{
 		{name: "display_name", ddl: `ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`},
+		{name: "admin", ddl: `ALTER TABLE users ADD COLUMN admin INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1))`},
 		{name: "collaboration_enabled", ddl: `ALTER TABLE users ADD COLUMN collaboration_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collaboration_enabled IN (0, 1))`},
 	} {
 		var exists int
@@ -138,13 +141,14 @@ func (s *Store) createUser(ctx context.Context, username, sid, passwordHash stri
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (User, error) {
 	var user User
-	var disabled, collaborationEnabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE username = ?`, username).
-		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
+	var disabled, admin, collaborationEnabled int
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled FROM users WHERE username = ?`, username).
+		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.Admin = admin != 0
 	user.CollaborationEnabled = collaborationEnabled != 0
 	user.CollaborationCapable = true
 	return user, nil
@@ -152,13 +156,14 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (User, erro
 
 func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
 	var user User
-	var disabled, collaborationEnabled int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE sid = ?`, sid).
-		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
+	var disabled, admin, collaborationEnabled int
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled FROM users WHERE sid = ?`, sid).
+		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.Admin = admin != 0
 	user.CollaborationEnabled = collaborationEnabled != 0
 	user.CollaborationCapable = true
 	return user, nil
@@ -225,6 +230,30 @@ func (s *Store) ResetUserPassword(ctx context.Context, username, passwordHash st
 	return nil
 }
 
+// SetUserAdmin is called only by the privileged Employee Manager. Revoking
+// every browser session makes role changes effective on the next request.
+func (s *Store) SetUserAdmin(ctx context.Context, username string, admin bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin administrator role change: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET admin = ? WHERE username = ?`, admin, username)
+	if err != nil {
+		return fmt.Errorf("update administrator role: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		return errors.New("Portal user does not exist")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit administrator role change: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) CreateSession(ctx context.Context, token string, userID int64, expiresAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token, user_id, expires_at) VALUES(?, ?, ?)`, token, userID, expiresAt.Unix())
 	if err != nil {
@@ -235,15 +264,16 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, e
 
 func (s *Store) UserBySession(ctx context.Context, token string, now time.Time) (User, error) {
 	var user User
-	var disabled, collaborationEnabled int
+	var disabled, admin, collaborationEnabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.collaboration_enabled
+SELECT u.id, u.username, u.display_name, u.sid, u.password_hash, u.disabled, u.admin, u.collaboration_enabled
 FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()).Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaborationEnabled)
+WHERE s.token = ? AND s.expires_at > ?`, token, now.Unix()).Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaborationEnabled)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.Admin = admin != 0
 	user.CollaborationEnabled = collaborationEnabled != 0
 	user.CollaborationCapable = true
 	if user.Disabled {

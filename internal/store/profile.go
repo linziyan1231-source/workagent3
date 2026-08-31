@@ -39,13 +39,14 @@ func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName str
 
 func (s *Store) UserByID(ctx context.Context, userID int64) (User, error) {
 	var user User
-	var disabled, collaboration int
-	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, collaboration_enabled FROM users WHERE id=?`, userID).
-		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &collaboration)
+	var disabled, admin, collaboration int
+	err := s.db.QueryRowContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled FROM users WHERE id=?`, userID).
+		Scan(&user.ID, &user.Username, &user.DisplayName, &user.SID, &user.PasswordHash, &disabled, &admin, &collaboration)
 	if err != nil {
 		return User{}, err
 	}
 	user.Disabled = disabled != 0
+	user.Admin = admin != 0
 	user.CollaborationEnabled = collaboration != 0
 	user.CollaborationCapable = true
 	return user, nil
