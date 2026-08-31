@@ -17,6 +17,7 @@ const (
 
 var lsaOpenPolicy = windows.NewLazySystemDLL("advapi32.dll").NewProc("LsaOpenPolicy")
 var lsaAddAccountRights = windows.NewLazySystemDLL("advapi32.dll").NewProc("LsaAddAccountRights")
+var lsaRemoveAccountRights = windows.NewLazySystemDLL("advapi32.dll").NewProc("LsaRemoveAccountRights")
 var lsaClose = windows.NewLazySystemDLL("advapi32.dll").NewProc("LsaClose")
 var lsaNtStatusToWinError = windows.NewLazySystemDLL("advapi32.dll").NewProc("LsaNtStatusToWinError")
 
@@ -35,6 +36,14 @@ type lsaUnicodeString struct {
 }
 
 func EnsureBatchLogonRight(sid string) error {
+	return updateBatchLogonRight(sid, true)
+}
+
+func RemoveBatchLogonRight(sid string) error {
+	return updateBatchLogonRight(sid, false)
+}
+
+func updateBatchLogonRight(sid string, add bool) error {
 	accountSID, err := windows.StringToSid(sid)
 	if err != nil {
 		return fmt.Errorf("parse Windows account SID: %w", err)
@@ -55,9 +64,17 @@ func EnsureBatchLogonRight(sid string) error {
 		MaximumLength: uint16(len(rightBuffer) * 2),
 		Buffer:        &rightBuffer[0],
 	}
-	status, _, _ = lsaAddAccountRights.Call(policy, uintptr(unsafe.Pointer(accountSID)), uintptr(unsafe.Pointer(&right)), 1)
+	operation := lsaAddAccountRights
+	if !add {
+		operation = lsaRemoveAccountRights
+	}
+	status, _, _ = operation.Call(policy, uintptr(unsafe.Pointer(accountSID)), uintptr(unsafe.Pointer(&right)), 1)
 	if status != 0 {
-		return lsaStatusError("grant batch logon right", status)
+		action := "grant batch logon right"
+		if !add {
+			action = "remove batch logon right"
+		}
+		return lsaStatusError(action, status)
 	}
 	return nil
 }

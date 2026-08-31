@@ -153,6 +153,9 @@ func DeleteManagedLocalAccount(username, expectedSID string) error {
 	if !strings.EqualFold(sid, expectedSID) {
 		return errors.New("refusing to delete Windows account with unexpected SID")
 	}
+	if err := RemoveBatchLogonRight(sid); err != nil {
+		return err
+	}
 	name, err := windows.UTF16PtrFromString(username)
 	if err != nil {
 		return err
