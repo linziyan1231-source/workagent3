@@ -63,6 +63,24 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
     }
   }
 
+  async reconcileInterrupted(request: AutomationExecution): Promise<void> {
+    const preset = this.presets.resolve(request.definition.presetId);
+    const modelId =
+      preset.resolvedSnapshot.modelId ??
+      defaultModel[request.definition.engine];
+    const units = estimatedAutomationUnits(request.definition.input);
+    const reservation = await this.quota.reserve({
+      runId: request.automationRunId,
+      modelId,
+      estimatedUnits: units,
+    });
+    if (reservation.status === "settled") return;
+    await this.quota.settle({
+      runId: request.automationRunId,
+      actualUnits: units,
+    });
+  }
+
   cancel(automationRunId: string): Promise<void> {
     return this.inner.cancel?.(automationRunId) ?? Promise.resolve();
   }

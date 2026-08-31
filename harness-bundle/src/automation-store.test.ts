@@ -71,6 +71,75 @@ describe("AutomationStore", () => {
     expect(recovered?.finishedAt).not.toBeNull();
   });
 
+  it("reconciles interrupted quota before executing pending work", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create(mutation);
+    const interrupted = store.runNow(definition.id);
+    store.begin(interrupted.id);
+    const pending = store.runNow(definition.id);
+    const reopened = new AutomationStore(data);
+    let releaseReconciliation!: () => void;
+    const reconcileInterrupted = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseReconciliation = resolve;
+        }),
+    );
+    const execute = vi.fn().mockResolvedValue({ sessionId: "pending-session" });
+    const scheduler = new AutomationScheduler(reopened, {
+      execute,
+      reconcileInterrupted,
+    });
+
+    const tick = scheduler.tick();
+    await vi.waitFor(() =>
+      expect(reconcileInterrupted).toHaveBeenCalledWith(
+        expect.objectContaining({ automationRunId: interrupted.id }),
+      ),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    releaseReconciliation();
+    await tick;
+
+    expect(reopened.history(definition.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: pending.id, status: "succeeded" }),
+      ]),
+    );
+    expect(new AutomationStore(data).interruptedExecutions()).toEqual([]);
+  });
+
+  it("retries automation quota reconciliation before running pending work", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create(mutation);
+    const interrupted = store.runNow(definition.id);
+    store.begin(interrupted.id);
+    const pending = store.runNow(definition.id);
+    const reopened = new AutomationStore(data);
+    const reconcileInterrupted = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("quota_unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const execute = vi.fn().mockResolvedValue({ sessionId: "pending-session" });
+    const scheduler = new AutomationScheduler(reopened, {
+      execute,
+      reconcileInterrupted,
+    });
+
+    await expect(scheduler.tick()).rejects.toThrow("quota_unavailable");
+    expect(reopened.history(definition.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: pending.id, status: "pending" }),
+      ]),
+    );
+    await scheduler.tick();
+
+    expect(reconcileInterrupted).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalled();
+  });
+
   it("coalesces missed intervals into one run instead of replaying each miss", () => {
     const data = root();
     let now = new Date("2026-08-31T00:00:00.000Z");

@@ -93,6 +93,7 @@ export class AutomationStore {
   readonly #clock: Clock;
   readonly #definitions = new Map<string, AutomationDefinition>();
   readonly #runs = new Map<string, AutomationRun>();
+  readonly #quotaReconciledRunIds = new Set<string>();
 
   constructor(dshHome: string, clock: Clock = defaultClock) {
     this.#path = join(dshHome, "workagent", "automations.json");
@@ -117,6 +118,8 @@ export class AutomationStore {
         if (run !== value) recovered = true;
         this.#runs.set(run.id, run);
       }
+      for (const id of document.quotaReconciledRunIds)
+        this.#quotaReconciledRunIds.add(id);
       if (recovered) this.#save();
     }
   }
@@ -294,6 +297,29 @@ export class AutomationStore {
     return next;
   }
 
+  interruptedExecutions(): AutomationExecution[] {
+    return [...this.#runs.values()]
+      .filter(
+        (run) =>
+          run.status === "failed" &&
+          run.error === "runtime_restarted" &&
+          !this.#quotaReconciledRunIds.has(run.id),
+      )
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((run) => ({
+        automationRunId: run.id,
+        definition: run.definitionSnapshot,
+      }));
+  }
+
+  acknowledgeInterruptedExecution(runId: string): void {
+    const run = this.#requiredRun(runId);
+    if (run.status !== "failed" || run.error !== "runtime_restarted")
+      throw new Error("automation_run_not_interrupted");
+    this.#quotaReconciledRunIds.add(runId);
+    this.#save();
+  }
+
   finish(
     runId: string,
     outcome:
@@ -354,6 +380,7 @@ export class AutomationStore {
           version: 1,
           definitions: [...this.#definitions.values()],
           runs: [...this.#runs.values()],
+          quotaReconciledRunIds: [...this.#quotaReconciledRunIds].sort(),
         },
         null,
         2,
@@ -374,10 +401,13 @@ export interface AutomationRunnerPort {
     request: AutomationExecution,
   ): Promise<{ sessionId: string; result?: string }>;
   cancel?(automationRunId: string): Promise<void>;
+  reconcileInterrupted?(request: AutomationExecution): Promise<void>;
 }
 
 export class AutomationScheduler {
   #ticking = false;
+  #recovered = false;
+  #recovering: Promise<void> | undefined;
   #timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -387,8 +417,11 @@ export class AutomationScheduler {
 
   start(intervalMs = 30_000): void {
     if (this.#timer !== undefined) return;
-    void this.tick();
-    this.#timer = setInterval(() => void this.tick(), intervalMs);
+    void this.tick().catch(() => undefined);
+    this.#timer = setInterval(
+      () => void this.tick().catch(() => undefined),
+      intervalMs,
+    );
     this.#timer.unref();
   }
 
@@ -405,6 +438,7 @@ export class AutomationScheduler {
   }
 
   async tick(): Promise<void> {
+    await this.#recoverInterruptedRuns();
     if (this.#ticking) return;
     this.#ticking = true;
     try {
@@ -431,5 +465,22 @@ export class AutomationScheduler {
     } finally {
       this.#ticking = false;
     }
+  }
+
+  async #recoverInterruptedRuns(): Promise<void> {
+    if (this.#recovered) return;
+    if (this.#recovering === undefined) {
+      this.#recovering = (async () => {
+        for (const request of this.store.interruptedExecutions()) {
+          if (this.runner.reconcileInterrupted !== undefined)
+            await this.runner.reconcileInterrupted(request);
+          this.store.acknowledgeInterruptedExecution(request.automationRunId);
+        }
+        this.#recovered = true;
+      })().finally(() => {
+        this.#recovering = undefined;
+      });
+    }
+    await this.#recovering;
   }
 }

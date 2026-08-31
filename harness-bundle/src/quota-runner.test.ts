@@ -104,6 +104,33 @@ describe("QuotaAutomationRunner", () => {
       actualUnits: 0,
     });
   });
+
+  it("conservatively reconciles an interrupted automation reservation", async () => {
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const runner = new QuotaAutomationRunner({ execute: vi.fn() }, presets, {
+      reserve: vi.fn().mockResolvedValue({ status: "reserved" }),
+      settle,
+    });
+
+    await runner.reconcileInterrupted(request);
+
+    expect(settle).toHaveBeenCalledWith({
+      runId: request.automationRunId,
+      actualUnits: estimatedAutomationUnits(request.definition.input),
+    });
+  });
+
+  it("accepts automation quota settled immediately before a crash", async () => {
+    const settle = vi.fn();
+    const runner = new QuotaAutomationRunner({ execute: vi.fn() }, presets, {
+      reserve: vi.fn().mockResolvedValue({ status: "settled" }),
+      settle,
+    });
+
+    await runner.reconcileInterrupted(request);
+
+    expect(settle).not.toHaveBeenCalled();
+  });
 });
 
 describe("QuotaTeamRunner", () => {

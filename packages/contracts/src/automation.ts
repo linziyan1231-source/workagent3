@@ -85,4 +85,5 @@ export const automationDocumentSchema = z.object({
   version: z.literal(1),
   definitions: z.array(automationDefinitionSchema),
   runs: z.array(automationRunSchema),
+  quotaReconciledRunIds: z.array(z.string().min(1)).default([]),
 });
