@@ -54,4 +54,62 @@ describe("Codex MCP projection", () => {
       },
     });
   });
+
+  it("projects stdio and rejects legacy SSE explicitly", () => {
+    const base = {
+      name: "Local",
+      source: "managed" as const,
+      enabled: true,
+      toolPolicy: "all" as const,
+      allowedTools: [],
+      oauthState: "none" as const,
+      health: "healthy" as const,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    };
+    expect(
+      projectCodexMcpServers([
+        {
+          server: {
+            ...base,
+            id: "local",
+            transport: {
+              kind: "stdio",
+              command: "C:\\managed\\server.exe",
+              args: ["--stdio"],
+              environmentCredentialIds: { TOKEN: "credential-1" },
+            },
+          },
+          environment: { TOKEN: "private" },
+          headers: {},
+          state: "ready",
+        },
+      ]),
+    ).toEqual({
+      local: {
+        command: "C:\\managed\\server.exe",
+        args: ["--stdio"],
+        env: { TOKEN: "private" },
+        required: true,
+      },
+    });
+    expect(() =>
+      projectCodexMcpServers([
+        {
+          server: {
+            ...base,
+            id: "legacy",
+            transport: {
+              kind: "sse",
+              url: "https://example.com/events",
+              headerCredentialIds: {},
+            },
+          },
+          environment: {},
+          headers: {},
+          state: "ready",
+        },
+      ]),
+    ).toThrow("unsupported_mcp_transport:codex:sse:legacy");
+  });
 });

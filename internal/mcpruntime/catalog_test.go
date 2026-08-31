@@ -72,3 +72,53 @@ func TestProjectionFailsExplicitlyForUnsupportedOrUnavailableServer(t *testing.T
 		t.Fatalf("needs-auth projection returned %v", err)
 	}
 }
+
+func TestCatalogAcceptsAllTransportsAndProjectsTheEngineSupportMatrix(t *testing.T) {
+	servers := map[string]Server{
+		"stdio": {
+			ID: "stdio", Name: "Stdio", Source: "managed", Enabled: true,
+			Transport:  Transport{Kind: "stdio", Command: filepath.Join(t.TempDir(), "server.exe")},
+			ToolPolicy: "all", OAuthState: "none", Health: "healthy",
+		},
+		"http": {
+			ID: "http", Name: "HTTP", Source: "user", Enabled: true,
+			Transport:  Transport{Kind: "http", URL: "https://example.com/mcp"},
+			ToolPolicy: "all", OAuthState: "none", Health: "healthy",
+		},
+		"sse": {
+			ID: "sse", Name: "SSE", Source: "user", Enabled: true,
+			Transport:  Transport{Kind: "sse", URL: "https://example.com/events"},
+			ToolPolicy: "all", OAuthState: "none", Health: "healthy",
+		},
+	}
+	catalog, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	for kind, server := range servers {
+		if _, err := catalog.Create(t.Context(), server); err != nil {
+			t.Fatalf("catalog rejected %s transport: %v", kind, err)
+		}
+	}
+
+	engines := map[string]EngineCapabilities{
+		"harness": {Engine: "harness", Stdio: true, HTTP: true},
+		"codex":   {Engine: "codex", Stdio: true, HTTP: true},
+		"kimi":    {Engine: "kimi", Stdio: true, HTTP: true, SSE: true},
+	}
+	for engine, capabilities := range engines {
+		for kind, server := range servers {
+			_, err := Project([]Server{server}, capabilities)
+			if kind == "sse" && engine != "kimi" {
+				if !errors.Is(err, ErrUnsupportedTransport) {
+					t.Fatalf("%s %s projection returned %v", engine, kind, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("%s rejected supported %s transport: %v", engine, kind, err)
+			}
+		}
+	}
+}

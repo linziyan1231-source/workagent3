@@ -46,6 +46,47 @@ describe("Harness MCP projection", () => {
     ]);
   });
 
+  it("projects Streamable HTTP with SID-resolved headers", () => {
+    expect(
+      projectHarnessMcpServers(
+        [
+          {
+            server: {
+              id: "remote_docs",
+              name: "Remote docs",
+              source: "user",
+              enabled: true,
+              transport: {
+                kind: "http",
+                url: "https://example.com/mcp",
+                headerCredentialIds: { Authorization: "credential-1" },
+              },
+              toolPolicy: "all",
+              allowedTools: [],
+              oauthState: "ready",
+              health: "healthy",
+              createdAt: "2026-09-01T00:00:00.000Z",
+              updatedAt: "2026-09-01T00:00:00.000Z",
+            },
+            environment: {},
+            headers: { Authorization: "Bearer private" },
+            state: "ready",
+          },
+        ],
+        "C:\\workspace",
+      ),
+    ).toEqual([
+      {
+        transport: "streamable-http",
+        serverName: "remote_docs",
+        url: "https://example.com/mcp",
+        headers: { Authorization: "Bearer private" },
+        toolCallTimeoutMs: 60_000,
+        failOnStartupError: true,
+      },
+    ]);
+  });
+
   it("fails explicitly for legacy SSE", () => {
     expect(() =>
       projectHarnessMcpServers(
