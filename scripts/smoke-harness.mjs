@@ -74,7 +74,10 @@ try {
             headers: { authorization: `Bearer ${token}` },
           });
           const sessions = await listed.json();
-          const harness = sessions.find((item) => item.engine === "harness");
+          const harness = sessions.find(
+            (item) =>
+              item.engine === "harness" && item.workspaceId !== "default",
+          );
           if (!harness) throw new Error("no persisted Harness session found");
           const resumed = await fetch(
             `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(harness.id)}/resume`,
@@ -87,6 +90,25 @@ try {
             throw new Error(
               `Harness resume failed with ${resumed.status}: ${await resumed.text()}`,
             );
+          const assets = await fetch(
+            `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(harness.workspaceId)}/assets?sessionId=${encodeURIComponent(harness.id)}`,
+            { headers: { authorization: `Bearer ${token}` } },
+          );
+          const recoveredAssets = await assets.json();
+          if (
+            !assets.ok ||
+            !recoveredAssets.some((item) => item.kind === "attachment") ||
+            !recoveredAssets.some((item) => item.kind === "artifact")
+          )
+            throw new Error("persisted session assets were not recovered");
+          for (const asset of recoveredAssets) {
+            const content = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(harness.workspaceId)}/content?path=${encodeURIComponent(asset.path)}`,
+              { headers: { authorization: `Bearer ${token}` } },
+            );
+            if (!content.ok)
+              throw new Error(`persisted asset ${asset.id} was unreadable`);
+          }
           process.stdout.write(
             `workagent resumed persisted Harness session ${harness.id}\n`,
           );
@@ -175,7 +197,7 @@ try {
             body: JSON.stringify({
               engine,
               title: `${engine} profile smoke test`,
-              workspace: "default",
+              workspace: workspace.id,
             }),
           });
           if (created.status !== 201) {
@@ -190,6 +212,76 @@ try {
           );
           if (!messages.ok || (await messages.json()).length !== 0)
             throw new Error(`${engine} session message log was not empty`);
+          if (engine === "harness") {
+            const attachment = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/attachments?sessionId=${encodeURIComponent(session.id)}&name=brief.txt`,
+              {
+                method: "PUT",
+                headers: {
+                  authorization: `Bearer ${token}`,
+                  "content-type": "text/plain",
+                },
+                body: "private attachment",
+              },
+            );
+            if (attachment.status !== 201)
+              throw new Error(
+                `attachment upload failed: ${await attachment.text()}`,
+              );
+            const artifactPath = "artifacts/result.txt";
+            const artifactContent = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/content?path=${encodeURIComponent(artifactPath)}`,
+              {
+                method: "PUT",
+                headers: { authorization: `Bearer ${token}` },
+                body: "generated artifact",
+              },
+            );
+            if (!artifactContent.ok)
+              throw new Error(
+                `artifact content write failed: ${await artifactContent.text()}`,
+              );
+            const artifact = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/assets?sessionId=${encodeURIComponent(session.id)}`,
+              {
+                method: "POST",
+                headers: {
+                  authorization: `Bearer ${token}`,
+                  "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                  path: artifactPath,
+                  name: "result.txt",
+                  mediaType: "text/plain",
+                }),
+              },
+            );
+            if (artifact.status !== 201)
+              throw new Error(
+                `artifact registration failed: ${await artifact.text()}`,
+              );
+            const assets = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/assets?sessionId=${encodeURIComponent(session.id)}`,
+              { headers: { authorization: `Bearer ${token}` } },
+            );
+            const listedAssets = await assets.json();
+            if (
+              !assets.ok ||
+              listedAssets.length !== 2 ||
+              !listedAssets.some((item) => item.kind === "attachment") ||
+              !listedAssets.some((item) => item.kind === "artifact")
+            )
+              throw new Error("session assets were not recoverable");
+            const recoveredArtifact = await fetch(
+              `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/content?path=${encodeURIComponent(artifactPath)}`,
+              { headers: { authorization: `Bearer ${token}` } },
+            );
+            if (
+              !recoveredArtifact.ok ||
+              (await recoveredArtifact.text()) !== "generated artifact"
+            )
+              throw new Error("registered artifact was not recoverable");
+          }
         }
         process.stdout.write(
           `workagent Harness profile healthy on loopback port ${port}\n`,
