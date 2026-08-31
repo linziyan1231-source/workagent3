@@ -10,6 +10,7 @@ import SiderScheduledEntry from "@renderer/components/layout/Sider/SiderNav/Side
 import ConversationRow from "@renderer/pages/conversation/GroupedHistory/ConversationRow";
 import type { TChatConversation } from "@/common/config/storage";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
+import { useThemeContext } from "@renderer/hooks/context/ThemeContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { Button, Input, Message, Modal } from "@arco-design/web-react";
 import { useState } from "react";
@@ -38,6 +39,7 @@ type Props = {
 
 export function AionSider(props: Props) {
   const layout = useLayoutContext();
+  const { theme, setTheme } = useThemeContext();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
   const [menuVisibleId, setMenuVisibleId] = useState<string>();
@@ -286,10 +288,10 @@ export function AionSider(props: Props) {
       <SiderFooter
         isMobile={isMobile}
         isSettings={false}
-        theme="light"
+        theme={theme}
         siderTooltipProps={tooltipProps}
         onSettingsClick={props.onSettings}
-        onThemeToggle={() => undefined}
+        onThemeToggle={() => void setTheme(theme === "dark" ? "light" : "dark")}
         showLogout
         onLogoutClick={props.onLogout}
       />

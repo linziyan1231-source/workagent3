@@ -1,6 +1,7 @@
 import SettingsSider from "@renderer/pages/settings/components/SettingsSider";
 import SiderFooter from "@renderer/components/layout/Sider/SiderFooter";
 import { useLayoutContext } from "@renderer/hooks/context/LayoutContext";
+import { useThemeContext } from "@renderer/hooks/context/ThemeContext";
 import { getSiderTooltipProps } from "@renderer/utils/ui/siderTooltip";
 import { useNavigate } from "react-router-dom";
 
@@ -14,6 +15,7 @@ export function AionSettingsSider({
   onLogout: () => Promise<void>;
 }) {
   const layout = useLayoutContext();
+  const { theme, setTheme } = useThemeContext();
   const navigate = useNavigate();
   const isMobile = layout?.isMobile ?? false;
 
@@ -30,10 +32,10 @@ export function AionSettingsSider({
         isMobile={isMobile}
         isSettings
         collapsed={false}
-        theme="light"
+        theme={theme}
         siderTooltipProps={getSiderTooltipProps(false)}
         onSettingsClick={() => navigate("/guid")}
-        onThemeToggle={() => undefined}
+        onThemeToggle={() => void setTheme(theme === "dark" ? "light" : "dark")}
         showLogout
         onLogoutClick={onLogout}
       />
