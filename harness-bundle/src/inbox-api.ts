@@ -12,6 +12,12 @@ export type InboxExecution = {
   sessionId: string;
   title: string;
   input: string;
+  attachments: Array<{
+    name: string;
+    contentType: string;
+    size: number;
+    contentBase64?: string;
+  }>;
 };
 
 export type InboxRunnerPort = {
@@ -30,7 +36,8 @@ const readBody = async (request: IncomingMessage): Promise<unknown> => {
   let value = "";
   for await (const chunk of request) {
     value += String(chunk);
-    if (value.length > 2 * 1024 * 1024) throw new Error("request_too_large");
+    if (value.length > 32 * 1024 * 1024)
+      throw new Error("request_too_large");
   }
   return JSON.parse(value);
 };
@@ -74,6 +81,14 @@ export const createInboxHandler =
         sessionId: begun.receipt.sessionId,
         title: `${delivery.message.connector_id} · ${delivery.message.sender.display_name}`,
         input: prompt(delivery.message),
+        attachments: delivery.message.attachments.map((attachment) => ({
+          name: attachment.name,
+          contentType: attachment.content_type,
+          size: attachment.size,
+          ...(attachment.content_base64 === undefined
+            ? {}
+            : { contentBase64: attachment.content_base64 }),
+        })),
       });
       store.complete(begun.receipt.id);
       return json(response, 200, {

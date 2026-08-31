@@ -7,11 +7,12 @@ import (
 )
 
 type Attachment struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
-	SourceRef   string `json:"source_ref"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ContentType   string `json:"content_type"`
+	Size          int64  `json:"size"`
+	SourceRef     string `json:"source_ref"`
+	ContentBase64 string `json:"content_base64,omitempty"`
 }
 
 type Sender struct {

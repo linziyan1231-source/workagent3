@@ -42,7 +42,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var delivery imgateway.RuntimeDelivery
-	decoder := json.NewDecoder(io.LimitReader(request.Body, 2<<20))
+	decoder := json.NewDecoder(io.LimitReader(request.Body, 32<<20))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&delivery) != nil || decoder.Decode(&struct{}{}) != io.EOF || !strings.HasPrefix(delivery.TargetSID, "S-1-") || delivery.Message.ConnectorID == "" || delivery.Message.ExternalMessageID == "" {
 		writeError(writer, http.StatusBadRequest, "invalid_im_delivery")

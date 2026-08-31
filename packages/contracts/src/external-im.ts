@@ -6,6 +6,7 @@ export const imAttachmentSchema = z.object({
   content_type: z.string(),
   size: z.number().int().nonnegative(),
   source_ref: z.string().min(1),
+  content_base64: z.string().max(24 * 1024 * 1024).optional(),
 });
 
 export const imInboundMessageSchema = z.object({

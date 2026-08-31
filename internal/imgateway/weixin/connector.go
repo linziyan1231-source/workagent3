@@ -3,6 +3,7 @@ package weixin
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +24,8 @@ import (
 )
 
 const defaultBaseURL = "https://ilinkai.weixin.qq.com"
+const defaultCDNURL = "https://novac2c.cdn.weixin.qq.com/c2c"
+const maxInboundMediaBytes = 16 * 1024 * 1024
 
 type CredentialPort interface {
 	Resolve(context.Context, string) ([]byte, error)
@@ -216,7 +221,7 @@ func (c *Connector) poll(ctx context.Context, receive func(context.Context, imga
 			buffer = response.Buffer
 		}
 		for _, raw := range response.Messages {
-			message, ok := c.normalize(accountID, raw)
+			message, ok := c.normalize(ctx, accountID, raw)
 			if ok {
 				_ = receive(ctx, message)
 			}
@@ -224,17 +229,30 @@ func (c *Connector) poll(ctx context.Context, receive func(context.Context, imga
 	}
 }
 
-func (c *Connector) normalize(accountID string, raw rawMessage) (imgateway.InboundMessage, bool) {
+func (c *Connector) normalize(ctx context.Context, accountID string, raw rawMessage) (imgateway.InboundMessage, bool) {
 	if raw.FromUserID == "" || raw.MessageID == "" {
 		return imgateway.InboundMessage{}, false
 	}
 	var textParts []string
-	for _, item := range raw.Items {
+	var attachments []imgateway.Attachment
+	for index, item := range raw.Items {
 		if (item.Type == 1 || item.Type == 3) && item.TextItem != nil && strings.TrimSpace(item.TextItem.Text) != "" {
 			textParts = append(textParts, item.TextItem.Text)
 		}
+		media := item.ImageItem
+		defaultName := fmt.Sprintf("image-%d.jpg", index+1)
+		if item.Type == 4 {
+			media = item.FileItem
+			defaultName = fmt.Sprintf("file-%d.bin", index+1)
+		}
+		if media != nil {
+			attachment, err := c.downloadAttachment(ctx, raw.MessageID, index, defaultName, *media)
+			if err == nil {
+				attachments = append(attachments, attachment)
+			}
+		}
 	}
-	if len(textParts) == 0 {
+	if len(textParts) == 0 && len(attachments) == 0 {
 		return imgateway.InboundMessage{}, false
 	}
 	c.mu.Lock()
@@ -250,9 +268,138 @@ func (c *Connector) normalize(accountID string, raw rawMessage) (imgateway.Inbou
 		ConnectorID: "weixin", ExternalAccountID: accountID,
 		ExternalConversationID: raw.FromUserID, ExternalMessageID: raw.MessageID,
 		Sender: imgateway.Sender{ID: raw.FromUserID, DisplayName: displayName},
-		Text:   strings.Join(textParts, "\n"), Attachments: []imgateway.Attachment{},
+		Text:   strings.Join(textParts, "\n"), Attachments: attachments,
 		ReplyCorrelation: raw.ContextToken, ReceivedAt: time.Now().UTC(),
 	}, true
+}
+
+func (c *Connector) downloadAttachment(ctx context.Context, messageID string, index int, defaultName string, item mediaItem) (imgateway.Attachment, error) {
+	if item.Media == nil {
+		return imgateway.Attachment{}, errors.New("Weixin media metadata is missing")
+	}
+	downloadURL, err := mediaDownloadURL(*item.Media)
+	if err != nil {
+		return imgateway.Attachment{}, err
+	}
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	response, err := c.client.Do(request)
+	if err != nil {
+		return imgateway.Attachment{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return imgateway.Attachment{}, fmt.Errorf("Weixin media returned HTTP %d", response.StatusCode)
+	}
+	ciphertext, err := io.ReadAll(io.LimitReader(response.Body, maxInboundMediaBytes+1))
+	if err != nil || len(ciphertext) > maxInboundMediaBytes {
+		clear(ciphertext)
+		return imgateway.Attachment{}, errors.New("Weixin media exceeds the 16 MiB limit")
+	}
+	key, err := mediaKey(item.Media.AESKey, item.AESKey)
+	if err != nil {
+		clear(ciphertext)
+		return imgateway.Attachment{}, err
+	}
+	plaintext, err := decryptECB(ciphertext, key)
+	clear(ciphertext)
+	if err != nil {
+		return imgateway.Attachment{}, err
+	}
+	name := safeName(item.FileName, defaultName)
+	contentType := mime.TypeByExtension(filepath.Ext(name))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	encoded := base64.StdEncoding.EncodeToString(plaintext)
+	size := int64(len(plaintext))
+	clear(plaintext)
+	return imgateway.Attachment{
+		ID: messageID + "-" + fmt.Sprint(index), Name: name,
+		ContentType: contentType, Size: size, SourceRef: "weixin:inline", ContentBase64: encoded,
+	}, nil
+}
+
+func mediaDownloadURL(media mediaEncryptInfo) (string, error) {
+	if media.FullURL != "" {
+		parsed, err := url.Parse(media.FullURL)
+		if err != nil || parsed.Scheme != "https" || !(parsed.Hostname() == "weixin.qq.com" || strings.HasSuffix(parsed.Hostname(), ".weixin.qq.com")) {
+			return "", errors.New("untrusted Weixin media URL")
+		}
+		return parsed.String(), nil
+	}
+	if media.EncryptQueryParam == "" {
+		return "", errors.New("Weixin media download parameter is missing")
+	}
+	parsed, _ := url.Parse(defaultCDNURL + "/download")
+	query := parsed.Query()
+	query.Set("encrypted_query_param", media.EncryptQueryParam)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func mediaKey(encoded, rawHex string) ([16]byte, error) {
+	var key [16]byte
+	if rawHex != "" {
+		decoded, err := hex.DecodeString(rawHex)
+		if err != nil || len(decoded) != len(key) {
+			return key, errors.New("invalid Weixin media AES key")
+		}
+		copy(key[:], decoded)
+		clear(decoded)
+		return key, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return key, errors.New("invalid Weixin media AES key")
+	}
+	if len(decoded) == 32 {
+		wrapped := decoded
+		decoded, err = hex.DecodeString(string(wrapped))
+		clear(wrapped)
+	}
+	if err != nil || len(decoded) != len(key) {
+		clear(decoded)
+		return key, errors.New("invalid Weixin media AES key length")
+	}
+	copy(key[:], decoded)
+	clear(decoded)
+	return key, nil
+}
+
+func decryptECB(ciphertext []byte, key [16]byte) ([]byte, error) {
+	if len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+		return nil, errors.New("invalid Weixin encrypted media length")
+	}
+	cipher, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	for offset := 0; offset < len(ciphertext); offset += aes.BlockSize {
+		cipher.Decrypt(ciphertext[offset:offset+aes.BlockSize], ciphertext[offset:offset+aes.BlockSize])
+	}
+	padding := int(ciphertext[len(ciphertext)-1])
+	if padding < 1 || padding > aes.BlockSize || padding > len(ciphertext) {
+		return nil, errors.New("invalid Weixin media padding")
+	}
+	for _, value := range ciphertext[len(ciphertext)-padding:] {
+		if int(value) != padding {
+			return nil, errors.New("invalid Weixin media padding")
+		}
+	}
+	plaintext := append([]byte(nil), ciphertext[:len(ciphertext)-padding]...)
+	clear(ciphertext)
+	return plaintext, nil
+}
+
+func safeName(value, fallback string) string {
+	name := filepath.Base(strings.TrimSpace(value))
+	if name == "." || name == "" || strings.ContainsAny(name, `:\/`) {
+		return fallback
+	}
+	if len(name) > 200 {
+		return name[:200]
+	}
+	return name
 }
 
 func (c *Connector) post(ctx context.Context, baseURL string, token []byte, uin, path string, input, output any) error {
@@ -346,13 +493,27 @@ type rawMessage struct {
 }
 
 type rawItem struct {
-	Type      int       `json:"type"`
-	TextItem  *textItem `json:"text_item"`
-	VoiceItem *textItem `json:"voice_item"`
+	Type      int        `json:"type"`
+	TextItem  *textItem  `json:"text_item"`
+	VoiceItem *textItem  `json:"voice_item"`
+	ImageItem *mediaItem `json:"image_item"`
+	FileItem  *mediaItem `json:"file_item"`
 }
 
 type textItem struct {
 	Text string `json:"text"`
+}
+
+type mediaItem struct {
+	Media    *mediaEncryptInfo `json:"media"`
+	AESKey   string            `json:"aeskey"`
+	FileName string            `json:"file_name"`
+}
+
+type mediaEncryptInfo struct {
+	EncryptQueryParam string `json:"encrypt_query_param"`
+	AESKey            string `json:"aes_key"`
+	FullURL           string `json:"full_url"`
 }
 
 func (item *rawItem) UnmarshalJSON(data []byte) error {

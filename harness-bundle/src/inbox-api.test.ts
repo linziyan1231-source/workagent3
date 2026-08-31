@@ -86,6 +86,31 @@ it("authenticates, deduplicates, and reuses an inbox session", async () => {
     expect(executions[0]!.input).toContain(
       "[External message from Alice via weixin]",
     );
+    const attachmentMessage = {
+      message: {
+        ...delivery.message,
+        external_message_id: "message-3",
+        attachments: [
+          {
+            id: "attachment-1",
+            name: "brief.txt",
+            content_type: "text/plain",
+            size: 5,
+            source_ref: "weixin:inline",
+            content_base64: Buffer.from("hello").toString("base64"),
+          },
+        ],
+      },
+    };
+    await call(address.port, "runtime-token", attachmentMessage);
+    expect(executions[2]!.attachments).toEqual([
+      {
+        name: "brief.txt",
+        contentType: "text/plain",
+        size: 5,
+        contentBase64: "aGVsbG8=",
+      },
+    ]);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

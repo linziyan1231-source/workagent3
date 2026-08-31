@@ -1,7 +1,10 @@
 package weixin
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -106,5 +109,36 @@ func TestConnectorRejectsNonLoopbackPlainHTTPAndUnknownConfig(t *testing.T) {
 	encoded, _ := json.Marshal(connector.Descriptor())
 	if strings.Contains(string(encoded), "token") || strings.Contains(string(encoded), "vault") {
 		t.Fatal("connector descriptor exposed credentials")
+	}
+}
+
+func TestMediaKeyAndECBDecryption(t *testing.T) {
+	rawKey := []byte("0123456789abcdef")
+	encodedHex := base64.StdEncoding.EncodeToString([]byte("30313233343536373839616263646566"))
+	key, err := mediaKey(encodedHex, "")
+	if err != nil || string(key[:]) != string(rawKey) {
+		t.Fatalf("unexpected decoded media key: %q, %v", key, err)
+	}
+	plaintext := []byte("private attachment")
+	padding := aes.BlockSize - len(plaintext)%aes.BlockSize
+	ciphertext := append(append([]byte(nil), plaintext...), bytes.Repeat([]byte{byte(padding)}, padding)...)
+	block, _ := aes.NewCipher(rawKey)
+	for offset := 0; offset < len(ciphertext); offset += aes.BlockSize {
+		block.Encrypt(ciphertext[offset:offset+aes.BlockSize], ciphertext[offset:offset+aes.BlockSize])
+	}
+	decrypted, err := decryptECB(ciphertext, key)
+	if err != nil || string(decrypted) != string(plaintext) {
+		t.Fatalf("unexpected decrypted media: %q, %v", decrypted, err)
+	}
+	clear(decrypted)
+}
+
+func TestMediaDownloadURLRejectsUntrustedHost(t *testing.T) {
+	if _, err := mediaDownloadURL(mediaEncryptInfo{FullURL: "https://example.com/private"}); err == nil {
+		t.Fatal("untrusted media URL accepted")
+	}
+	value, err := mediaDownloadURL(mediaEncryptInfo{EncryptQueryParam: "opaque value"})
+	if err != nil || !strings.HasPrefix(value, defaultCDNURL+"/download?") || !strings.Contains(value, "opaque+value") {
+		t.Fatalf("unexpected CDN media URL: %q, %v", value, err)
 	}
 }

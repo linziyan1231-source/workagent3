@@ -299,6 +299,7 @@ export class RuntimeController
       return { sessionId: request.sessionId };
     }
     const now = new Date().toISOString();
+    const workspaceId = this.#workspaces.ensureDefault().id;
     const definition: AutomationExecution["definition"] = {
       id: `inbox-${request.sessionId}`,
       version: 1,
@@ -307,7 +308,7 @@ export class RuntimeController
       schedule: { kind: "interval", everyMinutes: 1 },
       presetId: "builtin-general",
       engine: "harness",
-      workspaceId: this.#workspaces.ensureDefault().id,
+      workspaceId,
       input: request.input,
       notificationPolicy: "none",
       nextRunAt: null,
@@ -321,23 +322,49 @@ export class RuntimeController
     });
     if (record.handle === undefined && record.native === undefined)
       await this.#activate(request.sessionId, record);
+    const attachmentPaths: string[] = [];
+    for (const attachment of request.attachments) {
+      if (attachment.contentBase64 === undefined) continue;
+      const content = Buffer.from(attachment.contentBase64, "base64");
+      if (
+        content.length !== attachment.size ||
+        content.toString("base64") !== attachment.contentBase64
+      )
+        throw new Error("invalid_inbox_attachment");
+      try {
+        const asset = this.#workspaces.addAttachment(
+          workspaceId,
+          request.sessionId,
+          attachment.name,
+          attachment.contentType,
+          content,
+        );
+        attachmentPaths.push(asset.path);
+      } finally {
+        content.fill(0);
+      }
+    }
+    const runtimeInput =
+      attachmentPaths.length === 0
+        ? request.input
+        : `${request.input}\n\nWorkspace attachment paths:\n${attachmentPaths.map((path) => `- ${path}`).join("\n")}`;
     const terminal = this.#waitForTerminal(request.sessionId);
     record.updatedAt = now;
     if (record.handle !== undefined) {
       record.handle.agent.followup(
         createUserMessage({
-          content: [{ type: "text", text: request.input }],
+          content: [{ type: "text", text: runtimeInput }],
           source: { kind: "user" },
         }),
       );
     } else {
-      await record.native!.send(request.input);
+      await record.native!.send(runtimeInput);
     }
     this.#messages.append({
       id: messageId,
       sessionId: request.sessionId,
       role: "user",
-      text: request.input,
+      text: runtimeInput,
       createdAt: now,
     });
     this.#persist(request.sessionId, record);
