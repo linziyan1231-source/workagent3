@@ -1423,6 +1423,34 @@
       "saveSuccess": "Professional database policy saved",
       "saveFailed": "Failed to save professional database policy"
     },
+    "lifecycle": {
+      "more": "More actions",
+      "title": "Employee lifecycle — {{username}}",
+      "action": "Action",
+      "apply": "Confirm action",
+      "success": "Employee lifecycle action completed",
+      "failed": "Employee lifecycle action failed",
+      "offboarded": "Offboarded, data retained",
+      "setLimits": "Adjust runtime capacity",
+      "repair": "Repair runtime",
+      "renameWindows": "Rename Windows account",
+      "offboardRetain": "Offboard and retain data",
+      "offboardDelete": "Permanently delete offboarded employee",
+      "memoryMiB": "Memory limit (MiB)",
+      "cpuPercent": "CPU limit (%)",
+      "activeProcesses": "Process limit",
+      "windowsPassword": "New Windows password",
+      "newWindowsUsername": "New Windows username",
+      "confirmation": "Enter {{value}} to confirm permanent deletion",
+      "confirmationMismatch": "The deletion confirmation does not match",
+      "descriptions": {
+        "set-limits": "Freeze employee access and the Runtime, apply capacity, and reopen only after health checks pass.",
+        "repair": "Rebuild this SID's Profile, scheduled task, and Runtime while preserving Portal data and identity.",
+        "rename-windows": "Rename only the Windows account while preserving the Portal username and SID.",
+        "offboard-retain": "Freeze login and the Runtime immediately while retaining SID-private data and native authentication for recovery.",
+        "offboard-delete": "Irreversible: delete the offboarded employee's task, SID-private data, Windows account, and Portal mapping."
+      }
+    },
     "passwordTooShort": "Password must be at least 12 characters",
     "empty": "No employee accounts"
   },

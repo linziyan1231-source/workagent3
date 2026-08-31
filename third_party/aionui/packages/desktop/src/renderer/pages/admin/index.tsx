@@ -27,6 +27,8 @@ import { useAuth } from '@renderer/hooks/context/AuthContext';
 import type {
   AddManagedUserForm,
   CreationJob,
+  EmployeeLifecycleAction,
+  EmployeeLifecycleForm,
   KimiDatasourcePolicyForm,
   ManagedUser,
   ResetManagedUserPasswordForm,
@@ -54,6 +56,7 @@ const AdminAccountsPage: React.FC = () => {
   const [form] = Form.useForm<AddManagedUserForm>();
   const [resetForm] = Form.useForm<ResetManagedUserPasswordForm>();
   const [kimiForm] = Form.useForm<KimiDatasourcePolicyForm>();
+  const [lifecycleForm] = Form.useForm<EmployeeLifecycleForm>();
   const [modal, modalContextHolder] = Modal.useModal();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,6 +66,9 @@ const AdminAccountsPage: React.FC = () => {
   const [resetting, setResetting] = useState(false);
   const [kimiTarget, setKimiTarget] = useState<ManagedUser>();
   const [savingKimi, setSavingKimi] = useState(false);
+  const [lifecycleTarget, setLifecycleTarget] = useState<ManagedUser>();
+  const [lifecycleAction, setLifecycleAction] = useState<EmployeeLifecycleAction>('set-limits');
+  const [savingLifecycle, setSavingLifecycle] = useState(false);
   const [kimiSources, setKimiSources] = useState<string[]>([]);
   const [usageLoading, setUsageLoading] = useState<ReadonlySet<string>>(new Set());
   const [creationJobs, setCreationJobs] = useState<CreationJob[]>([]);
@@ -401,6 +407,91 @@ const AdminAccountsPage: React.FC = () => {
     }
   };
 
+  const openLifecycle = (managedUser: ManagedUser) => {
+    const action: EmployeeLifecycleAction = managedUser.offboarded ? 'offboard-delete' : 'set-limits';
+    setLifecycleTarget(managedUser);
+    setLifecycleAction(action);
+    lifecycleForm.setFieldsValue({
+      action,
+      memoryMiB: 1024,
+      cpuPercent: 50,
+      activeProcesses: 64,
+      confirmation: '',
+      newWindowsUsername: '',
+      windowsPassword: '',
+    });
+  };
+
+  const saveLifecycle = async () => {
+    if (!lifecycleTarget) return;
+    let values: EmployeeLifecycleForm;
+    try {
+      values = await lifecycleForm.validate();
+    } catch {
+      return;
+    }
+    if (
+      values.action === 'offboard-delete' &&
+      values.confirmation !== `DELETE ${lifecycleTarget.username}`
+    ) {
+      lifecycleForm.setFields({
+        confirmation: { error: { message: t('settings.adminAccounts.lifecycle.confirmationMismatch') } },
+      });
+      return;
+    }
+    try {
+      setSavingLifecycle(true);
+      const username = lifecycleTarget.username;
+      switch (values.action) {
+        case 'set-limits':
+          await ipcBridge.portal.setManagedUserLimits.invoke({
+            username,
+            limits: {
+              memory_bytes: Math.round((values.memoryMiB ?? 0) * 1024 ** 2),
+              cpu_percent: values.cpuPercent ?? 0,
+              active_processes: values.activeProcesses ?? 0,
+            },
+          });
+          break;
+        case 'repair':
+          await ipcBridge.portal.repairManagedUser.invoke({
+            username,
+            windows_password: values.windowsPassword ?? '',
+          });
+          break;
+        case 'rename-windows':
+          await ipcBridge.portal.renameManagedWindowsAccount.invoke({
+            username,
+            new_windows_username: values.newWindowsUsername?.trim() ?? '',
+            windows_password: values.windowsPassword ?? '',
+          });
+          break;
+        case 'offboard-retain':
+          await ipcBridge.portal.offboardManagedUserRetainingData.invoke({ username });
+          break;
+        case 'offboard-delete':
+          await ipcBridge.portal.deleteOffboardedManagedUser.invoke({
+            username,
+            confirmation: values.confirmation ?? '',
+          });
+          break;
+      }
+      Message.success(t('settings.adminAccounts.lifecycle.success'));
+      setLifecycleTarget(undefined);
+      lifecycleForm.resetFields();
+      await loadUsers();
+    } catch (error) {
+      console.error('Failed to update employee lifecycle:', error);
+      const message =
+        isBackendHttpError(error) && error.backendMessage.trim()
+          ? error.backendMessage
+          : t('settings.adminAccounts.lifecycle.failed');
+      Message.error(message);
+    } finally {
+      setSavingLifecycle(false);
+    }
+  };
+
   const beginColumnResize = useCallback(
     (event: React.MouseEvent, key: ColumnKey) => {
       event.preventDefault();
@@ -460,8 +551,14 @@ const AdminAccountsPage: React.FC = () => {
         dataIndex: 'enabled',
         width: columnWidths.status,
         render: (_, record) => (
-          <Tag color={record.enabled ? 'green' : 'gray'}>
-            {t(record.enabled ? 'settings.adminAccounts.enabled' : 'settings.adminAccounts.disabled')}
+          <Tag color={record.offboarded ? 'orange' : record.enabled ? 'green' : 'gray'}>
+            {t(
+              record.offboarded
+                ? 'settings.adminAccounts.lifecycle.offboarded'
+                : record.enabled
+                  ? 'settings.adminAccounts.enabled'
+                  : 'settings.adminAccounts.disabled'
+            )}
           </Tag>
         ),
       },
@@ -566,16 +663,23 @@ const AdminAccountsPage: React.FC = () => {
               <Button type='text' status='danger' onClick={() => disableUser(record)}>
                 {t('settings.adminAccounts.disable')}
               </Button>
-            ) : (
+            ) : !record.offboarded ? (
               <Button type='text' onClick={() => enableUser(record)}>
                 {t('settings.adminAccounts.enable')}
               </Button>
+            ) : null}
+            {!record.offboarded && (
+              <>
+                <Button type='text' onClick={() => setResetTarget(record)}>
+                  {t('settings.adminAccounts.resetPassword')}
+                </Button>
+                <Button type='text' onClick={() => editKimiDatasource(record)}>
+                  {t('settings.adminAccounts.kimiDatasource.manage')}
+                </Button>
+              </>
             )}
-            <Button type='text' onClick={() => setResetTarget(record)}>
-              {t('settings.adminAccounts.resetPassword')}
-            </Button>
-            <Button type='text' onClick={() => editKimiDatasource(record)}>
-              {t('settings.adminAccounts.kimiDatasource.manage')}
+            <Button type='text' onClick={() => openLifecycle(record)}>
+              {t('settings.adminAccounts.lifecycle.more')}
             </Button>
           </Space>
         ),
@@ -746,6 +850,112 @@ const AdminAccountsPage: React.FC = () => {
           >
             <InputNumber min={1} max={100000} precision={0} />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('settings.adminAccounts.lifecycle.title', { username: lifecycleTarget?.username })}
+        visible={Boolean(lifecycleTarget)}
+        onCancel={() => {
+          if (!savingLifecycle) {
+            setLifecycleTarget(undefined);
+            lifecycleForm.resetFields();
+          }
+        }}
+        onOk={() => void saveLifecycle()}
+        confirmLoading={savingLifecycle}
+        okButtonProps={lifecycleAction === 'offboard-delete' ? { status: 'danger' } : undefined}
+        okText={t('settings.adminAccounts.lifecycle.apply')}
+        unmountOnExit
+      >
+        <Typography.Paragraph type='secondary'>
+          {t(`settings.adminAccounts.lifecycle.descriptions.${lifecycleAction}`, {
+            username: lifecycleTarget?.username,
+          })}
+        </Typography.Paragraph>
+        <Form form={lifecycleForm} layout='vertical'>
+          <Form.Item field='action' label={t('settings.adminAccounts.lifecycle.action')} rules={[{ required: true }]}>
+            <Select
+              onChange={(value) => setLifecycleAction(value as EmployeeLifecycleAction)}
+              disabled={savingLifecycle}
+            >
+              {!lifecycleTarget?.offboarded && (
+                <>
+                  <Select.Option value='set-limits'>{t('settings.adminAccounts.lifecycle.setLimits')}</Select.Option>
+                  <Select.Option value='rename-windows'>
+                    {t('settings.adminAccounts.lifecycle.renameWindows')}
+                  </Select.Option>
+                  <Select.Option value='offboard-retain'>
+                    {t('settings.adminAccounts.lifecycle.offboardRetain')}
+                  </Select.Option>
+                </>
+              )}
+              <Select.Option value='repair'>{t('settings.adminAccounts.lifecycle.repair')}</Select.Option>
+              {lifecycleTarget?.offboarded && (
+                <Select.Option value='offboard-delete'>
+                  {t('settings.adminAccounts.lifecycle.offboardDelete')}
+                </Select.Option>
+              )}
+            </Select>
+          </Form.Item>
+
+          {lifecycleAction === 'set-limits' && (
+            <div className='grid grid-cols-1 gap-12px md:grid-cols-3'>
+              <Form.Item
+                field='memoryMiB'
+                label={t('settings.adminAccounts.lifecycle.memoryMiB')}
+                rules={[{ required: true, type: 'number', min: 256 }]}
+              >
+                <InputNumber min={256} precision={0} className='w-full' />
+              </Form.Item>
+              <Form.Item
+                field='cpuPercent'
+                label={t('settings.adminAccounts.lifecycle.cpuPercent')}
+                rules={[{ required: true, type: 'number', min: 1, max: 100 }]}
+              >
+                <InputNumber min={1} max={100} precision={0} className='w-full' />
+              </Form.Item>
+              <Form.Item
+                field='activeProcesses'
+                label={t('settings.adminAccounts.lifecycle.activeProcesses')}
+                rules={[{ required: true, type: 'number', min: 3 }]}
+              >
+                <InputNumber min={3} precision={0} className='w-full' />
+              </Form.Item>
+            </div>
+          )}
+
+          {(lifecycleAction === 'repair' || lifecycleAction === 'rename-windows') && (
+            <Form.Item
+              field='windowsPassword'
+              label={t('settings.adminAccounts.lifecycle.windowsPassword')}
+              rules={[{ required: true }, { minLength: 12, message: t('settings.adminAccounts.passwordTooShort') }]}
+            >
+              <Input.Password autoComplete='new-password' />
+            </Form.Item>
+          )}
+
+          {lifecycleAction === 'rename-windows' && (
+            <Form.Item
+              field='newWindowsUsername'
+              label={t('settings.adminAccounts.lifecycle.newWindowsUsername')}
+              rules={[{ required: true }, { match: /^[A-Za-z0-9._-]{1,20}$/ }]}
+            >
+              <Input autoComplete='off' placeholder={t('settings.adminAccounts.usernamePlaceholder')} />
+            </Form.Item>
+          )}
+
+          {lifecycleAction === 'offboard-delete' && (
+            <Form.Item
+              field='confirmation'
+              label={t('settings.adminAccounts.lifecycle.confirmation', {
+                value: `DELETE ${lifecycleTarget?.username ?? ''}`,
+              })}
+              rules={[{ required: true }]}
+            >
+              <Input autoComplete='off' />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 

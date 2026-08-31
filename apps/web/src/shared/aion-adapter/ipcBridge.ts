@@ -86,6 +86,7 @@ export type PortalManagedUser = {
   windows_username: string;
   windows_sid: string;
   enabled: boolean;
+  offboarded: boolean;
   created_at: string;
   last_login_at?: string;
   resource_usage?: PortalUsageSummary;

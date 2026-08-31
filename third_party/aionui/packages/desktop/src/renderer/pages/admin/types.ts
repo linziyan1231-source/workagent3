@@ -20,3 +20,20 @@ export interface KimiDatasourcePolicyForm {
   dailyLimit: number;
   monthlyLimit: number;
 }
+
+export type EmployeeLifecycleAction =
+  | 'set-limits'
+  | 'repair'
+  | 'rename-windows'
+  | 'offboard-retain'
+  | 'offboard-delete';
+
+export interface EmployeeLifecycleForm {
+  action: EmployeeLifecycleAction;
+  windowsPassword?: string;
+  newWindowsUsername?: string;
+  memoryMiB?: number;
+  cpuPercent?: number;
+  activeProcesses?: number;
+  confirmation?: string;
+}

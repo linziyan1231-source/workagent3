@@ -1526,6 +1526,34 @@
       "saveSuccess": "专业数据库权限已保存",
       "saveFailed": "保存专业数据库权限失败"
     },
+    "lifecycle": {
+      "more": "更多操作",
+      "title": "员工生命周期 — {{username}}",
+      "action": "操作",
+      "apply": "确认执行",
+      "success": "员工生命周期操作已完成",
+      "failed": "员工生命周期操作失败",
+      "offboarded": "已离职保留",
+      "setLimits": "调整运行容量",
+      "repair": "修复运行环境",
+      "renameWindows": "重命名 Windows 账号",
+      "offboardRetain": "离职并保留数据",
+      "offboardDelete": "永久删除离职员工",
+      "memoryMiB": "内存上限（MiB）",
+      "cpuPercent": "CPU 上限（%）",
+      "activeProcesses": "进程数上限",
+      "windowsPassword": "新的 Windows 密码",
+      "newWindowsUsername": "新的 Windows 用户名",
+      "confirmation": "输入 {{value}} 以确认永久删除",
+      "confirmationMismatch": "删除确认文字不匹配",
+      "descriptions": {
+        "set-limits": "冻结员工登录和 Runtime，应用容量后仅在健康检查通过时重新启用。",
+        "repair": "重建该 SID 的 Profile、计划任务和 Runtime；Portal 数据与身份保持不变。",
+        "rename-windows": "仅重命名 Windows 账号并保持 Portal 用户名和 SID 不变。",
+        "offboard-retain": "立即冻结登录和 Runtime，保留 SID 私有数据与本机认证，之后可通过修复恢复。",
+        "offboard-delete": "不可撤销：删除已离职员工的计划任务、SID 私有数据、Windows 账号和 Portal 映射。"
+      }
+    },
     "passwordTooShort": "密码至少需要 12 个字符",
     "empty": "暂无员工账号"
   },

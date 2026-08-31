@@ -498,6 +498,69 @@ export const ipcBridge = {
           },
         ),
     },
+    repairManagedUser: {
+      invoke: (input: { username: string; windows_password: string }) =>
+        requestJson<{ success: boolean }>("/api/portal/admin/users/repair", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+    },
+    renameManagedWindowsAccount: {
+      invoke: (input: {
+        username: string;
+        new_windows_username: string;
+        windows_password: string;
+      }) =>
+        requestJson<{ success: boolean }>(
+          "/api/portal/admin/users/rename-windows",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
+    setManagedUserLimits: {
+      invoke: (input: {
+        username: string;
+        limits: {
+          memory_bytes: number;
+          cpu_percent: number;
+          active_processes: number;
+        };
+      }) =>
+        requestJson<{ success: boolean }>(
+          "/api/portal/admin/users/set-limits",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
+    offboardManagedUserRetainingData: {
+      invoke: (input: { username: string }) =>
+        requestJson<{ success: boolean }>(
+          "/api/portal/admin/users/offboard-retain",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
+    deleteOffboardedManagedUser: {
+      invoke: (input: { username: string; confirmation: string }) =>
+        requestJson<{ success: boolean }>(
+          "/api/portal/admin/users/offboard-delete",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          },
+        ),
+    },
     setManagedUserKimiDatasource: {
       invoke: (input: {
         username: string;

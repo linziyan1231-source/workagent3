@@ -77,6 +77,82 @@ describe("production Renderer Skill Market adapter", () => {
   });
 });
 
+describe("production Renderer employee lifecycle adapter", () => {
+  it("routes every extended administrator action through its explicit Portal endpoint", async () => {
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.portal.setManagedUserLimits.invoke({
+      username: "alice",
+      limits: {
+        memory_bytes: 805306368,
+        cpu_percent: 35,
+        active_processes: 32,
+      },
+    });
+    await ipcBridge.portal.repairManagedUser.invoke({
+      username: "alice",
+      windows_password: "windows secret",
+    });
+    await ipcBridge.portal.renameManagedWindowsAccount.invoke({
+      username: "alice",
+      new_windows_username: "alice2",
+      windows_password: "windows secret 2",
+    });
+    await ipcBridge.portal.offboardManagedUserRetainingData.invoke({
+      username: "alice",
+    });
+    await ipcBridge.portal.deleteOffboardedManagedUser.invoke({
+      username: "alice",
+      confirmation: "DELETE alice",
+    });
+
+    const calls = fetch.mock.calls.map(([path, init]) => ({
+      path,
+      body: JSON.parse(String((init as RequestInit).body)),
+    }));
+    expect(calls).toEqual([
+      {
+        path: "/api/portal/admin/users/set-limits",
+        body: {
+          username: "alice",
+          limits: {
+            memory_bytes: 805306368,
+            cpu_percent: 35,
+            active_processes: 32,
+          },
+        },
+      },
+      {
+        path: "/api/portal/admin/users/repair",
+        body: { username: "alice", windows_password: "windows secret" },
+      },
+      {
+        path: "/api/portal/admin/users/rename-windows",
+        body: {
+          username: "alice",
+          new_windows_username: "alice2",
+          windows_password: "windows secret 2",
+        },
+      },
+      {
+        path: "/api/portal/admin/users/offboard-retain",
+        body: { username: "alice" },
+      },
+      {
+        path: "/api/portal/admin/users/offboard-delete",
+        body: { username: "alice", confirmation: "DELETE alice" },
+      },
+    ]);
+  });
+});
+
 describe("production Renderer conversation adapter", () => {
   it("maps WorkAgent3 sessions into the original Renderer list contract", async () => {
     const now = "2026-08-31T06:00:00.000Z";

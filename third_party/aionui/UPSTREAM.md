@@ -15,12 +15,16 @@ Do not restyle or independently reimplement these renderer components in the
 WorkAgent3 application. Product integration belongs in the WorkAgent3 adapter
 layer; refresh this snapshot mechanically from the pinned source repository.
 
-The only in-tree compatibility changes are the event-neutral `onCancel`/`onOk`
-wrappers in `renderer/components/base/AionModal.tsx`, the absolute hooks module
-specifier in `renderer/pages/conversation/Messages/MessageList.tsx`, and the
-optional `hiddenBuiltinIds` input on the settings sider. They preserve
-visual/runtime behavior while allowing WorkAgent3's Web adapter to replace
-desktop state and omit features excluded by `plan.md`. The guide action row
-also accepts an optional browser-file callback so its unchanged picker can
-hand selected `File` objects to the WorkAgent3 HTTP asset port. Other Web
-integration remains in the adapter layer.
+The host compatibility changes are the event-neutral `onCancel`/`onOk`
+wrappers in `renderer/components/base/AionModal.tsx`, the Portal notification
+Port, the absolute hooks module specifier in
+`renderer/pages/conversation/Messages/MessageList.tsx`, and the optional
+browser-file callback in the guide action row. They preserve visual/runtime
+behavior while allowing WorkAgent3's Web adapter to replace desktop state.
+
+The formal Web 78 administrator page has one scoped WorkAgent3 product
+extension: its existing account table, status tags, forms and Modal primitives
+also expose the lifecycle actions required by `plan.md` (capacity, repair,
+Windows rename, retained offboarding and separately confirmed deletion). No
+parallel administrator page or replacement visual system is maintained.
+Other Web integration remains in the adapter layer.
