@@ -23,9 +23,22 @@ type legacyAssistant struct {
 	preset  PresetAsset
 }
 
+type AssistantResourceOptions struct {
+	Root          string
+	Locale        string
+	PublicBaseURL string
+}
+
 func CaptureLegacyInventory(ctx context.Context, databasePath, sid string, capturedAt time.Time) (Manifest, error) {
+	return CaptureLegacyInventoryWithAssistantResources(ctx, databasePath, sid, capturedAt, AssistantResourceOptions{})
+}
+
+func CaptureLegacyInventoryWithAssistantResources(ctx context.Context, databasePath, sid string, capturedAt time.Time, assistantResources AssistantResourceOptions) (Manifest, error) {
 	if !filepath.IsAbs(databasePath) || !validSID(sid) || capturedAt.IsZero() {
 		return Manifest{}, errors.New("absolute legacy database, SID, and capture time are required")
+	}
+	if assistantResources.Root != "" && !filepath.IsAbs(assistantResources.Root) {
+		return Manifest{}, errors.New("assistant resource root must be absolute")
 	}
 	info, err := os.Lstat(databasePath)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
@@ -43,7 +56,7 @@ func CaptureLegacyInventory(ctx context.Context, databasePath, sid string, captu
 	if err := captureLegacySkills(ctx, database, &manifest); err != nil {
 		return Manifest{}, err
 	}
-	assistants, err := captureLegacyAssistants(ctx, database)
+	assistants, err := captureLegacyAssistants(ctx, database, assistantResources)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -98,8 +111,8 @@ func captureLegacySkills(ctx context.Context, database *sql.DB, manifest *Manife
 	return rows.Err()
 }
 
-func captureLegacyAssistants(ctx context.Context, database *sql.DB) ([]legacyAssistant, error) {
-	definitions, found, err := captureLegacyAssistantDefinitions(ctx, database)
+func captureLegacyAssistants(ctx context.Context, database *sql.DB, resources AssistantResourceOptions) ([]legacyAssistant, error) {
+	definitions, found, err := captureLegacyAssistantDefinitions(ctx, database, resources)
 	if err != nil || found {
 		return definitions, err
 	}
@@ -128,8 +141,8 @@ func captureLegacyAssistants(ctx context.Context, database *sql.DB) ([]legacyAss
 	return result, rows.Err()
 }
 
-func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([]legacyAssistant, bool, error) {
-	rows, err := database.QueryContext(ctx, `SELECT assistant_id,name,COALESCE(description,''),avatar_type,avatar_value,agent_id,rule_resource_type,rule_inline_content,default_model_mode,default_model_value,default_permission_mode,default_permission_value,default_skill_ids,custom_skill_names,default_mcps_mode,default_mcp_ids FROM assistant_definitions WHERE deleted_at IS NULL ORDER BY assistant_id`)
+func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB, resources AssistantResourceOptions) ([]legacyAssistant, bool, error) {
+	rows, err := database.QueryContext(ctx, `SELECT assistant_id,name,COALESCE(description,''),avatar_type,avatar_value,agent_id,rule_resource_type,rule_resource_ref,rule_inline_content,default_model_mode,default_model_value,default_permission_mode,default_permission_value,default_skill_ids,custom_skill_names,default_mcps_mode,default_mcp_ids FROM assistant_definitions WHERE deleted_at IS NULL ORDER BY assistant_id`)
 	if err != nil {
 		if legacyTableMissing(err) {
 			return nil, false, nil
@@ -140,8 +153,8 @@ func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([
 	result := []legacyAssistant{}
 	for rows.Next() {
 		var id, name, description, avatarType, agentID, ruleType, modelMode, permissionMode, skillIDs, customNames, mcpMode, mcpIDs string
-		var avatarValue, ruleInline, modelValue, permissionValue sql.NullString
-		if err := rows.Scan(&id, &name, &description, &avatarType, &avatarValue, &agentID, &ruleType, &ruleInline, &modelMode, &modelValue, &permissionMode, &permissionValue, &skillIDs, &customNames, &mcpMode, &mcpIDs); err != nil {
+		var avatarValue, ruleRef, ruleInline, modelValue, permissionValue sql.NullString
+		if err := rows.Scan(&id, &name, &description, &avatarType, &avatarValue, &agentID, &ruleType, &ruleRef, &ruleInline, &modelMode, &modelValue, &permissionMode, &permissionValue, &skillIDs, &customNames, &mcpMode, &mcpIDs); err != nil {
 			return nil, true, err
 		}
 		skills := append(parseStringList(skillIDs), parseStringList(customNames)...)
@@ -152,12 +165,18 @@ func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([
 		systemPrompt := ""
 		if strings.EqualFold(ruleType, "inline") {
 			systemPrompt = ruleInline.String
+		} else if strings.EqualFold(ruleType, "builtin_asset") {
+			var resolved bool
+			systemPrompt, resolved = legacyBuiltinRule(resources, ruleRef.String)
+			if !resolved {
+				issues = append(issues, "rule_resource_projection_required")
+			}
 		} else if !strings.EqualFold(ruleType, "none") {
 			issues = append(issues, "rule_resource_projection_required")
 		}
 		var avatar *string
 		if !strings.EqualFold(avatarType, "none") && avatarValue.Valid && strings.TrimSpace(avatarValue.String) != "" {
-			avatar, issues = legacyAvatar(avatarType, avatarValue.String, issues)
+			avatar, issues = legacyAvatar(resources, avatarType, avatarValue.String, issues)
 		}
 		var modelID *string
 		if strings.EqualFold(modelMode, "fixed") && modelValue.Valid && strings.TrimSpace(modelValue.String) != "" {
@@ -176,8 +195,31 @@ func captureLegacyAssistantDefinitions(ctx context.Context, database *sql.DB) ([
 	return result, true, rows.Err()
 }
 
-func legacyAvatar(kind, value string, issues []string) (*string, []string) {
+func legacyBuiltinRule(resources AssistantResourceOptions, reference string) (string, bool) {
+	root := strings.TrimSpace(resources.Root)
+	reference = strings.TrimSpace(reference)
+	if root == "" || !safeAssistantResourceName(reference) {
+		return "", false
+	}
+	locale := strings.TrimSpace(resources.Locale)
+	if locale == "" {
+		locale = "zh-CN"
+	}
+	for _, candidate := range []string{locale, "en-US"} {
+		path := filepath.Join(root, "rules", reference+"."+candidate+".md")
+		content, err := os.ReadFile(path)
+		if err == nil && len(content) <= 50_000 {
+			return string(content), true
+		}
+	}
+	return "", false
+}
+
+func legacyAvatar(resources AssistantResourceOptions, kind, value string, issues []string) (*string, []string) {
 	value = strings.TrimSpace(value)
+	if strings.EqualFold(kind, "emoji") {
+		return &value, issues
+	}
 	if strings.EqualFold(kind, "url") {
 		parsed, err := url.Parse(value)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
@@ -189,12 +231,38 @@ func legacyAvatar(kind, value string, issues []string) (*string, []string) {
 		clean := parsed.String()
 		return &clean, issues
 	}
+	if strings.EqualFold(kind, "builtin_asset") && resources.Root != "" {
+		clean := filepath.ToSlash(filepath.Clean(value))
+		if strings.HasPrefix(clean, "avatars/") && safeAssistantResourceName(strings.TrimSuffix(strings.TrimPrefix(clean, "avatars/"), filepath.Ext(clean))) {
+			path := filepath.Join(resources.Root, filepath.FromSlash(clean))
+			if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+				base := strings.TrimRight(strings.TrimSpace(resources.PublicBaseURL), "/")
+				if base == "" {
+					base = "/assets/puxin-builtin-assistants"
+				}
+				resolved := base + "/" + clean
+				return &resolved, issues
+			}
+		}
+	}
 	clean := filepath.ToSlash(filepath.Clean(value))
 	if filepath.IsAbs(value) || clean == ".." || strings.HasPrefix(clean, "../") || len(clean) > 2048 {
 		return nil, append(issues, "avatar_resource_projection_required")
 	}
 	issues = append(issues, "avatar_resource_projection_required")
 	return &clean, issues
+}
+
+func safeAssistantResourceName(value string) bool {
+	if value == "" || len(value) > 160 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func legacyApprovalPolicy(mode, value string) (string, string) {

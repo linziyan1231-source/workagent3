@@ -99,10 +99,10 @@ func TestCaptureLegacyInventoryUsesLatestAssistantDefinitions(t *testing.T) {
 	}
 	if _, err := database.Exec(`
 CREATE TABLE skills (id TEXT,name TEXT,description TEXT,path TEXT,source TEXT,enabled INTEGER,deleted_at INTEGER);
-CREATE TABLE assistant_definitions (assistant_id TEXT,name TEXT,description TEXT,avatar_type TEXT,avatar_value TEXT,agent_id TEXT,rule_resource_type TEXT,rule_inline_content TEXT,default_model_mode TEXT,default_model_value TEXT,default_permission_mode TEXT,default_permission_value TEXT,default_skill_ids TEXT,custom_skill_names TEXT,default_mcps_mode TEXT,default_mcp_ids TEXT,deleted_at INTEGER);
+CREATE TABLE assistant_definitions (assistant_id TEXT,name TEXT,description TEXT,avatar_type TEXT,avatar_value TEXT,agent_id TEXT,rule_resource_type TEXT,rule_resource_ref TEXT,rule_inline_content TEXT,default_model_mode TEXT,default_model_value TEXT,default_permission_mode TEXT,default_permission_value TEXT,default_skill_ids TEXT,custom_skill_names TEXT,default_mcps_mode TEXT,default_mcp_ids TEXT,deleted_at INTEGER);
 CREATE TABLE mcp_servers (id TEXT,name TEXT,description TEXT,enabled INTEGER,transport_type TEXT,transport_config TEXT,tools TEXT,builtin INTEGER,deleted_at INTEGER);
 INSERT INTO skills VALUES ('skill-id','Skill name','', 'C:/legacy/skill','user',1,NULL);
-INSERT INTO assistant_definitions VALUES ('assistant','Latest assistant','Migrated','url','https://user:password@example.test/avatar.png?token=secret#fragment','codex','inline','Keep it concise','fixed','codex-native','fixed','plan','["skill-id"]','[]','fixed','["fixed-mcp"]',NULL);
+INSERT INTO assistant_definitions VALUES ('assistant','Latest assistant','Migrated','url','https://user:password@example.test/avatar.png?token=secret#fragment','codex','inline',NULL,'Keep it concise','fixed','codex-native','fixed','plan','["skill-id"]','[]','fixed','["fixed-mcp"]',NULL);
 INSERT INTO mcp_servers VALUES ('fixed-mcp','Fixed','',0,'http','{"url":"https://example.test/path"}','[]',0,NULL);
 INSERT INTO mcp_servers VALUES ('unbound-mcp','Unbound','',1,'http','{"url":"https://example.test/path"}','[]',0,NULL);
 `); err != nil {
@@ -126,5 +126,45 @@ INSERT INTO mcp_servers VALUES ('unbound-mcp','Unbound','',1,'http','{"url":"htt
 	}
 	if manifest.Presets[0].Avatar == nil || *manifest.Presets[0].Avatar != "https://example.test/avatar.png" {
 		t.Fatalf("sanitized avatar = %#v", manifest.Presets[0].Avatar)
+	}
+}
+
+func TestCaptureLegacyInventoryResolvesOfficialBuiltinAssistantResources(t *testing.T) {
+	root := t.TempDir()
+	resources := filepath.Join(root, "puxin-builtin-assistants")
+	if err := os.MkdirAll(filepath.Join(resources, "rules"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(resources, "avatars"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resources, "rules", "official.zh-CN.md"), []byte("正式规则"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resources, "avatars", "official.jpg"), []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	databasePath := filepath.Join(root, "legacy.db")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+CREATE TABLE skills (id TEXT,name TEXT,description TEXT,path TEXT,source TEXT,enabled INTEGER,deleted_at INTEGER);
+CREATE TABLE assistant_definitions (assistant_id TEXT,name TEXT,description TEXT,avatar_type TEXT,avatar_value TEXT,agent_id TEXT,rule_resource_type TEXT,rule_resource_ref TEXT,rule_inline_content TEXT,default_model_mode TEXT,default_model_value TEXT,default_permission_mode TEXT,default_permission_value TEXT,default_skill_ids TEXT,custom_skill_names TEXT,default_mcps_mode TEXT,default_mcp_ids TEXT,deleted_at INTEGER);
+INSERT INTO assistant_definitions VALUES ('official','Official','', 'builtin_asset','avatars/official.jpg','aionrs','builtin_asset','official',NULL,'auto',NULL,'auto',NULL,'[]','[]','auto','[]',NULL);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := CaptureLegacyInventoryWithAssistantResources(context.Background(), databasePath, "S-1-5-21-1000", time.Now(), AssistantResourceOptions{Root: resources, Locale: "zh-CN", PublicBaseURL: "/assets/puxin-builtin-assistants"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset := manifest.Presets[0]
+	if preset.SystemPrompt != "正式规则" || preset.Avatar == nil || *preset.Avatar != "/assets/puxin-builtin-assistants/avatars/official.jpg" || len(preset.MigrationIssues) != 0 {
+		t.Fatalf("resolved builtin preset = %#v", preset)
 	}
 }

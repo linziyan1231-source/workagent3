@@ -34,6 +34,8 @@ func run(arguments []string, output io.Writer) error {
 	legacyDatabase := flags.String("legacy-db", "", "read-only WorkAgent2/AionUi SQLite database")
 	inventorySID := flags.String("sid", "", "employee SID recorded in an inventory")
 	inventoryOutput := flags.String("output", "", "new credential-free inventory JSON path")
+	assistantResources := flags.String("assistant-resources", "", "latest WorkAgent2 builtin assistant resource root")
+	assistantLocale := flags.String("assistant-locale", "zh-CN", "locale used for builtin assistant rules")
 	runtimeDirectory := flags.String("runtime-dir", "", "stopped SID UserHost runtime directory")
 	dshHome := flags.String("dsh-home", "", "stopped SID Harness DSH_HOME for staged Preset migration")
 	releaseRoot := flags.String("release-skills-root", "", "WorkAgent3 released builtin Skill root")
@@ -41,7 +43,7 @@ func run(arguments []string, output io.Writer) error {
 		return err
 	}
 	if *action == "inventory" {
-		return captureInventory(*legacyDatabase, *inventorySID, *inventoryOutput, output)
+		return captureInventory(*legacyDatabase, *inventorySID, *inventoryOutput, *assistantResources, *assistantLocale, output)
 	}
 	if *action != "migrate" {
 		return errors.New("action must be inventory or migrate")
@@ -173,11 +175,13 @@ func stagePresetProjection(dshHome string, projection skillmigration.PresetProje
 	return file.Close()
 }
 
-func captureInventory(databasePath, sid, outputPath string, output io.Writer) error {
-	if !filepath.IsAbs(databasePath) || !filepath.IsAbs(outputPath) {
-		return errors.New("legacy-db and output must be absolute")
+func captureInventory(databasePath, sid, outputPath, assistantResources, assistantLocale string, output io.Writer) error {
+	if !filepath.IsAbs(databasePath) || !filepath.IsAbs(outputPath) || (assistantResources != "" && !filepath.IsAbs(assistantResources)) {
+		return errors.New("legacy-db, output, and optional assistant-resources must be absolute")
 	}
-	manifest, err := skillmigration.CaptureLegacyInventory(context.Background(), databasePath, sid, time.Now())
+	manifest, err := skillmigration.CaptureLegacyInventoryWithAssistantResources(context.Background(), databasePath, sid, time.Now(), skillmigration.AssistantResourceOptions{
+		Root: assistantResources, Locale: assistantLocale, PublicBaseURL: "/assets/puxin-builtin-assistants",
+	})
 	if err != nil {
 		return err
 	}

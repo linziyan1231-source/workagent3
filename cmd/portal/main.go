@@ -49,6 +49,7 @@ func run() error {
 	notificationsPath := flag.String("notifications-db", "", "Notifications SQLite path (defaults beside Portal database)")
 	auditPath := flag.String("audit-db", "", "Audit SQLite path (defaults beside Portal database)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
+	assistantResources := flag.String("assistant-resources", filepath.Join("third_party", "aionui", "resources", "puxin-builtin-assistants"), "latest WorkAgent2 builtin assistant resource root")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	flag.Parse()
 
@@ -211,6 +212,20 @@ func run() error {
 	if _, err := fs.Stat(web, "index.html"); err != nil {
 		return fmt.Errorf("Web distribution is not built: %w", err)
 	}
+	if !filepath.IsAbs(*assistantResources) {
+		absolute, err := filepath.Abs(*assistantResources)
+		if err != nil {
+			return fmt.Errorf("resolve assistant resources: %w", err)
+		}
+		*assistantResources = absolute
+	}
+	avatars, err := fs.Sub(os.DirFS(*assistantResources), "avatars")
+	if err != nil {
+		return fmt.Errorf("open assistant avatar resources: %w", err)
+	}
+	if _, err := fs.ReadDir(avatars, "."); err != nil {
+		return fmt.Errorf("read assistant avatar resources: %w", err)
+	}
 
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
@@ -227,6 +242,7 @@ func run() error {
 		}
 		root.Handle("/internal/im/employees/", directoryHandler)
 	}
+	root.Handle("/assets/puxin-builtin-assistants/", portal.AssistantAvatarHandler(avatars))
 	root.Handle("/", server.HandlerWithWeb(portal.SPAHandler(web)))
 	httpServer := &http.Server{
 		Addr:              *address,
