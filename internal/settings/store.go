@@ -21,6 +21,11 @@ var allowedKeys = map[string]struct{}{
 	"ui.fontSize.chat":     {},
 	"ui.fontSize.markdown": {},
 	"ui.fontSize.code":     {},
+	"channel.telegram":     {},
+	"channel.lark":         {},
+	"channel.dingtalk":     {},
+	"channel.weixin":       {},
+	"channel.wecom":        {},
 }
 
 type Store struct {

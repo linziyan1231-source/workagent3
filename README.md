@@ -46,13 +46,18 @@ $env:WORKAGENT_IM_ADMIN_TOKEN = '<Gateway admin token, at least 32 bytes>'
 go run ./cmd/im-gateway -portal-url http://127.0.0.1:8080
 ```
 
-Portal needs the same `WORKAGENT_IM_DELIVERY_TOKEN`. Connector credentials are
+Portal needs the same `WORKAGENT_IM_DELIVERY_TOKEN`, plus
+`WORKAGENT_IM_GATEWAY_URL` and the matching `WORKAGENT_IM_ADMIN_TOKEN` for its
+authenticated, SID-injecting ChannelPort proxy. Browser sessions never receive
+that token. Connector credentials are
 regular, non-symlink files under the Gateway `-credential-root`; the Gateway
 database stores only their opaque filenames. The version-pinned Weixin
 connector uses the iLink `getupdates` and `sendmessage` protocols. Its public
-configuration and enable state are managed through the authenticated
-`/v1/connectors` API, while pairing approval validates the target employee SID
-against Portal before any message can reach that employee's Runtime.
+configuration, QR login, enable state, running instance, pairing list, and
+authorized users are isolated by owner SID. The Gateway stores the QR login
+token directly in its private credential directory and returns no token in the
+SSE stream. Pairing approval can only target the Portal-authenticated owner SID
+before any message can reach that employee's Runtime.
 
 Speech input is disabled unless the Portal administrator sets both
 `WORKAGENT_SPEECH_URL` and `WORKAGENT_SPEECH_TOKEN`. The URL points to the

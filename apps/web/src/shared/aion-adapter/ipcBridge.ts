@@ -6,6 +6,9 @@ import type {
 import { mcpPort } from "../../features/mcp/mcpPort.js";
 import { credentialPort } from "../../features/credentials/credentialPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
+import { presetPort } from "../../features/presets/presetPort.js";
+import { channelPort } from "../../features/channels/channelPort.js";
+import type { Assistant } from "@/common/types/agent/assistantTypes";
 
 export interface IDirOrFile {
   name: string;
@@ -80,10 +83,103 @@ const unavailableService = new Proxy(
   { get: () => unavailableCommand },
 ) as Record<string, typeof unavailableCommand>;
 
+const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
+  provider: () => {},
+  invoke,
+});
+
 export const extensions = unavailableService;
 export const webui = unavailableService;
-export const assistants = unavailableService;
-export const channel = unavailableService;
+export const assistants = {
+  list: {
+    provider: () => {},
+    invoke: async (): Promise<Assistant[]> =>
+      (await presetPort.list()).map((preset) => ({
+        id: preset.id,
+        source: preset.source,
+        name: preset.name,
+        name_i18n: {},
+        description: preset.description,
+        description_i18n: {},
+        ...(preset.avatar === null ? {} : { avatar: preset.avatar }),
+        enabled: preset.enabled,
+        sort_order: 0,
+        agent_id: preset.engine,
+        agent: {
+          type: preset.engine === "harness" ? "aionrs" : preset.engine,
+          source: preset.engine === "harness" ? "internal" : "builtin",
+        },
+        enabled_skills: preset.skillIds,
+        custom_skill_names: [],
+        disabled_builtin_skills: [],
+        context: preset.systemPrompt,
+        context_i18n: {},
+        prompts: [],
+        prompts_i18n: {},
+        models: preset.modelId === null ? [] : [preset.modelId],
+        agent_status: "online",
+        team_selectable: false,
+        deletable: preset.source === "user",
+      })),
+  },
+};
+
+const passiveEvent = {
+  on: (_listener: (value: any) => void) => () => undefined,
+  emit: (_value: any) => undefined,
+};
+
+export const channel = {
+  getPluginStatus: command<
+    void,
+    Awaited<ReturnType<typeof channelPort.statuses>>
+  >(async () => channelPort.statuses()),
+  enablePlugin: command<Record<string, any>, any>(async ({ plugin_id }) =>
+    channelPort.toggle(plugin_id, true),
+  ),
+  disablePlugin: command<Record<string, any>, any>(async ({ plugin_id }) =>
+    channelPort.toggle(plugin_id, false),
+  ),
+  testPlugin: command<Record<string, any>, any>(async ({ plugin_id }) =>
+    channelPort.test(plugin_id),
+  ),
+  getPendingPairings: command<
+    void,
+    Awaited<ReturnType<typeof channelPort.pending>>
+  >(async () => channelPort.pending()),
+  getAuthorizedUsers: command<
+    void,
+    Awaited<ReturnType<typeof channelPort.authorized>>
+  >(async () => channelPort.authorized()),
+  approvePairing: command<{ code: string }, void>(async ({ code }) =>
+    channelPort.pairing(code, "approve"),
+  ),
+  rejectPairing: command<{ code: string }, void>(async ({ code }) =>
+    channelPort.pairing(code, "reject"),
+  ),
+  revokeUser: command<{ user_id: string }, void>(async ({ user_id }) =>
+    channelPort.pairing(user_id, "revoke"),
+  ),
+  getPlatformSettings: command<
+    { platform: string },
+    Awaited<ReturnType<typeof channelPort.getSettings>>
+  >(async ({ platform }) => channelPort.getSettings(platform)),
+  setAssistantSetting: command<
+    { platform: string; assistant: { assistant_id: string } },
+    void
+  >(async ({ platform, assistant }) =>
+    channelPort.putSettings(platform, { assistant }),
+  ),
+  setDefaultModelSetting: command<
+    { platform: string; default_model: { id: string; use_model: string } },
+    void
+  >(async ({ platform, default_model }) =>
+    channelPort.putSettings(platform, { default_model }),
+  ),
+  pluginStatusChanged: passiveEvent,
+  pairingRequested: passiveEvent,
+  userAuthorized: passiveEvent,
+};
 export const acpConversation = unavailableService;
 export const dialog = unavailableService;
 export const fs = unavailableService;
@@ -164,11 +260,6 @@ type LegacyPayload = Pick<
   IMcpServer,
   "name" | "description" | "transport" | "original_json" | "builtin"
 >;
-
-const command = <Input, Output>(invoke: (input: Input) => Promise<Output>) => ({
-  provider: () => {},
-  invoke,
-});
 
 export const conversation = {
   confirmMessage: command(

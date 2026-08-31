@@ -24,7 +24,7 @@ func (g *Gateway) Receive(ctx context.Context, message InboundMessage) (Delivery
 	if err := validateInbound(message); err != nil {
 		return DeliveryReceipt{}, err
 	}
-	if _, exists := g.registry.Get(message.ConnectorID); !exists {
+	if !g.registry.Has(message.ConnectorID) {
 		return DeliveryReceipt{}, errors.New("unknown channel connector")
 	}
 	targetSID, err := g.store.AuthorizedSID(ctx, message.ConnectorID, message.ExternalAccountID, message.Sender.ID)

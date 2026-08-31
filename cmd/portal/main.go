@@ -123,6 +123,13 @@ func run() error {
 			return err
 		}
 	}
+	var imGatewayProxy *portal.IMGatewayProxy
+	if endpoint := strings.TrimSpace(os.Getenv("WORKAGENT_IM_GATEWAY_URL")); endpoint != "" {
+		imGatewayProxy, err = portal.NewIMGatewayProxy(endpoint, os.Getenv("WORKAGENT_IM_ADMIN_TOKEN"))
+		if err != nil {
+			return err
+		}
+	}
 
 	registry := runtimeapi.NewRegistry()
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
@@ -132,7 +139,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy})
+	server, err := portal.NewWithModules(data, registry, *secureCookie, portal.Modules{ModelAccess: models, Quota: quotas, Speech: speechProxy, Settings: clientSettings, SkillMarket: market, Collaboration: sharedProjects, SharedProjects: sharedPlatform, ChatForward: chatForwardProxy, IM: imGatewayProxy})
 	if err != nil {
 		return err
 	}

@@ -51,7 +51,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	registry, err := imgateway.NewRegistry(weixinConnector)
+	weixinLogin, err := weixin.NewLoginService(credentials)
+	if err != nil {
+		return err
+	}
+	registry, err := imgateway.NewFactoryRegistry(imgateway.ConnectorRegistration{
+		Descriptor: weixinConnector.Descriptor(),
+		New: func() (imgateway.ChannelConnector, error) {
+			return weixin.New(credentials)
+		},
+		Login: weixinLogin.Login,
+	})
 	if err != nil {
 		return err
 	}

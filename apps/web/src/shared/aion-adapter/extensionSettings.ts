@@ -5,10 +5,18 @@ export function useExtensionSettingsTabs(): IExtensionSettingsTab[] {
   const { t } = useTranslation();
   return [
     {
+      id: "workagent-channels",
+      label: t("settings.channels.title", { defaultValue: "Channels" }),
+      url: "workagent:channels",
+      order: 0,
+      extensionName: "workagent",
+      position: { relativeTo: "system", placement: "before" as const },
+    },
+    {
       id: "workagent-skills",
       label: t("settings.skillsHub.title", { defaultValue: "Skills" }),
       url: "workagent:skills",
-      order: 0,
+      order: 1,
       extensionName: "workagent",
       position: { relativeTo: "system", placement: "before" as const },
     },
@@ -16,7 +24,7 @@ export function useExtensionSettingsTabs(): IExtensionSettingsTab[] {
       id: "workagent-usage",
       label: t("settings.usage", { defaultValue: "Usage" }),
       url: "workagent:usage",
-      order: 1,
+      order: 2,
       extensionName: "workagent",
       position: { relativeTo: "system", placement: "before" as const },
     },
@@ -24,7 +32,7 @@ export function useExtensionSettingsTabs(): IExtensionSettingsTab[] {
       id: "workagent-migration",
       label: t("settings.migration", { defaultValue: "Migration" }),
       url: "workagent:migration",
-      order: 2,
+      order: 3,
       extensionName: "workagent",
       position: { relativeTo: "system", placement: "before" as const },
     },

@@ -163,6 +163,7 @@
       "i18next": ["node_modules/i18next"],
       "json5": ["node_modules/json5"],
       "react-i18next": ["node_modules/react-i18next"],
+      "qrcode.react": ["node_modules/qrcode.react"],
       "react-router-dom": ["node_modules/react-router-dom"],
       "rehype-sanitize": ["node_modules/rehype-sanitize"],
       "swr": ["node_modules/swr"],

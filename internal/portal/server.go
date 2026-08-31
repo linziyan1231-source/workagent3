@@ -63,6 +63,10 @@ type ChatForwardPort interface {
 	ServeChatForward(http.ResponseWriter, *http.Request, contracts.ChatForwardDelegation)
 }
 
+type IMPort interface {
+	ServeIM(http.ResponseWriter, *http.Request, string)
+}
+
 type Modules struct {
 	ModelAccess    ModelAccessPort
 	Quota          QuotaUsagePort
@@ -72,6 +76,7 @@ type Modules struct {
 	Collaboration  CollaborationPort
 	SharedProjects SharedProjectPlatformPort
 	ChatForward    ChatForwardPort
+	IM             IMPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -119,6 +124,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/shared-projects/{id}/ownership", s.requireUser(s.sharedProjectOwnership))
 	mux.HandleFunc("/chatgpt", s.requireUser(s.chatForward))
 	mux.HandleFunc("/chatgpt/", s.requireUser(s.chatForward))
+	mux.HandleFunc("/api/channels/", s.requireUser(s.externalIM))
+	mux.HandleFunc("GET /api/channel/weixin/login", s.requireUser(s.externalWeixinLogin))
 	mux.HandleFunc("GET /api/portal/shared-invites", s.requireUser(s.sharedInvites))
 	mux.HandleFunc("POST /api/portal/shared-invites/{id}/{action}", s.requireUser(s.sharedInviteAction))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
@@ -126,6 +133,20 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
 	mux.Handle("/", web)
 	return s.securityHeaders(s.sameOriginWrites(mux))
+}
+
+func (s *Server) externalWeixinLogin(writer http.ResponseWriter, request *http.Request, user store.User) {
+	clone := request.Clone(request.Context())
+	clone.URL.Path = "/api/channels/connectors/weixin/login"
+	s.externalIM(writer, clone, user)
+}
+
+func (s *Server) externalIM(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.IM == nil {
+		writeError(writer, http.StatusServiceUnavailable, "im_gateway_unavailable")
+		return
+	}
+	s.modules.IM.ServeIM(writer, request, user.SID)
 }
 
 func (s *Server) chatForward(writer http.ResponseWriter, request *http.Request, user store.User) {

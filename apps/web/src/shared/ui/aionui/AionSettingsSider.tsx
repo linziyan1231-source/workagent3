@@ -22,11 +22,7 @@ export function AionSettingsSider({
   return (
     <div className="size-full flex flex-col">
       <div className="flex-1 min-h-0 overflow-hidden">
-        <SettingsSider
-          collapsed={false}
-          tooltipEnabled={false}
-          hiddenBuiltinIds={["webui"]}
-        />
+        <SettingsSider collapsed={false} tooltipEnabled={false} />
       </div>
       <SiderFooter
         isMobile={isMobile}

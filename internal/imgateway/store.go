@@ -29,9 +29,10 @@ type Pairing struct {
 }
 
 type StoredConnector struct {
-	ID      string          `json:"id"`
-	Enabled bool            `json:"enabled"`
-	Config  ConnectorConfig `json:"config"`
+	OwnerSID string          `json:"owner_sid"`
+	ID       string          `json:"id"`
+	Enabled  bool            `json:"enabled"`
+	Config   ConnectorConfig `json:"config"`
 }
 
 type receiptState struct {
@@ -62,22 +63,22 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) PutConnector(ctx context.Context, connector StoredConnector) error {
-	if connector.ID == "" || len(connector.Config.Public) == 0 || connector.Config.CredentialRef == "" {
+	if !strings.HasPrefix(connector.OwnerSID, "S-1-") || connector.ID == "" || len(connector.Config.Public) == 0 || connector.Config.CredentialRef == "" {
 		return errors.New("connector configuration is incomplete")
 	}
 	enabled := 0
 	if connector.Enabled {
 		enabled = 1
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO connector_configs(connector_id, enabled, public_config, credential_ref, updated_at) VALUES(?, ?, ?, ?, ?) ON CONFLICT(connector_id) DO UPDATE SET enabled=excluded.enabled, public_config=excluded.public_config, credential_ref=excluded.credential_ref, updated_at=excluded.updated_at`, connector.ID, enabled, string(connector.Config.Public), connector.Config.CredentialRef, s.now().Unix())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO connector_configs(owner_sid, connector_id, enabled, public_config, credential_ref, updated_at) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(owner_sid, connector_id) DO UPDATE SET enabled=excluded.enabled, public_config=excluded.public_config, credential_ref=excluded.credential_ref, updated_at=excluded.updated_at`, connector.OwnerSID, connector.ID, enabled, string(connector.Config.Public), connector.Config.CredentialRef, s.now().Unix())
 	if err != nil {
 		return fmt.Errorf("store connector configuration: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) Connectors(ctx context.Context) ([]StoredConnector, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT connector_id, enabled, public_config, credential_ref FROM connector_configs ORDER BY connector_id`)
+func (s *Store) Connectors(ctx context.Context, ownerSID string) ([]StoredConnector, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT owner_sid, connector_id, enabled, public_config, credential_ref FROM connector_configs WHERE owner_sid=? ORDER BY connector_id`, ownerSID)
 	if err != nil {
 		return nil, fmt.Errorf("list connector configurations: %w", err)
 	}
@@ -87,7 +88,28 @@ func (s *Store) Connectors(ctx context.Context) ([]StoredConnector, error) {
 		var value StoredConnector
 		var enabled int
 		var public string
-		if err := rows.Scan(&value.ID, &enabled, &public, &value.Config.CredentialRef); err != nil {
+		if err := rows.Scan(&value.OwnerSID, &value.ID, &enabled, &public, &value.Config.CredentialRef); err != nil {
+			return nil, err
+		}
+		value.Enabled = enabled != 0
+		value.Config.Public = []byte(public)
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) AllConnectors(ctx context.Context) ([]StoredConnector, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT owner_sid, connector_id, enabled, public_config, credential_ref FROM connector_configs ORDER BY owner_sid, connector_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list connector configurations: %w", err)
+	}
+	defer rows.Close()
+	var result []StoredConnector
+	for rows.Next() {
+		var value StoredConnector
+		var enabled int
+		var public string
+		if err := rows.Scan(&value.OwnerSID, &value.ID, &enabled, &public, &value.Config.CredentialRef); err != nil {
 			return nil, err
 		}
 		value.Enabled = enabled != 0
@@ -101,11 +123,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS connector_configs (
-  connector_id TEXT PRIMARY KEY,
+	owner_sid TEXT NOT NULL,
+	connector_id TEXT NOT NULL,
   enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
   public_config TEXT NOT NULL,
   credential_ref TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+	updated_at INTEGER NOT NULL,
+	PRIMARY KEY(owner_sid, connector_id)
 );
 CREATE TABLE IF NOT EXISTS pairings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +167,45 @@ CREATE TABLE IF NOT EXISTS inbound_receipts (
 );`)
 	if err != nil {
 		return fmt.Errorf("migrate IM Gateway database: %w", err)
+	}
+	return s.migrateConnectorOwnership(ctx)
+}
+
+func (s *Store) migrateConnectorOwnership(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(connector_configs)`)
+	if err != nil {
+		return err
+	}
+	hasOwner := false
+	for rows.Next() {
+		var ordinal, notNull, primaryKey int
+		var name, valueType string
+		var defaultValue any
+		if err := rows.Scan(&ordinal, &name, &valueType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		hasOwner = hasOwner || name == "owner_sid"
+	}
+	if err := rows.Close(); err != nil || hasOwner {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+ALTER TABLE connector_configs RENAME TO connector_configs_legacy;
+CREATE TABLE connector_configs (
+  owner_sid TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+  public_config TEXT NOT NULL,
+  credential_ref TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(owner_sid, connector_id)
+);
+INSERT INTO connector_configs(owner_sid, connector_id, enabled, public_config, credential_ref, updated_at)
+SELECT '', connector_id, enabled, public_config, credential_ref, updated_at FROM connector_configs_legacy;
+DROP TABLE connector_configs_legacy;`)
+	if err != nil {
+		return fmt.Errorf("migrate connector ownership: %w", err)
 	}
 	return nil
 }
@@ -217,6 +280,41 @@ func (s *Store) Pairings(ctx context.Context) ([]Pairing, error) {
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) PairingsForOwner(ctx context.Context, ownerSID string) ([]Pairing, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.connector_id, p.external_account_id, p.external_user_id, p.display_name, p.target_sid, p.status, p.created_at, p.updated_at FROM pairings p JOIN connector_configs c ON c.connector_id=p.connector_id AND json_extract(c.public_config, '$.account_id')=p.external_account_id WHERE c.owner_sid=? ORDER BY p.updated_at DESC, p.id DESC`, ownerSID)
+	if err != nil {
+		return nil, fmt.Errorf("list owner pairings: %w", err)
+	}
+	defer rows.Close()
+	var result []Pairing
+	for rows.Next() {
+		value, err := scanPairing(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) SetOwnerPairingStatus(ctx context.Context, ownerSID string, id int64, status string) error {
+	if status != "approved" && status != "rejected" && status != "revoked" {
+		return errors.New("invalid pairing status")
+	}
+	targetSID := ""
+	if status == "approved" {
+		targetSID = ownerSID
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE pairings SET status=?, target_sid=?, updated_at=? WHERE id=? AND EXISTS (SELECT 1 FROM connector_configs c WHERE c.owner_sid=? AND c.connector_id=pairings.connector_id AND json_extract(c.public_config, '$.account_id')=pairings.external_account_id)`, status, targetSID, s.now().Unix(), id, ownerSID)
+	if err != nil {
+		return fmt.Errorf("update owner pairing: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) AuthorizedSID(ctx context.Context, connectorID, accountID, externalUserID string) (string, error) {

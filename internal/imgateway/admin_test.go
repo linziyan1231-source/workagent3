@@ -47,6 +47,7 @@ func adminRequest(admin *Admin, method, path, body string, authenticated bool) *
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	if authenticated {
 		request.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef")
+		request.Header.Set("X-WorkAgent-SID", "S-1-5-21-9000")
 	}
 	response := httptest.NewRecorder()
 	admin.ServeHTTP(response, request)
@@ -70,7 +71,7 @@ func TestAdminControlsConnectorAndApprovesOnlyExistingEmployee(t *testing.T) {
 	if response := adminRequest(admin, http.MethodGet, "/v1/connectors", "", false); response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status %d", response.Code)
 	}
-	configured := adminRequest(admin, http.MethodPut, "/v1/connectors/weixin", `{"enabled":true,"public":{"account_id":"bot-1"},"credential_ref":"bot-1.token"}`, true)
+	configured := adminRequest(admin, http.MethodPut, "/v1/connectors/weixin", `{"enabled":true,"public":{"account_id":"account-1"},"credential_ref":"bot-1.token"}`, true)
 	if configured.Code != http.StatusOK || connector.started != 1 || connector.receive == nil {
 		t.Fatalf("configure status=%d starts=%d body=%s", configured.Code, connector.started, configured.Body.String())
 	}
@@ -83,11 +84,7 @@ func TestAdminControlsConnectorAndApprovesOnlyExistingEmployee(t *testing.T) {
 	if len(pairings) != 1 || pairings[0].Status != "pending" {
 		t.Fatalf("pending pairing missing: %#v", pairings)
 	}
-	bad := adminRequest(admin, http.MethodPost, "/v1/pairings/1/approve", `{"target_sid":"S-1-5-21-unknown"}`, true)
-	if bad.Code != http.StatusNotFound {
-		t.Fatalf("unknown employee approval status %d", bad.Code)
-	}
-	approved := adminRequest(admin, http.MethodPost, "/v1/pairings/1/approve", `{"target_sid":"S-1-5-21-9000"}`, true)
+	approved := adminRequest(admin, http.MethodPost, "/v1/pairings/1/approve", ``, true)
 	if approved.Code != http.StatusNoContent {
 		t.Fatalf("approval status %d: %s", approved.Code, approved.Body.String())
 	}
@@ -101,5 +98,44 @@ func TestAdminControlsConnectorAndApprovesOnlyExistingEmployee(t *testing.T) {
 	testResponse := adminRequest(admin, http.MethodPost, "/v1/connectors/weixin/test", "", true)
 	if testResponse.Code != http.StatusOK || !strings.Contains(testResponse.Body.String(), `"healthy":true`) {
 		t.Fatalf("test response %d: %s", testResponse.Code, testResponse.Body.String())
+	}
+}
+
+func TestLoginIsOwnerScopedAndDoesNotExposeCredential(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "im.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	descriptor := (&adminConnector{}).Descriptor()
+	registry, err := NewFactoryRegistry(ConnectorRegistration{
+		Descriptor: descriptor,
+		New: func() (ChannelConnector, error) {
+			return &adminConnector{}, nil
+		},
+		Login: func(_ context.Context, ownerSID string, emit LoginEmitter) (ConnectorConfig, error) {
+			if ownerSID != "S-1-5-21-9000" {
+				t.Fatalf("unexpected login owner %s", ownerSID)
+			}
+			_ = emit("qr", map[string]string{"qrcodeData": "weixin://ticket"})
+			return ConnectorConfig{Public: json.RawMessage(`{"account_id":"account-1"}`), CredentialRef: "private-token.ref"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, _ := New(store, registry, &deliveryStub{})
+	admin, _ := NewAdmin(t.Context(), store, registry, gateway, directoryStub{sid: "S-1-5-21-9000"}, "0123456789abcdef0123456789abcdef")
+	response := adminRequest(admin, http.MethodGet, "/v1/connectors/weixin/login", "", true)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: qr") || !strings.Contains(response.Body.String(), "event: done") || strings.Contains(response.Body.String(), "private-token") {
+		t.Fatalf("unsafe login stream %d: %s", response.Code, response.Body.String())
+	}
+	owned, err := store.Connectors(t.Context(), "S-1-5-21-9000")
+	if err != nil || len(owned) != 1 || !owned[0].Enabled {
+		t.Fatalf("owner connector missing: %#v, %v", owned, err)
+	}
+	other, err := store.Connectors(t.Context(), "S-1-5-21-OTHER")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("connector leaked across owners: %#v, %v", other, err)
 	}
 }

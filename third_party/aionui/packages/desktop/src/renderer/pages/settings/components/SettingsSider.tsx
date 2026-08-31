@@ -66,14 +66,9 @@ type SiderItem = {
   path: string;
 };
 
-const SettingsSider: React.FC<{
-  collapsed?: boolean;
-  tooltipEnabled?: boolean;
-  hiddenBuiltinIds?: readonly (typeof BUILTIN_TAB_IDS)[number][];
-}> = ({
+const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }> = ({
   collapsed = false,
   tooltipEnabled = false,
-  hiddenBuiltinIds = [],
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -112,9 +107,7 @@ const SettingsSider: React.FC<{
     };
 
     // Start with ordered builtin IDs, hiding desktop-only tabs in browser mode
-    const result: SiderItem[] = BUILTIN_TAB_IDS.filter(
-      (id) => (isDesktop || id !== 'pet') && !hiddenBuiltinIds.includes(id)
-    ).map((id) => builtinMap[id]);
+    const result: SiderItem[] = BUILTIN_TAB_IDS.filter((id) => isDesktop || id !== 'pet').map((id) => builtinMap[id]);
 
     // Extension tabs with position anchoring
     const beforeMap = new Map<string, IExtensionSettingsTab[]>();
@@ -188,7 +181,7 @@ const SettingsSider: React.FC<{
     }
 
     return { menus: result, groupHeaderAt: headerAt };
-  }, [t, isDesktop, extensionTabs, resolveExtTabName, hiddenBuiltinIds]);
+  }, [t, isDesktop, extensionTabs, resolveExtTabName]);
 
   const siderTooltipProps = getSiderTooltipProps(tooltipEnabled);
   return (

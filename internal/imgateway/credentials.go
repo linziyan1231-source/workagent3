@@ -47,3 +47,29 @@ func (s *FileCredentialStore) Resolve(_ context.Context, ref string) ([]byte, er
 	}
 	return secret, nil
 }
+
+func (s *FileCredentialStore) Save(_ context.Context, ref string, secret []byte) error {
+	if ref == "" || filepath.Base(ref) != ref || strings.ContainsAny(ref, `/\`) || len(secret) == 0 || len(secret) > 64*1024 {
+		return errors.New("invalid IM credential")
+	}
+	path := filepath.Join(s.root, ref)
+	temporary, err := os.CreateTemp(s.root, ".credential-*")
+	if err != nil {
+		return fmt.Errorf("create private IM credential: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err == nil {
+		_, err = temporary.Write(secret)
+	}
+	if closeErr := temporary.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("write private IM credential: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("activate private IM credential: %w", err)
+	}
+	return nil
+}
