@@ -20,6 +20,7 @@ type WindowsPlatformConfig struct {
 	HarnessArguments     []string
 	Profile              string
 	HarnessProfileSource string
+	ManagedSkillsRoot    string
 	PortalURL            string
 	Limits               winutil.JobLimits
 }

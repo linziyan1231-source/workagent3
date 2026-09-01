@@ -34,6 +34,7 @@ type managerConfig struct {
 	HarnessArguments     []string          `json:"harnessArguments,omitempty"`
 	Profile              string            `json:"profile"`
 	HarnessProfileSource string            `json:"harnessProfileSource"`
+	ManagedSkillsRoot    string            `json:"managedSkillsRoot"`
 	PortalURL            string            `json:"portalUrl"`
 	Limits               winutil.JobLimits `json:"limits"`
 }
@@ -83,7 +84,8 @@ func run() error {
 		CodexCommand: config.CodexCommand,
 		KimiCommand:  config.KimiCommand, HarnessArguments: config.HarnessArguments,
 		Profile: config.Profile, HarnessProfileSource: config.HarnessProfileSource,
-		PortalURL: config.PortalURL, Limits: config.Limits,
+		ManagedSkillsRoot: config.ManagedSkillsRoot,
+		PortalURL:         config.PortalURL, Limits: config.Limits,
 	})
 	if err != nil {
 		return err
@@ -171,7 +173,7 @@ func loadManagerConfig(path string) (managerConfig, error) {
 	if err := decoder.Decode(&config); err != nil {
 		return managerConfig{}, fmt.Errorf("decode Employee Manager configuration: %w", err)
 	}
-	for _, path := range []string{config.DatabasePath, config.DataRootBase, config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource} {
+	for _, path := range []string{config.DatabasePath, config.DataRootBase, config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.ManagedSkillsRoot} {
 		if !filepath.IsAbs(path) {
 			return managerConfig{}, errors.New("Employee Manager paths must be absolute")
 		}

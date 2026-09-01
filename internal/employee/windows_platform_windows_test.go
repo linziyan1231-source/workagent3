@@ -29,6 +29,24 @@ func TestWriteAtomicReplacesProvisionedRuntimeFile(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigProjectsManagedSkillsRelease(t *testing.T) {
+	root := t.TempDir()
+	managedSkillsRoot := filepath.Join(root, "release", "managed-skills")
+	platform := &WindowsPlatform{config: WindowsPlatformConfig{
+		HarnessCommand:    filepath.Join(root, "dsh.exe"),
+		HarnessEntrypoint: filepath.Join("dist", "index.js"),
+		HarnessArguments:  []string{"--verbose"},
+		Profile:           "workagent",
+		PortalURL:         "http://127.0.0.1:8080",
+		ManagedSkillsRoot: managedSkillsRoot,
+	}}
+	spec := RuntimeSpec{SID: "S-1-5-21-1000", DataRoot: filepath.Join(root, "employee")}
+	config := platform.runtimeFileConfig(spec, filepath.Join(root, "registration.token"))
+	if config.ManagedSkillsRoot != managedSkillsRoot {
+		t.Fatalf("managed Skills release was not projected: %+v", config)
+	}
+}
+
 func TestUpdateInstalledLimitsPreservesSIDOwnedRuntimeConfig(t *testing.T) {
 	root := t.TempDir()
 	sid := "S-1-5-21-1000"

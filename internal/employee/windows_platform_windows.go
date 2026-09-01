@@ -34,6 +34,7 @@ type WindowsPlatformConfig struct {
 	HarnessArguments     []string
 	Profile              string
 	HarnessProfileSource string
+	ManagedSkillsRoot    string
 	PortalURL            string
 	Limits               winutil.JobLimits
 }
@@ -41,7 +42,7 @@ type WindowsPlatformConfig struct {
 type WindowsPlatform struct{ config WindowsPlatformConfig }
 
 func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) {
-	if !filepath.IsAbs(config.DataRootBase) || !filepath.IsAbs(config.UserHostExecutable) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.HarnessProfileSource) {
+	if !filepath.IsAbs(config.DataRootBase) || !filepath.IsAbs(config.UserHostExecutable) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.HarnessProfileSource) || !filepath.IsAbs(config.ManagedSkillsRoot) {
 		return nil, errors.New("employee data root, runtime executables, and Harness profile source must be absolute")
 	}
 	if config.Profile == "" || config.PortalURL == "" {
@@ -95,13 +96,7 @@ func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, 
 	if err := writeAtomic(credentialPath, []byte(spec.RegistrationCredential)); err != nil {
 		return fmt.Errorf("write registration credential: %w", err)
 	}
-	config := userhost.FileConfig{
-		SID: spec.SID, DataRoot: spec.DataRoot, HarnessCommand: p.config.HarnessCommand,
-		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
-		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
-		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
-		Limits: p.config.Limits,
-	}
+	config := p.runtimeFileConfig(spec, credentialPath)
 	payload, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
@@ -113,6 +108,17 @@ func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, 
 		Name: taskName(spec.SID), Username: spec.CanonicalUsername, Executable: p.config.UserHostExecutable,
 		ConfigPath: configPath, WorkingDirectory: filepath.Dir(p.config.UserHostExecutable),
 	}, password)
+}
+
+func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath string) userhost.FileConfig {
+	return userhost.FileConfig{
+		SID: spec.SID, DataRoot: spec.DataRoot, HarnessCommand: p.config.HarnessCommand,
+		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
+		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
+		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
+		ManagedSkillsRoot: p.config.ManagedSkillsRoot,
+		Limits:            p.config.Limits,
+	}
 }
 
 func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) error {

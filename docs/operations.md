@@ -36,6 +36,12 @@ remains disabled. `enable` starts the installed UserHost and waits for its
 authenticated Runtime lease before reopening the Portal account. A failed
 health check leaves the employee disabled.
 
+The Employee Manager configuration must set `managedSkillsRoot` to the
+absolute path of the active release's `managed-skills` directory. Provisioning
+and repair copy that immutable release location into the SID-private UserHost
+configuration; UserHost then synchronizes the catalog under the employee SID.
+Do not point it at a developer checkout or an employee-writable directory.
+
 `set-limits` revokes active sessions, stops the Runtime, atomically updates the
 SID-private UserHost configuration, starts a new Job Object, waits for a healthy
 lease, and only then re-enables the account. Invalid limits are rejected before
