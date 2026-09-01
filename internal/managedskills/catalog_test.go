@@ -72,11 +72,28 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		if strings.HasPrefix(entry.ID, "officecli-") && (entry.Enabled || len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "officecli") {
 			t.Fatalf("OfficeCLI skill dependency state = %#v", entry)
 		}
+		if entry.ID == "pdf" && (len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "python") {
+			t.Fatalf("PDF skill dependency state = %#v", entry)
+		}
+		if entry.ID == "pdf" {
+			if _, err := os.Stat(filepath.Join(skills.DirectoryFor(entry), "scripts", "check_bounding_boxes.py")); err != nil {
+				t.Fatalf("PDF validator missing: %v", err)
+			}
+		}
+		if entry.ID == "puxin-help" {
+			help, err := os.ReadFile(filepath.Join(skills.DirectoryFor(entry), "references", "help.zh-CN.md"))
+			if err != nil || !strings.Contains(string(help), "## 文件、Workspace 与产物") || !strings.Contains(string(help), "## 常见恢复顺序") {
+				t.Fatalf("Puxin help reference is incomplete: %v", err)
+			}
+		}
 		if strings.HasPrefix(entry.ID, "wiki-") && (len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "python") {
 			t.Fatalf("Wiki skill dependency state = %#v", entry)
 		}
-		if entry.ID == "weixin-file-send" && entry.Enabled {
-			t.Fatalf("Weixin delivery must remain disabled until its connector protocol is ready: %#v", entry)
+		if entry.ID == "weixin-file-send" {
+			protocol, err := os.ReadFile(filepath.Join(skills.DirectoryFor(entry), "SKILL.md"))
+			if entry.Enabled || err != nil || !strings.Contains(string(protocol), "[WORKAGENT_CHANNEL_SEND]") {
+				t.Fatalf("Weixin delivery must remain disabled with an explicit protocol until its connector is ready: %#v, %v", entry, err)
+			}
 		}
 	}
 	err = filepath.Walk(release, func(path string, info os.FileInfo, walkErr error) error {

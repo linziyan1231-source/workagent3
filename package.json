@@ -20,6 +20,7 @@
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
     "native:task-smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engine-tasks.mjs",
     "skills:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-managed-skills.ps1",
+    "pdf:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-pdf-skill.ps1",
     "dwg:smoke": "node scripts/smoke-dwg-managed-mcp.mjs",
     "professional-database:smoke": "node scripts/smoke-professional-database.mjs",
     "wiki:semantic-smoke": "node scripts/smoke-wiki-semantic.mjs",

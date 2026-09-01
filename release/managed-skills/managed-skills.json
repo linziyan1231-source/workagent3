@@ -27,6 +27,7 @@
       "version": "0.1.0",
       "relativePath": "pdf",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {

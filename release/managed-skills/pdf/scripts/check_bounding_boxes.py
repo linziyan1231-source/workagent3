@@ -11,6 +11,10 @@ Validates:
 
 import json
 import sys
+from typing import TextIO, Union
+
+
+MAX_FAILURE_MESSAGES = 20
 
 
 def boxes_intersect(box1: list, box2: list) -> bool:
@@ -22,48 +26,64 @@ def boxes_intersect(box1: list, box2: list) -> bool:
     left2, top2, right2, bottom2 = box2
 
     # Check for no intersection
-    if right1 < left2 or right2 < left1:
+    if right1 <= left2 or right2 <= left1:
         return False
-    if bottom1 < top2 or bottom2 < top1:
+    if bottom1 <= top2 or bottom2 <= top1:
         return False
 
     return True
 
 
-def check_bounding_boxes(json_path: str) -> bool:
-    """Check bounding boxes for issues."""
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    errors = []
-    MIN_HEIGHT = 15  # Minimum height in pixels for text entry
-
-    form_fields = data.get('form_fields', [])
-
-    for i, field in enumerate(form_fields):
-        label_box = field.get('label_bounding_box')
-        entry_box = field.get('entry_bounding_box')
-        description = field.get('description', f'Field {i}')
-        page = field.get('page_number', 1)
-
-        # Check for intersection
-        if label_box and entry_box and boxes_intersect(label_box, entry_box):
-            errors.append(f"Page {page}: Label and entry boxes intersect for '{description}'")
-
-        # Check minimum height
-        if entry_box:
-            height = entry_box[3] - entry_box[1]  # bottom - top
-            if height < MIN_HEIGHT:
-                errors.append(f"Page {page}: Entry box too short ({height}px < {MIN_HEIGHT}px) for '{description}'")
-
-    if errors:
-        print("Bounding box errors found:")
-        for error in errors:
-            print(f"  ✗ {error}")
-        return False
+def get_bounding_box_messages(source: Union[str, TextIO]) -> list:
+    """Return bounded validation messages for a fields.json path or stream."""
+    if hasattr(source, "read"):
+        data = json.load(source)
     else:
-        print("✓ All bounding boxes are valid")
-        return True
+        with open(source, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+
+    failures = []
+    page_boxes = {}
+    for index, field in enumerate(data.get("form_fields", [])):
+        description = field.get("description", f"Field {index}")
+        page = field.get("page_number", 1)
+        for kind in ("label", "entry"):
+            box = field.get(f"{kind}_bounding_box")
+            if box:
+                page_boxes.setdefault(page, []).append((description, kind, box))
+
+        entry_box = field.get("entry_bounding_box")
+        if entry_box and "entry_text" in field:
+            font_size = field.get("entry_text", {}).get("font_size", 14)
+            height = entry_box[3] - entry_box[1]
+            if height < font_size:
+                failures.append(
+                    f"FAILURE: Page {page} entry height {height}px is below "
+                    f"font size {font_size}px for '{description}'"
+                )
+
+    for page, boxes in page_boxes.items():
+        for left_index, (left_name, left_kind, left_box) in enumerate(boxes):
+            for right_name, right_kind, right_box in boxes[left_index + 1:]:
+                if boxes_intersect(left_box, right_box):
+                    failures.append(
+                        f"FAILURE: Page {page} bounding box intersection between "
+                        f"'{left_name}' {left_kind} and '{right_name}' {right_kind}"
+                    )
+                if len(failures) >= MAX_FAILURE_MESSAGES:
+                    return failures + [
+                        f"Aborting after {MAX_FAILURE_MESSAGES} validation failures"
+                    ]
+
+    return failures or ["SUCCESS: All bounding boxes are valid"]
+
+
+def check_bounding_boxes(json_path: str) -> bool:
+    """Check bounding boxes for issues and print the retained messages."""
+    messages = get_bounding_box_messages(json_path)
+    for message in messages:
+        print(message)
+    return not any("FAILURE" in message for message in messages)
 
 
 if __name__ == "__main__":
