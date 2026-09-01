@@ -17,6 +17,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/winutil"
 )
@@ -34,6 +35,7 @@ type Config struct {
 	Limits             winutil.JobLimits
 	StartupTimeout     time.Duration
 	ManagedSkillsRoot  string
+	ManagedToolsRoot   string
 	ManagedMCPServers  []mcpruntime.Server
 	PlatformURL        string
 	PlatformCredential string
@@ -61,7 +63,8 @@ func New(config Config) (*Supervisor, error) {
 	}
 	if (config.CodexCommand != "" && !filepath.IsAbs(config.CodexCommand)) ||
 		(config.KimiCommand != "" && !filepath.IsAbs(config.KimiCommand)) ||
-		(config.ManagedSkillsRoot != "" && !filepath.IsAbs(config.ManagedSkillsRoot)) {
+		(config.ManagedSkillsRoot != "" && !filepath.IsAbs(config.ManagedSkillsRoot)) ||
+		(config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot)) {
 		return nil, errors.New("native engine commands and managed skills root must be absolute")
 	}
 	if config.StartupTimeout <= 0 {
@@ -83,6 +86,10 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	if err != nil {
 		lock.Close()
 		return runtimeapi.Registration{}, err
+	}
+	if err := nativeauth.Apply(s.config.DataRoot); err != nil {
+		lock.Close()
+		return runtimeapi.Registration{}, fmt.Errorf("apply SID-private native model access: %w", err)
 	}
 	port, err := reserveLoopbackPort()
 	if err != nil {
@@ -109,7 +116,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
-	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand)
+	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot)
 	command.Stdout = harnessLog
 	command.Stderr = harnessLog
 	if err := command.Start(); err != nil {
@@ -264,7 +271,7 @@ func reserveLoopbackPort() (int, error) {
 	return port, nil
 }
 
-func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand string) []string {
+func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot string) []string {
 	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
@@ -292,6 +299,14 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 	}
 	if kimiCommand != "" {
 		environment = append(environment, "WORKAGENT_KIMI_BIN="+kimiCommand)
+	}
+	if managedToolsRoot != "" {
+		for index, value := range environment {
+			if key, current, found := strings.Cut(value, "="); found && strings.EqualFold(key, "PATH") {
+				environment[index] = key + "=" + managedToolsRoot + string(os.PathListSeparator) + current
+				break
+			}
+		}
 	}
 	return environment
 }

@@ -54,7 +54,7 @@ func EnsurePrivateTree(root, userSID string) error {
 		return err
 	}
 	security := windows.SECURITY_INFORMATION(windows.OWNER_SECURITY_INFORMATION | windows.GROUP_SECURITY_INFORMATION | windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION)
-	if err := windows.SetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, security, owner, group, dacl, nil); err != nil {
+	if err := setNamedSecurityInfoWithOwnerPrivilege(root, security, owner, group, dacl); err != nil {
 		return fmt.Errorf("protect private data root: %w", err)
 	}
 	actual, err := windows.GetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)

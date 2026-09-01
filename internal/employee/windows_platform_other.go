@@ -22,10 +22,14 @@ type WindowsPlatformConfig struct {
 	Profile              string
 	HarnessProfileSource string
 	ManagedSkillsRoot    string
+	ManagedToolsRoot     string
 	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
 	Limits               winutil.JobLimits
+	NativeModels         NativeModelProvisioner
 }
+
+type NativeModelProvisioner interface{}
 type WindowsPlatform struct{}
 
 func NewWindowsPlatform(WindowsPlatformConfig) (*WindowsPlatform, error) {

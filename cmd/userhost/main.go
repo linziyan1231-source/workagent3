@@ -40,6 +40,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if config.ManagedToolsRoot != "" {
+		if err := os.Setenv("PATH", config.ManagedToolsRoot+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
+			return fmt.Errorf("configure managed tool path: %w", err)
+		}
+	}
 	credentialBytes, err := os.ReadFile(config.RegistrationCredentialFile)
 	if err != nil {
 		return fmt.Errorf("read runtime registration credential: %w", err)
@@ -56,6 +61,7 @@ func run() error {
 		Arguments: config.HarnessArguments, Profile: config.Profile, Limits: config.Limits,
 		StartupTimeout:     time.Duration(config.StartupTimeoutSeconds) * time.Second,
 		ManagedSkillsRoot:  config.ManagedSkillsRoot,
+		ManagedToolsRoot:   config.ManagedToolsRoot,
 		ManagedMCPServers:  config.ManagedMCPServers,
 		PlatformURL:        config.PortalURL,
 		PlatformCredential: credential,

@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useState } from "react";
 import { ConfigProvider } from "@arco-design/web-react";
 import { LayoutContext } from "@renderer/hooks/context/LayoutContext";
 import { ThemeProvider } from "@renderer/hooks/context/ThemeContext";
+import { PreviewProvider } from "@renderer/pages/conversation/Preview/context/PreviewContext";
 
 /** WorkAgent3 host adapter for the unmodified AionUi Renderer context. */
 export function AionRendererProvider({ children }: { children: ReactNode }) {
@@ -28,11 +29,13 @@ export function AionRendererProvider({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider theme={{ primaryColor: "#4E5969" }}>
       <ThemeProvider>
-        <LayoutContext.Provider
-          value={{ isMobile, siderCollapsed, setSiderCollapsed }}
-        >
-          {children}
-        </LayoutContext.Provider>
+        <PreviewProvider>
+          <LayoutContext.Provider
+            value={{ isMobile, siderCollapsed, setSiderCollapsed }}
+          >
+            {children}
+          </LayoutContext.Provider>
+        </PreviewProvider>
       </ThemeProvider>
     </ConfigProvider>
   );

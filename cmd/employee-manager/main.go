@@ -20,25 +20,28 @@ import (
 	"workagent3/internal/employee"
 	"workagent3/internal/employeemanager"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/modelgateway"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
 type managerConfig struct {
-	DatabasePath         string              `json:"databasePath"`
-	DataRootBase         string              `json:"dataRootBase"`
-	UserHostExecutable   string              `json:"userHostExecutable"`
-	HarnessCommand       string              `json:"harnessCommand"`
-	HarnessEntrypoint    string              `json:"harnessEntrypoint"`
-	CodexCommand         string              `json:"codexCommand,omitempty"`
-	KimiCommand          string              `json:"kimiCommand,omitempty"`
-	HarnessArguments     []string            `json:"harnessArguments,omitempty"`
-	Profile              string              `json:"profile"`
-	HarnessProfileSource string              `json:"harnessProfileSource"`
-	ManagedSkillsRoot    string              `json:"managedSkillsRoot"`
-	ManagedMCPServers    []mcpruntime.Server `json:"managedMcpServers,omitempty"`
-	PortalURL            string              `json:"portalUrl"`
-	Limits               winutil.JobLimits   `json:"limits"`
+	DatabasePath         string               `json:"databasePath"`
+	DataRootBase         string               `json:"dataRootBase"`
+	UserHostExecutable   string               `json:"userHostExecutable"`
+	HarnessCommand       string               `json:"harnessCommand"`
+	HarnessEntrypoint    string               `json:"harnessEntrypoint"`
+	CodexCommand         string               `json:"codexCommand,omitempty"`
+	KimiCommand          string               `json:"kimiCommand,omitempty"`
+	HarnessArguments     []string             `json:"harnessArguments,omitempty"`
+	Profile              string               `json:"profile"`
+	HarnessProfileSource string               `json:"harnessProfileSource"`
+	ManagedSkillsRoot    string               `json:"managedSkillsRoot"`
+	ManagedToolsRoot     string               `json:"managedToolsRoot,omitempty"`
+	ManagedMCPServers    []mcpruntime.Server  `json:"managedMcpServers,omitempty"`
+	PortalURL            string               `json:"portalUrl"`
+	Limits               winutil.JobLimits    `json:"limits"`
+	ModelGateway         *modelgateway.Config `json:"modelGateway,omitempty"`
 }
 
 func main() {
@@ -80,6 +83,13 @@ func run() error {
 		return err
 	}
 	defer data.Close()
+	var nativeModels employee.NativeModelProvisioner
+	if config.ModelGateway != nil {
+		nativeModels, err = modelgateway.NewCLIProxy(*config.ModelGateway)
+		if err != nil {
+			return err
+		}
+	}
 	platform, err := employee.NewWindowsPlatform(employee.WindowsPlatformConfig{
 		DataRootBase: config.DataRootBase, UserHostExecutable: config.UserHostExecutable,
 		HarnessCommand: config.HarnessCommand, HarnessEntrypoint: config.HarnessEntrypoint,
@@ -87,8 +97,9 @@ func run() error {
 		KimiCommand:  config.KimiCommand, HarnessArguments: config.HarnessArguments,
 		Profile: config.Profile, HarnessProfileSource: config.HarnessProfileSource,
 		ManagedSkillsRoot: config.ManagedSkillsRoot,
+		ManagedToolsRoot:  config.ManagedToolsRoot,
 		ManagedMCPServers: config.ManagedMCPServers,
-		PortalURL:         config.PortalURL, Limits: config.Limits,
+		PortalURL:         config.PortalURL, Limits: config.Limits, NativeModels: nativeModels,
 	})
 	if err != nil {
 		return err
@@ -180,6 +191,9 @@ func loadManagerConfig(path string) (managerConfig, error) {
 		if !filepath.IsAbs(path) {
 			return managerConfig{}, errors.New("Employee Manager paths must be absolute")
 		}
+	}
+	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
+		return managerConfig{}, errors.New("managed tools root must be absolute")
 	}
 	if strings.TrimSpace(config.Profile) == "" || strings.TrimSpace(config.PortalURL) == "" {
 		return managerConfig{}, errors.New("Harness profile and Portal URL are required")

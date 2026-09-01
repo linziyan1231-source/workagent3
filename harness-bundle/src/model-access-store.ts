@@ -125,7 +125,7 @@ export class CredentialStatusStore {
         "kimi-native",
         "kimi_native",
         "Kimi",
-        join(this.#nativeHomes.kimi, "kimi.json"),
+        join(this.#nativeHomes.kimi, "config.toml"),
       ),
     ];
   }

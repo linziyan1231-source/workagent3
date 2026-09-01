@@ -20,6 +20,7 @@ import (
 	"unicode/utf16"
 
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
@@ -36,9 +37,15 @@ type WindowsPlatformConfig struct {
 	Profile              string
 	HarnessProfileSource string
 	ManagedSkillsRoot    string
+	ManagedToolsRoot     string
 	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
 	Limits               winutil.JobLimits
+	NativeModels         NativeModelProvisioner
+}
+
+type NativeModelProvisioner interface {
+	Provision(context.Context, string, string) (nativeauth.Bundle, error)
 }
 
 type WindowsPlatform struct{ config WindowsPlatformConfig }
@@ -73,7 +80,7 @@ func (p *WindowsPlatform) EnsureProfile(_ context.Context, account Account, user
 	return winutil.EnsureProfileForAccount(account.SID, username, password)
 }
 
-func (p *WindowsPlatform) EnsurePrivateDataRoot(_ context.Context, account Account) (string, error) {
+func (p *WindowsPlatform) EnsurePrivateDataRoot(ctx context.Context, account Account) (string, error) {
 	root := filepath.Join(p.config.DataRootBase, account.SID)
 	if err := winutil.EnsurePrivateTree(root, account.SID); err != nil {
 		return "", err
@@ -84,6 +91,15 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(_ context.Context, account Accou
 	profileDirectory := filepath.Join(root, "dsh-home", "profiles", p.config.Profile)
 	if err := projectHarnessProfile(p.config.HarnessProfileSource, profileDirectory); err != nil {
 		return "", fmt.Errorf("project Harness profile: %w", err)
+	}
+	if p.config.NativeModels != nil && !nativeauth.Ready(root) {
+		bundle, err := p.config.NativeModels.Provision(ctx, account.Canonical, account.SID)
+		if err != nil {
+			return "", fmt.Errorf("provision native model access: %w", err)
+		}
+		if err := nativeauth.Stage(root, bundle); err != nil {
+			return "", fmt.Errorf("stage SID-private native model access: %w", err)
+		}
 	}
 	return root, nil
 }
@@ -118,7 +134,7 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
 		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
 		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
-		ManagedSkillsRoot: p.config.ManagedSkillsRoot,
+		ManagedSkillsRoot: p.config.ManagedSkillsRoot, ManagedToolsRoot: p.config.ManagedToolsRoot,
 		ManagedMCPServers: expandManagedMCPServers(p.config.ManagedMCPServers, spec),
 		Limits:            p.config.Limits,
 	}

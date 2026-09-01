@@ -25,6 +25,7 @@ type FileConfig struct {
 	Limits                     winutil.JobLimits   `json:"limits"`
 	StartupTimeoutSeconds      int                 `json:"startupTimeoutSeconds,omitempty"`
 	ManagedSkillsRoot          string              `json:"managedSkillsRoot,omitempty"`
+	ManagedToolsRoot           string              `json:"managedToolsRoot,omitempty"`
 	ManagedMCPServers          []mcpruntime.Server `json:"managedMcpServers,omitempty"`
 }
 
@@ -45,6 +46,9 @@ func LoadFileConfig(path string) (FileConfig, error) {
 	}
 	if config.ManagedSkillsRoot != "" && !filepath.IsAbs(config.ManagedSkillsRoot) {
 		return FileConfig{}, errors.New("managed skills root must be absolute")
+	}
+	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
+		return FileConfig{}, errors.New("managed tools root must be absolute")
 	}
 	return config, nil
 }

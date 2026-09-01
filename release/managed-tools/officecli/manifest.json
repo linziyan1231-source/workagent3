@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "OfficeCLI",
+  "version": "1.0.146",
+  "license": "Apache-2.0",
+  "source": "https://github.com/iOfficeAI/OfficeCLI/releases/tag/v1.0.146",
+  "asset": "officecli-win-x64.exe",
+  "sha256": "ad36ca99a50102d8f953e8ed1742fab65c9e201a29733601ea6ca9e676b2eed0"
+}

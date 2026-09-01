@@ -241,7 +241,7 @@ func applyAndVerifySharedACL(path string, directory bool, sddl string) error {
 		return err
 	}
 	security := windows.SECURITY_INFORMATION(windows.OWNER_SECURITY_INFORMATION | windows.GROUP_SECURITY_INFORMATION | windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION)
-	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, security, owner, group, dacl, nil); err != nil {
+	if err := setNamedSecurityInfoWithOwnerPrivilege(path, security, owner, group, dacl); err != nil {
 		return fmt.Errorf("set protected shared ACL: %w", err)
 	}
 	actual, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)

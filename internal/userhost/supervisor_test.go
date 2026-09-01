@@ -13,7 +13,7 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "must-not-leak")
 	t.Setenv("WORKAGENT_TEST_ALLOWED", "must-not-leak")
 	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
-	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`)
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`, `C:\release\managed-tools\officecli`)
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "must-not-leak") {
 		t.Fatal("unrelated service credential inherited")
@@ -32,6 +32,9 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	}
 	if strings.Contains(joined, "KIMI_HOME=") || !strings.Contains(joined, "KIMI_CODE_HOME=") {
 		t.Fatalf("Kimi private home is not configured correctly: %v", environment)
+	}
+	if !strings.Contains(joined, `PATH=C:\release\managed-tools\officecli`) {
+		t.Fatal("managed tools were not prepended to the Harness PATH")
 	}
 }
 

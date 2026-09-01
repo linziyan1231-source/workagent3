@@ -1,0 +1,188 @@
+package nativeauth
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+const bootstrapFileName = "native-model-bootstrap-v1.json"
+
+var apiKeyPattern = regexp.MustCompile(`^cpa_[A-Za-z0-9_-]{20,256}$`)
+
+type Bundle struct {
+	FormatVersion int    `json:"formatVersion"`
+	BaseURL       string `json:"baseUrl"`
+	CodexAPIKey   string `json:"codexApiKey"`
+	KimiAPIKey    string `json:"kimiApiKey"`
+	CodexModel    string `json:"codexModel"`
+	KimiModel     string `json:"kimiModel"`
+}
+
+func (b Bundle) Validate() error {
+	endpoint, err := url.Parse(b.BaseURL)
+	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.Port() == "" || endpoint.Path != "/v1" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return errors.New("native model gateway must be an exact IPv4 loopback /v1 HTTP URL")
+	}
+	if b.FormatVersion != 1 || !apiKeyPattern.MatchString(b.CodexAPIKey) || !apiKeyPattern.MatchString(b.KimiAPIKey) {
+		return errors.New("native model bootstrap contains invalid credentials")
+	}
+	if !validModel(b.CodexModel) || !validModel(b.KimiModel) {
+		return errors.New("native model bootstrap contains an invalid model")
+	}
+	return nil
+}
+
+func Ready(dataRoot string) bool {
+	return regular(filepath.Join(dataRoot, "native", "codex", "auth.json")) &&
+		regular(filepath.Join(dataRoot, "native", "kimi", "config.toml"))
+}
+
+func Stage(dataRoot string, bundle Bundle) error {
+	if err := bundle.Validate(); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		return err
+	}
+	return writePrivate(filepath.Join(dataRoot, "runtime", bootstrapFileName), append(encoded, '\n'))
+}
+
+func Apply(dataRoot string) error {
+	path := filepath.Join(dataRoot, "runtime", bootstrapFileName)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64*1024 {
+		return errors.New("native model bootstrap must be a bounded regular non-symlink file")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	defer clear(payload)
+	var bundle Bundle
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&bundle) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return errors.New("native model bootstrap is invalid")
+	}
+	if err := bundle.Validate(); err != nil {
+		return err
+	}
+	codexHome := filepath.Join(dataRoot, "native", "codex")
+	kimiHome := filepath.Join(dataRoot, "native", "kimi")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(kimiHome, 0o700); err != nil {
+		return err
+	}
+	auth, _ := json.Marshal(map[string]string{"auth_mode": "apikey", "OPENAI_API_KEY": bundle.CodexAPIKey})
+	if err := writePrivate(filepath.Join(codexHome, "auth.json"), append(auth, '\n')); err != nil {
+		return fmt.Errorf("write native Codex authentication: %w", err)
+	}
+	codexConfig := "# CLIProxyAPI settings managed by WorkAgent3.\n" +
+		"openai_base_url = " + strconv.Quote(bundle.BaseURL) + "\n" +
+		"model = " + strconv.Quote(bundle.CodexModel) + "\n" +
+		"cli_auth_credentials_store = \"file\"\n"
+	if err := writePrivate(filepath.Join(codexHome, "config.toml"), []byte(codexConfig)); err != nil {
+		return fmt.Errorf("write native Codex configuration: %w", err)
+	}
+	kimiConfig := kimiConfiguration(bundle)
+	if err := writePrivate(filepath.Join(kimiHome, "config.toml"), []byte(kimiConfig)); err != nil {
+		return fmt.Errorf("write native Kimi configuration: %w", err)
+	}
+	if !Ready(dataRoot) {
+		return errors.New("native model authentication readback failed")
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("consume native model bootstrap: %w", err)
+	}
+	return nil
+}
+
+func kimiConfiguration(bundle Bundle) string {
+	return "# CLIProxyAPI settings managed by WorkAgent3.\n" +
+		"default_model = " + strconv.Quote("kimi-code/"+bundle.KimiModel) + "\n" +
+		"default_thinking = true\n" +
+		"default_yolo = true\n\n" +
+		"[providers.\"managed:kimi-code\"]\n" +
+		"type = \"kimi\"\n" +
+		"base_url = " + strconv.Quote(bundle.BaseURL) + "\n" +
+		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n\n" +
+		"[models.\"kimi-code/" + bundle.KimiModel + "\"]\n" +
+		"provider = \"managed:kimi-code\"\n" +
+		"model = " + strconv.Quote(bundle.KimiModel) + "\n" +
+		"max_context_size = 1048576\n" +
+		"capabilities = [\"thinking\"]\n" +
+		"display_name = \"Kimi\"\n" +
+		"support_efforts = [\"low\", \"high\", \"max\"]\n" +
+		"default_effort = \"low\"\n\n" +
+		"[thinking]\n" +
+		"enabled = true\n\n" +
+		"[services.moonshot_search]\n" +
+		"base_url = " + strconv.Quote(bundle.BaseURL+"/search?model="+bundle.KimiModel) + "\n" +
+		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n\n" +
+		"[services.moonshot_fetch]\n" +
+		"base_url = " + strconv.Quote(bundle.BaseURL+"/fetch?model="+bundle.KimiModel) + "\n" +
+		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n"
+}
+
+func validModel(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("._:-", character)) {
+			return false
+		}
+	}
+	return true
+}
+
+func regular(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
+}
+
+func writePrivate(path string, payload []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".native-auth-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(payload); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		}
+		return os.Rename(temporaryPath, path)
+	}
+	return nil
+}
