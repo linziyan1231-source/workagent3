@@ -13,6 +13,12 @@ test("system port reads status and requests the current SID runtime restart", as
       ),
     )
     .mockResolvedValueOnce(
+      new Response(
+        '{"schemaVersion":1,"platformModules":[],"runtimeModules":[],"runtimeStatus":"unavailable","engines":{}}',
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )
+    .mockResolvedValueOnce(
       new Response('{"reconnect_after_ms":4000}', {
         status: 202,
         headers: { "content-type": "application/json" },
@@ -21,11 +27,13 @@ test("system port reads status and requests the current SID runtime restart", as
   vi.stubGlobal("fetch", fetchMock);
 
   await systemPort.status();
+  await systemPort.capabilities();
   await systemPort.restartRuntime();
 
   expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/system/status");
-  expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/system/runtime/restart");
-  expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+  expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/system/capabilities");
+  expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/system/runtime/restart");
+  expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
     method: "POST",
     credentials: "same-origin",
   });

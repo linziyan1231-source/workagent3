@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { engineCapabilitiesSchema, engineIdSchema } from "./engine.js";
 
 const moduleIdSchema = z
   .string()
@@ -23,6 +24,25 @@ export const moduleManifestSchema = z.object({
 export type ModuleManifest = z.infer<typeof moduleManifestSchema>;
 
 export const moduleManifestListSchema = z.array(moduleManifestSchema);
+
+export const moduleHealthSchema = z.enum([
+  "healthy",
+  "unhealthy",
+  "unavailable",
+  "unknown",
+  "disabled",
+]);
+
+export const capabilityReadModelSchema = z.object({
+  schemaVersion: z.literal(1),
+  platformModules: z.array(
+    z.object({ manifest: moduleManifestSchema, status: moduleHealthSchema }),
+  ),
+  runtimeModules: moduleManifestListSchema,
+  runtimeStatus: moduleHealthSchema.exclude(["disabled"]),
+  engines: z.partialRecord(engineIdSchema, engineCapabilitiesSchema),
+});
+export type CapabilityReadModel = z.infer<typeof capabilityReadModelSchema>;
 
 export function validateModuleGraph(
   manifests: readonly ModuleManifest[],

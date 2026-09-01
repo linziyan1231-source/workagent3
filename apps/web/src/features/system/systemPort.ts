@@ -1,3 +1,7 @@
+import {
+  capabilityReadModelSchema,
+  type CapabilityReadModel,
+} from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
 
 export type SystemStatus = {
@@ -12,6 +16,10 @@ export type SystemStatus = {
 export const systemPort = {
   diagnosticsUrl: "/api/system/diagnostics",
   status: () => requestJson<SystemStatus>("/api/system/status"),
+  capabilities: async (): Promise<CapabilityReadModel> =>
+    capabilityReadModelSchema.parse(
+      await requestJson<unknown>("/api/system/capabilities"),
+    ),
   restartRuntime: () =>
     requestJson<{ reconnect_after_ms: number }>("/api/system/runtime/restart", {
       method: "POST",

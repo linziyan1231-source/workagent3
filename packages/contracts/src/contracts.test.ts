@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capabilityReadModelSchema,
   engineEventSchema,
   moduleManifestListSchema,
   credentialStatusSchema,
@@ -290,5 +291,19 @@ describe("module manifests", () => {
         manifest("workspace-runtime", ["personal-work"]),
       ]),
     ).toThrow("cyclic_module_dependency");
+  });
+
+  it("parses the read-only platform and Runtime capability projection", () => {
+    expect(
+      capabilityReadModelSchema.parse({
+        schemaVersion: 1,
+        platformModules: [
+          { manifest: manifest("portal-auth"), status: "healthy" },
+        ],
+        runtimeModules: [],
+        runtimeStatus: "unavailable",
+        engines: {},
+      }),
+    ).toMatchObject({ schemaVersion: 1, runtimeStatus: "unavailable" });
   });
 });

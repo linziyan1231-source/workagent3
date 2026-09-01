@@ -105,6 +105,9 @@ func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter
 	if data == nil || runtimes == nil {
 		return nil, errors.New("store and runtime router are required")
 	}
+	if err := contracts.ValidateModuleGraph(platformModuleManifests()); err != nil {
+		return nil, err
+	}
 	dummyHash, err := auth.HashPassword([]byte("disabled-account-dummy-password"))
 	if err != nil {
 		return nil, err
@@ -136,6 +139,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/me/notifications/{id}/read", s.requireUser(s.readNotification))
 	mux.HandleFunc("POST /api/portal/me/notifications/{id}/acknowledge", s.requireUser(s.acknowledgeNotification))
 	mux.HandleFunc("GET /api/system/status", s.requireUser(s.systemStatus))
+	mux.HandleFunc("GET /api/system/capabilities", s.requireUser(s.systemCapabilities))
 	mux.HandleFunc("GET /api/system/diagnostics", s.requireUser(s.systemDiagnostics))
 	mux.HandleFunc("POST /api/system/runtime/restart", s.requireUser(s.restartRuntime))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
