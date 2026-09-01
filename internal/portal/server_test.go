@@ -56,13 +56,34 @@ func TestLoginAndRuntimeRoutingUsesAuthenticatedSID(t *testing.T) {
 	}
 }
 
-func TestTwoBrowserUsersCannotRouteToEachOthersRuntime(t *testing.T) {
-	runtimeFor := func(owner string) *httptest.Server {
+func TestTwoBrowserUsersCannotEnumerateOrSendToEachOthersSessions(t *testing.T) {
+	type isolatedRuntime struct {
+		owner     string
+		sessionID string
+		turns     int
+	}
+	runtimeFor := func(runtime *isolatedRuntime) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			json.NewEncoder(writer).Encode(map[string]string{"owner": owner})
+			if request.Header.Get("Authorization") != "Bearer "+runtime.owner+"-token" {
+				t.Errorf("%s Runtime received the wrong credential", runtime.owner)
+			}
+			switch {
+			case request.Method == http.MethodGet && request.URL.Path == "/v1/sessions":
+				json.NewEncoder(writer).Encode([]map[string]string{{"id": runtime.sessionID, "owner": runtime.owner}})
+			case request.Method == http.MethodGet && request.URL.Path == "/v1/sessions/"+runtime.sessionID:
+				json.NewEncoder(writer).Encode(map[string]string{"id": runtime.sessionID, "owner": runtime.owner})
+			case request.Method == http.MethodPost && request.URL.Path == "/v1/sessions/"+runtime.sessionID+"/turns":
+				runtime.turns++
+				writer.WriteHeader(http.StatusAccepted)
+				json.NewEncoder(writer).Encode(map[string]bool{"accepted": true})
+			default:
+				writeError(writer, http.StatusNotFound, "session_not_found")
+			}
 		}))
 	}
-	aliceRuntime, bobRuntime := runtimeFor("alice"), runtimeFor("bob")
+	aliceState := &isolatedRuntime{owner: "alice", sessionID: "session-alice-private"}
+	bobState := &isolatedRuntime{owner: "bob", sessionID: "session-bob-private"}
+	aliceRuntime, bobRuntime := runtimeFor(aliceState), runtimeFor(bobState)
 	defer aliceRuntime.Close()
 	defer bobRuntime.Close()
 	data, err := store.Open(":memory:")
@@ -96,18 +117,43 @@ func TestTwoBrowserUsersCannotRouteToEachOthersRuntime(t *testing.T) {
 		}
 		return response.Result().Cookies()[0]
 	}
-	requestRuntime := func(cookie *http.Cookie) string {
-		request := httptest.NewRequest(http.MethodGet, "/api/runtime/v1/sessions", nil)
+	requestRuntime := func(cookie *http.Cookie, method, path, forgedSID string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, "http://portal.test"+path, strings.NewReader(`{"content":"private turn"}`))
 		request.AddCookie(cookie)
+		if method != http.MethodGet && method != http.MethodHead {
+			request.Header.Set("Origin", "http://portal.test")
+		}
+		if forgedSID != "" {
+			request.Header.Set("X-WorkAgent-SID", forgedSID)
+		}
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		return response.Body.String()
+		return response
 	}
-	if body := requestRuntime(login("alice")); !strings.Contains(body, `"owner":"alice"`) || strings.Contains(body, `"owner":"bob"`) {
+	aliceCookie, bobCookie := login("alice"), login("bob")
+	if body := requestRuntime(aliceCookie, http.MethodGet, "/api/runtime/v1/sessions", "").Body.String(); !strings.Contains(body, aliceState.sessionID) || strings.Contains(body, bobState.sessionID) {
 		t.Fatalf("Alice was routed outside her SID runtime: %s", body)
 	}
-	if body := requestRuntime(login("bob")); !strings.Contains(body, `"owner":"bob"`) || strings.Contains(body, `"owner":"alice"`) {
+	if body := requestRuntime(bobCookie, http.MethodGet, "/api/runtime/v1/sessions", aliceState.owner).Body.String(); !strings.Contains(body, bobState.sessionID) || strings.Contains(body, aliceState.sessionID) {
 		t.Fatalf("Bob was routed outside his SID runtime: %s", body)
+	}
+	for _, attempt := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/runtime/v1/sessions/" + aliceState.sessionID},
+		{http.MethodPost, "/api/runtime/v1/sessions/" + aliceState.sessionID + "/turns"},
+	} {
+		response := requestRuntime(bobCookie, attempt.method, attempt.path, aliceState.owner)
+		if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "session_not_found") {
+			t.Fatalf("Bob cross-SID request %s %s returned %d: %s", attempt.method, attempt.path, response.Code, response.Body.String())
+		}
+	}
+	if aliceState.turns != 0 || bobState.turns != 0 {
+		t.Fatalf("cross-SID send reached a private Session: alice=%d bob=%d", aliceState.turns, bobState.turns)
+	}
+	if response := requestRuntime(aliceCookie, http.MethodPost, "/api/runtime/v1/sessions/"+aliceState.sessionID+"/turns", ""); response.Code != http.StatusAccepted || aliceState.turns != 1 {
+		t.Fatalf("same-SID send failed: status=%d turns=%d body=%s", response.Code, aliceState.turns, response.Body.String())
 	}
 }
 
