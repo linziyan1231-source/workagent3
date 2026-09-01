@@ -60,7 +60,7 @@ it("authenticates, deduplicates, and reuses an inbox session", async () => {
     createInboxHandler("runtime-token", store, {
       executeInbox: async (input) => {
         executions.push(input);
-        return { sessionId: input.sessionId };
+        return { sessionId: input.sessionId, replyText: "hello back" };
       },
     }),
   );
@@ -72,11 +72,15 @@ it("authenticates, deduplicates, and reuses an inbox session", async () => {
     expect((await call(address.port, undefined, delivery)).status).toBe(401);
     const first = await call(address.port, "runtime-token", delivery);
     expect(first.status).toBe(200);
-    expect(JSON.parse(first.body)).toMatchObject({ duplicate: false });
+    expect(JSON.parse(first.body)).toMatchObject({
+      duplicate: false,
+      reply_text: "hello back",
+    });
     const duplicate = await call(address.port, "runtime-token", delivery);
     expect(JSON.parse(duplicate.body)).toMatchObject({
       duplicate: true,
       runtime_session_id: executions[0]!.sessionId,
+      reply_text: "hello back",
     });
     const secondMessage = structuredClone(delivery);
     secondMessage.message.external_message_id = "message-2";

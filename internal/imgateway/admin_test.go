@@ -13,6 +13,7 @@ import (
 type adminConnector struct {
 	started int
 	receive func(context.Context, InboundMessage) error
+	sends   []OutboundMessage
 }
 
 func (*adminConnector) Descriptor() ConnectorDescriptor {
@@ -33,8 +34,9 @@ func (c *adminConnector) Start(_ context.Context, _ ConnectorConfig, receive fun
 	return nil
 }
 func (*adminConnector) Stop(context.Context) error { return nil }
-func (*adminConnector) Send(context.Context, OutboundMessage) (SendReceipt, error) {
-	return SendReceipt{}, nil
+func (c *adminConnector) Send(_ context.Context, message OutboundMessage) (SendReceipt, error) {
+	c.sends = append(c.sends, message)
+	return SendReceipt{ExternalMessageID: "external-reply-1"}, nil
 }
 
 type directoryStub struct{ sid string }
@@ -93,6 +95,9 @@ func TestAdminControlsConnectorAndApprovesOnlyExistingEmployee(t *testing.T) {
 	}
 	if err := connector.receive(t.Context(), first); err != nil || delivery.calls != 1 {
 		t.Fatalf("duplicate delivery err=%v calls=%d", err, delivery.calls)
+	}
+	if len(connector.sends) != 1 || connector.sends[0].Text != "hello back" {
+		t.Fatalf("Runtime reply did not use the active connector instance: %#v", connector.sends)
 	}
 
 	testResponse := adminRequest(admin, http.MethodPost, "/v1/connectors/weixin/test", "", true)

@@ -296,7 +296,7 @@ func (a *Admin) start(config StoredConnector) {
 		return
 	}
 	err = connector.Start(a.runContext, config.Config, func(ctx context.Context, message InboundMessage) error {
-		_, err := a.gateway.Receive(ctx, message)
+		_, err := a.gateway.Receive(ctx, message, connector)
 		return err
 	})
 	state := connectorState{Running: err == nil}

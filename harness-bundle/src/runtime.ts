@@ -358,7 +358,9 @@ export class RuntimeController
     });
   }
 
-  async executeInbox(request: InboxExecution): Promise<{ sessionId: string }> {
+  async executeInbox(
+    request: InboxExecution,
+  ): Promise<{ sessionId: string; replyText?: string }> {
     const messageId = `message-${request.receiptId}`;
     if (
       this.#messages
@@ -439,8 +441,10 @@ export class RuntimeController
       createdAt: now,
     });
     this.#persist(request.sessionId, record);
-    await terminal;
-    return { sessionId: request.sessionId };
+    const completed = await terminal;
+    return completed.result === undefined
+      ? { sessionId: request.sessionId }
+      : { sessionId: request.sessionId, replyText: completed.result };
   }
 
   cancelTeamTask(taskId: string): Promise<void> {

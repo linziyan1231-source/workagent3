@@ -40,6 +40,7 @@ type OutboundMessage struct {
 	Text                   string       `json:"text"`
 	Attachments            []Attachment `json:"attachments"`
 	ReplyCorrelation       string       `json:"reply_correlation,omitempty"`
+	IdempotencyKey         string       `json:"idempotency_key,omitempty"`
 }
 
 type SendReceipt struct {
@@ -84,8 +85,13 @@ type DeliveryReceipt struct {
 	RuntimeSessionID string `json:"runtime_session_id"`
 	RuntimeReceiptID string `json:"runtime_receipt_id"`
 	Duplicate        bool   `json:"duplicate"`
+	ReplyText        string `json:"reply_text,omitempty"`
 }
 
 type RuntimeDeliveryPort interface {
 	Deliver(context.Context, RuntimeDelivery) (DeliveryReceipt, error)
+}
+
+type OutboundReplyPort interface {
+	Send(context.Context, OutboundMessage) (SendReceipt, error)
 }

@@ -9,6 +9,7 @@ type InboxReceipt = {
   conversationKey: string;
   sessionId: string;
   status: "processing" | "delivered" | "failed";
+  replyText: string | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -80,6 +81,7 @@ export class InboxStore {
       conversationKey,
       sessionId,
       status: "processing",
+      replyText: null,
       error: null,
       createdAt: now,
       updatedAt: now,
@@ -89,9 +91,10 @@ export class InboxStore {
     return { receipt: structuredClone(receipt), duplicate: false };
   }
 
-  complete(id: string): InboxReceipt {
+  complete(id: string, replyText?: string): InboxReceipt {
     const receipt = this.#required(id);
     receipt.status = "delivered";
+    receipt.replyText = replyText ?? null;
     receipt.error = null;
     receipt.updatedAt = new Date().toISOString();
     this.#write();

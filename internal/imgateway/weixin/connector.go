@@ -175,7 +175,7 @@ func (c *Connector) Send(ctx context.Context, message imgateway.OutboundMessage)
 	if strings.TrimSpace(message.Text) == "" {
 		return imgateway.SendReceipt{}, errors.New("Weixin text message is empty")
 	}
-	clientID := randomID()
+	clientID := outboundClientID(message.IdempotencyKey)
 	body := sendMessageRequest{Msg: sendMessage{
 		ToUserID: message.ExternalConversationID, ClientID: clientID,
 		MessageType: 2, MessageState: 2,
@@ -473,6 +473,16 @@ func randomID() string {
 		panic(err)
 	}
 	return hex.EncodeToString(value)
+}
+
+func outboundClientID(idempotencyKey string) string {
+	candidate := strings.ReplaceAll(strings.TrimPrefix(idempotencyKey, "inbox-"), "-", "")
+	if len(candidate) == 32 {
+		if _, err := hex.DecodeString(candidate); err == nil {
+			return candidate
+		}
+	}
+	return randomID()
 }
 
 type getUpdatesRequest struct {

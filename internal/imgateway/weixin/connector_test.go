@@ -85,11 +85,12 @@ func TestConnectorPollsNormalizesAndSendsWithPrivateCredential(t *testing.T) {
 	receipt, err := connector.Send(t.Context(), imgateway.OutboundMessage{
 		ConnectorID: "weixin", ExternalAccountID: "bot-1",
 		ExternalConversationID: inbound.ExternalConversationID, Text: "reply",
+		IdempotencyKey: "inbox-11111111-1111-1111-1111-111111111111",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.ExternalMessageID == "" || sent.Msg.ToUserID != inbound.ExternalConversationID || sent.Msg.ContextToken != "reply-context" || sent.Msg.ItemList[0].TextItem.Text != "reply" {
+	if receipt.ExternalMessageID != "11111111111111111111111111111111" || sent.Msg.ClientID != receipt.ExternalMessageID || sent.Msg.ToUserID != inbound.ExternalConversationID || sent.Msg.ContextToken != "reply-context" || sent.Msg.ItemList[0].TextItem.Text != "reply" {
 		t.Fatalf("unexpected send request=%#v receipt=%#v", sent, receipt)
 	}
 	cancel()

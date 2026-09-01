@@ -9,21 +9,29 @@ import (
 	"time"
 )
 
-type connectorStub struct{ id string }
+type connectorStub struct {
+	id        string
+	sends     []OutboundMessage
+	failFirst bool
+}
 
-func (c connectorStub) Descriptor() ConnectorDescriptor {
+func (c *connectorStub) Descriptor() ConnectorDescriptor {
 	return ConnectorDescriptor{ID: c.id, DisplayName: "Test", Version: "1.0.0"}
 }
-func (connectorStub) ValidateConfig(ConnectorConfig) error { return nil }
-func (connectorStub) Test(context.Context, ConnectorConfig) (ConnectorHealth, error) {
+func (*connectorStub) ValidateConfig(ConnectorConfig) error { return nil }
+func (*connectorStub) Test(context.Context, ConnectorConfig) (ConnectorHealth, error) {
 	return ConnectorHealth{Healthy: true}, nil
 }
-func (connectorStub) Start(context.Context, ConnectorConfig, func(context.Context, InboundMessage) error) error {
+func (*connectorStub) Start(context.Context, ConnectorConfig, func(context.Context, InboundMessage) error) error {
 	return nil
 }
-func (connectorStub) Stop(context.Context) error { return nil }
-func (connectorStub) Send(context.Context, OutboundMessage) (SendReceipt, error) {
-	return SendReceipt{}, nil
+func (*connectorStub) Stop(context.Context) error { return nil }
+func (c *connectorStub) Send(_ context.Context, message OutboundMessage) (SendReceipt, error) {
+	c.sends = append(c.sends, message)
+	if c.failFirst && len(c.sends) == 1 {
+		return SendReceipt{}, errors.New("connector offline")
+	}
+	return SendReceipt{ExternalMessageID: "external-reply-1", SentAt: time.Now().UTC()}, nil
 }
 
 type deliveryStub struct {
@@ -38,17 +46,18 @@ func (d *deliveryStub) Deliver(_ context.Context, delivery RuntimeDelivery) (Del
 	if d.failFirst && d.calls == 1 {
 		return DeliveryReceipt{}, errors.New("runtime offline")
 	}
-	return DeliveryReceipt{RuntimeSessionID: "session-1", RuntimeReceiptID: "turn-1"}, nil
+	return DeliveryReceipt{RuntimeSessionID: "session-1", RuntimeReceiptID: "inbox-11111111-1111-1111-1111-111111111111", ReplyText: "hello back"}, nil
 }
 
-func testGateway(t *testing.T, delivery RuntimeDeliveryPort) (*Gateway, *Store) {
+func testGateway(t *testing.T, delivery RuntimeDeliveryPort) (*Gateway, *Store, *connectorStub) {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "im.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	registry, err := NewRegistry(connectorStub{id: "weixin"})
+	connector := &connectorStub{id: "weixin"}
+	registry, err := NewRegistry(connector)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +65,7 @@ func testGateway(t *testing.T, delivery RuntimeDeliveryPort) (*Gateway, *Store) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gateway, store
+	return gateway, store, connector
 }
 
 func message() InboundMessage {
@@ -81,8 +90,8 @@ func approve(t *testing.T, store *Store) {
 
 func TestReceiveRequiresApprovedPairing(t *testing.T) {
 	delivery := &deliveryStub{}
-	gateway, store := testGateway(t, delivery)
-	if _, err := gateway.Receive(t.Context(), message()); !errors.Is(err, ErrPairingNotAuthorized) {
+	gateway, store, connector := testGateway(t, delivery)
+	if _, err := gateway.Receive(t.Context(), message(), connector); !errors.Is(err, ErrPairingNotAuthorized) {
 		t.Fatalf("expected pairing rejection, got %v", err)
 	}
 	if delivery.calls != 0 {
@@ -96,34 +105,41 @@ func TestReceiveRequiresApprovedPairing(t *testing.T) {
 
 func TestDuplicateInboundMessageExecutesOnlyOnce(t *testing.T) {
 	delivery := &deliveryStub{}
-	gateway, store := testGateway(t, delivery)
+	gateway, store, connector := testGateway(t, delivery)
 	approve(t, store)
-	first, err := gateway.Receive(t.Context(), message())
+	first, err := gateway.Receive(t.Context(), message(), connector)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := gateway.Receive(t.Context(), message())
+	second, err := gateway.Receive(t.Context(), message(), connector)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if delivery.calls != 1 || first.Duplicate || !second.Duplicate || second.RuntimeReceiptID != first.RuntimeReceiptID {
 		t.Fatalf("deduplication failed calls=%d first=%#v second=%#v", delivery.calls, first, second)
 	}
+	if len(connector.sends) != 1 {
+		t.Fatalf("duplicate inbound message sent %d replies", len(connector.sends))
+	}
+	reply := connector.sends[0]
+	if reply.Text != "hello back" || reply.ExternalConversationID != "conversation-1" || reply.IdempotencyKey != first.RuntimeReceiptID {
+		t.Fatalf("wrong outbound reply: %#v", reply)
+	}
 }
 
 func TestFailedDeliveryCanRetryAndReusesConversationMapping(t *testing.T) {
 	delivery := &deliveryStub{failFirst: true}
-	gateway, store := testGateway(t, delivery)
+	gateway, store, connector := testGateway(t, delivery)
 	approve(t, store)
-	if _, err := gateway.Receive(t.Context(), message()); err == nil {
+	if _, err := gateway.Receive(t.Context(), message(), connector); err == nil {
 		t.Fatal("expected first delivery failure")
 	}
-	if _, err := gateway.Receive(t.Context(), message()); err != nil {
+	if _, err := gateway.Receive(t.Context(), message(), connector); err != nil {
 		t.Fatal(err)
 	}
 	next := message()
 	next.ExternalMessageID = "message-2"
-	if _, err := gateway.Receive(t.Context(), next); err != nil {
+	if _, err := gateway.Receive(t.Context(), next, connector); err != nil {
 		t.Fatal(err)
 	}
 	if delivery.calls != 3 || delivery.deliveries[2].SessionID != "session-1" {
@@ -131,8 +147,27 @@ func TestFailedDeliveryCanRetryAndReusesConversationMapping(t *testing.T) {
 	}
 }
 
+func TestFailedReplyCanRetryWithStableIdempotencyKey(t *testing.T) {
+	delivery := &deliveryStub{}
+	gateway, store, connector := testGateway(t, delivery)
+	connector.failFirst = true
+	approve(t, store)
+	if _, err := gateway.Receive(t.Context(), message(), connector); err == nil {
+		t.Fatal("expected first reply failure")
+	}
+	if _, err := gateway.Receive(t.Context(), message(), connector); err != nil {
+		t.Fatal(err)
+	}
+	if delivery.calls != 2 || len(connector.sends) != 2 {
+		t.Fatalf("retry did not traverse the persisted Runtime reply: deliveries=%d sends=%d", delivery.calls, len(connector.sends))
+	}
+	if connector.sends[0].IdempotencyKey != connector.sends[1].IdempotencyKey {
+		t.Fatalf("reply retry changed idempotency key: %#v", connector.sends)
+	}
+}
+
 func TestRegistryRejectsDuplicateConnectorAndDoesNotExposeSecrets(t *testing.T) {
-	if _, err := NewRegistry(connectorStub{id: "weixin"}, connectorStub{id: "weixin"}); err == nil {
+	if _, err := NewRegistry(&connectorStub{id: "weixin"}, &connectorStub{id: "weixin"}); err == nil {
 		t.Fatal("duplicate connector was accepted")
 	}
 	config := ConnectorConfig{Public: json.RawMessage(`{"base_url":"https://example.test"}`), CredentialRef: "vault:weixin/account-1"}

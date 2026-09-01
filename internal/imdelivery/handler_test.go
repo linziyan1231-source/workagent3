@@ -20,7 +20,7 @@ func TestHandlerAuthenticatesAndRoutesOnlyToTargetSIDRuntime(t *testing.T) {
 		body, _ := io.ReadAll(request.Body)
 		received = string(body)
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"runtime_session_id":"session-1","runtime_receipt_id":"turn-1","duplicate":false}`))
+		_, _ = writer.Write([]byte(`{"runtime_session_id":"session-1","runtime_receipt_id":"turn-1","duplicate":false,"reply_text":"hello back"}`))
 	}))
 	defer runtime.Close()
 	registry := runtimeapi.NewRegistry()
@@ -37,7 +37,7 @@ func TestHandlerAuthenticatesAndRoutesOnlyToTargetSIDRuntime(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(received, `"external_message_id":"message-1"`) || strings.Contains(received, "target_sid") {
+	if response.Code != http.StatusOK || !strings.Contains(received, `"external_message_id":"message-1"`) || strings.Contains(received, "target_sid") || !strings.Contains(response.Body.String(), `"reply_text":"hello back"`) {
 		t.Fatalf("delivery status=%d runtime body=%s response=%s", response.Code, received, response.Body.String())
 	}
 

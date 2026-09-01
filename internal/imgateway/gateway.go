@@ -20,9 +20,12 @@ func New(store *Store, registry *Registry, runtime RuntimeDeliveryPort) (*Gatewa
 	return &Gateway{store: store, registry: registry, runtime: runtime}, nil
 }
 
-func (g *Gateway) Receive(ctx context.Context, message InboundMessage) (DeliveryReceipt, error) {
+func (g *Gateway) Receive(ctx context.Context, message InboundMessage, replies OutboundReplyPort) (DeliveryReceipt, error) {
 	if err := validateInbound(message); err != nil {
 		return DeliveryReceipt{}, err
+	}
+	if replies == nil {
+		return DeliveryReceipt{}, errors.New("outbound reply port is required")
 	}
 	if !g.registry.Has(message.ConnectorID) {
 		return DeliveryReceipt{}, errors.New("unknown channel connector")
@@ -55,6 +58,20 @@ func (g *Gateway) Receive(ctx context.Context, message InboundMessage) (Delivery
 		err = errors.New("runtime returned an incomplete delivery receipt")
 		_ = g.store.FailReceipt(ctx, message, err)
 		return DeliveryReceipt{}, err
+	}
+	if strings.TrimSpace(receipt.ReplyText) != "" {
+		_, err = replies.Send(ctx, OutboundMessage{
+			ConnectorID:            message.ConnectorID,
+			ExternalAccountID:      message.ExternalAccountID,
+			ExternalConversationID: message.ExternalConversationID,
+			Text:                   receipt.ReplyText,
+			ReplyCorrelation:       message.ReplyCorrelation,
+			IdempotencyKey:         receipt.RuntimeReceiptID,
+		})
+		if err != nil {
+			_ = g.store.FailReceipt(ctx, message, err)
+			return DeliveryReceipt{}, fmt.Errorf("send external reply: %w", err)
+		}
 	}
 	if err := g.store.CompleteReceipt(ctx, message, targetSID, receipt); err != nil {
 		return DeliveryReceipt{}, err

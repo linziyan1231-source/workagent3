@@ -21,7 +21,9 @@ export type InboxExecution = {
 };
 
 export type InboxRunnerPort = {
-  executeInbox(input: InboxExecution): Promise<{ sessionId: string }>;
+  executeInbox(
+    input: InboxExecution,
+  ): Promise<{ sessionId: string; replyText?: string }>;
 };
 
 const json = (response: ServerResponse, status: number, value: unknown) => {
@@ -74,6 +76,10 @@ export const createInboxHandler =
           runtime_session_id: begun.receipt.sessionId,
           runtime_receipt_id: begun.receipt.id,
           duplicate: true,
+          ...(begun.receipt.replyText === null ||
+          begun.receipt.replyText === undefined
+            ? {}
+            : { reply_text: begun.receipt.replyText }),
         });
       const result = await runner.executeInbox({
         receiptId: begun.receipt.id,
@@ -89,11 +95,14 @@ export const createInboxHandler =
             : { contentBase64: attachment.content_base64 }),
         })),
       });
-      store.complete(begun.receipt.id);
+      store.complete(begun.receipt.id, result.replyText);
       return json(response, 200, {
         runtime_session_id: result.sessionId,
         runtime_receipt_id: begun.receipt.id,
         duplicate: false,
+        ...(result.replyText === undefined
+          ? {}
+          : { reply_text: result.replyText }),
       });
     } catch (error) {
       if (begun !== undefined && !begun.duplicate)
