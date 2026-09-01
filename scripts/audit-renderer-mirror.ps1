@@ -1,6 +1,8 @@
 param(
     [string]$Source = 'C:\projects\WorkAgent2\.tools\worktrees\runtime-auth-deploy-ui\packages\desktop\src\renderer',
-    [string]$Target = (Join-Path $PSScriptRoot '..\third_party\aionui\packages\desktop\src\renderer')
+    [string]$Target = (Join-Path $PSScriptRoot '..\third_party\aionui\packages\desktop\src\renderer'),
+    [string]$ExpectedSourceCommit = '0a5e806e9e495323368fb3b5b5f359c5ff8a9f4b',
+    [string]$ExpectedSourceBranch = 'codex/dwg-managed-mcp-web77'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +60,23 @@ function Test-FileContentEqual([string]$Left, [string]$Right) {
 
 $sourceRoot = Resolve-Tree $Source
 $targetRoot = Resolve-Tree $Target
+$sourceCommit = (& git -C $sourceRoot rev-parse HEAD 2>$null).Trim()
+$sourceBranch = (& git -C $sourceRoot branch --show-current 2>$null).Trim()
+$sourceRendererCommit = (& git -C $sourceRoot log -1 --format=%H -- . 2>$null).Trim()
+$latestRendererCommit = (& git -C $sourceRoot log --all -1 --format=%H -- . 2>$null).Trim()
+$sourceRendererStatus = @(& git -C $sourceRoot status --short -- . 2>$null)
+if ($sourceCommit -ne $ExpectedSourceCommit) {
+    throw "Renderer source snapshot changed: expected $ExpectedSourceCommit, got $sourceCommit"
+}
+if ($sourceBranch -ne $ExpectedSourceBranch) {
+    throw "Renderer source branch changed: expected $ExpectedSourceBranch, got $sourceBranch"
+}
+if ($sourceRendererCommit -ne $latestRendererCommit) {
+    throw "Renderer source is not the latest local Renderer tree: source $sourceRendererCommit, latest $latestRendererCommit"
+}
+if ($sourceRendererStatus.Count -ne 0) {
+    throw "Renderer source contains uncommitted changes: $($sourceRendererStatus -join ', ')"
+}
 $sourceFiles = Get-TreeFiles $sourceRoot
 $targetFiles = Get-TreeFiles $targetRoot
 $relativePaths = @($sourceFiles.Keys + $targetFiles.Keys | Sort-Object -Unique)
@@ -76,10 +95,13 @@ foreach ($relativePath in $relativePaths) {
 }
 
 $unexpected = @($deltas | Where-Object { $_.path -notin $allowedDeltas })
-$sourceCommit = (& git -C $sourceRoot rev-parse --short HEAD 2>$null)
 $result = [ordered]@{
     source = $sourceRoot
-    source_commit = if ($LASTEXITCODE -eq 0) { $sourceCommit.Trim() } else { $null }
+    source_commit = $sourceCommit
+    source_branch = $sourceBranch
+    source_renderer_commit = $sourceRendererCommit
+    latest_local_renderer_commit = $latestRendererCommit
+    source_renderer_clean = $true
     target = $targetRoot
     source_file_count = $sourceFiles.Count
     target_file_count = $targetFiles.Count

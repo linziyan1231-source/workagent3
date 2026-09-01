@@ -109,6 +109,10 @@ describe("Web feature boundaries", () => {
     expect(mirrorAudit).toContain(
       String.raw`C:\projects\WorkAgent2\.tools\worktrees\runtime-auth-deploy-ui\packages\desktop\src\renderer`,
     );
-    expect(mirrorAudit).not.toContain(String.raw`C:\projects\AionUi`);
+    expect(mirrorAudit).toContain("0a5e806e9e495323368fb3b5b5f359c5ff8a9f4b");
+    expect(mirrorAudit).toContain("codex/dwg-managed-mcp-web77");
+    expect(mirrorAudit).toContain("sourceRendererCommit");
+    expect(mirrorAudit).toContain("latestRendererCommit");
+    expect(mirrorAudit).toContain("sourceRendererStatus");
   });
 });
