@@ -93,4 +93,22 @@ describe("Web feature boundaries", () => {
       'find: "../viewers/PDFViewer",\n        replacement: adapter("BrowserPdfViewer.tsx")',
     );
   });
+
+  it("pins the Renderer mirror to the latest managed WorkAgent2 Web78 tree", () => {
+    const mirrorAudit = readFileSync(
+      join(
+        sourceRoot,
+        "..",
+        "..",
+        "..",
+        "scripts",
+        "audit-renderer-mirror.ps1",
+      ),
+      "utf8",
+    );
+    expect(mirrorAudit).toContain(
+      String.raw`C:\projects\WorkAgent2\.tools\worktrees\runtime-auth-deploy-ui\packages\desktop\src\renderer`,
+    );
+    expect(mirrorAudit).not.toContain(String.raw`C:\projects\AionUi`);
+  });
 });
