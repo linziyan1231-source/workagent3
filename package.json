@@ -21,6 +21,7 @@
     "dwg:smoke": "node scripts/smoke-dwg-managed-mcp.mjs",
     "professional-database:smoke": "node scripts/smoke-professional-database.mjs",
     "wiki:semantic-smoke": "node scripts/smoke-wiki-semantic.mjs",
+    "release:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-release-lifecycle.ps1",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm --filter @workagent/contracts build && pnpm -r --if-present typecheck"
   },

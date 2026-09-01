@@ -218,6 +218,18 @@ printing native credentials.
 
 ## Component release and rollback
 
+Before operating a real release root, run the local production-CLI lifecycle
+gate:
+
+```powershell
+pnpm release:smoke
+```
+
+It uses real temporary artifacts and SQLite stores, waits through the same
+mandatory 60-second notification window, verifies activated component pointers
+and immutable bytes, rolls the activation journal back, and removes its
+temporary release root.
+
 The release controller accepts only these independently activatable components:
 
 - `web`
