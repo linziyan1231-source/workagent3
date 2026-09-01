@@ -135,6 +135,19 @@ pnpm wiki:semantic-smoke
 Failed semantic runs retain their temporary evidence path for diagnosis; only
 successful runs are automatically removed.
 
+Run the Harness restart-recovery gate after changing its Profile, persistence,
+Workspace, attachment, or Artifact components:
+
+```powershell
+pnpm profile:recovery-smoke
+```
+
+The gate builds and installs the formal Profile into a fresh SID-style temporary
+DSH Home, creates a Workspace and Harness Session with an attachment and an
+Artifact, terminates that Harness process, starts a new Harness against the same
+private Home, and requires the Session and both assets to be readable. It then
+removes only its validated temporary root.
+
 `set-limits` revokes active sessions, stops the Runtime, atomically updates the
 SID-private UserHost configuration, starts a new Job Object, waits for a healthy
 lease, and only then re-enables the account. Invalid limits are rejected before

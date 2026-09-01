@@ -1,6 +1,14 @@
+param(
+    [string]$DestinationHome
+)
+
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$profileHome = Join-Path $repositoryRoot '.cache\dsh-home'
+$profileHome = if ([string]::IsNullOrWhiteSpace($DestinationHome)) {
+    Join-Path $repositoryRoot '.cache\dsh-home'
+} else {
+    [System.IO.Path]::GetFullPath($DestinationHome)
+}
 $profileDirectory = Join-Path $profileHome 'profiles\workagent'
 $bundleDirectory = Join-Path $profileHome 'harness-bundle'
 $contractsDirectory = Join-Path $profileHome 'contracts'

@@ -5,15 +5,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const home = fileURLToPath(new URL("../.cache/dsh-home", import.meta.url));
+const home =
+  process.env.WORKAGENT_SMOKE_DSH_HOME ??
+  fileURLToPath(new URL("../.cache/dsh-home", import.meta.url));
 const dsh = fileURLToPath(
   new URL("../node_modules/@deepseek-ai/dsh/lib/bin.js", import.meta.url),
 );
 const token = "workagent-profile-smoke-token";
 const nativeHome = join(home, "native-smoke");
-const workspaceRoot = fileURLToPath(
-  new URL("../.cache/workspaces", import.meta.url),
-);
+const workspaceRoot =
+  process.env.WORKAGENT_SMOKE_WORKSPACE_ROOT ??
+  fileURLToPath(new URL("../.cache/workspaces", import.meta.url));
 await mkdir(join(nativeHome, "codex"), { recursive: true });
 await mkdir(join(nativeHome, "kimi"), { recursive: true });
 await mkdir(workspaceRoot, { recursive: true });
