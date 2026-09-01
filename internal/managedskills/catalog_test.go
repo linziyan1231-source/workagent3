@@ -72,6 +72,9 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		if strings.HasPrefix(entry.ID, "officecli-") && (entry.Enabled || len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "officecli") {
 			t.Fatalf("OfficeCLI skill dependency state = %#v", entry)
 		}
+		if strings.HasPrefix(entry.ID, "wiki-") && (len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "python") {
+			t.Fatalf("Wiki skill dependency state = %#v", entry)
+		}
 		if entry.ID == "weixin-file-send" && entry.Enabled {
 			t.Fatalf("Weixin delivery must remain disabled until its connector protocol is ready: %#v", entry)
 		}

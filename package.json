@@ -17,6 +17,7 @@
     "mcp:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-mcp-engines.mjs",
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
     "native:task-smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engine-tasks.mjs",
+    "skills:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-managed-skills.ps1",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm --filter @workagent/contracts build && pnpm -r --if-present typecheck"
   },

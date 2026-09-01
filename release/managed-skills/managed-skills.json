@@ -115,6 +115,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-dream",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {
@@ -125,6 +126,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-edit",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {
@@ -135,6 +137,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-ingest",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {
@@ -145,6 +148,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-lint",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {
@@ -155,6 +159,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-query",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     },
     {
@@ -165,6 +170,7 @@
       "relativePath": "llm-wiki",
       "skillSubdirectory": "skills/wiki-setup",
       "enabledByDefault": true,
+      "requiredCommands": ["python"],
       "requiredMcpServerIds": []
     }
   ]
