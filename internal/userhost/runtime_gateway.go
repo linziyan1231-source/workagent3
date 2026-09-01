@@ -1,6 +1,7 @@
 package userhost
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -76,6 +77,14 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		catalog.Close()
 		return nil, err
 	}
+	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
+	if err := providerPublisher.Publish(context.Background()); err != nil {
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
 	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	if err := skillPublisher.Publish(context.Background()); err != nil {
 		migration.Close()
@@ -143,6 +152,7 @@ type runtimeCredentialCatalog interface {
 	credentialCatalog
 	projectionCredentialResolver
 	Put(context.Context, credentialbroker.Input) (credentialbroker.Metadata, error)
+	Resolve(context.Context, string) ([]byte, error)
 	Revoke(context.Context, string) error
 }
 
@@ -156,12 +166,16 @@ func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials
 
 func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, restart func(), assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/system/status", runtimeSystemStatus(target, token))
 	mux.HandleFunc("POST /v1/system/restart", runtimeSystemRestart(restart))
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
 	mux.HandleFunc("POST /v1/credentials", createCredential(credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", revokeCredential(credentials, publisher))
+	mux.HandleFunc("PUT /v1/provider-credentials/harness", putManagedProviderCredential(credentials, providerPublisher))
+	mux.HandleFunc("DELETE /v1/provider-credentials/harness", revokeManagedProviderCredential(credentials, providerPublisher))
+	mux.HandleFunc("POST /v1/provider-credentials/harness/test", testManagedProvider(providerPublisher))
 	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog, credentials))
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
@@ -360,6 +374,68 @@ func createCredential(credentials runtimeCredentialCatalog) http.HandlerFunc {
 			return
 		}
 		writeRuntimeJSON(writer, http.StatusCreated, metadata)
+	}
+}
+
+func putManagedProviderCredential(credentials runtimeCredentialCatalog, publisher providerCredentialPublisher) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		secret, err := io.ReadAll(io.LimitReader(request.Body, (32*1024)+1))
+		if err != nil || len(secret) == 0 || len(secret) > 32*1024 || bytes.IndexByte(secret, 0) >= 0 {
+			clearBytes(secret)
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_provider_credential")
+			return
+		}
+		metadata, err := credentials.Put(request.Context(), credentialbroker.Input{
+			ID: managedHarnessProviderCredentialID, Kind: credentialbroker.KindProvider, Label: "Harness managed Provider", Secret: secret, State: credentialbroker.StateReady,
+		})
+		clearBytes(secret)
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadRequest, "invalid_provider_credential")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, metadata)
+	}
+}
+
+func revokeManagedProviderCredential(credentials runtimeCredentialCatalog, publisher providerCredentialPublisher) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		metadata, err := credentials.Metadata(request.Context(), managedHarnessProviderCredentialID)
+		if errors.Is(err, credentialbroker.ErrNotFound) {
+			if err := publisher.Publish(request.Context()); err != nil {
+				writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
+				return
+			}
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err != nil || metadata.Kind != credentialbroker.KindProvider {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		if err := credentials.Revoke(request.Context(), managedHarnessProviderCredentialID); err != nil {
+			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
+			return
+		}
+		if err := publisher.Publish(request.Context()); err != nil {
+			writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func testManagedProvider(tester providerHealthTester) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		health, err := tester.Test(request.Context())
+		if err != nil {
+			writeRuntimeError(writer, http.StatusBadGateway, "provider_health_failed")
+			return
+		}
+		writeRuntimeJSON(writer, http.StatusOK, health)
 	}
 }
 

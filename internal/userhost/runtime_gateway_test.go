@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -191,6 +192,91 @@ func TestRuntimeGatewayCreatesAndRevokesMCPSecrets(t *testing.T) {
 	}
 	if _, err := credentials.Resolve(context.Background(), metadata.ID); !errors.Is(err, credentialbroker.ErrCredentialExpired) {
 		t.Fatalf("revoked credential remains resolvable: %v", err)
+	}
+}
+
+func TestRuntimeGatewayProjectsManagedProviderCredentialWithoutReturningSecret(t *testing.T) {
+	catalog, err := mcpruntime.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	credentials := openGatewayCredentials(t)
+	type projection struct {
+		method, authorization, secret string
+	}
+	projected := make(chan projection, 2)
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/internal/provider-credentials/deepseek-official" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		body, _ := io.ReadAll(request.Body)
+		projected <- projection{method: request.Method, authorization: request.Header.Get("Authorization"), secret: string(body)}
+		clearBytes(body)
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer downstream.Close()
+	target, _ := url.Parse(downstream.URL)
+	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "runtime-token")
+
+	put := httptest.NewRequest(http.MethodPut, "/v1/provider-credentials/harness", strings.NewReader("private-provider-key"))
+	put.Header.Set("Authorization", "Bearer runtime-token")
+	putResponse := httptest.NewRecorder()
+	handler.ServeHTTP(putResponse, put)
+	if putResponse.Code != http.StatusOK || strings.Contains(putResponse.Body.String(), "private-provider-key") {
+		t.Fatalf("Provider credential response %d: %s", putResponse.Code, putResponse.Body.String())
+	}
+	first := <-projected
+	if first.method != http.MethodPut || first.authorization != "Bearer runtime-token" || first.secret != "private-provider-key" {
+		t.Fatalf("Provider projection = %#v", first)
+	}
+	secret, err := credentials.Resolve(context.Background(), managedHarnessProviderCredentialID)
+	if err != nil || string(secret) != "private-provider-key" {
+		t.Fatalf("protected Provider credential = %q, %v", secret, err)
+	}
+	clearBytes(secret)
+
+	revoke := httptest.NewRequest(http.MethodDelete, "/v1/provider-credentials/harness", nil)
+	revoke.Header.Set("Authorization", "Bearer runtime-token")
+	revokeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(revokeResponse, revoke)
+	if revokeResponse.Code != http.StatusNoContent {
+		t.Fatalf("Provider revoke response %d: %s", revokeResponse.Code, revokeResponse.Body.String())
+	}
+	second := <-projected
+	if second.method != http.MethodDelete || second.authorization != "Bearer runtime-token" || second.secret != "" {
+		t.Fatalf("Provider revoke projection = %#v", second)
+	}
+	if _, err := credentials.Resolve(context.Background(), managedHarnessProviderCredentialID); !errors.Is(err, credentialbroker.ErrCredentialExpired) {
+		t.Fatalf("revoked Provider credential remains resolvable: %v", err)
+	}
+}
+
+func TestRuntimeGatewayRunsManagedProviderHealthThroughPrivateHarnessRoute(t *testing.T) {
+	catalog, err := mcpruntime.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/internal/providers/deepseek-official/test" || request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer runtime-token" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":"healthy","message":"provider_request_succeeded","elapsed_ms":17}`))
+	}))
+	defer downstream.Close()
+	target, _ := url.Parse(downstream.URL)
+	handler := newRuntimeGatewayHandler(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "runtime-token")
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/provider-credentials/harness/test", nil)
+	request.Header.Set("Authorization", "Bearer runtime-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"healthy"`) || !strings.Contains(response.Body.String(), `"elapsed_ms":17`) {
+		t.Fatalf("Provider health response %d: %s", response.Code, response.Body.String())
 	}
 }
 

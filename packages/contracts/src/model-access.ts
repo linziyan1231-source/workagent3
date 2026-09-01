@@ -56,6 +56,13 @@ export const credentialStatusSchema = z.object({
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 export const credentialStatusListSchema = z.array(credentialStatusSchema);
 
+export const providerHealthSchema = z.object({
+  status: z.enum(["healthy", "unhealthy"]),
+  message: z.string().min(1).max(256),
+  elapsed_ms: z.number().int().nonnegative(),
+});
+export type ProviderHealth = z.infer<typeof providerHealthSchema>;
+
 export const credentialCreateSchema = z
   .object({
     kind: z.enum(["mcp_header", "mcp_env"]),

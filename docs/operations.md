@@ -212,6 +212,40 @@ administrator session and same-origin request; Portal forwards them only to the
 authenticated loopback Employee Manager. Permanent deletion additionally
 requires the JSON confirmation value to exactly equal `DELETE <username>`.
 
+## Managed Provider credential and health
+
+Employees enter the DeepSeek Harness credential through the formal Web 78
+Model Settings editor. The browser sends it once to that employee's Runtime;
+the Runtime seals it in the SID Credential Broker with DPAPI and returns only
+credential metadata. UserHost projects the value over the authenticated
+loopback Harness Port after every start and on rotation or revocation.
+
+The WorkAgent Profile disables DSH's file-backed credential provider. The
+replacement implements the official `ctx.credentials` contract but retains
+projected values only in process memory, so a Provider edit must not create
+`$DSH_HOME/.credentials.yaml`. Do not copy an old WorkAgent2 ChatGPT/Kimi proxy
+key into the DeepSeek reference: those are separate native Engine credentials,
+not `DEEPSEEK_API_KEY`.
+
+The original Model Settings health action makes a bounded one-token request
+through the official `deepseek-official` adapter. It returns only stable health,
+diagnostic code, and elapsed time. Before using its redacted run ID as release
+readiness evidence, verify the UI reports `provider_request_succeeded` with the
+employee's real credential.
+
+Run the credential-free protocol gate after Profile or credential changes:
+
+```powershell
+pnpm provider:projection-smoke
+```
+
+This isolated gate starts the formal Profile and a local DeepSeek-compatible
+fixture, proves the private credential projection and official adapter stream,
+checks that status never includes the key or writes a DSH credential file, and
+then revokes the projection. It proves the boundary and protocol only; release
+readiness still requires a successful request to the configured managed
+Provider.
+
 ## Three-engine MCP acceptance
 
 Run the deterministic MCP smoke under the target employee SID after native

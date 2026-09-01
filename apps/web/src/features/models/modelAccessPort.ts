@@ -12,6 +12,8 @@ export type ModelAccessSnapshot = {
   credentials: CredentialStatus[];
 };
 
+export const maskedProviderCredential = "••••••••";
+
 const managedProvider = (providerId: string) => {
   if (providerId === "codex")
     return {
@@ -34,6 +36,7 @@ const managedProvider = (providerId: string) => {
 
 export const toRendererProviders = (
   models: readonly AuthorizedModelCatalogEntry[],
+  credentials: readonly CredentialStatus[] = [],
 ): IProvider[] => {
   const groups = new Map<string, AuthorizedModelCatalogEntry[]>();
   for (const model of models) {
@@ -46,7 +49,16 @@ export const toRendererProviders = (
     return {
       ...provider,
       base_url: "",
-      api_key: "",
+      api_key:
+        providerId === "harness" &&
+        credentials.some(
+          (credential) =>
+            credential.id === "provider-harness" &&
+            credential.kind === "provider" &&
+            credential.state === "ready",
+        )
+          ? maskedProviderCredential
+          : "",
       models: entries.map((model) => model.id),
       enabled: entries.some((model) => model.authorization.authorized),
       model_enabled: Object.fromEntries(
@@ -81,6 +93,7 @@ export const modelAccessPort = {
     };
   },
   async providers(): Promise<IProvider[]> {
-    return toRendererProviders((await this.snapshot()).models);
+    const snapshot = await this.snapshot();
+    return toRendererProviders(snapshot.models, snapshot.credentials);
   },
 };

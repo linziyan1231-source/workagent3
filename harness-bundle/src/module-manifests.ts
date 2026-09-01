@@ -17,10 +17,11 @@ export const RUNTIME_MODULES = [
     version: "1.0.0",
     layer: "adapter",
     required: true,
-    capabilities: ["credential.status"],
+    capabilities: ["credential.status", "credential.provider-projection"],
     dependencies: [],
     configSchema: "workagent://schemas/credential-broker/v1",
-    dataOwner: "employee SID native credential directories and references",
+    dataOwner:
+      "employee SID DPAPI broker, native credential directories and memory-only DSH reference projection",
     healthCheck: "/v1/credentials",
   },
   {

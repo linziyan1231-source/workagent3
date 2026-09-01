@@ -1,4 +1,9 @@
+- id: credentials
+  name: "@deepseek-ai/dsh-credentials-local"
+  disabled: true
 - insert:
+    - id: workagent-credentials
+      name: "@workagent/harness-bundle/dist/credential-provider.js"
     - id: workagent-runtime-host
       name: "@deepseek-ai/dsh-host-webserver"
       config:

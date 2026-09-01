@@ -43,6 +43,7 @@ const DEFAULT_MODELS: readonly ModelCatalogEntry[] = [
 export class ModelAccessStore {
   readonly #models: readonly ModelCatalogEntry[];
   readonly #authorized: ReadonlySet<string>;
+  readonly #providerHealth = new Map<string, ModelCatalogEntry["health"]>();
 
   constructor(dshHome: string) {
     const path = join(dshHome, "workagent", "model-access.json");
@@ -73,11 +74,21 @@ export class ModelAccessStore {
   }
 
   listModels(): readonly ModelCatalogEntry[] {
-    return this.#models;
+    return this.#models.map((model) => ({
+      ...model,
+      health: this.#providerHealth.get(model.providerId) ?? model.health,
+    }));
   }
 
   getModel(modelId: string): ModelCatalogEntry | undefined {
-    return this.#models.find((model) => model.id === modelId);
+    return this.listModels().find((model) => model.id === modelId);
+  }
+
+  setProviderHealth(
+    providerId: string,
+    health: ModelCatalogEntry["health"],
+  ): void {
+    this.#providerHealth.set(providerId, health);
   }
 
   authorizationFor(modelId: string): ModelAuthorization {

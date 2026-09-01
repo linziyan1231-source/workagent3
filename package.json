@@ -15,6 +15,7 @@
     "profile:dump": "pnpm --filter @workagent/contracts build && pnpm --filter @workagent/harness-bundle build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dump-harness-profile.ps1",
     "profile:smoke": "pnpm profile:dump && node scripts/smoke-harness.mjs",
     "profile:recovery-smoke": "pnpm --filter @workagent/contracts build && pnpm --filter @workagent/harness-bundle build && node scripts/smoke-harness-recovery.mjs",
+    "provider:projection-smoke": "pnpm --filter @workagent/contracts build && pnpm --filter @workagent/harness-bundle build && node scripts/smoke-provider-projection.mjs",
     "mcp:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-mcp-engines.mjs",
     "native:smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engines.mjs",
     "native:task-smoke": "pnpm --filter @workagent/harness-bundle build && node scripts/smoke-native-engine-tasks.mjs",

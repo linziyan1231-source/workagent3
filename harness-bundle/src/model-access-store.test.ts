@@ -37,6 +37,15 @@ describe("model access", () => {
     });
   });
 
+  it("projects the latest Provider probe into the public model catalog", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-model-health-"));
+    const store = new ModelAccessStore(home);
+    expect(store.getModel("harness-default")?.health).toBe("unknown");
+    store.setProviderHealth("harness", "healthy");
+    expect(store.getModel("harness-default")?.health).toBe("healthy");
+    expect(store.getModel("codex-native")?.health).toBe("unknown");
+  });
+
   it("projects native credential state without credential material", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-credentials-"));
     const codex = join(home, "native", "codex");

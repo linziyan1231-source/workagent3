@@ -1,4 +1,6 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
+import { maskedProviderCredential } from "../../features/models/modelAccessPort.js";
+import { providerCredentialPort } from "../../features/credentials/providerCredentialPort.js";
 import { automationPort } from "../../features/automation/automationPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
@@ -706,13 +708,26 @@ export const ipcBridge = {
       },
     },
     updateProvider: {
-      invoke: async () => {
-        throw new Error("managed_model_catalog_read_only");
+      invoke: async (provider: { id: string; api_key?: string }) => {
+        if (provider.id !== "managed-workagent-harness") {
+          throw new Error("managed_model_catalog_read_only");
+        }
+        const secret = provider.api_key?.trim();
+        if (
+          secret === undefined ||
+          secret === "" ||
+          secret === maskedProviderCredential
+        )
+          return;
+        await providerCredentialPort.put(secret);
       },
     },
     deleteProvider: {
-      invoke: async () => {
-        throw new Error("managed_model_catalog_read_only");
+      invoke: async ({ id }: { id: string }) => {
+        if (id !== "managed-workagent-harness") {
+          throw new Error("managed_model_catalog_read_only");
+        }
+        await providerCredentialPort.revoke();
       },
     },
   },
@@ -1508,19 +1523,28 @@ export const ipcBridge = {
           return agent;
         },
       },
+      checkProviderHealth: {
+        invoke: async ({
+          provider_id,
+        }: {
+          provider_id: string;
+          model?: string;
+        }) => {
+          if (provider_id !== "managed-workagent-harness")
+            return {
+              status: "unknown",
+              message: "managed_health_status_only",
+              elapsed_ms: 0,
+            };
+          return providerCredentialPort.test();
+        },
+      },
     },
     {
       get: (target, key) => {
         if (key in target) return target[key as keyof typeof target];
         return {
           invoke: async () => {
-            if (key === "checkProviderHealth") {
-              return {
-                status: "unknown",
-                message: "managed_health_status_only",
-                elapsed_ms: 0,
-              };
-            }
             throw new Error(`unsupported_browser_agent_command:${String(key)}`);
           },
           on: () => () => undefined,

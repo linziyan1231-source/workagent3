@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { modelAccessPort, toRendererProviders } from "./modelAccessPort.js";
+import {
+  maskedProviderCredential,
+  modelAccessPort,
+  toRendererProviders,
+} from "./modelAccessPort.js";
 
 const model = {
   id: "codex-native",
@@ -26,6 +30,24 @@ describe("Model Access HTTP port", () => {
         model_enabled: { "codex-native": true },
       }),
     ]);
+  });
+
+  it("shows only a fixed mask for a ready managed Provider credential", () => {
+    const harness = { ...model, id: "harness-default", providerId: "harness" };
+    expect(
+      toRendererProviders(
+        [harness],
+        [
+          {
+            id: "provider-harness",
+            kind: "provider",
+            state: "ready",
+            label: "Harness managed Provider",
+            updatedAt: null,
+          },
+        ],
+      )[0]?.api_key,
+    ).toBe(maskedProviderCredential);
   });
 
   it("loads model authorization and credential status together", async () => {

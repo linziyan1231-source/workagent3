@@ -26,12 +26,17 @@ import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
 import { QuotaAutomationRunner, QuotaTeamRunner } from "./quota-runner.js";
 import { SharedTurnController } from "./shared-turn-api.js";
+import { createManagedProviderCredentialHandler } from "./provider-credential-api.js";
+import { createManagedProviderHealthHandler } from "./provider-health-api.js";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "workagent-runtime-api";
 export const inject = [
   "agentDefaultModel",
   "agents",
   "approval",
+  "credentials",
+  "llm",
   "sessions",
   "webServer",
 ];
@@ -81,6 +86,17 @@ export function apply(ctx: Context): void {
       "workagent-runtime-api: WORKAGENT_RUNTIME_TOKEN is required",
     );
   }
+  const dshHome = process.env.DSH_HOME;
+  const workspaceRoot = process.env.WORKAGENT_WORKSPACE_ROOT;
+  if (dshHome === undefined || workspaceRoot === undefined) {
+    throw new Error("workagent-runtime-api: private roots are required");
+  }
+  const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
+  const models = new ModelAccessStore(dshHome);
+  const skills = new SkillCatalogStore();
+  const mcp = new McpCatalogStore();
+  const presets = new PresetStore(dshHome, models, skills, mcp);
+  const credentials = new CredentialStatusStore(dshHome);
   ctx.effect(
     () =>
       ctx.webServer.register({
@@ -89,6 +105,51 @@ export function apply(ctx: Context): void {
         handler: createHealthHandler(token),
       }),
     "workagent-runtime-api: health route",
+  );
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/internal/providers/deepseek-official/test",
+        handler: createManagedProviderHealthHandler(token, async (signal) => {
+          const selection = ctx.agentDefaultModel.currentSelection();
+          for await (const chunk of ctx.llm.stream({
+            provider: selection.provider,
+            model: selection.model,
+            messages: [
+              createUserMessage({
+                content: [{ type: "text", text: "Reply OK." }],
+                source: { kind: "user" },
+              }),
+            ],
+            maxTokens: 1,
+            signal,
+          })) {
+            if (chunk.type !== "finish") continue;
+            if (
+              chunk.reason.kind === "error" ||
+              chunk.reason.kind === "aborted"
+            ) {
+              models.setProviderHealth("harness", "unavailable");
+              return {
+                status: "unhealthy" as const,
+                message: `provider_${chunk.reason.failure.code.toLowerCase()}`,
+              };
+            }
+            models.setProviderHealth("harness", "healthy");
+            return {
+              status: "healthy" as const,
+              message: "provider_request_succeeded",
+            };
+          }
+          models.setProviderHealth("harness", "unavailable");
+          return {
+            status: "unhealthy" as const,
+            message: "provider_stream_incomplete",
+          };
+        }),
+      }),
+    "workagent-runtime-api: managed Provider health route",
   );
   ctx.effect(
     () =>
@@ -113,17 +174,15 @@ export function apply(ctx: Context): void {
       }),
     "workagent-runtime-api: capability route",
   );
-  const dshHome = process.env.DSH_HOME;
-  const workspaceRoot = process.env.WORKAGENT_WORKSPACE_ROOT;
-  if (dshHome === undefined || workspaceRoot === undefined) {
-    throw new Error("workagent-runtime-api: private roots are required");
-  }
-  const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
-  const models = new ModelAccessStore(dshHome);
-  const skills = new SkillCatalogStore();
-  const mcp = new McpCatalogStore();
-  const presets = new PresetStore(dshHome, models, skills, mcp);
-  const credentials = new CredentialStatusStore(dshHome);
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: "exact",
+        path: "/internal/provider-credentials/deepseek-official",
+        handler: createManagedProviderCredentialHandler(token, ctx.credentials),
+      }),
+    "workagent-runtime-api: managed Provider credential route",
+  );
   new RuntimeServicesController(
     ctx,
     token,

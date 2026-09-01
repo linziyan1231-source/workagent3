@@ -77,6 +77,87 @@ describe("production Renderer Skill Market adapter", () => {
   });
 });
 
+describe("production Renderer managed Provider adapter", () => {
+  it("keeps the formal Provider edit action and writes only through the SID Runtime Port", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "provider-harness",
+            kind: "provider",
+            state: "ready",
+            label: "Harness managed Provider",
+            updatedAt: "2026-09-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.mode.updateProvider.invoke({
+      id: "managed-workagent-harness",
+      api_key: "private-provider-key",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/provider-credentials/harness",
+      expect.objectContaining({ method: "PUT", body: "private-provider-key" }),
+    );
+  });
+
+  it("does not overwrite a configured Provider when the formal editor returns its mask", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await ipcBridge.mode.updateProvider.invoke({
+      id: "managed-workagent-harness",
+      api_key: "••••••••",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("revokes the credential without deleting the managed model catalog", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    await ipcBridge.mode.deleteProvider.invoke({
+      id: "managed-workagent-harness",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/provider-credentials/harness",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("connects the formal health action to a real managed Provider probe", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: "healthy",
+            message: "provider_request_succeeded",
+            elapsed_ms: 19,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.acpConversation.checkProviderHealth.invoke({
+        provider_id: "managed-workagent-harness",
+        model: "harness-default",
+      }),
+    ).resolves.toEqual({
+      status: "healthy",
+      message: "provider_request_succeeded",
+      elapsed_ms: 19,
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/provider-credentials/harness/test",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
 describe("production Renderer project adapter", () => {
   it("creates the formal guide project through the Runtime workspace port", async () => {
     const now = "2026-08-31T06:00:00.000Z";

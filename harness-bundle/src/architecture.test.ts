@@ -31,4 +31,17 @@ describe("Harness plugin boundary", () => {
     });
     expect(violations).toEqual([]);
   });
+
+  it("keeps Broker-owned Provider secrets out of the DSH file credential store", () => {
+    const patch = readFileSync(
+      join(sourceRoot, "..", "cordis.patch.yml"),
+      "utf8",
+    );
+    expect(patch).toContain(
+      'name: "@deepseek-ai/dsh-credentials-local"\n  disabled: true',
+    );
+    expect(patch).toContain(
+      'name: "@workagent/harness-bundle/dist/credential-provider.js"',
+    );
+  });
 });
