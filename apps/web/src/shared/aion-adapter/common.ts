@@ -363,6 +363,7 @@ const sendRendererMessage = async (input: {
     input.conversation_id,
     runtimeInput,
     replacements.size === 0 ? undefined : displayInput,
+    msgId,
   );
   return {
     msg_id: msgId,
@@ -1647,6 +1648,25 @@ export const ipcBridge = {
         ensureRuntimeSubscription(conversation_id);
         return { is_processing: false, turn_id: null };
       },
+    },
+    fork: {
+      invoke: async ({
+        conversation_id,
+        message_id,
+        replacement_content,
+      }: {
+        conversation_id: string;
+        message_id: string;
+        replacement_content?: string;
+      }) => ({
+        conversation: toRendererConversation(
+          await conversationPort.fork(
+            conversation_id,
+            message_id,
+            replacement_content,
+          ),
+        ),
+      }),
     },
     activeLease: { invoke: async () => null },
     getAssociateConversation: { invoke: async () => null },

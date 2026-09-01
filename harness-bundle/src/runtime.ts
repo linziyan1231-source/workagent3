@@ -25,7 +25,7 @@ import { ApprovalBridge } from "./approval-bridge.js";
 import { SessionIndex, type StoredSession } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
-import { MessageStore } from "./message-store.js";
+import { MessageStore, type StoredMessage } from "./message-store.js";
 import type {
   AutomationExecution,
   AutomationRunnerPort,
@@ -90,6 +90,40 @@ export const searchRuntimeMessages = (
     page,
     pageSize,
     hasMore: offset + pageSize < matches.length,
+  };
+};
+
+export const planMessageFork = (
+  messages: readonly StoredMessage[],
+  messageId: string,
+  editing: boolean,
+) => {
+  const selectedIndex = messages.findIndex(
+    (message) => message.id === messageId && message.role === "user",
+  );
+  if (selectedIndex === -1) throw new Error("fork_message_not_found");
+  const selected = messages[selectedIndex]!;
+  if (selected.nativeTurnId === undefined)
+    throw new Error("message_turn_unavailable");
+  const previousUser = messages
+    .slice(0, selectedIndex)
+    .reverse()
+    .find((message) => message.role === "user");
+  const nextUserIndex = messages.findIndex(
+    (message, index) => index > selectedIndex && message.role === "user",
+  );
+  return {
+    selectedTurnId: selected.nativeTurnId,
+    previousTurnId: previousUser?.nativeTurnId,
+    hasLaterUser: nextUserIndex !== -1,
+    copiedMessages: messages.slice(
+      0,
+      editing
+        ? selectedIndex
+        : nextUserIndex === -1
+          ? messages.length
+          : nextUserIndex,
+    ),
   };
 };
 
@@ -743,7 +777,7 @@ export class RuntimeController
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume|messages)$/.exec(
+      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume|messages|fork)$/.exec(
         path,
       );
     if (match === null) {
@@ -754,6 +788,44 @@ export class RuntimeController
     const record = this.#sessions.get(id);
     if (record === undefined || record.internal === true) {
       writeJson(response, 404, { error: "session_not_found" });
+      return;
+    }
+    if (match[2] === "fork" && request.method === "POST") {
+      const input = await readJson(request);
+      if (
+        typeof input.messageId !== "string" ||
+        input.messageId.length === 0 ||
+        input.messageId.length > 200 ||
+        (input.replacementContent !== undefined &&
+          (typeof input.replacementContent !== "string" ||
+            input.replacementContent.trim() === ""))
+      ) {
+        writeJson(response, 400, { error: "invalid_fork_request" });
+        return;
+      }
+      try {
+        const forked = await this.#forkSession(
+          id,
+          record,
+          input.messageId,
+          typeof input.replacementContent === "string"
+            ? input.replacementContent
+            : undefined,
+        );
+        writeJson(response, 201, forked);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "session_fork_failed";
+        writeJson(
+          response,
+          message.startsWith("engine_capability_unsupported:") ||
+            message === "message_turn_unavailable" ||
+            message === "fork_message_not_found"
+            ? 409
+            : 503,
+          { error: message },
+        );
+      }
       return;
     }
     if (match[2] !== "events" && match[2] !== "messages") {
@@ -776,12 +848,17 @@ export class RuntimeController
         input.content.trim() === "" ||
         (input.displayContent !== undefined &&
           (typeof input.displayContent !== "string" ||
-            input.displayContent.trim() === ""))
+            input.displayContent.trim() === "")) ||
+        (input.messageId !== undefined &&
+          (typeof input.messageId !== "string" ||
+            input.messageId.length === 0 ||
+            input.messageId.length > 200))
       ) {
         writeJson(response, 400, { error: "content_required" });
         return;
       }
       record.updatedAt = new Date().toISOString();
+      let nativeTurnId: string | undefined;
       if (record.handle !== undefined) {
         record.handle.agent.followup(
           createUserMessage({
@@ -791,14 +868,17 @@ export class RuntimeController
         );
       } else {
         try {
-          await record.native!.send(input.content);
+          nativeTurnId = await record.native!.send(input.content);
         } catch {
           writeJson(response, 409, { error: "engine_turn_rejected" });
           return;
         }
       }
       this.#messages.append({
-        id: `message-${randomUUID()}`,
+        id:
+          typeof input.messageId === "string"
+            ? input.messageId
+            : `message-${randomUUID()}`,
         sessionId: id,
         role: "user",
         text:
@@ -806,6 +886,7 @@ export class RuntimeController
             ? input.displayContent
             : input.content,
         createdAt: new Date().toISOString(),
+        ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
       });
       this.#persist(id, record);
       writeJson(response, 202, { accepted: true });
@@ -1303,6 +1384,111 @@ export class RuntimeController
     };
   }
 
+  async #forkSession(
+    sourceId: string,
+    source: SessionRecord,
+    messageId: string,
+    replacementContent?: string,
+  ): Promise<RuntimeSession> {
+    if (source.engine === "harness")
+      throw new Error("engine_capability_unsupported:harness:fork");
+    const messages = this.#messages.list(sourceId);
+    const plan = planMessageFork(
+      messages,
+      messageId,
+      replacementContent !== undefined,
+    );
+    if (
+      source.engine === "kimi" &&
+      (plan.hasLaterUser ||
+        (replacementContent !== undefined && plan.previousTurnId !== undefined))
+    )
+      throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
+
+    const bridge = this.#bridges.get(source.engine);
+    if (bridge === undefined) throw new Error("engine_unavailable");
+    const mcpServers = this.#resolvedMcpServers(source.preset);
+    const workspace = this.#engineWorkspace(source);
+    const options = {
+      mcpServers,
+      ...(source.modelId === undefined ? {} : { modelId: source.modelId }),
+      ...(source.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: source.thinkingEffort }),
+    };
+    const publicId = `session-${randomUUID()}`;
+    const now = new Date().toISOString();
+    const record: SessionRecord = {
+      activating: undefined,
+      engine: source.engine,
+      events: [],
+      handle: undefined,
+      native: undefined,
+      nativeId: publicId,
+      nextEventSequence: 1,
+      title: `${source.title} (Fork)`.slice(0, 200),
+      createdAt: now,
+      updatedAt: now,
+      workspaceId: source.workspaceId,
+      ...(source.workspacePath === undefined
+        ? {}
+        : { workspacePath: source.workspacePath }),
+      ...(source.modelId === undefined ? {} : { modelId: source.modelId }),
+      ...(source.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: source.thinkingEffort }),
+      preset: source.preset,
+    };
+    const onEvent = (event: BridgeEvent) =>
+      this.#publish(record, this.#nativeEvent(publicId, record, event));
+    record.native =
+      replacementContent !== undefined && plan.previousTurnId === undefined
+        ? await bridge.create(workspace, onEvent, options)
+        : await bridge.fork(
+            source.nativeId,
+            workspace,
+            onEvent,
+            options,
+            source.engine === "codex"
+              ? replacementContent === undefined
+                ? plan.selectedTurnId
+                : plan.previousTurnId
+              : undefined,
+          );
+    record.nativeId = record.native.nativeId;
+    this.#sessions.set(publicId, record);
+    try {
+      for (const message of plan.copiedMessages)
+        this.#messages.append({ ...message, sessionId: publicId });
+      if (replacementContent !== undefined) {
+        const turnId = await record.native.send(replacementContent);
+        this.#messages.append({
+          id: `message-${randomUUID()}`,
+          sessionId: publicId,
+          role: "user",
+          text: replacementContent,
+          createdAt: new Date().toISOString(),
+          nativeTurnId: turnId,
+        });
+      }
+      this.#persist(publicId, record);
+    } catch (error) {
+      this.#sessions.delete(publicId);
+      this.#messages.delete(publicId);
+      await record.native.close().catch(() => undefined);
+      throw error;
+    }
+    return {
+      id: publicId,
+      engine: record.engine,
+      title: record.title,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      workspaceId: record.workspaceId,
+      preset: record.preset,
+    };
+  }
+
   #publish(record: SessionRecord, event: PublicEvent): void {
     record.events.push(event);
     if (record.events.length > 2_000) record.events.shift();
@@ -1316,6 +1502,9 @@ export class RuntimeController
         role: "assistant",
         text: event.content,
         createdAt: event.occurredAt,
+        ...(typeof event.turnId === "string"
+          ? { nativeTurnId: event.turnId }
+          : {}),
       });
     }
     if (event.type === "turn.failed" && typeof event.message === "string") {

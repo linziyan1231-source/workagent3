@@ -13,6 +13,7 @@ export type StoredMessage = {
   role: "user" | "assistant";
   text: string;
   createdAt: string;
+  nativeTurnId?: string;
 };
 
 const validMessage = (value: unknown): value is StoredMessage => {
@@ -24,7 +25,8 @@ const validMessage = (value: unknown): value is StoredMessage => {
     typeof item.sessionId === "string" &&
     (item.role === "user" || item.role === "assistant") &&
     typeof item.text === "string" &&
-    typeof item.createdAt === "string"
+    typeof item.createdAt === "string" &&
+    (item.nativeTurnId === undefined || typeof item.nativeTurnId === "string")
   );
 };
 

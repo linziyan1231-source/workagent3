@@ -222,6 +222,39 @@ describe("ConversationPort", () => {
     );
   });
 
+  it("forks a conversation from the selected persisted message", async () => {
+    const session = {
+      id: "session-fork",
+      engine: "codex",
+      title: "Quarterly plan (Fork)",
+      workspaceId: "workspace-1",
+      preset,
+      createdAt: "2026-08-30T10:00:00.000Z",
+      updatedAt: "2026-08-30T10:01:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(session), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      conversationPort.fork("session-1", "message-1", "revised prompt"),
+    ).resolves.toMatchObject({ id: "session-fork", engine: "codex" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runtime/v1/sessions/session-1/fork",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messageId: "message-1",
+          replacementContent: "revised prompt",
+        }),
+      }),
+    );
+  });
+
   it("routes rename, cancel, and delete through the session resource", async () => {
     const session = {
       id: "session-1",

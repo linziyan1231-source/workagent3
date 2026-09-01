@@ -807,7 +807,7 @@ describe("production Renderer conversation adapter", () => {
       "/api/runtime/v1/sessions/session-1/turns",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ content: "Hello" }),
+        body: JSON.stringify({ content: "Hello", messageId: result.msg_id }),
       }),
     );
     expect(streamed).toHaveBeenCalledWith(
@@ -885,7 +885,7 @@ describe("production Renderer conversation adapter", () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetch);
 
-    await ipcBridge.acpConversation.sendMessage.invoke({
+    const result = await ipcBridge.acpConversation.sendMessage.invoke({
       conversation_id: "session-1",
       input: `Review this file\n\n${stagedPath}`,
       files: [stagedPath],
@@ -901,8 +901,72 @@ describe("production Renderer conversation adapter", () => {
       body: JSON.stringify({
         content: `Review this file\n\n${privatePath}`,
         displayContent: "Review this file\n\nbrief.txt",
+        messageId: result.msg_id,
       }),
     });
+  });
+
+  it("routes the formal fork action through the native Runtime session port", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "session-fork",
+          engine: "codex",
+          title: "Review (Fork)",
+          workspaceId: "workspace-1",
+          preset: {
+            presetId: "builtin-codex",
+            presetVersion: 1,
+            resolvedSnapshot: {
+              id: "builtin-codex",
+              version: 1,
+              source: "builtin",
+              name: "Codex",
+              description: "",
+              avatar: null,
+              enabled: true,
+              engine: "codex",
+              modelId: null,
+              systemPrompt: "",
+              workspacePolicy: "default",
+              skillIds: [],
+              mcpServerIds: [],
+              toolAllowlist: [],
+              approvalPolicy: "never",
+              createdAt: now,
+              updatedAt: now,
+              resolvedAt: now,
+            },
+          },
+          createdAt: now,
+          updatedAt: now,
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const result = await ipcBridge.conversation.fork.invoke({
+      conversation_id: "session-1",
+      message_id: "message-1",
+      replacement_content: "Use the revised request",
+    });
+
+    expect(result.conversation).toMatchObject({
+      id: "session-fork",
+      extra: { backend: "codex" },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/sessions/session-1/fork",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messageId: "message-1",
+          replacementContent: "Use the revised request",
+        }),
+      }),
+    );
   });
 });
 

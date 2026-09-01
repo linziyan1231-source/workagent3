@@ -20,6 +20,11 @@ export type ConversationPort = {
   create(input: CreateEngineSession): Promise<RuntimeSession>;
   engines(): Promise<EngineStatus[]>;
   get(sessionId: string): Promise<RuntimeSession>;
+  fork(
+    sessionId: string,
+    messageId: string,
+    replacementContent?: string,
+  ): Promise<RuntimeSession>;
   list(): Promise<RuntimeSession[]>;
   messages(sessionId: string): Promise<RuntimeMessage[]>;
   searchMessages(
@@ -36,6 +41,7 @@ export type ConversationPort = {
     sessionId: string,
     content: string,
     displayContent?: string,
+    messageId?: string,
   ): Promise<void>;
   subscribe(
     sessionId: string,
@@ -66,6 +72,18 @@ export const conversationPort: ConversationPort = {
     return runtimeApiSchemas.session.parse(
       await requestJson<unknown>(
         `${runtimePath}/${encodeURIComponent(sessionId)}`,
+      ),
+    );
+  },
+  async fork(sessionId, messageId, replacementContent) {
+    return runtimeApiSchemas.session.parse(
+      await requestJson<unknown>(
+        `${runtimePath}/${encodeURIComponent(sessionId)}/fork`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ messageId, replacementContent }),
+        },
       ),
     );
   },
@@ -130,11 +148,11 @@ export const conversationPort: ConversationPort = {
       { method: "POST" },
     );
   },
-  async send(sessionId, content, displayContent) {
+  async send(sessionId, content, displayContent, messageId) {
     await requestJson(`${runtimePath}/${encodeURIComponent(sessionId)}/turns`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content, displayContent }),
+      body: JSON.stringify({ content, displayContent, messageId }),
     });
   },
   subscribe(sessionId, listener) {

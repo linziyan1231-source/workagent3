@@ -5,6 +5,7 @@ import {
   eventsAfterLastId,
   nativeCredentialError,
   normalizeEvent,
+  planMessageFork,
   searchRuntimeMessages,
 } from "./runtime.js";
 import type {
@@ -27,6 +28,71 @@ describe("SSE event replay", () => {
 
   it("replays retained events when the client cursor is unknown", () => {
     expect(eventsAfterLastId(events, "expired-event-id")).toEqual(events);
+  });
+});
+
+describe("native conversation branching", () => {
+  const messages = [
+    {
+      id: "message-1",
+      sessionId: "session-1",
+      role: "user" as const,
+      text: "first",
+      createdAt: "2026-08-30T10:00:00.000Z",
+      nativeTurnId: "turn-1",
+    },
+    {
+      id: "turn-1",
+      sessionId: "session-1",
+      role: "assistant" as const,
+      text: "first answer",
+      createdAt: "2026-08-30T10:01:00.000Z",
+      nativeTurnId: "turn-1",
+    },
+    {
+      id: "message-2",
+      sessionId: "session-1",
+      role: "user" as const,
+      text: "second",
+      createdAt: "2026-08-30T10:02:00.000Z",
+      nativeTurnId: "turn-2",
+    },
+  ];
+
+  it("copies through the selected turn for a fork", () => {
+    expect(planMessageFork(messages, "message-1", false)).toMatchObject({
+      selectedTurnId: "turn-1",
+      previousTurnId: undefined,
+      hasLaterUser: true,
+      copiedMessages: messages.slice(0, 2),
+    });
+  });
+
+  it("copies only prior turns when replacing a user message", () => {
+    expect(planMessageFork(messages, "message-2", true)).toMatchObject({
+      selectedTurnId: "turn-2",
+      previousTurnId: "turn-1",
+      hasLaterUser: false,
+      copiedMessages: messages.slice(0, 2),
+    });
+  });
+
+  it("rejects legacy messages without a persisted native turn", () => {
+    expect(() =>
+      planMessageFork(
+        [
+          {
+            id: "message-1",
+            sessionId: "session-1",
+            role: "user",
+            text: "legacy",
+            createdAt: "2026-08-30T10:00:00.000Z",
+          },
+        ],
+        "message-1",
+        false,
+      ),
+    ).toThrow("message_turn_unavailable");
   });
 });
 

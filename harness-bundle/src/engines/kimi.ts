@@ -77,6 +77,33 @@ export class KimiBridge implements EngineBridge {
     return session;
   }
 
+  async fork(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+    options?: import("./types.js").EngineSessionOptions,
+    lastTurnId?: string,
+  ): Promise<BridgeSession> {
+    if (lastTurnId !== undefined)
+      throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
+    const connection = await this.#connect();
+    const result = await connection.unstable_forkSession({
+      sessionId: nativeId,
+      cwd: workspace,
+      mcpServers: projectMcpServers(options?.mcpServers ?? []),
+    });
+    if (options?.modelId !== undefined)
+      await connection.unstable_setSessionModel({
+        sessionId: result.sessionId,
+        modelId: options.modelId,
+      });
+    const session = new KimiSession(connection, result.sessionId, onEvent, () =>
+      this.#sessions.delete(result.sessionId),
+    );
+    this.#sessions.set(result.sessionId, session);
+    return session;
+  }
+
   async probe(): Promise<void> {
     await this.#connect();
   }
@@ -218,7 +245,7 @@ export class KimiSession implements BridgeSession {
     this.#closed = closed;
   }
 
-  async send(content: string): Promise<void> {
+  async send(content: string): Promise<string> {
     if (this.#activeTurn !== undefined)
       throw new Error("Kimi already has an active turn");
     const turnId = `turn-${randomUUID()}`;
@@ -259,6 +286,7 @@ export class KimiSession implements BridgeSession {
           message: error instanceof Error ? error.message : String(error),
         });
       });
+    return turnId;
   }
 
   async cancel(): Promise<void> {

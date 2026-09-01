@@ -11,7 +11,7 @@ describe("Kimi session terminal transitions", () => {
       },
       cancel: async () => undefined,
     };
-    let followup: Promise<void> | undefined;
+    let followup: Promise<string> | undefined;
     const session = new KimiSession(
       connection as never,
       "session-1",
@@ -25,7 +25,7 @@ describe("Kimi session terminal transitions", () => {
 
     await session.send("first turn");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await expect(followup).resolves.toBeUndefined();
+    await expect(followup).resolves.toMatch(/^turn-/);
     expect(promptCount).toBe(2);
   });
 });

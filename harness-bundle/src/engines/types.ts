@@ -22,7 +22,7 @@ export type BridgeSession = {
   readonly nativeId: string;
   cancel(): Promise<void>;
   close(): Promise<void>;
-  send(content: string): Promise<void>;
+  send(content: string): Promise<string>;
 };
 
 export type NativeEngineStatus = {
@@ -44,6 +44,13 @@ export type EngineBridge = {
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
     options?: EngineSessionOptions,
+  ): Promise<BridgeSession>;
+  fork(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+    options: EngineSessionOptions | undefined,
+    lastTurnId?: string,
   ): Promise<BridgeSession>;
   close(): Promise<void>;
   status(): Promise<NativeEngineStatus>;

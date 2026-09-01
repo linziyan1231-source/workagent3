@@ -13,6 +13,7 @@ describe("MessageStore", () => {
       role: "assistant" as const,
       text: "Finished",
       createdAt: "2026-08-30T10:00:00.000Z",
+      nativeTurnId: "native-turn-1",
     };
     const store = new MessageStore(home);
     store.append(message);

@@ -121,6 +121,37 @@ export class CodexBridge implements EngineBridge {
     return session;
   }
 
+  async fork(
+    nativeId: string,
+    workspace: string,
+    onEvent: (event: BridgeEvent) => void,
+    options: import("./types.js").EngineSessionOptions | undefined,
+    lastTurnId?: string,
+  ): Promise<BridgeSession> {
+    const rpc = await this.#connection();
+    const result = await rpc.request<ThreadResponse>("thread/fork", {
+      threadId: nativeId,
+      ...(lastTurnId === undefined ? {} : { lastTurnId }),
+      cwd: workspace,
+      ...(options?.modelId === undefined ? {} : { model: options.modelId }),
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+      config: {
+        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+      },
+    });
+    const session = new CodexSession(
+      rpc,
+      result.thread.id,
+      onEvent,
+      () => this.#sessions.delete(result.thread.id),
+      options?.modelId,
+      options?.thinkingEffort,
+    );
+    this.#sessions.set(result.thread.id, session);
+    return session;
+  }
+
   async probe(): Promise<void> {
     await this.#connection();
   }
@@ -266,7 +297,7 @@ class CodexSession implements BridgeSession {
     this.#thinkingEffort = thinkingEffort;
   }
 
-  async send(content: string): Promise<void> {
+  async send(content: string): Promise<string> {
     const result = await this.#rpc.request<TurnResponse>("turn/start", {
       threadId: this.nativeId,
       input: [{ type: "text", text: content }],
@@ -276,6 +307,7 @@ class CodexSession implements BridgeSession {
         : { effort: this.#thinkingEffort }),
     });
     this.#activeTurn = result.turn.id;
+    return result.turn.id;
   }
 
   async cancel(): Promise<void> {
