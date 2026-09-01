@@ -2,6 +2,7 @@ import QuotaSettingsContent from "../../features/quota/QuotaSettingsContent.js";
 import MigrationSettingsContent from "../../features/migration/MigrationSettingsContent.js";
 import SkillsHubSettings from "@renderer/pages/settings/SkillsHubSettings";
 import ChannelModalContent from "@renderer/components/settings/SettingsModal/contents/channels/ChannelModalContent";
+import CapabilitySettingsContent from "../../features/system/CapabilitySettingsContent.js";
 
 type Props = {
   url: string;
@@ -14,6 +15,7 @@ export default function ExtensionSettingsTabContent({ tabId }: Props) {
   if (tabId === "workagent-skills")
     return <SkillsHubSettings withWrapper={false} />;
   if (tabId === "workagent-usage") return <QuotaSettingsContent />;
+  if (tabId === "workagent-components") return <CapabilitySettingsContent />;
   if (tabId === "workagent-migration") return <MigrationSettingsContent />;
   return null;
 }
