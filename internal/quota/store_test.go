@@ -17,6 +17,17 @@ func (a authorizationStub) Authorized(context.Context, string, string) (bool, er
 	return a.authorized, nil
 }
 
+type authorizationCapture struct {
+	sid     string
+	modelID string
+}
+
+func (capture *authorizationCapture) Authorized(_ context.Context, sid, modelID string) (bool, error) {
+	capture.sid = sid
+	capture.modelID = modelID
+	return true, nil
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "quota.db"), authorizationStub{authorized: true})
@@ -67,6 +78,33 @@ func TestReserveAndSettleAreIdempotent(t *testing.T) {
 	}
 	if usage.ConsumedUnits != 25 || usage.ReservedUnits != 0 {
 		t.Fatalf("unexpected usage: %#v", usage)
+	}
+}
+
+func TestSpeechPortUsesFixedTranscriptionBucket(t *testing.T) {
+	ctx := t.Context()
+	const sid = "S-1-5-21-991"
+	authorizer := &authorizationCapture{}
+	store, err := Open(":memory:", authorizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetBudget(ctx, Budget{SID: sid, ModelID: SpeechTranscriptionModelID, Period: Daily, LimitUnits: 300}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReserveSpeech(ctx, sid, "speech-run", 60); err != nil {
+		t.Fatal(err)
+	}
+	if authorizer.sid != sid || authorizer.modelID != SpeechTranscriptionModelID {
+		t.Fatalf("speech authorization used sid=%q model=%q", authorizer.sid, authorizer.modelID)
+	}
+	if err := store.SettleSpeech(ctx, "speech-run", 7); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := store.Usage(ctx, sid, SpeechTranscriptionModelID, time.Now())
+	if err != nil || usage.ConsumedUnits != 7 || usage.ReservedUnits != 0 {
+		t.Fatalf("speech usage=%#v err=%v", usage, err)
 	}
 }
 

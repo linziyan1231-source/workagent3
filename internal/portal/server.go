@@ -43,6 +43,11 @@ type QuotaUsagePort interface {
 	Usage(context.Context, string, string, time.Time) (contracts.QuotaUsage, error)
 }
 
+type SpeechQuotaPort interface {
+	ReserveSpeech(context.Context, string, string, int64) error
+	SettleSpeech(context.Context, string, int64) error
+}
+
 type SpeechPort interface {
 	Capability() contracts.SpeechCapability
 	ServeSpeech(http.ResponseWriter, *http.Request, string)
@@ -83,6 +88,7 @@ type AuditPort interface {
 type Modules struct {
 	ModelAccess        ModelAccessPort
 	Quota              QuotaUsagePort
+	SpeechQuota        SpeechQuotaPort
 	Speech             SpeechPort
 	Settings           SettingsPort
 	SkillMarket        SkillMarketPort
@@ -104,6 +110,9 @@ func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bo
 func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool, modules Modules) (*Server, error) {
 	if data == nil || runtimes == nil {
 		return nil, errors.New("store and runtime router are required")
+	}
+	if modules.Speech != nil && modules.Speech.Capability().Enabled && modules.SpeechQuota == nil {
+		return nil, errors.New("enabled speech adapter requires SpeechQuotaPort")
 	}
 	if err := contracts.ValidateModuleGraph(platformModuleManifests()); err != nil {
 		return nil, err
@@ -619,7 +628,46 @@ func (s *Server) speech(writer http.ResponseWriter, request *http.Request, user 
 		writeError(writer, http.StatusServiceUnavailable, "speech_disabled")
 		return
 	}
+	capability := s.modules.Speech.Capability()
+	if !capability.Enabled {
+		writeError(writer, http.StatusServiceUnavailable, "speech_disabled")
+		return
+	}
+	estimatedSeconds := capability.MaxStreamSeconds
+	if estimatedSeconds < 1 {
+		estimatedSeconds = 1
+	}
+	runID := "speech-" + CorrelationID(request.Context())
+	if err := s.modules.SpeechQuota.ReserveSpeech(request.Context(), user.SID, runID, estimatedSeconds); err != nil {
+		writeSpeechQuotaError(writer, err)
+		return
+	}
+	started := s.now()
 	s.modules.Speech.ServeSpeech(writer, request, user.SID)
+	elapsed := s.now().Sub(started)
+	actualSeconds := int64((elapsed + time.Second - 1) / time.Second)
+	if actualSeconds < 1 {
+		actualSeconds = 1
+	}
+	if actualSeconds > estimatedSeconds {
+		actualSeconds = estimatedSeconds
+	}
+	// A failed settlement conservatively leaves the reservation open, so a
+	// metering outage cannot turn into unaccounted speech usage.
+	_ = s.modules.SpeechQuota.SettleSpeech(context.WithoutCancel(request.Context()), runID, actualSeconds)
+}
+
+func writeSpeechQuotaError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, contracts.ErrQuotaExceeded):
+		writeError(writer, http.StatusTooManyRequests, "quota_exceeded")
+	case errors.Is(err, contracts.ErrModelUnauthorized):
+		writeError(writer, http.StatusForbidden, "model_not_authorized")
+	case errors.Is(err, contracts.ErrQuotaNotConfigured):
+		writeError(writer, http.StatusConflict, "quota_not_configured")
+	default:
+		writeError(writer, http.StatusServiceUnavailable, "speech_quota_unavailable")
+	}
 }
 
 func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request, user store.User) {

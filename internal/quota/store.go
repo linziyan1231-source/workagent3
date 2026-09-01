@@ -15,11 +15,13 @@ import (
 
 var (
 	ErrBudgetNotConfigured = contracts.ErrQuotaNotConfigured
-	ErrExceeded            = errors.New("quota exceeded")
+	ErrExceeded            = contracts.ErrQuotaExceeded
 	ErrIdempotencyConflict = errors.New("quota idempotency conflict")
 	ErrReservationNotFound = errors.New("quota reservation not found")
-	ErrModelUnauthorized   = errors.New("model is not authorized")
+	ErrModelUnauthorized   = contracts.ErrModelUnauthorized
 )
+
+const SpeechTranscriptionModelID = "speech-transcription"
 
 type ModelAuthorizationPort interface {
 	Authorized(ctx context.Context, sid, modelID string) (bool, error)
@@ -214,6 +216,20 @@ func (s *Store) SettleForSID(ctx context.Context, sid string, request SettleRequ
 		return err
 	}
 	return s.settle(ctx, sid, request)
+}
+
+// ReserveSpeech and SettleSpeech expose a narrow resource-specific Port to the
+// Portal. Speech never receives the Quota store or its database and cannot
+// choose a different model/accounting bucket.
+func (s *Store) ReserveSpeech(ctx context.Context, sid, runID string, estimatedSeconds int64) error {
+	_, err := s.Reserve(ctx, ReserveRequest{
+		RunID: runID, SID: sid, ModelID: SpeechTranscriptionModelID, EstimatedUnits: estimatedSeconds,
+	})
+	return err
+}
+
+func (s *Store) SettleSpeech(ctx context.Context, runID string, actualSeconds int64) error {
+	return s.Settle(ctx, SettleRequest{RunID: runID, ActualUnits: actualSeconds})
 }
 
 func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) error {

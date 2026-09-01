@@ -187,7 +187,7 @@ func run() error {
 		return err
 	}
 	modules := portal.Modules{
-		ModelAccess: models, Quota: quotas, Speech: speechProxy,
+		ModelAccess: models, Quota: quotas, SpeechQuota: quotas, Speech: speechProxy,
 		Settings: clientSettings, SkillMarket: market,
 		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles, SharedTurns: sharedTurns,
 		Notifications: notificationStore, Audit: auditStore,
@@ -274,6 +274,7 @@ func bootstrapModels(models *modelaccess.Store) error {
 		{ID: "harness-default", ProviderID: "harness", DisplayName: "DeepSeek Harness", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
 		{ID: "codex-native", ProviderID: "codex", DisplayName: "Codex", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
 		{ID: "kimi-native", ProviderID: "kimi", DisplayName: "Kimi", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
+		{ID: quota.SpeechTranscriptionModelID, ProviderID: "speech", DisplayName: "Speech transcription", Aliases: []string{}, ContextWindow: 1, Health: modelaccess.Unknown},
 	} {
 		if err := models.UpsertModel(ctx, model); err != nil {
 			return fmt.Errorf("seed model %s: %w", model.ID, err)

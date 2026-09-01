@@ -51,6 +51,7 @@ func (s *Server) platformModuleReadModel() []contracts.ModuleReadModelEntry {
 		}
 		return "disabled"
 	}
+	speechConfigured := s.modules.Speech != nil && s.modules.SpeechQuota != nil && s.modules.Speech.Capability().Enabled
 	statuses := map[string]string{
 		"portal-auth": "healthy", "runtime-router": "healthy", "observability": "healthy",
 		"capability-read-model": "healthy",
@@ -67,7 +68,7 @@ func (s *Server) platformModuleReadModel() []contracts.ModuleReadModelEntry {
 			s.modules.SharedFiles != nil && s.modules.SharedTurns != nil),
 		"chatforward": configured(s.modules.ChatForward != nil),
 		"im-gateway":  configured(s.modules.IM != nil),
-		"speech":      configured(s.modules.Speech != nil),
+		"speech":      configured(speechConfigured),
 	}
 	manifests := platformModuleManifests()
 	entries := make([]contracts.ModuleReadModelEntry, 0, len(manifests))

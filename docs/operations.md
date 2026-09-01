@@ -346,6 +346,31 @@ go run ./cmd/release-manager -action rollback -activation-id 42
 Rollback refuses an already rolled-back journal or a component that has moved
 to another release since the journal was committed.
 
+## Managed speech admission and accounting
+
+Speech remains disabled unless both `WORKAGENT_SPEECH_URL` and the private
+`WORKAGENT_SPEECH_TOKEN` are configured. The employee must also have Model
+Access authorization and a Quota budget for the stable
+`speech-transcription` resource. The formal WorkAgent2 SendBox discovers only
+the redacted same-origin capability; it never receives the adapter URL or
+token.
+
+For both `POST /api/stt` and `GET /api/stt/stream`, Portal reserves the
+adapter's maximum stream seconds through `SpeechQuotaPort` before forwarding
+audio. It then settles elapsed whole seconds when the batch request or upgraded
+connection closes. Authorization, missing budget, exhausted budget and Quota
+failure are rejected before the private adapter is called. If settlement is
+temporarily unavailable, the reservation remains open and conservatively
+blocks unaccounted use.
+
+The Portal and Speech tests use controlled batch and WebSocket adapters to
+verify same-origin authentication, private SID/token projection, browser
+credential stripping, reserve/settle, and pre-adapter quota rejection:
+
+```powershell
+go test ./internal/portal ./internal/quota ./internal/speech
+```
+
 ## Restricted metadata backup
 
 Create snapshots by authoritative data owner. Global owners are `portal-auth`,

@@ -62,7 +62,13 @@ before any message can reach that employee's Runtime.
 Speech input is disabled unless the Portal administrator sets both
 `WORKAGENT_SPEECH_URL` and `WORKAGENT_SPEECH_TOKEN`. The URL points to the
 private batch/WebSocket transcription adapter; the token is injected only by
-the Portal proxy and is never returned to the browser.
+the Portal proxy and is never returned to the browser. Enabling the adapter
+also requires the employee to be authorized for the stable
+`speech-transcription` resource and to have a Quota budget for it. Portal
+reserves the configured maximum stream seconds before opening either adapter
+route and settles elapsed whole seconds when it closes; admission fails closed
+before audio reaches the adapter when authorization, budget, or Quota is
+unavailable.
 
 Notifications are owned by the separate `notifications.db` module store and
 are scoped by employee SID, with global announcements represented by `*`.

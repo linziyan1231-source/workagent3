@@ -2,7 +2,11 @@ package contracts
 
 import "errors"
 
-var ErrQuotaNotConfigured = errors.New("quota budget is not configured")
+var (
+	ErrQuotaNotConfigured = errors.New("quota budget is not configured")
+	ErrQuotaExceeded      = errors.New("quota exceeded")
+	ErrModelUnauthorized  = errors.New("model is not authorized")
+)
 
 type ModelHealth string
 
