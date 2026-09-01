@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
@@ -240,4 +241,70 @@ func TestRunMapsLegacyManagedMCPFromSIDUserHostRelease(t *testing.T) {
 	if err != nil || server.Source != "managed" || server.Health != "healthy" {
 		t.Fatalf("managed MCP catalog state = %#v, %v", server, err)
 	}
+}
+
+func TestRunMigratesProfessionalDatabaseGrantDirectlyBetweenSIDPrivateStores(t *testing.T) {
+	root := t.TempDir()
+	sid := "S-1-5-21-1"
+	manifest := skillmigration.Manifest{
+		SchemaVersion: 1, SID: sid, CapturedAt: time.Now(), Skills: []skillmigration.Asset{},
+		MCPServers: []skillmigration.MCPServer{{
+			ID: "workagent2-kimi-datasource", Name: "WorkAgent2_Professional_Database", Source: "managed", Enabled: true,
+			ToolPolicy: "all", OAuthState: "none",
+		}},
+		SkillBindings: []skillmigration.Binding{}, MCPBindings: []skillmigration.Binding{}, Results: []skillmigration.Result{},
+	}
+	manifestPath := filepath.Join(root, "manifest.json")
+	encoded, _ := json.Marshal(manifest)
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentialID := "professional-database-authorization"
+	endpoint := "http://127.0.0.1:3211/mcp"
+	config := userhost.FileConfig{
+		SID: sid, DataRoot: filepath.Join(root, "data"), HarnessCommand: filepath.Join(root, "dsh.exe"),
+		Profile: "workagent", PortalURL: "http://127.0.0.1:8080", RegistrationCredentialFile: filepath.Join(root, "registration.token"),
+		ManagedMCPServers: []mcpruntime.Server{{
+			ID: "professional-database", Name: "Professional Database", Source: "managed", Enabled: true,
+			Transport:  mcpruntime.Transport{Kind: "http", URL: endpoint, HeaderCredentialIDs: map[string]string{"Authorization": credentialID}},
+			ToolPolicy: "all", OAuthState: "none", Health: "healthy",
+		}},
+	}
+	configPath := filepath.Join(root, "userhost.json")
+	encoded, _ = json.Marshal(config)
+	if err := os.WriteFile(configPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacyToken := "sid-private-professional-database-token"
+	legacyConfigPath := filepath.Join(root, "legacy-userhost.json")
+	legacyPayload := map[string]any{
+		"windows_sid": sid, "unrelated_legacy_field": true,
+		"kimi_datasource": map[string]string{"endpoint": endpoint, "token": legacyToken},
+	}
+	encoded, _ = json.Marshal(legacyPayload)
+	if err := os.WriteFile(legacyConfigPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeDirectory := filepath.Join(root, "runtime")
+	var output bytes.Buffer
+	if err := run([]string{
+		"--manifest", manifestPath, "--runtime-dir", runtimeDirectory,
+		"--userhost-config", configPath, "--legacy-userhost-config", legacyConfigPath,
+	}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), legacyToken) || !strings.Contains(output.String(), `"targetId":"professional-database","kind":"mcp_server","status":"ready"`) {
+		t.Fatalf("professional database migration report is unsafe or incomplete: %s", output.String())
+	}
+	broker, err := credentialbroker.Open(filepath.Join(runtimeDirectory, "credential-broker.db"), credentialbroker.NewUserProtector())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	secret, err := broker.ResolveMCPValue(t.Context(), credentialID)
+	if err != nil || string(secret) != legacyToken {
+		clearCredential(secret)
+		t.Fatalf("professional database grant was not migrated: %v", err)
+	}
+	clearCredential(secret)
 }

@@ -78,11 +78,12 @@ WorkAgent2 path:
 The plugin root is a separately versioned immutable component copied from the
 latest WorkAgent2 DWG package; it is not an employee checkout. The adapter sets
 `DWG_QUANTITY_ROOT` to the expanded SID workspace before starting the plugin.
-For the professional-database remote MCP, use an HTTPS transport whose
-`headerCredentialIds` references an MCP-header credential in that employee's
-private broker. Never place the bearer value in this configuration. Changes to
-managed definitions take effect through the normal repair/release workflow;
-the browser MCP CRUD API remains restricted to user-owned servers.
+For the professional-database MCP, use either its exact managed loopback broker
+endpoint or an HTTPS remote endpoint. Its `headerCredentialIds` must reference
+an MCP-header credential in that employee's private broker. Never place the
+bearer value in this configuration. Changes to managed definitions take effect
+through the normal repair/release workflow; the browser MCP CRUD API remains
+restricted to user-owned servers.
 
 Before activating a DWG component, run its native dependency and protocol gate
 against the immutable candidate package:
@@ -97,6 +98,27 @@ The gate creates a temporary SID-style workspace, verifies LibreDWG and the
 interactive Tianzheng converter dependencies, then starts the real MCP over
 stdio and requires a valid JSON-RPC initialize result. It removes the temporary
 workspace and does not read provider or MCP credentials.
+
+The professional-database gate reads an existing employee grant only from its
+protected legacy UserHost configuration. It never prints the bearer value. The
+default gate proves authentication, MCP initialization, tool discovery and the
+employee source allowlist. Set the explicit live-call switch only when spending
+one datasource quota unit is intended:
+
+```powershell
+$env:WORKAGENT_LEGACY_USERHOST_CONFIG = 'C:\ProgramData\AionUiPortal\users\<SID>\userhost.json'
+pnpm professional-database:smoke
+
+$env:WORKAGENT_PROFESSIONAL_DATABASE_LIVE_CALL = '1'
+pnpm professional-database:smoke
+```
+
+For one-time migration, stop the SID Runtime and pass both its new private
+`userhost.json` and protected WorkAgent2 UserHost configuration to
+`skill-migrate` via `--userhost-config` and `--legacy-userhost-config`. The
+migrator verifies both SIDs and endpoints, seals the grant directly into that
+SID's WorkAgent3 Credential Broker, and writes only the credential ID into the
+managed MCP transport. The migration report never contains the token.
 
 `set-limits` revokes active sessions, stops the Runtime, atomically updates the
 SID-private UserHost configuration, starts a new Job Object, waits for a healthy

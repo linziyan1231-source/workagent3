@@ -42,6 +42,7 @@ func run(arguments []string, output io.Writer) error {
 	dshHome := flags.String("dsh-home", "", "stopped SID Harness DSH_HOME for staged Preset migration")
 	releaseRoot := flags.String("release-skills-root", "", "WorkAgent3 released builtin Skill root")
 	userHostConfig := flags.String("userhost-config", "", "stopped SID UserHost configuration containing managed MCP definitions")
+	legacyUserHostConfig := flags.String("legacy-userhost-config", "", "protected WorkAgent2 UserHost configuration for direct SID credential migration")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -51,8 +52,8 @@ func run(arguments []string, output io.Writer) error {
 	if *action != "migrate" {
 		return errors.New("action must be inventory or migrate")
 	}
-	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*dshHome != "" && !filepath.IsAbs(*dshHome)) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) || (*userHostConfig != "" && !filepath.IsAbs(*userHostConfig)) {
-		return errors.New("manifest, runtime-dir, and optional dsh-home/release-skills-root/userhost-config must be absolute")
+	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*dshHome != "" && !filepath.IsAbs(*dshHome)) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) || (*userHostConfig != "" && !filepath.IsAbs(*userHostConfig)) || (*legacyUserHostConfig != "" && !filepath.IsAbs(*legacyUserHostConfig)) {
+		return errors.New("manifest, runtime-dir, and optional dsh-home/release-skills-root/userhost-config/legacy-userhost-config must be absolute")
 	}
 	manifestFile, err := os.Open(*manifestPath)
 	if err != nil {
@@ -103,6 +104,14 @@ func run(arguments []string, output io.Writer) error {
 			return err
 		}
 		managedReplacements = managedMCPReplacementIndex(config.ManagedMCPServers)
+	}
+	if *legacyUserHostConfig != "" {
+		if managedReplacements == nil {
+			return errors.New("legacy managed credentials require a WorkAgent3 UserHost managed MCP release")
+		}
+		if err := importLegacyProfessionalDatabaseCredential(ctx, *legacyUserHostConfig, manifest.SID, managedReplacements, credentials); err != nil {
+			return err
+		}
 	}
 	released := map[string]string{}
 	if *releaseRoot != "" {
@@ -170,8 +179,72 @@ func managedMCPReplacementIndex(servers []mcpruntime.Server) map[string]mcprunti
 	for _, server := range servers {
 		index[server.ID] = server
 		index[strings.ToLower(strings.TrimSpace(server.Name))] = server
+		switch server.ID {
+		case "dwg-quantity-surveyor":
+			index["workagent2-dwg-quantity"] = server
+		case "professional-database":
+			index["workagent2-kimi-datasource"] = server
+			index["workagent2_professional_database"] = server
+		}
 	}
 	return index
+}
+
+func importLegacyProfessionalDatabaseCredential(ctx context.Context, path, sid string, managed map[string]mcpruntime.Server, credentials *credentialbroker.Store) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect legacy UserHost configuration: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("legacy UserHost configuration must be a regular non-symlink file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open legacy UserHost configuration: %w", err)
+	}
+	defer file.Close()
+	var legacy struct {
+		SID            string `json:"windows_sid"`
+		KimiDataSource *struct {
+			Endpoint string `json:"endpoint"`
+			Token    string `json:"token"`
+		} `json:"kimi_datasource"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(file, 64*1024))
+	if decoder.Decode(&legacy) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return errors.New("invalid legacy UserHost configuration")
+	}
+	if legacy.SID != sid || legacy.KimiDataSource == nil || strings.TrimSpace(legacy.KimiDataSource.Token) == "" {
+		return errors.New("legacy professional-database grant is missing or belongs to another SID")
+	}
+	replacement, ok := managed["workagent2-kimi-datasource"]
+	if !ok || replacement.ID != "professional-database" || replacement.Transport.Kind != "http" || replacement.Transport.URL != legacy.KimiDataSource.Endpoint {
+		return errors.New("legacy professional-database endpoint does not match the WorkAgent3 managed release")
+	}
+	credentialID := ""
+	for name, id := range replacement.Transport.HeaderCredentialIDs {
+		if strings.EqualFold(name, "Authorization") {
+			credentialID = id
+			break
+		}
+	}
+	if credentialID == "" {
+		return errors.New("professional-database managed release has no Authorization credential reference")
+	}
+	secret := []byte(legacy.KimiDataSource.Token)
+	legacy.KimiDataSource.Token = ""
+	defer clearCredential(secret)
+	_, err = credentials.Put(ctx, credentialbroker.Input{
+		ID: credentialID, Kind: credentialbroker.KindMCPHeader, Label: "Professional database employee grant",
+		Secret: secret, State: credentialbroker.StateReady,
+	})
+	return err
+}
+
+func clearCredential(value []byte) {
+	for index := range value {
+		value[index] = 0
+	}
 }
 
 func stagePresetProjection(dshHome string, projection skillmigration.PresetProjection) error {

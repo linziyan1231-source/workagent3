@@ -481,7 +481,7 @@ func (s *Store) mcpTargetID(ctx context.Context, asset MCPServer, catalog *mcpru
 	}
 	if preferred != "" {
 		existing, getErr := catalog.Get(ctx, preferred)
-		if errors.Is(getErr, mcpruntime.ErrNotFound) || (getErr == nil && existing.Source == "managed" && strings.EqualFold(existing.Name, asset.Name)) {
+		if errors.Is(getErr, mcpruntime.ErrNotFound) || (getErr == nil && existing.Source == "managed") {
 			return preferred, nil
 		}
 		if getErr != nil {
