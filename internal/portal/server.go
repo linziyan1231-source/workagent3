@@ -698,7 +698,12 @@ func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request,
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
+		frameAncestors := "'none'"
+		previewPath := strings.ToLower(request.URL.Query().Get("path"))
+		if request.Method == http.MethodGet && request.URL.Query().Get("preview") == "1" && strings.HasSuffix(previewPath, ".pdf") && strings.HasPrefix(request.URL.Path, "/api/runtime/v1/workspaces/") && strings.HasSuffix(request.URL.Path, "/content") {
+			frameAncestors = "'self'"
+		}
+		writer.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors "+frameAncestors+"; base-uri 'none'")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(writer, request)

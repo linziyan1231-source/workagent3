@@ -150,4 +150,10 @@ describe("WorkspacePort", () => {
       }),
     );
   });
+
+  it("builds the same-origin authenticated inline-preview URL", () => {
+    expect(workspacePort.previewUrl("workspace-1", "reports/final.pdf")).toBe(
+      "/api/runtime/v1/workspaces/workspace-1/content?path=reports%2Ffinal.pdf&preview=1",
+    );
+  });
 });

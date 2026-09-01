@@ -115,6 +115,9 @@ export const workspacePort = {
   downloadUrl(workspaceId: string, path: string): string {
     return `${base}/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}`;
   },
+  previewUrl(workspaceId: string, path: string): string {
+    return `${base}/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}&preview=1`;
+  },
   async read(
     workspaceId: string,
     path: string,

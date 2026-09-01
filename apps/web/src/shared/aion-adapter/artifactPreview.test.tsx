@@ -34,6 +34,12 @@ describe("formal WorkAgent2 artifact preview", () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+    });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -133,6 +139,59 @@ describe("formal WorkAgent2 artifact preview", () => {
       });
 
       expect(container.textContent).toBe("updated body");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("detects Agent-side Workspace writes through the formal PreviewProvider polling path", async () => {
+    vi.useFakeTimers();
+    let modifiedAt = "2026-09-01T02:00:00.000Z";
+    let content = "initial body";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/files?")
+          ? Response.json([
+              {
+                name: "final.md",
+                path: "reports/final.md",
+                kind: "file",
+                size: content.length,
+                modifiedAt,
+              },
+            ])
+          : new Response(content, { status: 200 }),
+      ),
+    );
+    const path =
+      "workagent-workspace:workspace-1\\Browser QA\\reports\\final.md";
+
+    try {
+      await act(async () =>
+        root.render(
+          <PreviewProvider>
+            <ArtifactPreviewProbe />
+          </PreviewProvider>,
+        ),
+      );
+      await act(async () => invokePreview!(path));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(container.textContent).toBe("initial body");
+
+      modifiedAt = "2026-09-01T02:00:01.000Z";
+      content = "agent update";
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toBe("agent update");
     } finally {
       vi.useRealTimers();
     }

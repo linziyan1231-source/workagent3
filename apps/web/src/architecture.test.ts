@@ -89,5 +89,8 @@ describe("Web feature boundaries", () => {
     }
     expect(viteConfig).not.toContain('adapter("previewContext.ts")');
     expect(viteConfig).not.toContain('adapter("localFilePreview.ts")');
+    expect(viteConfig).toContain(
+      'find: "../viewers/PDFViewer",\n        replacement: adapter("BrowserPdfViewer.tsx")',
+    );
   });
 });

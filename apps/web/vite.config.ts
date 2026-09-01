@@ -253,6 +253,10 @@ export default defineConfig({
         replacement: adapter("autoPreviewOfficeFiles.ts"),
       },
       {
+        find: "../viewers/PDFViewer",
+        replacement: adapter("BrowserPdfViewer.tsx"),
+      },
+      {
         find: /^@\/renderer\/pages\/conversation\/Preview$/,
         replacement: `${aionSrc}/renderer/pages/conversation/Preview/index.ts`,
       },

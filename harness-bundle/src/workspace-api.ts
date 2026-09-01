@@ -5,6 +5,35 @@ import { WorkspaceStore } from "./workspace-store.js";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+const INLINE_PREVIEW_MEDIA_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+};
+
+export const workspaceContentHeaders = (
+  path: string,
+  length: number,
+  inlineRequested: boolean,
+): Record<string, string | number> => {
+  const fileName = path.split("/").at(-1) ?? "file";
+  const extension = fileName.toLocaleLowerCase().split(".").pop() ?? "";
+  const mediaType = inlineRequested
+    ? INLINE_PREVIEW_MEDIA_TYPES[extension]
+    : undefined;
+  const disposition = mediaType === undefined ? "attachment" : "inline";
+  return {
+    "cache-control": "no-store",
+    "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    "content-length": length,
+    "content-type": mediaType ?? "application/octet-stream",
+    ...(mediaType === undefined
+      ? {}
+      : {
+          "content-security-policy":
+            "default-src 'none'; frame-ancestors 'self'; base-uri 'none'",
+        }),
+  };
+};
+
 const json = (
   response: ServerResponse,
   status: number,
@@ -154,12 +183,14 @@ export class WorkspaceController {
     }
     if (action === "content" && request.method === "GET") {
       const content = this.#store.read(id, path);
-      response.writeHead(200, {
-        "cache-control": "no-store",
-        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(path.split("/").at(-1) ?? "file")}`,
-        "content-length": content.length,
-        "content-type": "application/octet-stream",
-      });
+      response.writeHead(
+        200,
+        workspaceContentHeaders(
+          path,
+          content.length,
+          url.searchParams.get("preview") === "1",
+        ),
+      );
       response.end(content);
       return;
     }

@@ -485,13 +485,16 @@ const runtimeWorkspaceId = (workspace: string | undefined) => {
     : workspace.slice("workagent-workspace:".length, separator);
 };
 
-const personalWorkspaceLocation = (
+export const personalWorkspaceLocation = (
   workspace: string | undefined,
   path: string,
 ) => {
   if (sharedProjectIDFromPath(workspace)) return null;
   if (!workspace) {
-    const normalizedPath = path.replaceAll("\\", "/").replace(/^\//, "");
+    const normalizedPath = path
+      .replaceAll("\\", "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\//, "");
     const managed = /^workagent-workspace:([^/]+)\/[^/]+(?:\/(.*))?$/.exec(
       normalizedPath,
     );
@@ -511,8 +514,12 @@ const personalWorkspaceLocation = (
   const workspaceId = runtimeWorkspaceId(workspace);
   const normalizedWorkspace = workspace
     .replaceAll("\\", "/")
+    .replace(/\/+/g, "/")
     .replace(/\/$/, "");
-  const normalizedPath = path.replaceAll("\\", "/").replace(/^\//, "");
+  const normalizedPath = path
+    .replaceAll("\\", "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\//, "");
   const idRoot = workspaceId.replaceAll("\\", "/").replace(/\/$/, "");
   const relativePath = normalizedPath.startsWith(`${normalizedWorkspace}/`)
     ? normalizedPath.slice(normalizedWorkspace.length + 1)
