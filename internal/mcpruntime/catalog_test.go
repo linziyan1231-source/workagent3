@@ -122,3 +122,70 @@ func TestCatalogAcceptsAllTransportsAndProjectsTheEngineSupportMatrix(t *testing
 		}
 	}
 }
+
+func TestSyncManagedReconcilesReleaseWithoutChangingUserServers(t *testing.T) {
+	catalog, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	user := Server{
+		ID: "user", Name: "User server", Source: "user", Enabled: true,
+		Transport:  Transport{Kind: "http", URL: "https://example.com/mcp"},
+		ToolPolicy: "all", OAuthState: "none", Health: "unknown",
+	}
+	if _, err := catalog.Create(t.Context(), user); err != nil {
+		t.Fatal(err)
+	}
+	first := Server{
+		ID: "managed-old", Name: "Managed old", Source: "managed", Enabled: true,
+		Transport:  Transport{Kind: "stdio", Command: filepath.Join(t.TempDir(), "old.exe")},
+		ToolPolicy: "all", OAuthState: "none", Health: "unknown",
+	}
+	if err := catalog.SyncManaged(t.Context(), []Server{first}); err != nil {
+		t.Fatal(err)
+	}
+	updated := Server{
+		ID: "managed-new", Name: "Managed new", Description: "release v2", Source: "managed", Enabled: false,
+		Transport:  Transport{Kind: "stdio", Command: filepath.Join(t.TempDir(), "new.exe"), Args: []string{"serve"}},
+		ToolPolicy: "none", OAuthState: "none", Health: "unavailable",
+	}
+	if err := catalog.SyncManaged(t.Context(), []Server{updated}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.Get(t.Context(), first.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("retired managed server remains: %v", err)
+	}
+	servers, err := catalog.List(t.Context())
+	if err != nil || len(servers) != 2 || servers[0].ID != updated.ID || servers[1].ID != user.ID {
+		t.Fatalf("reconciled servers = %#v, %v", servers, err)
+	}
+	if servers[0].Description != "release v2" || servers[0].Enabled {
+		t.Fatalf("managed release state = %#v", servers[0])
+	}
+}
+
+func TestSyncManagedRollsBackOnUserConflict(t *testing.T) {
+	catalog, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	user := Server{
+		ID: "shared", Name: "User server", Source: "user", Enabled: true,
+		Transport:  Transport{Kind: "http", URL: "https://example.com/mcp"},
+		ToolPolicy: "all", OAuthState: "none", Health: "unknown",
+	}
+	if _, err := catalog.Create(t.Context(), user); err != nil {
+		t.Fatal(err)
+	}
+	managed := user
+	managed.Name, managed.Source = "Managed server", "managed"
+	if err := catalog.SyncManaged(t.Context(), []Server{managed}); err == nil {
+		t.Fatal("managed release replaced a user-owned server")
+	}
+	server, err := catalog.Get(t.Context(), user.ID)
+	if err != nil || server.Source != "user" || server.Name != user.Name {
+		t.Fatalf("user server changed after rollback: %#v, %v", server, err)
+	}
+}

@@ -42,6 +42,62 @@ and repair copy that immutable release location into the SID-private UserHost
 configuration; UserHost then synchronizes the catalog under the employee SID.
 Do not point it at a developer checkout or an employee-writable directory.
 
+The optional `managedMcpServers` array is the release-owned half of the same
+contract. Employee Manager expands `${SID}`, `${DATA_ROOT}`, and
+`${WORKSPACE_ROOT}` in transport commands, arguments, and URLs before writing
+the private UserHost configuration. UserHost atomically reconciles only
+`source: "managed"` entries and never updates or removes user-owned MCP
+servers. A DWG definition can therefore invoke the released adapter without a
+WorkAgent2 path:
+
+```json
+{
+  "id": "dwg-quantity-surveyor",
+  "name": "DWG Quantity Surveyor",
+  "description": "Per-SID DWG, Tianzheng, 3D, and BOQ tools",
+  "source": "managed",
+  "enabled": true,
+  "transport": {
+    "kind": "stdio",
+    "command": "C:\\Program Files\\AionAgentCliShared\\bin\\python.exe",
+    "args": [
+      "E:\\WorkAgent3\\release\\managed-mcp\\dwg_launcher.py",
+      "--plugin-root",
+      "E:\\WorkAgent3\\components\\dwg-quantity-surveyor",
+      "--workspace-root",
+      "${WORKSPACE_ROOT}"
+    ]
+  },
+  "toolPolicy": "all",
+  "allowedTools": [],
+  "oauthState": "none",
+  "health": "unknown"
+}
+```
+
+The plugin root is a separately versioned immutable component copied from the
+latest WorkAgent2 DWG package; it is not an employee checkout. The adapter sets
+`DWG_QUANTITY_ROOT` to the expanded SID workspace before starting the plugin.
+For the professional-database remote MCP, use an HTTPS transport whose
+`headerCredentialIds` references an MCP-header credential in that employee's
+private broker. Never place the bearer value in this configuration. Changes to
+managed definitions take effect through the normal repair/release workflow;
+the browser MCP CRUD API remains restricted to user-owned servers.
+
+Before activating a DWG component, run its native dependency and protocol gate
+against the immutable candidate package:
+
+```powershell
+$env:WORKAGENT_DWG_PLUGIN_ROOT = 'E:\WorkAgent3\components\dwg-quantity-surveyor'
+$env:WORKAGENT_PYTHON_COMMAND = 'C:\Program Files\AionAgentCliShared\bin\python.exe'
+pnpm dwg:smoke
+```
+
+The gate creates a temporary SID-style workspace, verifies LibreDWG and the
+interactive Tianzheng converter dependencies, then starts the real MCP over
+stdio and requires a valid JSON-RPC initialize result. It removes the temporary
+workspace and does not read provider or MCP credentials.
+
 `set-limits` revokes active sessions, stops the Runtime, atomically updates the
 SID-private UserHost configuration, starts a new Job Object, waits for a healthy
 lease, and only then re-enables the account. Invalid limits are rejected before

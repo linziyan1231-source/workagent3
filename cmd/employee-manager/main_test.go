@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"workagent3/internal/mcpruntime"
 )
 
 func TestLoadManagerConfigRejectsRelativeOrUnknownFields(t *testing.T) {
@@ -36,6 +38,11 @@ func TestManagerConfigKeepsLifecycleActionsOnThePrivilegedBoundary(t *testing.T)
 		HarnessEntrypoint: "dist/index.js", Profile: "workagent",
 		HarnessProfileSource: filepath.Join(root, "profile"), PortalURL: "https://portal.test",
 		ManagedSkillsRoot: filepath.Join(root, "managed-skills"),
+		ManagedMCPServers: []mcpruntime.Server{{
+			ID: "managed", Name: "Managed", Source: "managed", Enabled: false,
+			Transport:  mcpruntime.Transport{Kind: "stdio", Command: filepath.Join(root, "managed.exe")},
+			ToolPolicy: "none", OAuthState: "none", Health: "unavailable",
+		}},
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -50,5 +57,8 @@ func TestManagerConfigKeepsLifecycleActionsOnThePrivilegedBoundary(t *testing.T)
 	}
 	if config.PortalURL != "https://portal.test" || config.DataRootBase != filepath.Join(root, "users") || config.ManagedSkillsRoot != filepath.Join(root, "managed-skills") {
 		t.Fatalf("unexpected lifecycle configuration: %+v", config)
+	}
+	if len(config.ManagedMCPServers) != 1 || config.ManagedMCPServers[0].ID != "managed" {
+		t.Fatalf("managed MCP release was not loaded: %+v", config.ManagedMCPServers)
 	}
 }

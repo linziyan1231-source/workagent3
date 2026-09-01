@@ -129,6 +129,86 @@ func (c *Catalog) Replace(ctx context.Context, server Server) (Server, error) {
 	return c.Get(ctx, server.ID)
 }
 
+// SyncManaged atomically reconciles the managed portion of a SID catalog with
+// the definitions supplied by the active release. User-owned servers are
+// never changed or removed.
+func (c *Catalog) SyncManaged(ctx context.Context, servers []Server) error {
+	seenIDs, seenNames := map[string]struct{}{}, map[string]struct{}{}
+	for _, server := range servers {
+		name := strings.ToLower(strings.TrimSpace(server.Name))
+		if server.Source != "managed" {
+			return errors.New("managed MCP release contains another source")
+		}
+		if err := validateServer(server); err != nil {
+			return err
+		}
+		if _, duplicate := seenIDs[server.ID]; duplicate {
+			return errors.New("duplicate managed MCP id")
+		}
+		if _, duplicate := seenNames[name]; duplicate {
+			return errors.New("duplicate managed MCP name")
+		}
+		seenIDs[server.ID], seenNames[name] = struct{}{}, struct{}{}
+	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return fmt.Errorf("sync managed MCP servers: %w", err)
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM mcp_servers WHERE source='managed'`)
+	if err != nil {
+		return fmt.Errorf("list managed MCP servers: %w", err)
+	}
+	var removed []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, retained := seenIDs[id]; !retained {
+			removed = append(removed, id)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range removed {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id=? AND source='managed'`, id); err != nil {
+			return fmt.Errorf("remove retired managed MCP server: %w", err)
+		}
+	}
+	stamp := c.now().UnixMilli()
+	for _, server := range servers {
+		transport, _ := json.Marshal(server.Transport)
+		allowedTools, _ := json.Marshal(server.AllowedTools)
+		var source string
+		err := tx.QueryRowContext(ctx, `SELECT source FROM mcp_servers WHERE id=?`, server.ID).Scan(&source)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			_, err = tx.ExecContext(ctx, `INSERT INTO mcp_servers
+(id,name,description,source,enabled,transport_json,tool_policy,allowed_tools_json,oauth_state,health,created_at,updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, server.ID, strings.TrimSpace(server.Name), strings.TrimSpace(server.Description), server.Source,
+				server.Enabled, string(transport), server.ToolPolicy, string(allowedTools), server.OAuthState, server.Health, stamp, stamp)
+		case err != nil:
+			return fmt.Errorf("inspect managed MCP server: %w", err)
+		case source != "managed":
+			return errors.New("managed MCP conflicts with a user server")
+		default:
+			_, err = tx.ExecContext(ctx, `UPDATE mcp_servers SET name=?,description=?,enabled=?,transport_json=?,tool_policy=?,allowed_tools_json=?,oauth_state=?,health=?,updated_at=? WHERE id=? AND source='managed'`,
+				strings.TrimSpace(server.Name), strings.TrimSpace(server.Description), server.Enabled, string(transport), server.ToolPolicy,
+				string(allowedTools), server.OAuthState, server.Health, stamp, server.ID)
+		}
+		if err != nil {
+			return fmt.Errorf("sync managed MCP server %s: %w", server.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit managed MCP servers: %w", err)
+	}
+	return nil
+}
+
 func (c *Catalog) Get(ctx context.Context, id string) (Server, error) {
 	return scanServer(c.db.QueryRowContext(ctx, mcpSelect+` WHERE id=?`, id))
 }

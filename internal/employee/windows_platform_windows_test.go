@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
@@ -32,6 +34,14 @@ func TestWriteAtomicReplacesProvisionedRuntimeFile(t *testing.T) {
 func TestRuntimeConfigProjectsManagedSkillsRelease(t *testing.T) {
 	root := t.TempDir()
 	managedSkillsRoot := filepath.Join(root, "release", "managed-skills")
+	managedServer := mcpruntime.Server{
+		ID: "managed", Name: "Managed", Source: "managed", Enabled: false,
+		Transport: mcpruntime.Transport{
+			Kind: "stdio", Command: filepath.Join(root, "managed.exe"),
+			Args: []string{"--workspace", "${WORKSPACE_ROOT}", "--sid", "${SID}"},
+		},
+		ToolPolicy: "none", OAuthState: "none", Health: "unavailable",
+	}
 	platform := &WindowsPlatform{config: WindowsPlatformConfig{
 		HarnessCommand:    filepath.Join(root, "dsh.exe"),
 		HarnessEntrypoint: filepath.Join("dist", "index.js"),
@@ -39,11 +49,22 @@ func TestRuntimeConfigProjectsManagedSkillsRelease(t *testing.T) {
 		Profile:           "workagent",
 		PortalURL:         "http://127.0.0.1:8080",
 		ManagedSkillsRoot: managedSkillsRoot,
+		ManagedMCPServers: []mcpruntime.Server{managedServer},
 	}}
 	spec := RuntimeSpec{SID: "S-1-5-21-1000", DataRoot: filepath.Join(root, "employee")}
 	config := platform.runtimeFileConfig(spec, filepath.Join(root, "registration.token"))
 	if config.ManagedSkillsRoot != managedSkillsRoot {
 		t.Fatalf("managed Skills release was not projected: %+v", config)
+	}
+	if len(config.ManagedMCPServers) != 1 || config.ManagedMCPServers[0].ID != managedServer.ID {
+		t.Fatalf("managed MCP release was not projected: %+v", config)
+	}
+	expectedArguments := []string{"--workspace", filepath.Join(spec.DataRoot, "workspace"), "--sid", spec.SID}
+	if !reflect.DeepEqual(config.ManagedMCPServers[0].Transport.Args, expectedArguments) {
+		t.Fatalf("managed MCP SID variables were not expanded: %#v", config.ManagedMCPServers[0].Transport.Args)
+	}
+	if managedServer.Transport.Args[1] != "${WORKSPACE_ROOT}" {
+		t.Fatal("shared managed MCP release definition was mutated")
 	}
 }
 

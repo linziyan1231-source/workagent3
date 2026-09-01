@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $toolPath = Join-Path $repositoryRoot "release/managed-skills/llm-wiki/scripts/wiki_tool.py"
+$dwgLauncherPath = Join-Path $repositoryRoot "release/managed-mcp/dwg_launcher.py"
 $pythonCommand = Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("workagent3-wiki-smoke-" + [guid]::NewGuid().ToString("N"))
 
@@ -17,6 +18,11 @@ function Invoke-WikiTool {
 
 try {
     New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+
+    & $pythonCommand.Source $dwgLauncherPath --help | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "DWG managed MCP launcher failed its command-line smoke"
+    }
 
     $preview = Invoke-WikiTool @("init", "--root", $smokeRoot, "--json")
     if ($preview.applied -ne $false -or $preview.workspace_state -ne "new" -or $preview.actions.Count -eq 0) {
@@ -53,7 +59,7 @@ try {
         throw "Wiki project lease was not released"
     }
 
-    Write-Output "Managed Skill smoke passed: Wiki init, status, lint, snapshot, and lease lifecycle."
+    Write-Output "Managed capability smoke passed: DWG launcher plus Wiki init, status, lint, snapshot, and lease lifecycle."
 }
 finally {
     if (Test-Path -LiteralPath $smokeRoot) {

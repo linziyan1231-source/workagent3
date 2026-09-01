@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
+	"workagent3/internal/userhost"
 )
 
 func TestRunCapturesCredentialFreeLegacyInventoryWithoutOverwrite(t *testing.T) {
@@ -187,5 +189,55 @@ func TestRunUsesManagedReleaseForLegacyBuiltinState(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.DirectoryFor(entry), "..", "..", "scripts", "wiki_tool.py")); err != nil {
 		t.Fatalf("managed shared script was not installed: %v", err)
+	}
+}
+
+func TestRunMapsLegacyManagedMCPFromSIDUserHostRelease(t *testing.T) {
+	root := t.TempDir()
+	sid := "S-1-5-21-1"
+	manifest := skillmigration.Manifest{
+		SchemaVersion: 1, SID: sid, CapturedAt: time.Now(),
+		Skills: []skillmigration.Asset{},
+		MCPServers: []skillmigration.MCPServer{{
+			ID: "workagent2-dwg-quantity", Name: "DWG Quantity Surveyor", Source: "managed", Enabled: true,
+			ToolPolicy: "all", OAuthState: "none",
+		}},
+		SkillBindings: []skillmigration.Binding{}, MCPBindings: []skillmigration.Binding{}, Results: []skillmigration.Result{},
+	}
+	manifestPath := filepath.Join(root, "manifest.json")
+	encoded, _ := json.Marshal(manifest)
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := userhost.FileConfig{
+		SID: sid, DataRoot: filepath.Join(root, "data"), HarnessCommand: filepath.Join(root, "dsh.exe"),
+		Profile: "workagent", PortalURL: "http://127.0.0.1:8080", RegistrationCredentialFile: filepath.Join(root, "registration.token"),
+		ManagedMCPServers: []mcpruntime.Server{{
+			ID: "dwg-quantity-surveyor", Name: "DWG Quantity Surveyor", Source: "managed", Enabled: true,
+			Transport:  mcpruntime.Transport{Kind: "stdio", Command: filepath.Join(root, "python.exe"), Args: []string{filepath.Join(root, "dwg_launcher.py")}},
+			ToolPolicy: "all", OAuthState: "none", Health: "healthy",
+		}},
+	}
+	configPath := filepath.Join(root, "userhost.json")
+	encoded, _ = json.Marshal(config)
+	if err := os.WriteFile(configPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeDirectory := filepath.Join(root, "runtime")
+	var output bytes.Buffer
+	if err := run([]string{"--manifest", manifestPath, "--runtime-dir", runtimeDirectory, "--userhost-config", configPath}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"sourceId":"workagent2-dwg-quantity","targetId":"dwg-quantity-surveyor","kind":"mcp_server","status":"ready"`) {
+		t.Fatalf("managed MCP was not mapped to the WorkAgent3 release: %s", output.String())
+	}
+	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	server, err := catalog.Get(t.Context(), "dwg-quantity-surveyor")
+	if err != nil || server.Source != "managed" || server.Health != "healthy" {
+		t.Fatalf("managed MCP catalog state = %#v, %v", server, err)
 	}
 }

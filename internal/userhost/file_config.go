@@ -8,22 +8,24 @@ import (
 	"os"
 	"path/filepath"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/winutil"
 )
 
 type FileConfig struct {
-	SID                        string            `json:"sid"`
-	DataRoot                   string            `json:"dataRoot"`
-	HarnessCommand             string            `json:"harnessCommand"`
-	CodexCommand               string            `json:"codexCommand,omitempty"`
-	KimiCommand                string            `json:"kimiCommand,omitempty"`
-	HarnessArguments           []string          `json:"harnessArguments,omitempty"`
-	Profile                    string            `json:"profile"`
-	PortalURL                  string            `json:"portalUrl"`
-	RegistrationCredentialFile string            `json:"registrationCredentialFile"`
-	Limits                     winutil.JobLimits `json:"limits"`
-	StartupTimeoutSeconds      int               `json:"startupTimeoutSeconds,omitempty"`
-	ManagedSkillsRoot          string            `json:"managedSkillsRoot,omitempty"`
+	SID                        string              `json:"sid"`
+	DataRoot                   string              `json:"dataRoot"`
+	HarnessCommand             string              `json:"harnessCommand"`
+	CodexCommand               string              `json:"codexCommand,omitempty"`
+	KimiCommand                string              `json:"kimiCommand,omitempty"`
+	HarnessArguments           []string            `json:"harnessArguments,omitempty"`
+	Profile                    string              `json:"profile"`
+	PortalURL                  string              `json:"portalUrl"`
+	RegistrationCredentialFile string              `json:"registrationCredentialFile"`
+	Limits                     winutil.JobLimits   `json:"limits"`
+	StartupTimeoutSeconds      int                 `json:"startupTimeoutSeconds,omitempty"`
+	ManagedSkillsRoot          string              `json:"managedSkillsRoot,omitempty"`
+	ManagedMCPServers          []mcpruntime.Server `json:"managedMcpServers,omitempty"`
 }
 
 func LoadFileConfig(path string) (FileConfig, error) {

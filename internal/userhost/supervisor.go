@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"workagent3/internal/auth"
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/winutil"
 )
@@ -33,6 +34,7 @@ type Config struct {
 	Limits             winutil.JobLimits
 	StartupTimeout     time.Duration
 	ManagedSkillsRoot  string
+	ManagedMCPServers  []mcpruntime.Server
 	PlatformURL        string
 	PlatformCredential string
 }
@@ -133,7 +135,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.DataRoot, s.config.SID, target, token, func() {
+	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.ManagedMCPServers, s.config.DataRoot, s.config.SID, target, token, func() {
 		select {
 		case s.restartRequested <- struct{}{}:
 		default:

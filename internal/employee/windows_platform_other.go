@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
@@ -21,6 +22,7 @@ type WindowsPlatformConfig struct {
 	Profile              string
 	HarnessProfileSource string
 	ManagedSkillsRoot    string
+	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
 	Limits               winutil.JobLimits
 }

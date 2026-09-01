@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"workagent3/internal/credentialbroker"
@@ -17,6 +18,7 @@ import (
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
+	"workagent3/internal/userhost"
 )
 
 func main() {
@@ -39,6 +41,7 @@ func run(arguments []string, output io.Writer) error {
 	runtimeDirectory := flags.String("runtime-dir", "", "stopped SID UserHost runtime directory")
 	dshHome := flags.String("dsh-home", "", "stopped SID Harness DSH_HOME for staged Preset migration")
 	releaseRoot := flags.String("release-skills-root", "", "WorkAgent3 released builtin Skill root")
+	userHostConfig := flags.String("userhost-config", "", "stopped SID UserHost configuration containing managed MCP definitions")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -48,8 +51,8 @@ func run(arguments []string, output io.Writer) error {
 	if *action != "migrate" {
 		return errors.New("action must be inventory or migrate")
 	}
-	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*dshHome != "" && !filepath.IsAbs(*dshHome)) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) {
-		return errors.New("manifest, runtime-dir, and optional dsh-home/release-skills-root must be absolute")
+	if !filepath.IsAbs(*manifestPath) || !filepath.IsAbs(*runtimeDirectory) || (*dshHome != "" && !filepath.IsAbs(*dshHome)) || (*releaseRoot != "" && !filepath.IsAbs(*releaseRoot)) || (*userHostConfig != "" && !filepath.IsAbs(*userHostConfig)) {
+		return errors.New("manifest, runtime-dir, and optional dsh-home/release-skills-root/userhost-config must be absolute")
 	}
 	manifestFile, err := os.Open(*manifestPath)
 	if err != nil {
@@ -84,6 +87,23 @@ func run(arguments []string, output io.Writer) error {
 	}
 	defer credentials.Close()
 	ctx := context.Background()
+	managedReplacements := map[string]mcpruntime.Server(nil)
+	if *userHostConfig != "" {
+		config, err := userhost.LoadFileConfig(*userHostConfig)
+		if err != nil {
+			return err
+		}
+		if config.SID != manifest.SID {
+			return errors.New("migration manifest and UserHost configuration SID do not match")
+		}
+		if config.ManagedMCPServers == nil {
+			return errors.New("UserHost configuration has no managed MCP release")
+		}
+		if err := mcp.SyncManaged(ctx, config.ManagedMCPServers); err != nil {
+			return err
+		}
+		managedReplacements = managedMCPReplacementIndex(config.ManagedMCPServers)
+	}
 	released := map[string]string{}
 	if *releaseRoot != "" {
 		if err := managedskills.Sync(ctx, *releaseRoot, skills); err != nil {
@@ -99,7 +119,7 @@ func run(arguments []string, output io.Writer) error {
 		return err
 	}
 	defer migration.Close()
-	mcpResults, err := migration.MigrateMCP(ctx, manifest.MCPServers, mcp, credentialReadiness{store: credentials}, nil)
+	mcpResults, err := migration.MigrateMCP(ctx, manifest.MCPServers, mcp, credentialReadiness{store: credentials}, managedReplacements)
 	if err != nil {
 		return err
 	}
@@ -143,6 +163,15 @@ func run(arguments []string, output io.Writer) error {
 		SID     string                  `json:"sid"`
 		Results []skillmigration.Result `json:"results"`
 	}{SID: manifest.SID, Results: results})
+}
+
+func managedMCPReplacementIndex(servers []mcpruntime.Server) map[string]mcpruntime.Server {
+	index := make(map[string]mcpruntime.Server, len(servers)*2)
+	for _, server := range servers {
+		index[server.ID] = server
+		index[strings.ToLower(strings.TrimSpace(server.Name))] = server
+	}
+	return index
 }
 
 func stagePresetProjection(dshHome string, projection skillmigration.PresetProjection) error {

@@ -56,6 +56,7 @@ func run() error {
 		Arguments: config.HarnessArguments, Profile: config.Profile, Limits: config.Limits,
 		StartupTimeout:     time.Duration(config.StartupTimeoutSeconds) * time.Second,
 		ManagedSkillsRoot:  config.ManagedSkillsRoot,
+		ManagedMCPServers:  config.ManagedMCPServers,
 		PlatformURL:        config.PortalURL,
 		PlatformCredential: credential,
 	})

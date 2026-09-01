@@ -31,10 +31,16 @@ type runtimeGateway struct {
 	oauth       *mcpOAuthManager
 }
 
-func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
+	}
+	if managedMCPServers != nil {
+		if err := catalog.SyncManaged(context.Background(), managedMCPServers); err != nil {
+			catalog.Close()
+			return nil, err
+		}
 	}
 	credentials, err := credentialbroker.Open(filepath.Join(runtimeDirectory, "credential-broker.db"), credentialbroker.NewUserProtector())
 	if err != nil {

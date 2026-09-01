@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
@@ -35,6 +36,7 @@ type WindowsPlatformConfig struct {
 	Profile              string
 	HarnessProfileSource string
 	ManagedSkillsRoot    string
+	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
 	Limits               winutil.JobLimits
 }
@@ -117,8 +119,34 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
 		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
 		ManagedSkillsRoot: p.config.ManagedSkillsRoot,
+		ManagedMCPServers: expandManagedMCPServers(p.config.ManagedMCPServers, spec),
 		Limits:            p.config.Limits,
 	}
+}
+
+func expandManagedMCPServers(servers []mcpruntime.Server, spec RuntimeSpec) []mcpruntime.Server {
+	variables := map[string]string{
+		"${SID}":            spec.SID,
+		"${DATA_ROOT}":      spec.DataRoot,
+		"${WORKSPACE_ROOT}": filepath.Join(spec.DataRoot, "workspace"),
+	}
+	expand := func(value string) string {
+		for variable, replacement := range variables {
+			value = strings.ReplaceAll(value, variable, replacement)
+		}
+		return value
+	}
+	result := make([]mcpruntime.Server, len(servers))
+	for index, server := range servers {
+		result[index] = server
+		result[index].Transport.Command = expand(server.Transport.Command)
+		result[index].Transport.URL = expand(server.Transport.URL)
+		result[index].Transport.Args = make([]string, len(server.Transport.Args))
+		for argumentIndex, argument := range server.Transport.Args {
+			result[index].Transport.Args[argumentIndex] = expand(argument)
+		}
+	}
+	return result
 }
 
 func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) error {

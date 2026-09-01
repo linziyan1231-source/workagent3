@@ -19,24 +19,26 @@ import (
 
 	"workagent3/internal/employee"
 	"workagent3/internal/employeemanager"
+	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
 type managerConfig struct {
-	DatabasePath         string            `json:"databasePath"`
-	DataRootBase         string            `json:"dataRootBase"`
-	UserHostExecutable   string            `json:"userHostExecutable"`
-	HarnessCommand       string            `json:"harnessCommand"`
-	HarnessEntrypoint    string            `json:"harnessEntrypoint"`
-	CodexCommand         string            `json:"codexCommand,omitempty"`
-	KimiCommand          string            `json:"kimiCommand,omitempty"`
-	HarnessArguments     []string          `json:"harnessArguments,omitempty"`
-	Profile              string            `json:"profile"`
-	HarnessProfileSource string            `json:"harnessProfileSource"`
-	ManagedSkillsRoot    string            `json:"managedSkillsRoot"`
-	PortalURL            string            `json:"portalUrl"`
-	Limits               winutil.JobLimits `json:"limits"`
+	DatabasePath         string              `json:"databasePath"`
+	DataRootBase         string              `json:"dataRootBase"`
+	UserHostExecutable   string              `json:"userHostExecutable"`
+	HarnessCommand       string              `json:"harnessCommand"`
+	HarnessEntrypoint    string              `json:"harnessEntrypoint"`
+	CodexCommand         string              `json:"codexCommand,omitempty"`
+	KimiCommand          string              `json:"kimiCommand,omitempty"`
+	HarnessArguments     []string            `json:"harnessArguments,omitempty"`
+	Profile              string              `json:"profile"`
+	HarnessProfileSource string              `json:"harnessProfileSource"`
+	ManagedSkillsRoot    string              `json:"managedSkillsRoot"`
+	ManagedMCPServers    []mcpruntime.Server `json:"managedMcpServers,omitempty"`
+	PortalURL            string              `json:"portalUrl"`
+	Limits               winutil.JobLimits   `json:"limits"`
 }
 
 func main() {
@@ -85,6 +87,7 @@ func run() error {
 		KimiCommand:  config.KimiCommand, HarnessArguments: config.HarnessArguments,
 		Profile: config.Profile, HarnessProfileSource: config.HarnessProfileSource,
 		ManagedSkillsRoot: config.ManagedSkillsRoot,
+		ManagedMCPServers: config.ManagedMCPServers,
 		PortalURL:         config.PortalURL, Limits: config.Limits,
 	})
 	if err != nil {
