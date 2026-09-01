@@ -112,6 +112,18 @@ func TestConnectorRejectsNonLoopbackPlainHTTPAndUnknownConfig(t *testing.T) {
 	}
 }
 
+func TestConnectorFailsClosedInsteadOfDroppingOutboundAttachments(t *testing.T) {
+	connector, _ := New(credentialStub{secret: []byte("token")})
+	_, err := connector.Send(t.Context(), imgateway.OutboundMessage{
+		ConnectorID: "weixin",
+		Text:        "report",
+		Attachments: []imgateway.Attachment{{Name: "report.pdf", ContentBase64: "cGRm"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "attachments are not supported") {
+		t.Fatalf("outbound attachment was silently dropped: %v", err)
+	}
+}
+
 func TestMediaKeyAndECBDecryption(t *testing.T) {
 	rawKey := []byte("0123456789abcdef")
 	encodedHex := base64.StdEncoding.EncodeToString([]byte("30313233343536373839616263646566"))

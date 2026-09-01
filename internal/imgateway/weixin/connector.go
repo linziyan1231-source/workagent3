@@ -155,6 +155,9 @@ func (c *Connector) Stop(ctx context.Context) error {
 }
 
 func (c *Connector) Send(ctx context.Context, message imgateway.OutboundMessage) (imgateway.SendReceipt, error) {
+	if len(message.Attachments) != 0 {
+		return imgateway.SendReceipt{}, errors.New("Weixin outbound attachments are not supported")
+	}
 	c.mu.Lock()
 	if c.cancel == nil || message.ExternalAccountID != c.accountID {
 		c.mu.Unlock()
