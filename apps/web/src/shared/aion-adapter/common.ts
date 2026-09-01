@@ -1762,7 +1762,34 @@ export const ipcBridge = {
       },
     },
     searchConversationMessages: {
-      invoke: async () => ({ items: [], next_cursor: null }),
+      invoke: async ({
+        keyword,
+        page = 0,
+        page_size = 20,
+      }: {
+        keyword: string;
+        page?: number;
+        page_size?: number;
+      }) => {
+        const result = await conversationPort.searchMessages(
+          keyword,
+          page,
+          page_size,
+        );
+        return {
+          items: result.items.map(({ session, message }) => ({
+            conversation: toRendererConversation(session),
+            message_id: message.id,
+            message_type: "text" as const,
+            message_created_at: Date.parse(message.createdAt),
+            preview_text: message.text,
+          })),
+          total: result.total,
+          page: result.page,
+          page_size: result.pageSize,
+          has_more: result.hasMore,
+        };
+      },
     },
   },
   windowControls: {

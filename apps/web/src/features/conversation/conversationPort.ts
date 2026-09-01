@@ -7,6 +7,7 @@ import {
   interactionApiSchemas,
   type PendingInteraction,
   type RuntimeMessage,
+  type RuntimeMessageSearchResult,
   type RuntimeSession,
 } from "@workagent/contracts";
 import { requestJson } from "../../shared/api/http.js";
@@ -21,6 +22,11 @@ export type ConversationPort = {
   get(sessionId: string): Promise<RuntimeSession>;
   list(): Promise<RuntimeSession[]>;
   messages(sessionId: string): Promise<RuntimeMessage[]>;
+  searchMessages(
+    keyword: string,
+    page: number,
+    pageSize: number,
+  ): Promise<RuntimeMessageSearchResult>;
   pending(sessionId: string): Promise<PendingInteraction[]>;
   respond(interactionId: string, decision: "allow" | "reject"): Promise<void>;
   rename(sessionId: string, title: string): Promise<RuntimeSession>;
@@ -67,6 +73,18 @@ export const conversationPort: ConversationPort = {
     return runtimeApiSchemas.messageList.parse(
       await requestJson<unknown>(
         `${runtimePath}/${encodeURIComponent(sessionId)}/messages`,
+      ),
+    );
+  },
+  async searchMessages(keyword, page, pageSize) {
+    const query = new URLSearchParams({
+      keyword,
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    return runtimeApiSchemas.messageSearchResult.parse(
+      await requestJson<unknown>(
+        `/api/runtime/v1/messages/search?${query.toString()}`,
       ),
     );
   },

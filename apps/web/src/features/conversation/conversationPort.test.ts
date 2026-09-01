@@ -179,6 +179,49 @@ describe("ConversationPort", () => {
     );
   });
 
+  it("searches persisted messages through the SID Runtime", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              session: {
+                id: "session-1",
+                engine: "harness",
+                title: "Quarterly plan",
+                workspaceId: "workspace-1",
+                preset,
+                createdAt: "2026-08-30T10:00:00.000Z",
+                updatedAt: "2026-08-30T10:01:00.000Z",
+              },
+              message: {
+                id: "message-1",
+                sessionId: "session-1",
+                role: "assistant",
+                text: "Revenue increased",
+                createdAt: "2026-08-30T10:01:00.000Z",
+              },
+            },
+          ],
+          total: 1,
+          page: 0,
+          pageSize: 20,
+          hasMore: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      conversationPort.searchMessages("revenue growth", 0, 20),
+    ).resolves.toMatchObject({ total: 1, hasMore: false });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runtime/v1/messages/search?keyword=revenue+growth&page=0&page_size=20",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+  });
+
   it("routes rename, cancel, and delete through the session resource", async () => {
     const session = {
       id: "session-1",

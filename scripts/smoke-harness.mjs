@@ -59,6 +59,7 @@ for (const output of [child.stdout, child.stderr]) {
 try {
   const deadline = Date.now() + 30_000;
   let succeeded = false;
+  let runtimeReady = false;
   let lastFailure = "";
   while (Date.now() < deadline) {
     if (child.exitCode !== null)
@@ -71,6 +72,7 @@ try {
         const body = await response.json();
         if (body.status !== "healthy")
           throw new Error("unexpected health response");
+        runtimeReady = true;
         if (process.env.WORKAGENT_SMOKE_RESUME_ONLY === "1") {
           const listed = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
             headers: { authorization: `Bearer ${token}` },
@@ -214,6 +216,22 @@ try {
           );
           if (!messages.ok || (await messages.json()).length !== 0)
             throw new Error(`${engine} session message log was not empty`);
+          const search = await fetch(
+            `http://127.0.0.1:${port}/v1/messages/search?keyword=profile-smoke-no-match&page=0&page_size=20`,
+            { headers: { authorization: `Bearer ${token}` } },
+          );
+          const searchResult = await search.json();
+          if (
+            !search.ok ||
+            !Array.isArray(searchResult.items) ||
+            searchResult.total !== 0 ||
+            searchResult.page !== 0 ||
+            searchResult.pageSize !== 20 ||
+            searchResult.hasMore !== false
+          )
+            throw new Error(
+              `${engine} session message search returned an invalid contract`,
+            );
           if (engine === "harness") {
             const attachment = await fetch(
               `http://127.0.0.1:${port}/v1/workspaces/${encodeURIComponent(workspace.id)}/attachments?sessionId=${encodeURIComponent(session.id)}&name=brief.txt`,
@@ -293,6 +311,10 @@ try {
       }
     } catch (error) {
       lastFailure = error instanceof Error ? error.message : String(error);
+      if (runtimeReady)
+        throw new Error(
+          `Harness acceptance failed: ${lastFailure}\n${diagnostics}`.trim(),
+        );
       // Startup is asynchronous; retry until the bounded deadline.
     }
     await new Promise((resolve) => setTimeout(resolve, 200));

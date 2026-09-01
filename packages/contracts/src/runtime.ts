@@ -28,6 +28,21 @@ export const runtimeMessageSchema = z.object({
 });
 export type RuntimeMessage = z.infer<typeof runtimeMessageSchema>;
 
+export const runtimeMessageSearchItemSchema = z.object({
+  session: runtimeSessionSchema,
+  message: runtimeMessageSchema,
+});
+export const runtimeMessageSearchResultSchema = z.object({
+  items: z.array(runtimeMessageSearchItemSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().nonnegative(),
+  pageSize: z.number().int().positive(),
+  hasMore: z.boolean(),
+});
+export type RuntimeMessageSearchResult = z.infer<
+  typeof runtimeMessageSearchResultSchema
+>;
+
 export const runtimeApiSchemas = {
   createSession: createEngineSessionSchema,
   engineCapabilities: z.record(engineIdSchema, engineCapabilitiesSchema),
@@ -37,4 +52,5 @@ export const runtimeApiSchemas = {
   sessionList: z.array(runtimeSessionSchema),
   message: runtimeMessageSchema,
   messageList: z.array(runtimeMessageSchema),
+  messageSearchResult: runtimeMessageSearchResultSchema,
 } as const;

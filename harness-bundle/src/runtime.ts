@@ -33,6 +33,8 @@ import type {
 import type {
   CredentialStatus,
   PresetBinding,
+  RuntimeMessage,
+  RuntimeSession,
   SharedTurnResult,
   SharedTurnRuntimeRequest,
 } from "@workagent/contracts";
@@ -64,6 +66,32 @@ export const nativeCredentialError = (
   engine === "harness" || credential?.state === "ready"
     ? undefined
     : `credential_needs_auth:${engine}`;
+
+export const searchRuntimeMessages = (
+  items: Array<{ session: RuntimeSession; message: RuntimeMessage }>,
+  keyword: string,
+  page: number,
+  pageSize: number,
+) => {
+  const normalizedKeyword = keyword.toLocaleLowerCase();
+  const matches = items
+    .filter(({ message }) =>
+      message.text.toLocaleLowerCase().includes(normalizedKeyword),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(right.message.createdAt) -
+        Date.parse(left.message.createdAt),
+    );
+  const offset = page * pageSize;
+  return {
+    items: matches.slice(offset, offset + pageSize),
+    total: matches.length,
+    page,
+    pageSize,
+    hasMore: offset + pageSize < matches.length,
+  };
+};
 
 type SessionRecord = {
   createdAt: string;
@@ -485,6 +513,15 @@ export class RuntimeController
     this.#ctx.effect(
       () =>
         this.#ctx.webServer.register({
+          kind: "exact",
+          path: "/v1/messages/search",
+          handler: (request, response) => this.#handle(request, response),
+        }),
+      "workagent-runtime-api: persisted message search route",
+    );
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
           kind: "prefix",
           path: "/v1/sessions",
           handler: (request, response) => this.#handle(request, response),
@@ -574,7 +611,47 @@ export class RuntimeController
       writeJson(response, 401, { error: "authentication_required" });
       return;
     }
-    const path = new URL(request.url ?? "/", "http://runtime").pathname;
+    const url = new URL(request.url ?? "/", "http://runtime");
+    const path = url.pathname;
+    if (path === "/v1/messages/search" && request.method === "GET") {
+      const keyword = (url.searchParams.get("keyword") ?? "").trim();
+      const page = Number(url.searchParams.get("page") ?? "0");
+      const pageSize = Number(url.searchParams.get("page_size") ?? "20");
+      if (
+        keyword === "" ||
+        keyword.length > 200 ||
+        !Number.isInteger(page) ||
+        page < 0 ||
+        !Number.isInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 100
+      ) {
+        writeJson(response, 400, { error: "invalid_message_search" });
+        return;
+      }
+      const items = [...this.#sessions.entries()]
+        .filter(([, record]) => record.internal !== true)
+        .flatMap(([sessionId, record]) =>
+          this.#messages.list(sessionId).map((message) => ({
+            session: {
+              id: sessionId,
+              engine: record.engine,
+              title: record.title,
+              createdAt: record.createdAt,
+              updatedAt: record.updatedAt,
+              workspaceId: record.workspaceId,
+              preset: record.preset,
+            },
+            message,
+          })),
+        );
+      writeJson(
+        response,
+        200,
+        searchRuntimeMessages(items, keyword, page, pageSize),
+      );
+      return;
+    }
     if (path === "/v1/sessions" && request.method === "GET") {
       writeJson(
         response,

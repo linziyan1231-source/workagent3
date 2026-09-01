@@ -542,6 +542,86 @@ describe("production Renderer conversation adapter", () => {
     });
   });
 
+  it("maps SID Runtime message search into the formal Renderer search popup", async () => {
+    const now = "2026-08-31T06:00:00.000Z";
+    const snapshot = {
+      id: "builtin-general",
+      version: 1,
+      source: "builtin",
+      name: "Puxin AI",
+      description: "",
+      avatar: null,
+      enabled: true,
+      engine: "harness",
+      modelId: null,
+      systemPrompt: "",
+      workspacePolicy: "default",
+      skillIds: [],
+      mcpServerIds: [],
+      toolAllowlist: [],
+      approvalPolicy: "on_risk",
+      createdAt: now,
+      updatedAt: now,
+      resolvedAt: now,
+    };
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                session: {
+                  id: "session-1",
+                  engine: "harness",
+                  title: "Project review",
+                  createdAt: now,
+                  updatedAt: now,
+                  workspaceId: "workspace-1",
+                  preset: {
+                    presetId: "builtin-general",
+                    presetVersion: 1,
+                    resolvedSnapshot: snapshot,
+                  },
+                },
+                message: {
+                  id: "message-1",
+                  sessionId: "session-1",
+                  role: "assistant",
+                  text: "Revenue increased 18 percent",
+                  createdAt: now,
+                },
+              },
+            ],
+            total: 1,
+            page: 0,
+            pageSize: 20,
+            hasMore: false,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.database.searchConversationMessages.invoke({
+        keyword: "revenue",
+        page: 0,
+        page_size: 20,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          conversation: { id: "session-1", name: "Project review" },
+          message_id: "message-1",
+          message_type: "text",
+          preview_text: "Revenue increased 18 percent",
+        },
+      ],
+      total: 1,
+      has_more: false,
+    });
+  });
+
   it("maps pending runtime approvals into formal Renderer confirmations", async () => {
     vi.stubGlobal(
       "fetch",

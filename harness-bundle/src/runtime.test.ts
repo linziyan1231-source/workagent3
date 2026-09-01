@@ -5,8 +5,12 @@ import {
   eventsAfterLastId,
   nativeCredentialError,
   normalizeEvent,
+  searchRuntimeMessages,
 } from "./runtime.js";
-import type { AutomationDefinition } from "@workagent/contracts";
+import type {
+  AutomationDefinition,
+  RuntimeSession,
+} from "@workagent/contracts";
 
 const events = [
   { eventId: "session-with-hyphens-9" },
@@ -111,5 +115,81 @@ describe("native engine credential gate", () => {
         updatedAt: null,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("persisted message search", () => {
+  const session: RuntimeSession = {
+    id: "session-1",
+    engine: "harness",
+    title: "Quarterly plan",
+    createdAt: "2026-08-30T10:00:00.000Z",
+    updatedAt: "2026-08-30T10:02:00.000Z",
+    workspaceId: "workspace-1",
+    preset: {
+      presetId: "builtin-general",
+      presetVersion: 1,
+      resolvedSnapshot: {
+        id: "builtin-general",
+        version: 1,
+        source: "builtin",
+        name: "General",
+        description: "",
+        avatar: null,
+        enabled: true,
+        engine: "harness",
+        modelId: "harness-default",
+        systemPrompt: "",
+        workspacePolicy: "default",
+        skillIds: [],
+        mcpServerIds: [],
+        toolAllowlist: [],
+        approvalPolicy: "on_risk",
+        createdAt: "2026-08-30T10:00:00.000Z",
+        updatedAt: "2026-08-30T10:00:00.000Z",
+        resolvedAt: "2026-08-30T10:00:00.000Z",
+      },
+    },
+  };
+
+  it("filters case-insensitively, orders newest first, and paginates", () => {
+    const items = [
+      {
+        session,
+        message: {
+          id: "message-1",
+          sessionId: session.id,
+          role: "user" as const,
+          text: "Quarterly revenue",
+          createdAt: "2026-08-30T10:01:00.000Z",
+        },
+      },
+      {
+        session,
+        message: {
+          id: "message-2",
+          sessionId: session.id,
+          role: "assistant" as const,
+          text: "REVENUE increased",
+          createdAt: "2026-08-30T10:02:00.000Z",
+        },
+      },
+      {
+        session,
+        message: {
+          id: "message-3",
+          sessionId: session.id,
+          role: "assistant" as const,
+          text: "No match",
+          createdAt: "2026-08-30T10:03:00.000Z",
+        },
+      },
+    ];
+    const first = searchRuntimeMessages(items, "revenue", 0, 1);
+    expect(first).toMatchObject({ total: 2, hasMore: true });
+    expect(first.items[0]!.message.id).toBe("message-2");
+    expect(
+      searchRuntimeMessages(items, "revenue", 1, 1).items[0]!.message.id,
+    ).toBe("message-1");
   });
 });
