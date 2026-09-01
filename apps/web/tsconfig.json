@@ -102,7 +102,13 @@
         "src/shared/aion-adapter/authContext.tsx"
       ],
       "@/renderer/pages/conversation/Preview": [
-        "src/shared/aion-adapter/previewContext.ts"
+        "src/shared/aion-adapter/preview.d.ts"
+      ],
+      "@/renderer/pages/conversation/Preview/context/PreviewContext": [
+        "src/shared/aion-adapter/preview.d.ts"
+      ],
+      "@/renderer/pages/conversation/Preview/hooks/useLocalFilePreview": [
+        "src/shared/aion-adapter/preview.d.ts"
       ],
       "@/renderer/utils/emitter": ["src/shared/aion-adapter/emitter.ts"],
       "@/renderer/components/chat/BtwOverlay/useBtwCommand": [

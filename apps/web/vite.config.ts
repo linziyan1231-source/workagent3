@@ -223,26 +223,6 @@ export default defineConfig({
         find: "../WindowControls",
         replacement: adapter("EmptyRendererComponent.tsx"),
       },
-      {
-        find: "@/renderer/pages/conversation/Preview/hooks/useLocalFilePreview",
-        replacement: adapter("localFilePreview.ts"),
-      },
-      {
-        find: /^@\/renderer\/pages\/conversation\/Preview$/,
-        replacement: adapter("previewContext.ts"),
-      },
-      {
-        find: /^@renderer\/pages\/conversation\/Preview$/,
-        replacement: adapter("previewContext.ts"),
-      },
-      {
-        find: /^@renderer\/pages\/conversation\/Preview\/context\/PreviewContext$/,
-        replacement: adapter("previewContext.ts"),
-      },
-      {
-        find: /^@\/renderer\/pages\/conversation\/Preview\/context\/PreviewContext$/,
-        replacement: adapter("previewContext.ts"),
-      },
       { find: "@/renderer/utils/emitter", replacement: adapter("emitter.ts") },
       {
         find: "@/renderer/components/chat/BtwOverlay/useBtwCommand",
@@ -271,6 +251,14 @@ export default defineConfig({
       {
         find: "@renderer/hooks/file/useAutoPreviewOfficeFiles",
         replacement: adapter("autoPreviewOfficeFiles.ts"),
+      },
+      {
+        find: /^@\/renderer\/pages\/conversation\/Preview$/,
+        replacement: `${aionSrc}/renderer/pages/conversation/Preview/index.ts`,
+      },
+      {
+        find: /^@renderer\/pages\/conversation\/Preview$/,
+        replacement: `${aionSrc}/renderer/pages/conversation/Preview/index.ts`,
       },
       {
         find: "diff",

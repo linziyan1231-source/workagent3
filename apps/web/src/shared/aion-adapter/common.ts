@@ -15,6 +15,7 @@ import {
 } from "../../features/collaboration/collaborationPort.js";
 import { requestJson } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
+import type { PreviewContentType } from "@/common/types/office/preview";
 import type { Theme } from "@/common/theme/types";
 import type {
   IDirOrFile,
@@ -56,6 +57,20 @@ type ConversationListEvent = {
 };
 
 const themeListeners = new Set<(theme: Theme) => void>();
+type FileContentUpdate = {
+  file_path: string;
+  content: string;
+  workspace: string;
+  relative_path: string;
+  operation: "write" | "delete";
+};
+type PreviewOpenEvent = {
+  content: string;
+  content_type: PreviewContentType;
+  metadata?: { title?: string; file_name?: string };
+};
+const fileContentListeners = new Set<(event: FileContentUpdate) => void>();
+const previewOpenListeners = new Set<(event: PreviewOpenEvent) => void>();
 
 const sharedProjectIDFromPath = (value?: string): string | null =>
   value?.replaceAll("\\", "/").match(/^shared:\/\/([^/]+)(?:\/|$)/)?.[1] ??
@@ -470,6 +485,128 @@ const runtimeWorkspaceId = (workspace: string | undefined) => {
     : workspace.slice("workagent-workspace:".length, separator);
 };
 
+const personalWorkspaceLocation = (
+  workspace: string | undefined,
+  path: string,
+) => {
+  if (sharedProjectIDFromPath(workspace)) return null;
+  if (!workspace) {
+    const normalizedPath = path.replaceAll("\\", "/").replace(/^\//, "");
+    const managed = /^workagent-workspace:([^/]+)\/[^/]+(?:\/(.*))?$/.exec(
+      normalizedPath,
+    );
+    if (managed)
+      return {
+        workspaceId: managed[1]!,
+        relativePath: managed[2] ?? "",
+      };
+    const separator = normalizedPath.indexOf("/");
+    if (separator > 0)
+      return {
+        workspaceId: normalizedPath.slice(0, separator),
+        relativePath: normalizedPath.slice(separator + 1),
+      };
+    return null;
+  }
+  const workspaceId = runtimeWorkspaceId(workspace);
+  const normalizedWorkspace = workspace
+    .replaceAll("\\", "/")
+    .replace(/\/$/, "");
+  const normalizedPath = path.replaceAll("\\", "/").replace(/^\//, "");
+  const idRoot = workspaceId.replaceAll("\\", "/").replace(/\/$/, "");
+  const relativePath = normalizedPath.startsWith(`${normalizedWorkspace}/`)
+    ? normalizedPath.slice(normalizedWorkspace.length + 1)
+    : normalizedPath.startsWith(`${idRoot}/`)
+      ? normalizedPath.slice(idRoot.length + 1)
+      : normalizedPath === normalizedWorkspace || normalizedPath === idRoot
+        ? ""
+        : normalizedPath;
+  return { workspaceId, relativePath };
+};
+
+const mediaTypeForPath = (path: string) => {
+  const extension = path.toLocaleLowerCase().split(".").pop() ?? "";
+  return (
+    (
+      {
+        md: "text/markdown; charset=utf-8",
+        txt: "text/plain; charset=utf-8",
+        json: "application/json; charset=utf-8",
+        html: "text/html; charset=utf-8",
+        css: "text/css; charset=utf-8",
+        js: "text/javascript; charset=utf-8",
+        ts: "text/typescript; charset=utf-8",
+        csv: "text/csv; charset=utf-8",
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        svg: "image/svg+xml",
+        pdf: "application/pdf",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      } as Record<string, string>
+    )[extension] ?? "application/octet-stream"
+  );
+};
+
+const bytesToBase64 = (bytes: Uint8Array) => {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+};
+
+const personalWorkspaceFiles = async (workspace: string) => {
+  const location = personalWorkspaceLocation(workspace, workspace);
+  if (!location) return [];
+  const result: Array<{
+    name: string;
+    fullPath: string;
+    relativePath: string;
+  }> = [];
+  const pending = [""];
+  while (pending.length > 0) {
+    const directory = pending.shift()!;
+    for (const entry of await workspacePort.files(
+      location.workspaceId,
+      directory,
+    )) {
+      if (entry.kind === "directory") pending.push(entry.path);
+      else
+        result.push({
+          name: entry.name,
+          fullPath: `${workspace}/${entry.path}`,
+          relativePath: entry.path,
+        });
+    }
+  }
+  return result;
+};
+
+const unavailableOfficePreview = () => ({
+  start: {
+    invoke: async (_input: { file_path: string; workspace?: string }) => ({
+      url: null,
+      error: "OFFICECLI_NOT_FOUND",
+    }),
+  },
+  stop: { invoke: async () => undefined },
+  status: {
+    on:
+      (_listener: (event: { state: "starting" | "installing" }) => void) =>
+      () =>
+        undefined,
+  },
+});
+
+const pptPreview = unavailableOfficePreview();
+const wordPreview = unavailableOfficePreview();
+const excelPreview = unavailableOfficePreview();
+
 const createRendererConversation = async (input: {
   name?: string;
   assistant?: { id?: string };
@@ -534,7 +671,22 @@ export const ipcBridge = {
     getFilesByDir: {
       invoke: async ({ dir, root }: { dir: string; root: string }) => {
         const projectId = sharedProjectIDFromPath(root);
-        if (!projectId) return [];
+        if (!projectId) {
+          const location = personalWorkspaceLocation(root, dir);
+          if (!location) return [];
+          return (
+            await workspacePort.files(
+              location.workspaceId,
+              location.relativePath,
+            )
+          ).map((entry) => ({
+            name: entry.name,
+            fullPath: `${root}/${entry.path}`,
+            relativePath: entry.path,
+            isDir: entry.kind === "directory",
+            isFile: entry.kind === "file",
+          }));
+        }
         const relative = sharedRelativePath(projectId, dir) ?? "";
         const raw = await sharedFileRequest<
           Array<{ name: string; type: string }>
@@ -545,7 +697,7 @@ export const ipcBridge = {
     listWorkspaceFiles: {
       invoke: async ({ root }: { root: string }) => {
         const projectId = sharedProjectIDFromPath(root);
-        if (!projectId) return [];
+        if (!projectId) return personalWorkspaceFiles(root);
         const raw = await sharedFileRequest<
           Array<{ name: string; full_path: string; relative_path: string }>
         >(projectId, "list");
@@ -566,11 +718,34 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        return projectId
-          ? sharedFileRequest<string | null>(projectId, "image-base64", {
-              path,
-            })
-          : "";
+        if (projectId)
+          return sharedFileRequest<string | null>(projectId, "image-base64", {
+            path,
+          });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) return "";
+        const content = await workspacePort.read(
+          location.workspaceId,
+          location.relativePath,
+        );
+        return `data:${mediaTypeForPath(location.relativePath)};base64,${bytesToBase64(content.bytes)}`;
+      },
+    },
+    fetchRemoteImage: {
+      invoke: async ({ url }: { url: string }) => {
+        const target = new URL(url);
+        if (target.protocol !== "http:" && target.protocol !== "https:")
+          throw new Error("remote_image_url_invalid");
+        const response = await fetch(target, {
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+        });
+        if (!response.ok) throw new Error("remote_image_unavailable");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length > 10 * 1024 * 1024)
+          throw new Error("remote_image_too_large");
+        const mediaType = response.headers.get("content-type") ?? "image/*";
+        return `data:${mediaType};base64,${bytesToBase64(bytes)}`;
       },
     },
     readFile: {
@@ -583,9 +758,15 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        return projectId
-          ? sharedFileRequest<string | null>(projectId, "read", { path })
-          : null;
+        if (projectId)
+          return sharedFileRequest<string | null>(projectId, "read", { path });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) return null;
+        const content = await workspacePort.read(
+          location.workspaceId,
+          location.relativePath,
+        );
+        return new TextDecoder().decode(content.bytes);
       },
     },
     readFileBuffer: {
@@ -598,9 +779,17 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        return projectId
-          ? sharedFileRequest<string | null>(projectId, "read-buffer", { path })
-          : null;
+        if (projectId)
+          return sharedFileRequest<string | null>(projectId, "read-buffer", {
+            path,
+          });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) return null;
+        const content = await workspacePort.read(
+          location.workspaceId,
+          location.relativePath,
+        );
+        return bytesToBase64(content.bytes);
       },
     },
     writeFile: {
@@ -615,9 +804,24 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        return projectId
-          ? sharedFileRequest<boolean>(projectId, "write", { path, data })
-          : false;
+        if (projectId)
+          return sharedFileRequest<boolean>(projectId, "write", { path, data });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) return false;
+        await workspacePort.upload(
+          location.workspaceId,
+          location.relativePath,
+          new Blob([data], { type: mediaTypeForPath(location.relativePath) }),
+        );
+        for (const listener of fileContentListeners)
+          listener({
+            file_path: path,
+            content: data,
+            workspace: workspace ?? location.workspaceId,
+            relative_path: location.relativePath,
+            operation: "write",
+          });
+        return true;
       },
     },
     getFileMetadata: {
@@ -630,10 +834,27 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        if (!projectId) throw new Error("browser_workspace_file_unavailable");
-        return sharedFileRequest<IFileMetadata>(projectId, "metadata", {
+        if (projectId)
+          return sharedFileRequest<IFileMetadata>(projectId, "metadata", {
+            path,
+          });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) throw new Error("browser_workspace_file_unavailable");
+        const separator = location.relativePath.lastIndexOf("/");
+        const directory =
+          separator === -1 ? "" : location.relativePath.slice(0, separator);
+        const entry = (
+          await workspacePort.files(location.workspaceId, directory)
+        ).find((candidate) => candidate.path === location.relativePath);
+        if (!entry) throw new Error("workspace_entry_not_found");
+        return {
+          name: entry.name,
           path,
-        });
+          size: entry.size,
+          type: mediaTypeForPath(entry.path),
+          lastModified: Date.parse(entry.modifiedAt),
+          isDirectory: entry.kind === "directory",
+        } satisfies IFileMetadata;
       },
     },
     removeEntry: {
@@ -646,8 +867,21 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        if (!projectId) throw new Error("browser_workspace_file_unavailable");
-        await sharedFileRequest<null>(projectId, "remove", { path });
+        if (projectId) {
+          await sharedFileRequest<null>(projectId, "remove", { path });
+          return;
+        }
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) throw new Error("browser_workspace_file_unavailable");
+        await workspacePort.remove(location.workspaceId, location.relativePath);
+        for (const listener of fileContentListeners)
+          listener({
+            file_path: path,
+            content: "",
+            workspace: workspace ?? location.workspaceId,
+            relative_path: location.relativePath,
+            operation: "delete",
+          });
       },
     },
     renameEntry: {
@@ -662,11 +896,21 @@ export const ipcBridge = {
       }) => {
         const projectId =
           sharedProjectIDFromPath(workspace) ?? sharedProjectIDFromPath(path);
-        if (!projectId) throw new Error("browser_workspace_file_unavailable");
-        return sharedFileRequest<{ new_path: string }>(projectId, "rename", {
-          path,
-          new_name,
-        });
+        if (projectId)
+          return sharedFileRequest<{ new_path: string }>(projectId, "rename", {
+            path,
+            new_name,
+          });
+        const location = personalWorkspaceLocation(workspace, path);
+        if (!location) throw new Error("browser_workspace_file_unavailable");
+        const separator = location.relativePath.lastIndexOf("/");
+        const destination = `${separator === -1 ? "" : location.relativePath.slice(0, separator + 1)}${new_name}`;
+        await workspacePort.move(
+          location.workspaceId,
+          location.relativePath,
+          destination,
+        );
+        return { new_path: `${workspace}/${destination}` };
       },
     },
   },
@@ -674,6 +918,33 @@ export const ipcBridge = {
     start: { invoke: async () => undefined },
     stop: { invoke: async () => undefined },
     fileAdded: { on: () => () => undefined },
+  },
+  fileStream: {
+    contentUpdate: {
+      emit: (event: FileContentUpdate) => {
+        for (const listener of fileContentListeners) listener(event);
+      },
+      on: (listener: (event: FileContentUpdate) => void) => {
+        fileContentListeners.add(listener);
+        return () => fileContentListeners.delete(listener);
+      },
+    },
+  },
+  preview: {
+    open: {
+      emit: (event: PreviewOpenEvent) => {
+        for (const listener of previewOpenListeners) listener(event);
+      },
+      on: (listener: (event: PreviewOpenEvent) => void) => {
+        previewOpenListeners.add(listener);
+        return () => previewOpenListeners.delete(listener);
+      },
+    },
+  },
+  previewHistory: {
+    list: { invoke: async () => [] },
+    save: { invoke: async () => undefined },
+    getContent: { invoke: async () => null },
   },
   fileSnapshot: {
     init: {
@@ -1401,7 +1672,9 @@ export const ipcBridge = {
           >(sharedProjectId, "dir", { path });
           return sharedDirectoryEntries(raw, workspace, relativePath);
         }
-        const entries = (await workspacePort.files(workspace, relativePath))
+        const entries = (
+          await workspacePort.files(runtimeWorkspaceId(workspace), relativePath)
+        )
           .filter(
             (entry) =>
               !search ||
@@ -1500,7 +1773,24 @@ export const ipcBridge = {
         window.open(url, "_blank", "noopener,noreferrer");
       },
     },
+    openFile: {
+      invoke: async (path: string) => {
+        const location = personalWorkspaceLocation(undefined, path);
+        if (!location) throw new Error("browser_workspace_file_unavailable");
+        window.open(
+          workspacePort.downloadUrl(
+            location.workspaceId,
+            location.relativePath,
+          ),
+          "_blank",
+          "noopener,noreferrer",
+        );
+      },
+    },
   },
+  pptPreview,
+  wordPreview,
+  excelPreview,
   acpConversation: new Proxy(
     {
       sendMessage: {

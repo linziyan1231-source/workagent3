@@ -52,6 +52,8 @@ describe("Web feature boundaries", () => {
       "shared/ui/aionui/AionTeamSiderSection.tsx",
       "shared/ui/aionui/BrandLogo.tsx",
       "shared/ui/aionui/aionui.css",
+      "shared/aion-adapter/localFilePreview.ts",
+      "shared/aion-adapter/previewContext.ts",
     ];
     expect(
       temporaryPageReplicas.filter((path) =>
@@ -85,5 +87,7 @@ describe("Web feature boundaries", () => {
       expect(viteConfig).not.toContain(`find: "${formalVisualSurface}"`);
       expect(viteConfig).not.toContain(`find: '${formalVisualSurface}'`);
     }
+    expect(viteConfig).not.toContain('adapter("previewContext.ts")');
+    expect(viteConfig).not.toContain('adapter("localFilePreview.ts")');
   });
 });

@@ -282,6 +282,105 @@ describe("production Renderer project adapter", () => {
       projects: [{ project_id: "workspace-1", name: "Browser QA" }],
     });
   });
+
+  it("opens and mutates personal Workspace artifacts through the formal Preview bridge", async () => {
+    const now = "2026-09-01T02:00:00.000Z";
+    const fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        if (target.endsWith("/files?path=reports")) {
+          return Response.json([
+            {
+              name: "final.md",
+              path: "reports/final.md",
+              kind: "file",
+              size: 13,
+              modifiedAt: now,
+            },
+          ]);
+        }
+        if (
+          target.endsWith("/content?path=reports%2Ffinal.md") &&
+          !init?.method
+        ) {
+          return new Response("artifact body", { status: 200 });
+        }
+        if (
+          target.endsWith("/content?path=reports%2Ffinal.md") &&
+          init?.method === "PUT"
+        ) {
+          return Response.json({
+            name: "final.md",
+            path: "reports/final.md",
+            kind: "file",
+            size: 7,
+            modifiedAt: now,
+          });
+        }
+        return new Response(null, { status: 204 });
+      },
+    );
+    vi.stubGlobal("fetch", fetch);
+    const input = {
+      workspace: "workagent-workspace:workspace-1\\Browser QA",
+      path: "workagent-workspace:workspace-1\\Browser QA\\reports\\final.md",
+    };
+
+    await expect(ipcBridge.fs.getFileMetadata.invoke(input)).resolves.toEqual({
+      name: "final.md",
+      path: input.path,
+      size: 13,
+      type: "text/markdown; charset=utf-8",
+      lastModified: Date.parse(now),
+      isDirectory: false,
+    });
+    await expect(ipcBridge.fs.readFile.invoke(input)).resolves.toBe(
+      "artifact body",
+    );
+    await expect(
+      ipcBridge.fs.writeFile.invoke({ ...input, data: "updated" }),
+    ).resolves.toBe(true);
+    await expect(
+      ipcBridge.fs.removeEntry.invoke(input),
+    ).resolves.toBeUndefined();
+    await expect(
+      ipcBridge.fs.renameEntry.invoke({ ...input, new_name: "approved.md" }),
+    ).resolves.toEqual({
+      new_path:
+        "workagent-workspace:workspace-1\\Browser QA/reports/approved.md",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces/workspace-1/content?path=reports%2Ffinal.md",
+      expect.objectContaining({ method: "PUT", body: expect.any(Blob) }),
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces/workspace-1/move",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          source: "reports/final.md",
+          destination: "reports/approved.md",
+        }),
+      }),
+    );
+  });
+
+  it("projects personal Workspace images as data URLs for the formal Image preview", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([137, 80, 78, 71]), { status: 200 }),
+      ),
+    );
+    await expect(
+      ipcBridge.fs.getImageBase64.invoke({
+        workspace: "workspace-1",
+        path: "workspace-1/images/chart.png",
+      }),
+    ).resolves.toBe("data:image/png;base64,iVBORw==");
+  });
 });
 
 describe("production Renderer employee lifecycle adapter", () => {

@@ -4,7 +4,7 @@ import {
   type WorkspaceAsset,
   type WorkspaceEntry,
 } from "@workagent/contracts";
-import { requestJson } from "../../shared/api/http.js";
+import { requestJson, requestRaw } from "../../shared/api/http.js";
 
 const base = "/api/runtime/v1/workspaces";
 
@@ -114,5 +114,21 @@ export const workspacePort = {
   },
   downloadUrl(workspaceId: string, path: string): string {
     return `${base}/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}`;
+  },
+  async read(
+    workspaceId: string,
+    path: string,
+  ): Promise<{ bytes: Uint8Array; contentType: string }> {
+    const response = await requestRaw(
+      `${base}/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}`,
+      {
+        headers: { accept: "application/octet-stream" },
+      },
+    );
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType:
+        response.headers.get("content-type") ?? "application/octet-stream",
+    };
   },
 };

@@ -126,4 +126,28 @@ describe("WorkspacePort", () => {
       }),
     );
   });
+
+  it("reads artifact bytes through the authenticated Runtime content port", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      workspacePort.read("workspace-1", "reports/final.pdf"),
+    ).resolves.toEqual({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "application/pdf",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces/workspace-1/content?path=reports%2Ffinal.pdf",
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: { accept: "application/octet-stream" },
+      }),
+    );
+  });
 });

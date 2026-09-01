@@ -11,13 +11,24 @@ export async function requestJson<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await requestRaw(path, {
     ...init,
-    credentials: "same-origin",
     headers: {
       accept: "application/json",
       ...init.headers,
     },
+  });
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export async function requestRaw(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const response = await fetch(path, {
+    ...init,
+    credentials: "same-origin",
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as {
@@ -29,6 +40,5 @@ export async function requestJson<T>(
       body.error ?? body.code ?? "request_failed",
     );
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return response;
 }
