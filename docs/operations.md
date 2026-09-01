@@ -120,6 +120,21 @@ migrator verifies both SIDs and endpoints, seals the grant directly into that
 SID's WorkAgent3 Credential Broker, and writes only the credential ID into the
 managed MCP transport. The migration report never contains the token.
 
+Run the semantic Wiki gate with a signed-in native Codex CLI. The gate creates
+and later removes a temporary project, uses the released Wiki ingest and query
+Skills, and requires provenance, the lease/overlay/snapshot/manifest commit
+gates, zero-error/zero-warning deterministic lint, a cited answer, and an
+unchanged Wiki hash after the read-only query:
+
+```powershell
+$env:WORKAGENT_CODEX_COMMAND = 'C:\Program Files\AionAgentCliShared\bin\codex.exe'
+$env:WORKAGENT_PYTHON_COMMAND = 'C:\Program Files\AionAgentCliShared\bin\python.exe'
+pnpm wiki:semantic-smoke
+```
+
+Failed semantic runs retain their temporary evidence path for diagnosis; only
+successful runs are automatically removed.
+
 `set-limits` revokes active sessions, stops the Runtime, atomically updates the
 SID-private UserHost configuration, starts a new Job Object, waits for a healthy
 lease, and only then re-enables the account. Invalid limits are rejected before
