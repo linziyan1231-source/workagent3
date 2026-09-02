@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"workagent3/internal/contracts"
+	"workagent3/internal/userhost"
 )
 
 func Handler(service *Service, token string) http.Handler {
@@ -37,6 +38,15 @@ func Handler(service *Service, token string) http.Handler {
 	mux.HandleFunc("GET /v1/users/usage", func(w http.ResponseWriter, r *http.Request) {
 		users, err := service.ManagedUsersUsage(r.Context())
 		respond(w, map[string]any{"users": users}, err)
+	})
+	mux.HandleFunc("PUT /v1/shared-projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var input userhost.SharedProjectRequest
+		if !decode(r, &input) {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		err := service.ApplySharedProjectTransfer(r.Context(), r.PathValue("id"), input)
+		respond(w, map[string]bool{"success": true}, err)
 	})
 	mux.HandleFunc("POST /v1/users/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {

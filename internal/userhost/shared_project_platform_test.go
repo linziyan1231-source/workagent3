@@ -13,10 +13,10 @@ import (
 
 type sharedProjectOperatorStub struct {
 	projectID string
-	input     sharedProjectRequest
+	input     SharedProjectRequest
 }
 
-func (s *sharedProjectOperatorStub) Apply(_ context.Context, projectID string, input sharedProjectRequest) error {
+func (s *sharedProjectOperatorStub) Apply(_ context.Context, projectID string, input SharedProjectRequest) error {
 	s.projectID, s.input = projectID, input
 	return nil
 }
@@ -53,5 +53,17 @@ func TestSharedProjectRequestRejectsGeneralPrincipals(t *testing.T) {
 	}
 	if _, err := normalizeSharedMembers("S-1-5-21-1000", []string{"S-1-5-21-2000", "S-1-5-21-2000"}); err != nil {
 		t.Fatalf("duplicate exact member should normalize: %v", err)
+	}
+}
+
+// The limited owner Runtime must not attempt cross-user transfer steps: it
+// lacks the privileges and cross-account write access, and a half-applied
+// attempt strands the project tree. Transfers run on the Employee Manager.
+func TestRuntimeSharedProjectOperatorRejectsTransferActions(t *testing.T) {
+	operator := runtimeSharedProjectOperator{}
+	for _, action := range []string{"transfer", "transfer_commit", "transfer_rollback"} {
+		if err := operator.Apply(t.Context(), "project_1234567890", SharedProjectRequest{Action: action, OwnerSID: "S-1-5-21-1000"}); err == nil {
+			t.Fatalf("runtime operator accepted %q", action)
+		}
 	}
 }

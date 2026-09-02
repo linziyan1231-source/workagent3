@@ -20,20 +20,24 @@ type sharedACLState interface {
 	OwnerRootACLState(context.Context, string) ([]string, error)
 }
 
-// RuntimeSharedProjectPlatform keeps privileged filesystem work inside the
+// RuntimeSharedProjectPlatform keeps single-owner filesystem work inside the
 // owner UserHost. Portal sends only an authenticated desired-state projection
-// to the loopback Runtime Gateway.
+// to the loopback Runtime Gateway. Cross-user ownership transfers instead go
+// to the SYSTEM-side Employee Manager (manager): they move directories
+// between two accounts' protected roots and rewrite owner plus protected
+// DACL, which no limited UserHost token is privileged to do.
 type RuntimeSharedProjectPlatform struct {
 	runtimes runtimeapi.EmployeeRuntimeRouter
 	state    sharedACLState
+	manager  *EmployeeManagerClient
 	client   *http.Client
 }
 
-func NewRuntimeSharedProjectPlatform(runtimes runtimeapi.EmployeeRuntimeRouter, state sharedACLState) (*RuntimeSharedProjectPlatform, error) {
+func NewRuntimeSharedProjectPlatform(runtimes runtimeapi.EmployeeRuntimeRouter, state sharedACLState, manager *EmployeeManagerClient) (*RuntimeSharedProjectPlatform, error) {
 	if runtimes == nil || state == nil {
 		return nil, errors.New("runtime router and collaboration ACL state are required")
 	}
-	return &RuntimeSharedProjectPlatform{runtimes: runtimes, state: state, client: &http.Client{Timeout: 30 * time.Second}}, nil
+	return &RuntimeSharedProjectPlatform{runtimes: runtimes, state: state, manager: manager, client: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
 func (p *RuntimeSharedProjectPlatform) ProvisionProject(ctx context.Context, projectID, ownerSID string) error {
@@ -78,7 +82,7 @@ func (p *RuntimeSharedProjectPlatform) TransferProjectOwnership(ctx context.Cont
 	}
 	newMembers := withoutSID(memberSIDs, newOwnerSID)
 	rootMembers := unionSIDs(previousRootMembers, newMembers)
-	return p.apply(ctx, newOwnerSID, projectID, sharedRuntimeRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: newMembers, OldMemberSIDs: oldMembers, RootMemberSIDs: rootMembers, PreviousRootMemberSIDs: previousRootMembers})
+	return p.transfer(ctx, projectID, sharedRuntimeRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: newMembers, OldMemberSIDs: oldMembers, RootMemberSIDs: rootMembers, PreviousRootMemberSIDs: previousRootMembers})
 }
 
 func (p *RuntimeSharedProjectPlatform) FinalizeProjectOwnership(ctx context.Context, projectID, ownerSID string, commit bool) error {
@@ -86,7 +90,16 @@ func (p *RuntimeSharedProjectPlatform) FinalizeProjectOwnership(ctx context.Cont
 	if commit {
 		action = "transfer_commit"
 	}
-	return p.apply(ctx, ownerSID, projectID, sharedRuntimeRequest{Action: action, OwnerSID: ownerSID, MemberSIDs: []string{}, RootMemberSIDs: []string{}})
+	return p.transfer(ctx, projectID, sharedRuntimeRequest{Action: action, OwnerSID: ownerSID, MemberSIDs: []string{}, RootMemberSIDs: []string{}})
+}
+
+// transfer executes the cross-user filesystem steps on the SYSTEM-side
+// Employee Manager; without it ownership transfer fails closed.
+func (p *RuntimeSharedProjectPlatform) transfer(ctx context.Context, projectID string, input sharedRuntimeRequest) error {
+	if p.manager == nil {
+		return errors.New("shared-project ownership transfer requires the Employee Manager service")
+	}
+	return p.manager.ApplySharedProjectTransfer(ctx, projectID, input)
 }
 
 type sharedRuntimeRequest struct {

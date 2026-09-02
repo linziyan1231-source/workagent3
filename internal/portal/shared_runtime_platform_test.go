@@ -51,7 +51,7 @@ func TestRuntimeSharedProjectPlatformRoutesDesiredStateToOwnerRuntime(t *testing
 	if err := registry.Register(runtimeapi.Registration{SID: "S-1-5-21-1000", BaseURL: server.URL, Token: "owner-runtime-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	platform, err := NewRuntimeSharedProjectPlatform(registry, sharedACLStateStub{owner: "S-1-5-21-1000", members: []string{"S-1-5-21-2000"}})
+	platform, err := NewRuntimeSharedProjectPlatform(registry, sharedACLStateStub{owner: "S-1-5-21-1000", members: []string{"S-1-5-21-2000"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestRuntimeSharedProjectPlatformRoutesDesiredStateToOwnerRuntime(t *testing
 }
 
 func TestRuntimeSharedProjectPlatformFailsClosedWithoutOwnerRuntime(t *testing.T) {
-	platform, err := NewRuntimeSharedProjectPlatform(runtimeapi.NewRegistry(), sharedACLStateStub{})
+	platform, err := NewRuntimeSharedProjectPlatform(runtimeapi.NewRegistry(), sharedACLStateStub{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +79,16 @@ func TestRuntimeSharedProjectPlatformFailsClosedWithoutOwnerRuntime(t *testing.T
 	}
 }
 
-func TestRuntimeSharedProjectPlatformTransfersWithRecoveryState(t *testing.T) {
+// Cross-user transfers execute on the SYSTEM-side Employee Manager, not on an
+// owner Runtime: a limited UserHost token cannot rewrite another account's
+// owner or protected DACL.
+func TestRuntimeSharedProjectPlatformTransfersThroughEmployeeManager(t *testing.T) {
 	requests := make(chan sharedRuntimeRequest, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer new-owner-token" {
+		if request.Method != http.MethodPut || request.URL.Path != "/v1/shared-projects/project_1234567890" {
+			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer manager-token" {
 			t.Fatalf("authorization = %q", request.Header.Get("Authorization"))
 		}
 		var input sharedRuntimeRequest
@@ -90,15 +96,15 @@ func TestRuntimeSharedProjectPlatformTransfersWithRecoveryState(t *testing.T) {
 			t.Fatal(err)
 		}
 		requests <- input
-		writer.WriteHeader(http.StatusNoContent)
+		writer.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	registry := runtimeapi.NewRegistry()
-	if err := registry.Register(runtimeapi.Registration{SID: "S-1-5-21-2000", BaseURL: server.URL, Token: "new-owner-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	manager, err := NewEmployeeManagerClient(server.URL, "manager-token")
+	if err != nil {
 		t.Fatal(err)
 	}
 	state := sharedACLStateStub{owner: "S-1-5-21-1000", members: []string{"S-1-5-21-2000", "S-1-5-21-3000"}, root: []string{"S-1-5-21-4000"}}
-	platform, err := NewRuntimeSharedProjectPlatform(registry, state)
+	platform, err := NewRuntimeSharedProjectPlatform(runtimeapi.NewRegistry(), state, manager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,13 +112,26 @@ func TestRuntimeSharedProjectPlatformTransfersWithRecoveryState(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared := <-requests
-	if prepared.Action != "transfer" || len(prepared.MemberSIDs) != 2 || len(prepared.OldMemberSIDs) != 2 || len(prepared.PreviousRootMemberSIDs) != 1 || len(prepared.RootMemberSIDs) != 3 {
+	if prepared.Action != "transfer" || prepared.OwnerSID != "S-1-5-21-2000" || prepared.OldOwnerSID != "S-1-5-21-1000" || len(prepared.MemberSIDs) != 2 || len(prepared.OldMemberSIDs) != 2 || len(prepared.PreviousRootMemberSIDs) != 1 || len(prepared.RootMemberSIDs) != 3 {
 		t.Fatalf("transfer projection = %#v", prepared)
 	}
 	if err := platform.FinalizeProjectOwnership(t.Context(), "project_1234567890", "S-1-5-21-2000", true); err != nil {
 		t.Fatal(err)
 	}
-	if finalized := <-requests; finalized.Action != "transfer_commit" {
+	if finalized := <-requests; finalized.Action != "transfer_commit" || finalized.OwnerSID != "S-1-5-21-2000" {
 		t.Fatalf("finalize projection = %#v", finalized)
+	}
+}
+
+func TestRuntimeSharedProjectPlatformTransferFailsClosedWithoutEmployeeManager(t *testing.T) {
+	platform, err := NewRuntimeSharedProjectPlatform(runtimeapi.NewRegistry(), sharedACLStateStub{owner: "S-1-5-21-1000"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platform.TransferProjectOwnership(t.Context(), "project_1234567890", "S-1-5-21-1000", "S-1-5-21-2000", nil); err == nil {
+		t.Fatal("transfer unexpectedly succeeded without the Employee Manager service")
+	}
+	if err := platform.FinalizeProjectOwnership(t.Context(), "project_1234567890", "S-1-5-21-2000", true); err == nil {
+		t.Fatal("finalize unexpectedly succeeded without the Employee Manager service")
 	}
 }

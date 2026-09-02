@@ -178,7 +178,7 @@ func run() error {
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
-	sharedPlatform, err := portal.NewRuntimeSharedProjectPlatform(registry, sharedProjects)
+	sharedPlatform, err := portal.NewRuntimeSharedProjectPlatform(registry, sharedProjects, employeeManager)
 	if err != nil {
 		return err
 	}

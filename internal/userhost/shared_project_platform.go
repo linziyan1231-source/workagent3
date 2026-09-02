@@ -16,7 +16,12 @@ import (
 
 var sharedProjectIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 
-type sharedProjectRequest struct {
+// SharedProjectRequest is the desired-state projection Portal sends for a
+// shared project. The transfer fields (OldOwnerSID, OldMemberSIDs,
+// PreviousRootMemberSIDs) are only meaningful to the cross-user transfer
+// actions, which run on the SYSTEM-side Employee Manager — not on the
+// limited owner Runtime.
+type SharedProjectRequest struct {
 	Action                 string   `json:"action"`
 	OwnerSID               string   `json:"ownerSid"`
 	OldOwnerSID            string   `json:"oldOwnerSid,omitempty"`
@@ -27,10 +32,31 @@ type sharedProjectRequest struct {
 }
 
 type sharedProjectOperator interface {
-	Apply(context.Context, string, sharedProjectRequest) error
+	Apply(context.Context, string, SharedProjectRequest) error
 }
 
-type sharedProjectManager struct {
+// runtimeSharedProjectOperator exposes only the single-owner actions on the
+// loopback Runtime Gateway. Cross-user transfers (transfer, transfer_commit,
+// transfer_rollback) move directories between two accounts' protected owner
+// roots and rewrite owner plus protected DACL — a limited UserHost token has
+// no SeRestore/SeSecurity/SeTakeOwnership privileges and no write access to
+// the other owner's tree, so those actions execute on the SYSTEM-side
+// Employee Manager service instead (see internal/employeemanager).
+type runtimeSharedProjectOperator struct{ manager *SharedProjectManager }
+
+func (o runtimeSharedProjectOperator) Apply(ctx context.Context, projectID string, request SharedProjectRequest) error {
+	switch request.Action {
+	case "provision", "reconcile":
+		return o.manager.Apply(ctx, projectID, request)
+	default:
+		return errors.New("shared-project ownership transfers run on the Employee Manager service")
+	}
+}
+
+// SharedProjectManager projects the shared-project filesystem policy. The
+// owner Runtime uses it for provision and reconcile; the SYSTEM-side Employee
+// Manager reuses it for the cross-user ownership transfer actions.
+type SharedProjectManager struct {
 	base     string
 	dataRoot string
 	ownerSID string
@@ -45,15 +71,15 @@ type sharedTransferJournal struct {
 	PreviousRootMemberSIDs []string `json:"previousRootMemberSids"`
 }
 
-func newSharedProjectManager(dataRoot, ownerSID string) (*sharedProjectManager, error) {
+func NewSharedProjectManager(dataRoot, ownerSID string) (*SharedProjectManager, error) {
 	dataRoot = filepath.Clean(dataRoot)
 	if !filepath.IsAbs(dataRoot) || !strings.EqualFold(filepath.Base(dataRoot), ownerSID) || !validSharedSID(ownerSID) {
 		return nil, errors.New("shared-project manager requires the SID-private data root")
 	}
-	return &sharedProjectManager{base: filepath.Dir(dataRoot), dataRoot: dataRoot, ownerSID: ownerSID}, nil
+	return &SharedProjectManager{base: filepath.Dir(dataRoot), dataRoot: dataRoot, ownerSID: ownerSID}, nil
 }
 
-func (m *sharedProjectManager) Apply(_ context.Context, projectID string, request sharedProjectRequest) error {
+func (m *SharedProjectManager) Apply(_ context.Context, projectID string, request SharedProjectRequest) error {
 	if !sharedProjectIDPattern.MatchString(projectID) || !strings.EqualFold(request.OwnerSID, m.ownerSID) {
 		return errors.New("shared-project request does not match this owner Runtime")
 	}
@@ -109,7 +135,7 @@ func (m *sharedProjectManager) Apply(_ context.Context, projectID string, reques
 	}
 }
 
-func (m *sharedProjectManager) prepareTransfer(projectID string, request sharedProjectRequest, members, rootMembers []string) error {
+func (m *SharedProjectManager) prepareTransfer(projectID string, request SharedProjectRequest, members, rootMembers []string) error {
 	if !validSharedSID(request.OldOwnerSID) || strings.EqualFold(request.OldOwnerSID, m.ownerSID) {
 		return errors.New("old shared-project owner SID is invalid")
 	}
@@ -154,7 +180,7 @@ func (m *sharedProjectManager) prepareTransfer(projectID string, request sharedP
 	return nil
 }
 
-func (m *sharedProjectManager) finishTransfer(projectID string, commit bool) error {
+func (m *SharedProjectManager) finishTransfer(projectID string, commit bool) error {
 	journal, err := m.readTransferJournal(projectID)
 	if err != nil {
 		if commit && errors.Is(err, os.ErrNotExist) {
@@ -171,7 +197,7 @@ func (m *sharedProjectManager) finishTransfer(projectID string, commit bool) err
 	return os.Remove(m.transferJournalPath(projectID))
 }
 
-func (m *sharedProjectManager) rollbackTransfer(journal sharedTransferJournal) error {
+func (m *SharedProjectManager) rollbackTransfer(journal sharedTransferJournal) error {
 	targetErr, sourceErr := requireNormalDirectory(journal.Target), requireNormalDirectory(journal.Source)
 	if (targetErr == nil) == (sourceErr == nil) {
 		return errors.New("shared transfer rollback requires exactly one project location")
@@ -190,11 +216,11 @@ func (m *sharedProjectManager) rollbackTransfer(journal sharedTransferJournal) e
 	return os.Remove(m.transferJournalPath(journal.ProjectID))
 }
 
-func (m *sharedProjectManager) transferJournalPath(projectID string) string {
+func (m *SharedProjectManager) transferJournalPath(projectID string) string {
 	return filepath.Join(m.dataRoot, "runtime", "shared-project-transactions", projectID+".json")
 }
 
-func (m *sharedProjectManager) writeTransferJournal(journal sharedTransferJournal) error {
+func (m *SharedProjectManager) writeTransferJournal(journal sharedTransferJournal) error {
 	path := m.transferJournalPath(journal.ProjectID)
 	if err := ensureNormalDirectory(filepath.Dir(path)); err != nil {
 		return err
@@ -214,7 +240,7 @@ func (m *sharedProjectManager) writeTransferJournal(journal sharedTransferJourna
 	return nil
 }
 
-func (m *sharedProjectManager) readTransferJournal(projectID string) (sharedTransferJournal, error) {
+func (m *SharedProjectManager) readTransferJournal(projectID string) (sharedTransferJournal, error) {
 	encoded, err := os.ReadFile(m.transferJournalPath(projectID))
 	if err != nil {
 		return sharedTransferJournal{}, err
@@ -239,7 +265,7 @@ func (m *sharedProjectManager) readTransferJournal(projectID string) (sharedTran
 
 func sharedProjectPlatformHandler(operator sharedProjectOperator) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		var input sharedProjectRequest
+		var input SharedProjectRequest
 		decoder := json.NewDecoder(io.LimitReader(request.Body, 16*1024))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF {

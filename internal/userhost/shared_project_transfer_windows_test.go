@@ -34,11 +34,11 @@ func TestSharedProjectTransferJournalCommitsMovedProject(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "brief.txt"), []byte("brief"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := newSharedProjectManager(dataRoot, newOwnerSID)
+	manager, err := NewSharedProjectManager(dataRoot, newOwnerSID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := sharedProjectRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: []string{oldOwnerSID}, RootMemberSIDs: []string{oldOwnerSID}, OldMemberSIDs: []string{newOwnerSID}}
+	request := SharedProjectRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: []string{oldOwnerSID}, RootMemberSIDs: []string{oldOwnerSID}, OldMemberSIDs: []string{newOwnerSID}}
 	if err := manager.Apply(context.Background(), projectID, request); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestSharedProjectTransferJournalCommitsMovedProject(t *testing.T) {
 	if _, err := os.Stat(manager.transferJournalPath(projectID)); err != nil {
 		t.Fatalf("recovery journal missing: %v", err)
 	}
-	if err := manager.Apply(context.Background(), projectID, sharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
+	if err := manager.Apply(context.Background(), projectID, SharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(manager.transferJournalPath(projectID)); !os.IsNotExist(err) {
@@ -58,7 +58,7 @@ func TestSharedProjectTransferJournalCommitsMovedProject(t *testing.T) {
 	if _, err := os.Stat(source); !os.IsNotExist(err) {
 		t.Fatalf("old project path still exists: %v", err)
 	}
-	if err := manager.Apply(context.Background(), projectID, sharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
+	if err := manager.Apply(context.Background(), projectID, SharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
 		t.Fatalf("replayed transfer commit was not idempotent: %v", err)
 	}
 }
@@ -87,11 +87,11 @@ func TestSharedProjectTransferCreatesMissingTargetOwnerRoot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "brief.txt"), []byte("brief"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := newSharedProjectManager(dataRoot, newOwnerSID)
+	manager, err := NewSharedProjectManager(dataRoot, newOwnerSID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := sharedProjectRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: []string{oldOwnerSID}, RootMemberSIDs: []string{oldOwnerSID}, OldMemberSIDs: []string{newOwnerSID}}
+	request := SharedProjectRequest{Action: "transfer", OwnerSID: newOwnerSID, OldOwnerSID: oldOwnerSID, MemberSIDs: []string{oldOwnerSID}, RootMemberSIDs: []string{oldOwnerSID}, OldMemberSIDs: []string{newOwnerSID}}
 	if err := manager.Apply(context.Background(), projectID, request); err != nil {
 		t.Fatalf("transfer with a missing target owner root failed: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestSharedProjectTransferCreatesMissingTargetOwnerRoot(t *testing.T) {
 	if _, err := os.Stat(source); !os.IsNotExist(err) {
 		t.Fatalf("old project path still exists: %v", err)
 	}
-	if err := manager.Apply(context.Background(), projectID, sharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
+	if err := manager.Apply(context.Background(), projectID, SharedProjectRequest{Action: "transfer_commit", OwnerSID: newOwnerSID}); err != nil {
 		t.Fatal(err)
 	}
 }

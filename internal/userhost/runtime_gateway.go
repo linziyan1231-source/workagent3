@@ -128,7 +128,7 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	oauth := newMCPOAuthManager(catalog, credentials, publisher, auditSink)
 	refreshContext, cancelRefresh := context.WithCancel(context.Background())
 	go oauth.runRefresher(refreshContext)
-	sharedProjects, err := newSharedProjectManager(dataRoot, ownerSID)
+	sharedProjects, err := NewSharedProjectManager(dataRoot, ownerSID)
 	if err != nil {
 		cancelRefresh()
 		migration.Close()
@@ -160,7 +160,7 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		return nil, err
 	}
 	sharedFiles.officePreview = officePreview
-	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, assigners...)
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, runtimeSharedProjectOperator{sharedProjects}, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, assigners...)
 	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
 }
 

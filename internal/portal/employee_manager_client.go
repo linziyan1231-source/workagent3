@@ -137,3 +137,10 @@ func (c *EmployeeManagerClient) SetKimiDatasource(ctx context.Context, username 
 	err := c.call(ctx, http.MethodPost, "/v1/users/kimi-datasource", map[string]any{"username": username, "grant": grant}, &result)
 	return result, err
 }
+
+// ApplySharedProjectTransfer hands one cross-user shared-project transfer
+// step to the SYSTEM-side Employee Manager, which owns the privileged
+// filesystem work (move across owner roots, owner + protected DACL rewrite).
+func (c *EmployeeManagerClient) ApplySharedProjectTransfer(ctx context.Context, projectID string, input sharedRuntimeRequest) error {
+	return c.call(ctx, http.MethodPut, "/v1/shared-projects/"+url.PathEscape(projectID), input, nil)
+}

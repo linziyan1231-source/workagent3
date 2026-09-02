@@ -200,7 +200,11 @@ func run() error {
 		if drainer != nil {
 			go runUsageDrain(ctx, drainer, usageDrainInterval)
 		}
-		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, Audit: auditStore})
+		transfers, err := employeemanager.NewSharedTransferManager(config.DataRootBase)
+		if err != nil {
+			return err
+		}
+		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore})
 	}
 	var user store.User
 	switch *action {

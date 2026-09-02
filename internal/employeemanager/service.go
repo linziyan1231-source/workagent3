@@ -14,6 +14,7 @@ import (
 	"workagent3/internal/contracts"
 	"workagent3/internal/employee"
 	"workagent3/internal/store"
+	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
 )
 
@@ -25,6 +26,9 @@ type Service struct {
 	Provisioner *employee.Provisioner
 	Lifecycle   employee.Lifecycle
 	Users       UserStore
+	// SharedTransfers executes cross-user shared-project ownership transfers
+	// under this service's SYSTEM identity; nil disables the endpoint.
+	SharedTransfers *SharedTransferManager
 	// Audit receives business lifecycle events; nil disables auditing.
 	Audit audit.Sink
 
@@ -180,6 +184,16 @@ func (s *Service) DeleteRetainedEmployee(ctx context.Context, username, confirma
 	err := s.Lifecycle.DeleteRetainedEmployee(ctx, username, confirmation)
 	s.record(ctx, audit.ActionEmployeeOffboardDelete, username, err, nil)
 	return err
+}
+
+// ApplySharedProjectTransfer runs one cross-user ownership transfer step
+// (prepare, commit, or rollback) for a shared project. Portal audits the
+// business event itself; this is the privileged filesystem execution.
+func (s *Service) ApplySharedProjectTransfer(ctx context.Context, projectID string, input userhost.SharedProjectRequest) error {
+	if s.SharedTransfers == nil {
+		return errors.New("shared transfer manager is required")
+	}
+	return s.SharedTransfers.Apply(ctx, projectID, input)
 }
 
 func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {
