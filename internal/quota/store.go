@@ -208,6 +208,37 @@ ALTER TABLE quota_reservations ADD COLUMN settle_source TEXT CHECK (settle_sourc
 }
 
 func (s *Store) SetBudget(ctx context.Context, budget Budget) error {
+	if err := validateBudget(budget); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO quota_budgets(sid, model_id, period, limit_units) VALUES(?, ?, ?, ?)
+ON CONFLICT(sid, model_id) DO UPDATE SET period = excluded.period, limit_units = excluded.limit_units`,
+		budget.SID, budget.ModelID, budget.Period, budget.LimitUnits)
+	if err != nil {
+		return fmt.Errorf("set quota budget: %w", err)
+	}
+	return nil
+}
+
+// EnsureBudget inserts the budget only when none exists for the (SID, model)
+// pair, so provisioning/repair replays never overwrite a later administrator
+// adjustment (SetBudget remains the authoritative overwrite path).
+func (s *Store) EnsureBudget(ctx context.Context, budget Budget) error {
+	if err := validateBudget(budget); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO quota_budgets(sid, model_id, period, limit_units) VALUES(?, ?, ?, ?)
+ON CONFLICT(sid, model_id) DO NOTHING`,
+		budget.SID, budget.ModelID, budget.Period, budget.LimitUnits)
+	if err != nil {
+		return fmt.Errorf("ensure quota budget: %w", err)
+	}
+	return nil
+}
+
+func validateBudget(budget Budget) error {
 	if err := validateSID(budget.SID); err != nil {
 		return err
 	}
@@ -219,13 +250,6 @@ func (s *Store) SetBudget(ctx context.Context, budget Budget) error {
 	}
 	if budget.LimitUnits < 0 {
 		return errors.New("quota limit cannot be negative")
-	}
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO quota_budgets(sid, model_id, period, limit_units) VALUES(?, ?, ?, ?)
-ON CONFLICT(sid, model_id) DO UPDATE SET period = excluded.period, limit_units = excluded.limit_units`,
-		budget.SID, budget.ModelID, budget.Period, budget.LimitUnits)
-	if err != nil {
-		return fmt.Errorf("set quota budget: %w", err)
 	}
 	return nil
 }
@@ -351,6 +375,15 @@ func (s *Store) ReserveSharedRun(ctx context.Context, sid, runID, modelID string
 		RunID: runID, SID: sid, ModelID: modelID, EstimatedUnits: estimatedUnits,
 	})
 	return err
+}
+
+// ReleaseSharedRun settles a shared run admission reservation with zero
+// actual units when the run failed before reaching the owner Runtime.
+// Settlement is idempotent: when the runtime-side runner already settled the
+// reservation, a repeated settle is either a no-op (same zero units) or an
+// idempotency conflict the caller may ignore.
+func (s *Store) ReleaseSharedRun(ctx context.Context, sid, runID string) error {
+	return s.SettleForSID(ctx, sid, SettleRequest{RunID: runID, ActualUnits: 0})
 }
 
 // SettleForSID prevents a scoped Runtime credential from settling another

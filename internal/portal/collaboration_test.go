@@ -45,6 +45,7 @@ type fakeSharedProjectPlatform struct {
 	previewErr   error
 	turnOwner    string
 	turnRequest  SharedTurnRequest
+	turnErr      error
 	cancelRunID  string
 }
 
@@ -95,6 +96,9 @@ func (p *fakeSharedProjectPlatform) OperateOfficePreview(_ context.Context, owne
 
 func (p *fakeSharedProjectPlatform) Run(_ context.Context, ownerSID string, input SharedTurnRequest) (SharedTurnResult, error) {
 	p.turnOwner, p.turnRequest = ownerSID, input
+	if p.turnErr != nil {
+		return SharedTurnResult{}, p.turnErr
+	}
 	return SharedTurnResult{RunID: input.RunID, RuntimeSessionID: "session-shared-" + input.ConversationID, AssistantBody: "Shared answer"}, nil
 }
 
@@ -167,6 +171,62 @@ func TestCollaborationHTTPKeepsDatabaseAndACLConsistent(t *testing.T) {
 	}
 	if projects, err := collaborationData.ListProjects(t.Context(), bob.user.ID, true); err != nil || len(projects) != 0 {
 		t.Fatalf("removed member retained database access: %#v, %v", projects, err)
+	}
+}
+
+func TestOwnershipTransferFailureLeavesDatabaseUntouchedAndRetries(t *testing.T) {
+	handler, collaborationData, platform, alice, bob := collaborationTestServer(t)
+
+	created := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects", `{"name":"Transfer"}`)
+	var createdBody struct {
+		Project sharedProjectDTO `json:"project"`
+	}
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &createdBody) != nil {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	projectID := createdBody.Project.ID
+	invited := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectID+"/invites", `{"targetUsername":"bob","expiresInHours":24}`)
+	var inviteBody struct {
+		Invite sharedInviteDTO `json:"invite"`
+	}
+	if invited.Code != http.StatusCreated || json.Unmarshal(invited.Body.Bytes(), &inviteBody) != nil {
+		t.Fatalf("invite = %d %s", invited.Code, invited.Body.String())
+	}
+	if accepted := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`); accepted.Code != http.StatusOK {
+		t.Fatalf("accept = %d %s", accepted.Code, accepted.Body.String())
+	}
+
+	// A filesystem-side ACL failure must abort the whole transfer: the
+	// database keeps the original owner, no pending owner remains, and the
+	// transfer never becomes visible to the target as ownership.
+	platform.transferErr = errors.New("injected ACL failure")
+	failed := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectID+"/ownership", `{"targetUsername":"bob"}`)
+	if failed.Code != http.StatusServiceUnavailable || !strings.Contains(failed.Body.String(), "shared_project_acl_failed") {
+		t.Fatalf("failed transfer = %d %s", failed.Code, failed.Body.String())
+	}
+	projects, err := collaborationData.ListProjects(t.Context(), alice.user.ID, true)
+	if err != nil || len(projects) != 1 {
+		t.Fatalf("owner projects after failed transfer = %#v, %v", projects, err)
+	}
+	if projects[0].OwnerUserID != alice.user.ID || projects[0].State != "active" || projects[0].PendingOwnerID != nil {
+		t.Fatalf("failed transfer changed database state: %#v", projects[0])
+	}
+	if bobs, err := collaborationData.ListProjects(t.Context(), bob.user.ID, true); err != nil || len(bobs) != 1 || bobs[0].CurrentRole != "member" {
+		t.Fatalf("failed transfer changed target membership: %#v, %v", bobs, err)
+	}
+
+	// The aborted transfer must not block an idempotent retry.
+	platform.transferErr = nil
+	retried := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectID+"/ownership", `{"targetUsername":"bob"}`)
+	if retried.Code != http.StatusOK {
+		t.Fatalf("retried transfer = %d %s", retried.Code, retried.Body.String())
+	}
+	projects, err = collaborationData.ListProjects(t.Context(), bob.user.ID, true)
+	if err != nil || len(projects) != 1 || projects[0].OwnerUserID != bob.user.ID || projects[0].State != "active" || projects[0].PendingOwnerID != nil {
+		t.Fatalf("retried transfer did not complete: %#v, %v", projects, err)
+	}
+	if len(platform.transferred) != 2 || len(platform.finalized) != 1 {
+		t.Fatalf("platform calls = transferred %#v finalized %#v", platform.transferred, platform.finalized)
 	}
 }
 

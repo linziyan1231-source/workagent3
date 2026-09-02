@@ -57,6 +57,10 @@ type SpeechQuotaPort interface {
 // (the member who mentioned the assistant) before the owner Runtime starts.
 type SharedRunQuotaPort interface {
 	ReserveSharedRun(context.Context, string, string, string, int64) error
+	// ReleaseSharedRun settles the reservation with zero usage when the run
+	// never reached the owner Runtime, so the admission reservation cannot
+	// leak in the reserved state.
+	ReleaseSharedRun(context.Context, string, string) error
 }
 
 type SpeechPort interface {

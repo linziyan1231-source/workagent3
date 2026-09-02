@@ -127,7 +127,9 @@ func (m *sharedProjectManager) prepareTransfer(projectID string, request sharedP
 	if err := requireNormalDirectory(source); err != nil {
 		return err
 	}
-	if err := requireNormalDirectory(targetOwnerRoot); err != nil {
+	// The target owner may never have held a shared project, so the per-owner
+	// root is created on demand; ApplySharedOwnerRoot below then sets its ACL.
+	if err := ensureNormalDirectory(targetOwnerRoot); err != nil {
 		return err
 	}
 	if _, err := os.Lstat(target); err == nil {

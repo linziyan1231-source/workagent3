@@ -87,6 +87,14 @@ func (s *Server) maybeStartSharedAI(ctx context.Context, message collaboration.M
 		runContext, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		result, runErr := s.modules.SharedTurns.Run(runContext, run.OwnerSID, request)
+		if runErr != nil && s.modules.SharedRunQuota != nil {
+			// A run that never reached the runtime-side runner (e.g. the owner
+			// Runtime rejected the turn) would otherwise leak its admission
+			// reservation in the reserved state; settle it with zero usage.
+			// When the runner did see the turn it settles on its own first, so
+			// this best-effort release is an idempotent no-op or conflict.
+			_ = s.modules.SharedRunQuota.ReleaseSharedRun(context.Background(), run.PayerSID, run.ID)
+		}
 		s.finishSharedAIRun(run, result, runErr)
 	}()
 	return true

@@ -3,6 +3,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,37 @@ func TestSharedAIRunReservesQuotaAgainstTriggerer(t *testing.T) {
 	usage, err := quotas.Usage(t.Context(), bob.user.SID, "gpt-5", time.Now())
 	if err != nil || usage.ReservedUnits != estimatedSharedTurnUnits(platform.turnRequest.Context) {
 		t.Fatalf("triggerer reservation = %#v, %v", usage, err)
+	}
+}
+
+func TestSharedAIRunReleasesQuotaWhenRuntimeRejectsTurn(t *testing.T) {
+	handler, quotas, platform, alice, bob := sharedTurnQuotaServer(t, 100000)
+	conversationID := sharedTurnConversation(t, handler, alice, bob)
+	platform.turnErr = errors.New("shared_project_not_found")
+
+	if !mentionAssistant(t, handler, bob.session, conversationID, "Please answer") {
+		t.Fatal("shared AI run did not start with sufficient triggerer quota")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	visible := false
+	for time.Now().Before(deadline) {
+		listed := collaborationRequest(t, handler, bob.session, http.MethodGet, "/api/portal/shared-messages?conversation_id="+conversationID, "")
+		if listed.Code == http.StatusOK && strings.Contains(listed.Body.String(), "AI run failed; the triggering messages remain available for retry.") {
+			visible = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !visible {
+		t.Fatal("runtime rejection left no visible failure message in the conversation")
+	}
+	usage, err := quotas.Usage(t.Context(), bob.user.SID, "gpt-5", time.Now())
+	if err != nil || usage.ReservedUnits != 0 {
+		t.Fatalf("rejected run leaked its admission reservation = %#v, %v", usage, err)
+	}
+	conversation := collaborationRequest(t, handler, bob.session, http.MethodGet, "/api/portal/shared-conversations?id="+conversationID, "")
+	if conversation.Code != http.StatusOK || !strings.Contains(conversation.Body.String(), `"state":"idle"`) {
+		t.Fatalf("rejected run did not release the conversation = %d %s", conversation.Code, conversation.Body.String())
 	}
 }
 

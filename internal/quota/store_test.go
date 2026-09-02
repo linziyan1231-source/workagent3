@@ -230,4 +230,51 @@ func TestReserveForSIDPinsReservationToFrozenPayer(t *testing.T) {
 	if err != nil || usage.ReservedUnits != 2048+1024 {
 		t.Fatalf("payer usage = %#v, %v", usage, err)
 	}
+	// A run rejected before reaching the runtime releases its admission
+	// reservation with zero usage; a replayed release is an idempotent no-op.
+	if err := store.ReleaseSharedRun(t.Context(), payer, "run-shared-3"); err != nil {
+		t.Fatalf("shared run release = %v", err)
+	}
+	if err := store.ReleaseSharedRun(t.Context(), payer, "run-shared-3"); err != nil {
+		t.Fatalf("replayed shared run release = %v", err)
+	}
+	if err := store.ReleaseSharedRun(t.Context(), payer, "run-shared-missing"); !errors.Is(err, ErrReservationNotFound) {
+		t.Fatalf("release of unknown run = %v", err)
+	}
+	usage, err = store.Usage(t.Context(), payer, "gpt-5", store.now())
+	if err != nil || usage.ReservedUnits != 2048 || usage.ConsumedUnits != 0 {
+		t.Fatalf("payer usage after release = %#v, %v", usage, err)
+	}
+}
+
+func TestEnsureBudgetNeverOverwritesExistingBudget(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	sid := "S-1-5-21-300"
+	seeded := Budget{SID: sid, ModelID: "codex-native", Period: Daily, LimitUnits: 1000}
+	if err := store.EnsureBudget(ctx, seeded); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := store.Usage(ctx, sid, "codex-native", store.now())
+	if err != nil || usage.LimitUnits != 1000 || usage.Period != string(Daily) {
+		t.Fatalf("seeded budget = %#v, %v", usage, err)
+	}
+	// A later administrator adjustment must survive provision/repair replays.
+	if err := store.SetBudget(ctx, Budget{SID: sid, ModelID: "codex-native", Period: Weekly, LimitUnits: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureBudget(ctx, seeded); err != nil {
+		t.Fatal(err)
+	}
+	var period string
+	var limit int64
+	if err := store.db.QueryRowContext(ctx, `SELECT period, limit_units FROM quota_budgets WHERE sid = ? AND model_id = ?`, sid, "codex-native").Scan(&period, &limit); err != nil {
+		t.Fatal(err)
+	}
+	if period != string(Weekly) || limit != 50 {
+		t.Fatalf("replay overwrote administrator adjustment: period=%s limit=%d", period, limit)
+	}
+	if err := store.EnsureBudget(ctx, Budget{SID: sid, ModelID: "", Period: Daily, LimitUnits: 1}); err == nil {
+		t.Fatal("invalid budget was seeded")
+	}
 }
