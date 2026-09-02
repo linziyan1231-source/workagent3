@@ -23,11 +23,9 @@ description: "Use this skill any time a .pptx file is involved -- as input, outp
 
 ## Setup
 
-If `officecli` is missing:
+OfficeCLI is a managed tool: the WorkAgent3 release installs a pinned, hash-verified `officecli.exe` into the release managed-tools directory, and the employee runtime places it on `PATH`. Never download or install it by hand.
 
-- **Customer setup (all platforms)**: Follow the public guide at https://github.com/iOfficeAI/OfficeCLI/releases, review and accept the upstream license, install it manually, and ensure `officecli` is on `PATH`. This product and skill do not download or run an installer.
-
-Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/iOfficeAI/OfficeCLI/releases.
+If `officecli` is missing, verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If it is still not found, ask the administrator to re-run the managed OfficeCLI installation or repair from the operations runbook.
 
 ## ⚠️ Help-First Rule
 

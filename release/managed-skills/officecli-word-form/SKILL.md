@@ -25,16 +25,16 @@ description: "Use this skill to create fillable Word forms (.docx) with real Con
 
 ## BEFORE YOU START (CRITICAL)
 
-**If `officecli` is not installed:** follow the public guide at
-https://github.com/iOfficeAI/OfficeCLI/releases, review and accept the upstream
-license, install it manually, and ensure `officecli` is on `PATH`. This product
-and skill do not download or run an installer.
+**If `officecli` is not available:** OfficeCLI is a managed tool. The
+WorkAgent3 release installs a pinned, hash-verified `officecli.exe` into the
+release managed-tools directory, and the employee runtime places it on `PATH`.
+Never download or install it by hand.
 
 Verify: `officecli --version`
 
-If `officecli` is still not found after first install, open a new terminal and run the verify command again.
-
-If setup is blocked by security policy or insufficient permissions, ask the system administrator to complete the customer-managed installation, then re-run the verify command.
+If `officecli` is still not found, ask the system administrator to re-run the
+managed OfficeCLI installation or repair from the operations runbook, then
+re-run the verify command.
 
 ## Help-First Rule
 

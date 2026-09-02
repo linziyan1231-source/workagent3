@@ -1,0 +1,53 @@
+# CLIProxyAPI configuration template for the WorkAgent3 managed model gateway.
+#
+# This file pairs with docs/employee-manager.config.example.json:
+#   - host/port must match the listener in modelGateway.managementUrl and
+#     modelGateway.baseUrl (http://127.0.0.1:8317).
+#   - remote-management.secret-key must equal the contents of the key file at
+#     modelGateway.managementKeyFile. Restrict that file's ACL to
+#     Administrators, SYSTEM, and the Employee Manager service account;
+#     Employee Manager refuses to start otherwise.
+#   - usage-statistics-enabled must stay true: the quota drain consumes
+#     /v0/management/usage-queue, which exists only when usage statistics are
+#     enabled.
+# Per-employee downstream keys and their model/quota policy are provisioned
+# and revoked by Employee Manager through the cpa-key-policy management
+# plugin; do not add employee keys to api-keys here.
+
+# Loopback only: every WorkAgent3 consumer (Harness, native Codex/Kimi,
+# Employee Manager) runs on this host.
+host: "127.0.0.1"
+port: 8317
+
+tls:
+  enable: false
+
+remote-management:
+  allow-remote: false
+  # Management key. Must equal the contents of modelGateway.managementKeyFile.
+  secret-key: ""
+  # The bundled control panel downloads assets from GitHub; the deployment has
+  # no browser management UI and must not fetch them.
+  disable-control-panel: true
+
+# Upstream provider credential files. Keep the directory private to the
+# CLIProxyAPI service account.
+auth-dir: "C:\\WorkAgent3\\cliproxy\\auth"
+
+# No static downstream keys: Employee Manager provisions revocable SID-scoped
+# keys through the cpa-key-policy plugin.
+api-keys: []
+
+plugins:
+  enabled: true
+  dir: "C:\\WorkAgent3\\cliproxy\\plugins"
+  configs:
+    cpa-key-policy:
+      enabled: true
+      priority: 1
+
+# Required by the WorkAgent3 quota drain; see the header comment.
+usage-statistics-enabled: true
+
+debug: false
+logging-to-file: false

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"workagent3/internal/contracts"
@@ -88,6 +87,12 @@ CREATE TABLE IF NOT EXISTS activation_journal (
   state TEXT NOT NULL CHECK (state IN ('prepared','committed','rolled_back')),
   created_at INTEGER NOT NULL,
   completed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS release_readiness (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version TEXT NOT NULL REFERENCES releases(version),
+  readiness_json TEXT NOT NULL,
+  recorded_at INTEGER NOT NULL
 );`)
 	if err != nil {
 		return fmt.Errorf("migrate operations database: %w", err)
@@ -180,6 +185,7 @@ func (s *Store) PublishUpgrade(ctx context.Context, version string, publisher No
 	publishedAt = publishedAt.UTC()
 	notification, err := publisher.Publish(ctx, contracts.NotificationInput{
 		TargetSID: "*", Kind: "upgrade", Title: "系统升级通知", Message: notice.Message,
+		DeepLink: "/settings/about",
 	})
 	if err != nil {
 		return contracts.Notification{}, fmt.Errorf("publish upgrade notification: %w", err)
@@ -191,11 +197,15 @@ func (s *Store) PublishUpgrade(ctx context.Context, version string, publisher No
 	return notification, nil
 }
 
+// RecordReadiness appends one passing readiness run to the append-only
+// release_readiness history. Existing rows are never updated or deleted, so
+// the evidence an activation relied on stays intact afterwards; the latest
+// row is the effective readiness for activation.
 func (s *Store) RecordReadiness(ctx context.Context, version string, readiness Readiness) error {
 	if _, err := s.Status(ctx, version); err != nil {
 		return err
 	}
-	if err := verifyReadiness(readiness); err != nil {
+	if err := verifyReadiness(version, readiness); err != nil {
 		return err
 	}
 	readiness.CheckedAt = readiness.CheckedAt.UTC()
@@ -203,11 +213,36 @@ func (s *Store) RecordReadiness(ctx context.Context, version string, readiness R
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE releases SET readiness_json=? WHERE version=?`, string(payload), version)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO release_readiness(version,readiness_json,recorded_at) VALUES(?,?,?)`,
+		version, string(payload), time.Now().UTC().UnixMilli())
 	if err != nil {
 		return fmt.Errorf("record release readiness: %w", err)
 	}
 	return nil
+}
+
+// ReadinessHistory returns every recorded readiness run for a version, oldest
+// first. The history is append-only: activation and later runs never rewrite
+// earlier rows.
+func (s *Store) ReadinessHistory(ctx context.Context, version string) ([]Readiness, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT readiness_json FROM release_readiness WHERE version=? ORDER BY id`, version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var history []Readiness
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var readiness Readiness
+		if err := json.Unmarshal([]byte(payload), &readiness); err != nil {
+			return nil, fmt.Errorf("decode stored readiness: %w", err)
+		}
+		history = append(history, readiness)
+	}
+	return history, rows.Err()
 }
 
 func (s *Store) Activate(ctx context.Context, version string, now time.Time) (Activation, error) {
@@ -222,7 +257,7 @@ func (s *Store) Activate(ctx context.Context, version string, now time.Time) (Ac
 	if status.Readiness == nil || status.Readiness.CheckedAt.Before(*status.NotifiedAt) || status.Readiness.CheckedAt.After(now) {
 		return Activation{}, errors.New("fresh post-notification readiness evidence is required")
 	}
-	if err := verifyReadiness(*status.Readiness); err != nil {
+	if err := verifyReadiness(status.Version, *status.Readiness); err != nil {
 		return Activation{}, err
 	}
 	releasePath := filepath.Join(s.releaseRoot, status.Version)
@@ -358,9 +393,8 @@ func (s *Store) Status(ctx context.Context, version string) (ReleaseStatus, erro
 	var manifestJSON string
 	var installedAt int64
 	var notifiedAt sql.NullInt64
-	var readinessJSON sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT version,state,manifest_json,installed_at,notified_at,readiness_json FROM releases WHERE version=?`, version).
-		Scan(&result.Version, &result.State, &manifestJSON, &installedAt, &notifiedAt, &readinessJSON)
+	err := s.db.QueryRowContext(ctx, `SELECT version,state,manifest_json,installed_at,notified_at FROM releases WHERE version=?`, version).
+		Scan(&result.Version, &result.State, &manifestJSON, &installedAt, &notifiedAt)
 	if err != nil {
 		return ReleaseStatus{}, fmt.Errorf("load release status: %w", err)
 	}
@@ -372,9 +406,17 @@ func (s *Store) Status(ctx context.Context, version string) (ReleaseStatus, erro
 		value := time.UnixMilli(notifiedAt.Int64).UTC()
 		result.NotifiedAt = &value
 	}
-	if readinessJSON.Valid {
+	// The effective readiness is the latest append-only record; earlier rows
+	// stay in release_readiness as history.
+	var readinessJSON string
+	err = s.db.QueryRowContext(ctx, `SELECT readiness_json FROM release_readiness WHERE version=? ORDER BY id DESC LIMIT 1`, version).
+		Scan(&readinessJSON)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ReleaseStatus{}, fmt.Errorf("load release readiness: %w", err)
+	}
+	if err == nil {
 		var readiness Readiness
-		if err := json.Unmarshal([]byte(readinessJSON.String), &readiness); err != nil {
+		if err := json.Unmarshal([]byte(readinessJSON), &readiness); err != nil {
 			return ReleaseStatus{}, fmt.Errorf("decode stored readiness: %w", err)
 		}
 		result.Readiness = &readiness
@@ -400,9 +442,4 @@ WHERE state='active' AND version NOT IN (SELECT DISTINCT version FROM active_com
 	_, err := tx.ExecContext(ctx, `UPDATE releases SET state='active'
 WHERE version IN (SELECT DISTINCT version FROM active_components)`)
 	return err
-}
-
-func validateEvidenceLabel(value string) bool {
-	value = strings.TrimSpace(value)
-	return value != "" && len(value) <= 256 && !strings.ContainsAny(value, "\r\n\x00")
 }

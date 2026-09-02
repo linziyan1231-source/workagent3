@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -33,11 +34,13 @@ const (
 	ComponentHarnessPlugin   Component = "harness-plugin"
 	ComponentChatForward     Component = "chatforward"
 	ComponentIMConnector     Component = "im-connector"
+	ComponentManagedTools    Component = "managed-tools"
 )
 
 var allowedComponents = map[Component]struct{}{
 	ComponentWeb: {}, ComponentPortal: {}, ComponentEmployeeManager: {}, ComponentUserHost: {},
 	ComponentHarnessProfile: {}, ComponentHarnessPlugin: {}, ComponentChatForward: {}, ComponentIMConnector: {},
+	ComponentManagedTools: {},
 }
 
 type Artifact struct {
@@ -54,17 +57,23 @@ type ReleaseManifest struct {
 	Artifacts          []Artifact  `json:"artifacts"`
 }
 
+// Probe records the outcome of one real readiness probe. Evidence is the
+// structured contracts.ProbeEvidence produced by the probe executor; free
+// text is rejected at validation time.
 type Probe struct {
-	OK       bool   `json:"ok"`
-	Evidence string `json:"evidence"`
+	OK       bool                    `json:"ok"`
+	Evidence contracts.ProbeEvidence `json:"evidence"`
 }
 
 type Readiness struct {
-	CheckedAt       time.Time `json:"checked_at"`
-	Harness         Probe     `json:"harness"`
-	Codex           Probe     `json:"codex"`
-	Kimi            Probe     `json:"kimi"`
-	ManagedProvider Probe     `json:"managed_provider"`
+	CheckedAt time.Time `json:"checked_at"`
+	Harness   Probe     `json:"harness"`
+	Codex     Probe     `json:"codex"`
+	Kimi      Probe     `json:"kimi"`
+	// CLIProxy records the managed model gateway install/health gate: a real
+	// management API call against the deployed CLIProxyAPI must succeed before
+	// activation.
+	CLIProxy Probe `json:"cliproxy"`
 }
 
 type UpgradeNotice struct {
@@ -181,17 +190,31 @@ func WriteReleaseManifest(path string, manifest ReleaseManifest) error {
 	return writeManifest(path, manifest)
 }
 
-func verifyReadiness(readiness Readiness) error {
+var probeRunIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
+
+// verifyReadiness gates activation on structured evidence produced by the real
+// probe executor: every probe must have passed, and its evidence must name the
+// expected engine, the exact release version, a well-formed run id, a sane
+// probe time, and the redaction marker. Free-text evidence cannot satisfy
+// these checks.
+func verifyReadiness(version string, readiness Readiness) error {
 	if readiness.CheckedAt.IsZero() {
 		return errors.New("readiness check time is required")
 	}
 	probes := map[string]Probe{
 		"harness": readiness.Harness, "codex": readiness.Codex,
-		"kimi": readiness.Kimi, "managed_provider": readiness.ManagedProvider,
+		"kimi": readiness.Kimi, "cliproxy": readiness.CLIProxy,
 	}
 	for name, probe := range probes {
-		if !probe.OK || strings.TrimSpace(probe.Evidence) == "" || len(probe.Evidence) > 256 || strings.ContainsAny(probe.Evidence, "\r\n\x00") {
-			return fmt.Errorf("successful redacted readiness evidence is required for %s", name)
+		evidence := probe.Evidence
+		if !probe.OK || evidence.Engine != name || evidence.Version != version ||
+			evidence.Result != contracts.ProbeResultPass || !evidence.Redacted ||
+			!probeRunIDPattern.MatchString(evidence.RunID) {
+			return fmt.Errorf("passing structured redacted readiness evidence is required for %s", name)
+		}
+		if evidence.CheckedAt.IsZero() || evidence.CheckedAt.Before(readiness.CheckedAt.Add(-time.Minute)) ||
+			evidence.CheckedAt.After(readiness.CheckedAt.Add(15*time.Minute)) {
+			return fmt.Errorf("readiness evidence time is outside the probe run window for %s", name)
 		}
 	}
 	return nil

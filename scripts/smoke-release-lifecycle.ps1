@@ -1,5 +1,10 @@
 $ErrorActionPreference = "Stop"
 
+# release-manager writes UTF-8 JSON (including Chinese notification text);
+# capture it as UTF-8 regardless of the console codepage.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $goScript = Join-Path $PSScriptRoot "go.ps1"
 $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("workagent3-release-smoke-" + [guid]::NewGuid().ToString("N"))
@@ -8,6 +13,7 @@ $componentRoot = Join-Path $candidateRoot "components"
 $releaseRoot = Join-Path $smokeRoot "releases"
 $databasePath = Join-Path $smokeRoot "operations.db"
 $notificationPath = Join-Path $smokeRoot "notifications.db"
+$auditPath = Join-Path $smokeRoot "audit.db"
 $manifestPath = Join-Path $candidateRoot "workagent-release.json"
 $version = "release-smoke-1.0.0"
 
@@ -17,7 +23,8 @@ function Invoke-ReleaseManager {
     $common = @(
         "-db", $databasePath,
         "-release-root", $releaseRoot,
-        "-notifications-db", $notificationPath
+        "-notifications-db", $notificationPath,
+        "-audit-db", $auditPath
     )
     $output = & $goScript run ./cmd/release-manager @common @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -49,13 +56,26 @@ try {
     }
 
     Invoke-ReleaseManager @("-action", "notify", "-version", $version) | Out-Null
-    Invoke-ReleaseManager @(
-        "-action", "readiness", "-version", $version,
-        "-harness-evidence", "release-drill-harness-ready",
-        "-codex-evidence", "release-drill-codex-ready",
-        "-kimi-evidence", "release-drill-kimi-ready",
-        "-provider-evidence", "release-drill-provider-ready"
-    ) | Out-Null
+
+    # Readiness now executes real probes against the deployed CLIProxyAPI: an
+    # authenticated management round trip plus one real model turn per engine
+    # boundary through temporary probe keys. Without a deployed gateway and
+    # real upstream engine credentials this step must fail — that failure is
+    # the gate. Point WORKAGENT_RELEASE_SMOKE_GATEWAY_CONFIG at a real
+    # Employee Manager configuration to run the full lifecycle.
+    $gatewayConfig = $env:WORKAGENT_RELEASE_SMOKE_GATEWAY_CONFIG
+    if ([string]::IsNullOrEmpty($gatewayConfig)) {
+        $gatewayConfig = Join-Path $repositoryRoot "docs\employee-manager.config.example.json"
+    }
+    try {
+        Invoke-ReleaseManager @(
+            "-action", "readiness", "-version", $version,
+            "-gateway-config", $gatewayConfig
+        ) | Out-Null
+    }
+    catch {
+        throw "release readiness probes failed (expected without a deployed CLIProxyAPI and real engine credentials): $_"
+    }
 
     # Production activation intentionally enforces a real one-minute notice window.
     Start-Sleep -Seconds 61
