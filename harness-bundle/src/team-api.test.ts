@@ -226,6 +226,34 @@ it("opens the lead session when a team is created and rolls back on failure", as
   } finally {
     await close(failing.server);
   }
+
+  // The B2 regression shape: the kimi agent answers session/new with a bare
+  // ACP internal error. The re-coded failure must surface as a 503 carrying
+  // the engine context — never a bare 4xx/200 {"error":"Internal error"}.
+  const acpFailing = await serve(store, async () => {
+    throw new Error("engine_session_failed:kimi:new: Internal error");
+  });
+  try {
+    const launch = store.list().find((team) => team.name === "Launch")!;
+    const memberFailed = await call(
+      acpFailing.port,
+      "POST",
+      `/v1/teams/${launch.id}/members`,
+      "runtime-token",
+      { name: "GhostKimi", engine: "kimi", presetId: "preset-2" },
+    );
+    expect(memberFailed.status).toBe(503);
+    expect(JSON.parse(memberFailed.body)).toEqual({
+      error: "engine_session_failed:kimi:new: Internal error",
+    });
+    expect(
+      store
+        .get(launch.id)!
+        .members.every((member) => member.name !== "GhostKimi"),
+    ).toBe(true);
+  } finally {
+    await close(acpFailing.server);
+  }
 });
 
 it("propagates credential and store error codes with their HTTP semantics", async () => {

@@ -19,6 +19,22 @@ import type {
   NativeEngineStatus,
 } from "./types.js";
 
+// ACP agents report in-agent session failures as JSON-RPC RequestError
+// values with generic messages ("Internal error"); re-code them so callers
+// see the engine context and the team API maps the failure to 503 instead of
+// a bare 400.
+export const kimiSessionFailure = (
+  operation: string,
+  error: unknown,
+): Error => {
+  const message = error instanceof Error ? error.message : String(error);
+  const data =
+    error instanceof Error ? (error as { data?: unknown }).data : undefined;
+  const detail =
+    data === undefined ? message : `${message} ${JSON.stringify(data)}`;
+  return new Error(`engine_session_failed:kimi:${operation}: ${detail}`);
+};
+
 export class KimiBridge implements EngineBridge {
   readonly id = "kimi" as const;
   readonly #binary: string;
@@ -37,15 +53,20 @@ export class KimiBridge implements EngineBridge {
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
-    const result = await connection.newSession({
-      cwd: workspace,
-      mcpServers: projectMcpServers(options?.mcpServers ?? []),
-    });
-    if (options?.modelId !== undefined)
-      await connection.unstable_setSessionModel({
-        sessionId: result.sessionId,
-        modelId: options.modelId,
+    let result;
+    try {
+      result = await connection.newSession({
+        cwd: workspace,
+        mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
+      if (options?.modelId !== undefined)
+        await connection.unstable_setSessionModel({
+          sessionId: result.sessionId,
+          modelId: options.modelId,
+        });
+    } catch (error) {
+      throw kimiSessionFailure("new", error);
+    }
     const session = new KimiSession(connection, result.sessionId, onEvent, () =>
       this.#sessions.delete(result.sessionId),
     );
@@ -60,16 +81,20 @@ export class KimiBridge implements EngineBridge {
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
-    await connection.unstable_resumeSession({
-      sessionId: nativeId,
-      cwd: workspace,
-      mcpServers: projectMcpServers(options?.mcpServers ?? []),
-    });
-    if (options?.modelId !== undefined)
-      await connection.unstable_setSessionModel({
+    try {
+      await connection.unstable_resumeSession({
         sessionId: nativeId,
-        modelId: options.modelId,
+        cwd: workspace,
+        mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
+      if (options?.modelId !== undefined)
+        await connection.unstable_setSessionModel({
+          sessionId: nativeId,
+          modelId: options.modelId,
+        });
+    } catch (error) {
+      throw kimiSessionFailure("resume", error);
+    }
     const session = new KimiSession(connection, nativeId, onEvent, () => {
       this.#sessions.delete(nativeId);
     });
@@ -87,16 +112,21 @@ export class KimiBridge implements EngineBridge {
     if (lastTurnId !== undefined)
       throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
     const connection = await this.#connect();
-    const result = await connection.unstable_forkSession({
-      sessionId: nativeId,
-      cwd: workspace,
-      mcpServers: projectMcpServers(options?.mcpServers ?? []),
-    });
-    if (options?.modelId !== undefined)
-      await connection.unstable_setSessionModel({
-        sessionId: result.sessionId,
-        modelId: options.modelId,
+    let result;
+    try {
+      result = await connection.unstable_forkSession({
+        sessionId: nativeId,
+        cwd: workspace,
+        mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
+      if (options?.modelId !== undefined)
+        await connection.unstable_setSessionModel({
+          sessionId: result.sessionId,
+          modelId: options.modelId,
+        });
+    } catch (error) {
+      throw kimiSessionFailure("fork", error);
+    }
     const session = new KimiSession(connection, result.sessionId, onEvent, () =>
       this.#sessions.delete(result.sessionId),
     );

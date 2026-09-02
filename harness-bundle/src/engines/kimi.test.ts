@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KimiBridge, KimiSession } from "./kimi.js";
+import { KimiBridge, KimiSession, kimiSessionFailure } from "./kimi.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -25,6 +25,25 @@ describe("Kimi bridge startup", () => {
       /^engine_start_failed:spawn workagent-missing-kimi-binary/,
     );
     await bridge.close();
+  });
+
+  it("re-codes opaque ACP session failures with engine context and data", () => {
+    // The agent answers session/new with a bare JSON-RPC internal error; the
+    // bridge must not propagate that bare message, because the team API would
+    // otherwise emit a 400 {"error":"Internal error"}.
+    const requestError = Object.assign(new Error("Internal error"), {
+      code: -32603,
+      data: { reason: "authentication required" },
+    });
+    expect(kimiSessionFailure("new", requestError).message).toBe(
+      'engine_session_failed:kimi:new: Internal error {"reason":"authentication required"}',
+    );
+    expect(kimiSessionFailure("new", new Error("Internal error")).message).toBe(
+      "engine_session_failed:kimi:new: Internal error",
+    );
+    expect(kimiSessionFailure("fork", "boom").message).toBe(
+      "engine_session_failed:kimi:fork: boom",
+    );
   });
 });
 
