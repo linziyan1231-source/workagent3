@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/contracts"
 )
 
@@ -70,13 +72,34 @@ type Usage = contracts.QuotaUsage
 type Store struct {
 	db         *sql.DB
 	authorizer ModelAuthorizationPort
+	audit      audit.Sink
 	now        func() time.Time
+}
+
+// SetAudit wires the business audit sink for quota reserve/settle events. The
+// run ID doubles as the correlation ID so a reserve and its settle share one
+// audit trail; the actor is the paying SID (the frozen payer for shared
+// runs). Recording never fails the quota operation itself.
+func (s *Store) SetAudit(sink audit.Sink) {
+	s.audit = sink
 }
 
 func Open(path string, authorizer ModelAuthorizationPort) (*Store, error) {
 	if authorizer == nil {
 		return nil, errors.New("quota model authorization port is required")
 	}
+	return open(path, authorizer)
+}
+
+// OpenRecorder opens the quota database for the Employee Manager usage drain,
+// which indexes gateway keys and records gateway usage but never reserves or
+// settles. The Portal holds the reserving store over the same database file;
+// both processes coordinate through SQLite with a busy timeout.
+func OpenRecorder(path string) (*Store, error) {
+	return open(path, nil)
+}
+
+func open(path string, authorizer ModelAuthorizationPort) (*Store, error) {
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open quota database: %w", err)
@@ -93,7 +116,10 @@ func Open(path string, authorizer ModelAuthorizationPort) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
+	// busy_timeout lets the Portal and the Employee Manager drain share this
+	// database file across processes without spurious SQLITE_BUSY failures.
 	_, err := s.db.ExecContext(ctx, `
+PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS quota_budgets (
   sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
@@ -116,9 +142,47 @@ CREATE TABLE IF NOT EXISTS quota_reservations (
 );
 CREATE INDEX IF NOT EXISTS quota_reservations_window
 ON quota_reservations(sid, model_id, period, period_key, status);
+CREATE TABLE IF NOT EXISTS quota_gateway_keys (
+  key_digest BLOB PRIMARY KEY CHECK (length(key_digest) = 32),
+  sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS quota_gateway_usage (
+  request_id TEXT PRIMARY KEY,
+  sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  auth_type TEXT NOT NULL,
+  failed INTEGER NOT NULL CHECK (failed IN (0, 1)),
+  input_tokens INTEGER NOT NULL CHECK (input_tokens >= 0),
+  output_tokens INTEGER NOT NULL CHECK (output_tokens >= 0),
+  reasoning_tokens INTEGER NOT NULL CHECK (reasoning_tokens >= 0),
+  cached_tokens INTEGER NOT NULL CHECK (cached_tokens >= 0),
+  total_tokens INTEGER NOT NULL CHECK (total_tokens >= 0),
+  occurred_at INTEGER NOT NULL,
+  drained_at INTEGER NOT NULL,
+  matched_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS quota_gateway_usage_match
+ON quota_gateway_usage(sid, failed, matched_run_id, occurred_at);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate quota database: %w", err)
+	}
+	// settle_source ('gateway' | 'estimated') records whether a settlement used
+	// authoritative gateway tokens or the caller's conservative estimate.
+	var columnCount int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM pragma_table_info('quota_reservations') WHERE name = 'settle_source'`).Scan(&columnCount); err != nil {
+		return fmt.Errorf("inspect quota reservations schema: %w", err)
+	}
+	if columnCount == 0 {
+		if _, err := s.db.ExecContext(ctx, `
+ALTER TABLE quota_reservations ADD COLUMN settle_source TEXT CHECK (settle_source IN ('gateway', 'estimated'))`); err != nil {
+			return fmt.Errorf("add quota settlement source column: %w", err)
+		}
 	}
 	return nil
 }
@@ -146,16 +210,32 @@ ON CONFLICT(sid, model_id) DO UPDATE SET period = excluded.period, limit_units =
 	return nil
 }
 
+// Reserve audits the business outcome of every fresh reservation attempt
+// (success, denial, or failure); idempotent replays of an existing
+// reservation are not new business events and are not recorded.
 func (s *Store) Reserve(ctx context.Context, request ReserveRequest) (Reservation, error) {
+	reservation, replayed, err := s.reserve(ctx, request)
+	if !replayed && strings.TrimSpace(request.RunID) != "" {
+		s.recordQuotaEvent(ctx, audit.ActionQuotaReserve, request.RunID, request.SID, err, map[string]string{
+			"model_id": request.ModelID, "estimated_units": strconv.FormatInt(request.EstimatedUnits, 10),
+		})
+	}
+	return reservation, err
+}
+
+func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservation, bool, error) {
 	if err := validateReserve(request); err != nil {
-		return Reservation{}, err
+		return Reservation{}, false, err
+	}
+	if s.authorizer == nil {
+		return Reservation{}, false, errors.New("quota model authorization port is required")
 	}
 	authorized, err := s.authorizer.Authorized(ctx, request.SID, request.ModelID)
 	if err != nil {
-		return Reservation{}, fmt.Errorf("authorize quota model: %w", err)
+		return Reservation{}, false, fmt.Errorf("authorize quota model: %w", err)
 	}
 	if !authorized {
-		return Reservation{}, ErrModelUnauthorized
+		return Reservation{}, false, ErrModelUnauthorized
 	}
 	if request.At.IsZero() {
 		request.At = s.now()
@@ -163,30 +243,30 @@ func (s *Store) Reserve(ctx context.Context, request ReserveRequest) (Reservatio
 
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		return Reservation{}, fmt.Errorf("begin quota reservation: %w", err)
+		return Reservation{}, false, fmt.Errorf("begin quota reservation: %w", err)
 	}
 	defer tx.Rollback()
 
 	if existing, found, err := reservationByRun(ctx, tx, request.RunID); err != nil {
-		return Reservation{}, err
+		return Reservation{}, false, err
 	} else if found {
 		if existing.SID != request.SID || existing.ModelID != request.ModelID || existing.ReservedUnits != request.EstimatedUnits {
-			return Reservation{}, ErrIdempotencyConflict
+			return Reservation{}, true, ErrIdempotencyConflict
 		}
-		return existing, nil
+		return existing, true, nil
 	}
 
 	period, limit, err := budgetFor(ctx, tx, request.SID, request.ModelID)
 	if err != nil {
-		return Reservation{}, err
+		return Reservation{}, false, err
 	}
 	key := periodKey(period, request.At)
 	usage, err := usageFor(ctx, tx, request.SID, request.ModelID, period, key, limit)
 	if err != nil {
-		return Reservation{}, err
+		return Reservation{}, false, err
 	}
 	if usage.ConsumedUnits+usage.ReservedUnits+request.EstimatedUnits > limit {
-		return Reservation{}, ErrExceeded
+		return Reservation{}, false, ErrExceeded
 	}
 	reservation := Reservation{
 		RunID: request.RunID, SID: request.SID, ModelID: request.ModelID,
@@ -197,16 +277,60 @@ INSERT INTO quota_reservations(run_id, sid, model_id, period, period_key, reserv
 VALUES(?, ?, ?, ?, ?, ?, 'reserved', ?)`, request.RunID, request.SID, request.ModelID,
 		period, key, request.EstimatedUnits, request.At.Unix())
 	if err != nil {
-		return Reservation{}, fmt.Errorf("persist quota reservation: %w", err)
+		return Reservation{}, false, fmt.Errorf("persist quota reservation: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return Reservation{}, fmt.Errorf("commit quota reservation: %w", err)
+		return Reservation{}, false, fmt.Errorf("commit quota reservation: %w", err)
 	}
-	return reservation, nil
+	return reservation, false, nil
+}
+
+// recordQuotaEvent writes one business audit event for a quota operation. The
+// run ID doubles as the correlation ID so a reserve and its settle share one
+// trail. Recording never fails the operation, matching the Portal middleware
+// policy.
+func (s *Store) recordQuotaEvent(ctx context.Context, action, runID, sid string, operation error, metadata map[string]string) {
+	if s.audit == nil {
+		return
+	}
+	result := "success"
+	if operation != nil {
+		result = "failure"
+		if errors.Is(operation, ErrExceeded) || errors.Is(operation, ErrModelUnauthorized) {
+			result = "denied"
+		}
+	}
+	_, _ = s.audit.Record(context.WithoutCancel(ctx), contracts.AuditInput{
+		Actor: sid, Target: runID, Action: action, Result: result, CorrelationID: runID, Metadata: metadata,
+	})
 }
 
 func (s *Store) Settle(ctx context.Context, request SettleRequest) error {
 	return s.settle(ctx, "", request)
+}
+
+// ReserveForSID prevents a scoped Runtime credential from reserving quota for
+// another employee: the pinned SID must match the request SID. The Portal uses
+// it to pin shared-run reservations to the frozen payer (the member who
+// mentioned the assistant), which may differ from the runtime owner's SID.
+func (s *Store) ReserveForSID(ctx context.Context, sid string, request ReserveRequest) (Reservation, error) {
+	if err := validateSID(sid); err != nil {
+		return Reservation{}, err
+	}
+	if request.SID != sid {
+		return Reservation{}, errors.New("quota reservation SID mismatch")
+	}
+	return s.Reserve(ctx, request)
+}
+
+// ReserveSharedRun exposes a narrow resource-specific Port to the Portal for
+// shared AI runs: the reservation is pinned to the frozen payer SID at
+// admission, before the owner Runtime starts the turn.
+func (s *Store) ReserveSharedRun(ctx context.Context, sid, runID, modelID string, estimatedUnits int64) error {
+	_, err := s.ReserveForSID(ctx, sid, ReserveRequest{
+		RunID: runID, SID: sid, ModelID: modelID, EstimatedUnits: estimatedUnits,
+	})
+	return err
 }
 
 // SettleForSID prevents a scoped Runtime credential from settling another
@@ -232,13 +356,27 @@ func (s *Store) SettleSpeech(ctx context.Context, runID string, actualSeconds in
 	return s.Settle(ctx, SettleRequest{RunID: runID, ActualUnits: actualSeconds})
 }
 
-func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) error {
+func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (err error) {
 	if strings.TrimSpace(request.RunID) == "" {
 		return errors.New("quota run ID is required")
 	}
 	if request.ActualUnits < 0 {
 		return errors.New("actual quota usage cannot be negative")
 	}
+	// The audit actor is the paying SID: the pinned one when scoped, otherwise
+	// the reservation owner once loaded. An idempotent replay of an unchanged
+	// settlement is not a new business event and stays unrecorded.
+	actor := sid
+	metadata := map[string]string{"actual_units": strconv.FormatInt(request.ActualUnits, 10)}
+	record := true
+	defer func() {
+		if record {
+			if actor == "" {
+				actor = "quota"
+			}
+			s.recordQuotaEvent(ctx, audit.ActionQuotaSettle, request.RunID, actor, err, metadata)
+		}
+	}()
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return fmt.Errorf("begin quota settlement: %w", err)
@@ -251,18 +389,45 @@ func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) e
 	if !found {
 		return ErrReservationNotFound
 	}
+	if actor == "" {
+		actor = reservation.SID
+	}
+	metadata["model_id"] = reservation.ModelID
 	if sid != "" && reservation.SID != sid {
 		return ErrReservationNotFound
 	}
 	if reservation.Status == "settled" {
 		if reservation.ActualUnits != nil && *reservation.ActualUnits == request.ActualUnits {
+			record = false
 			return nil
 		}
 		return ErrIdempotencyConflict
 	}
+	actual := request.ActualUnits
+	var source string
+	if reservation.ModelID != SpeechTranscriptionModelID {
+		// Authoritative settlement prefers real tokens from the drained gateway
+		// usage detail (matched by SID + time window + model); without a match
+		// the caller's conservative estimate stands and is marked estimated.
+		tokens, matched, matchErr := s.matchGatewayUsage(ctx, tx, reservation)
+		if matchErr != nil {
+			return matchErr
+		}
+		source = "estimated"
+		if matched {
+			actual = tokens
+			source = "gateway"
+		}
+		metadata["actual_units"] = strconv.FormatInt(actual, 10)
+		metadata["settle_source"] = source
+	}
+	var sourceColumn any
+	if source != "" {
+		sourceColumn = source
+	}
 	_, err = tx.ExecContext(ctx, `
-UPDATE quota_reservations SET status = 'settled', actual_units = ?, settled_at = ?
-WHERE run_id = ? AND status = 'reserved'`, request.ActualUnits, s.now().Unix(), request.RunID)
+UPDATE quota_reservations SET status = 'settled', actual_units = ?, settled_at = ?, settle_source = ?
+WHERE run_id = ? AND status = 'reserved'`, actual, s.now().Unix(), sourceColumn, request.RunID)
 	if err != nil {
 		return fmt.Errorf("settle quota reservation: %w", err)
 	}

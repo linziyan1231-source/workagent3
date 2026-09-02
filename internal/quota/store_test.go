@@ -203,3 +203,31 @@ func TestReserveFailsClosedForUnauthorizedOrMissingBudget(t *testing.T) {
 		t.Fatalf("expected missing budget error, got %v", err)
 	}
 }
+
+func TestReserveForSIDPinsReservationToFrozenPayer(t *testing.T) {
+	store := openTestStore(t)
+	const payer = "S-1-5-21-2000"
+	if err := store.SetBudget(t.Context(), Budget{SID: payer, ModelID: "gpt-5", Period: Daily, LimitUnits: 10000}); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := store.ReserveForSID(t.Context(), payer, ReserveRequest{RunID: "run-shared-1", SID: payer, ModelID: "gpt-5", EstimatedUnits: 2048})
+	if err != nil || reservation.SID != payer || reservation.Status != "reserved" {
+		t.Fatalf("pinned reservation = %#v, %v", reservation, err)
+	}
+	// Idempotent replay with identical parameters (runtime-side pass-through
+	// after the Portal reserved at admission).
+	replayed, err := store.ReserveForSID(t.Context(), payer, ReserveRequest{RunID: "run-shared-1", SID: payer, ModelID: "gpt-5", EstimatedUnits: 2048})
+	if err != nil || replayed.ReservedUnits != 2048 {
+		t.Fatalf("idempotent replay = %#v, %v", replayed, err)
+	}
+	if _, err := store.ReserveForSID(t.Context(), "S-1-5-21-1000", ReserveRequest{RunID: "run-shared-2", SID: payer, ModelID: "gpt-5", EstimatedUnits: 1}); err == nil {
+		t.Fatal("mismatched SID pin was accepted")
+	}
+	if err := store.ReserveSharedRun(t.Context(), payer, "run-shared-3", "gpt-5", 1024); err != nil {
+		t.Fatalf("shared run reserve = %v", err)
+	}
+	usage, err := store.Usage(t.Context(), payer, "gpt-5", store.now())
+	if err != nil || usage.ReservedUnits != 2048+1024 {
+		t.Fatalf("payer usage = %#v, %v", usage, err)
+	}
+}

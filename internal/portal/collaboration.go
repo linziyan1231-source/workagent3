@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
 	"workagent3/internal/contracts"
@@ -31,6 +32,11 @@ type CollaborationPort interface {
 	CompleteInviteAcceptance(context.Context, string, int64) (collaboration.Project, error)
 	AbortInviteAcceptance(context.Context, string, int64) error
 	DeclineInvite(context.Context, string, int64) error
+	CreateInviteLink(context.Context, collaboration.InviteLink) (collaboration.InviteLink, error)
+	RevokeInviteLink(context.Context, string, string, int64) error
+	BeginInviteLinkAcceptance(context.Context, string, int64, string) (collaboration.Member, error)
+	CompleteInviteLinkAcceptance(context.Context, string, int64) (collaboration.Project, error)
+	AbortInviteLinkAcceptance(context.Context, string, int64) error
 	BeginMemberRemoval(context.Context, string, int64, int64) (collaboration.Member, error)
 	CompleteMemberRemoval(context.Context, string, int64, int64) error
 	AbortMemberRemoval(context.Context, string, int64, int64) error
@@ -77,6 +83,16 @@ type SharedFileRequest struct {
 // owner's Runtime. Portal never resolves or opens a shared filesystem path.
 type SharedFilePlatformPort interface {
 	Operate(context.Context, string, SharedFileRequest) (json.RawMessage, error)
+	// OperateOfficePreview converts a shared Office document on the owner's
+	// Runtime and returns the cached PDF rendering.
+	OperateOfficePreview(context.Context, string, SharedFileRequest) (OfficePreviewData, error)
+}
+
+// OfficePreviewData carries a converted Office document back from the owner's
+// Runtime through the shared-files envelope.
+type OfficePreviewData struct {
+	Name string
+	PDF  []byte
 }
 
 type sharedProjectDTO struct {
@@ -108,6 +124,16 @@ type sharedInviteDTO struct {
 	ExpiresAt     time.Time  `json:"expiresAt"`
 	CreatedAt     time.Time  `json:"createdAt"`
 	ActedAt       *time.Time `json:"actedAt,omitempty"`
+}
+
+type sharedInviteLinkDTO struct {
+	Token     string    `json:"token"`
+	ProjectID string    `json:"projectId"`
+	SingleUse bool      `json:"singleUse"`
+	UseCount  int       `json:"useCount"`
+	Status    string    `json:"status"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 func (s *Server) sharedProjects(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -260,7 +286,7 @@ func (s *Server) createSharedInvite(writer http.ResponseWriter, request *http.Re
 		writeCollaborationError(writer, err)
 		return
 	}
-	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_invite", Title: "Shared project invitation", Message: user.DisplayName + " invited you to " + invite.ProjectName, DeepLink: "/", ExpiresAt: &invite.ExpiresAt})
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_invite", Title: "Shared project invitation", Message: user.DisplayName + " invited you to " + invite.ProjectName, DeepLink: "/guid?open=shared-invites", ExpiresAt: &invite.ExpiresAt})
 	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite, user.DisplayName)})
 }
 
@@ -382,6 +408,7 @@ func (s *Server) sharedInviteAction(writer http.ResponseWriter, request *http.Re
 		if err := s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID); err != nil {
 			_ = s.modules.Collaboration.AbortInviteAcceptance(request.Context(), id, user.ID)
 			_ = s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID)
+			s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLGrant, member.ProjectID, err, map[string]string{"member_sid": member.SID})
 			writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
 			return
 		}
@@ -390,6 +417,7 @@ func (s *Server) sharedInviteAction(writer http.ResponseWriter, request *http.Re
 			writeError(writer, http.StatusInternalServerError, "shared_invite_failed")
 			return
 		}
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLGrant, member.ProjectID, nil, map[string]string{"member_sid": member.SID})
 		if owner, lookupErr := s.store.UserByID(request.Context(), project.OwnerUserID); lookupErr == nil {
 			s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: owner.SID, Kind: "shared_member", Title: "Project member joined", Message: user.DisplayName + " joined " + project.Name, DeepLink: "/"})
 		}
@@ -397,6 +425,101 @@ func (s *Server) sharedInviteAction(writer http.ResponseWriter, request *http.Re
 	default:
 		writeError(writer, http.StatusNotFound, "shared_invite_action_not_found")
 	}
+}
+
+func (s *Server) sharedProjectInviteLinkCreate(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Collaboration == nil {
+		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
+		return
+	}
+	var input struct {
+		ExpiresInHours int  `json:"expiresInHours"`
+		SingleUse      bool `json:"singleUse"`
+	}
+	if !decodeJSON(request, &input, 8*1024) {
+		writeError(writer, http.StatusBadRequest, "invalid_shared_invite_link")
+		return
+	}
+	if input.ExpiresInHours == 0 {
+		input.ExpiresInHours = 72
+	}
+	if input.ExpiresInHours < 1 || input.ExpiresInHours > 24*30 {
+		writeError(writer, http.StatusBadRequest, "invalid_shared_invite_link")
+		return
+	}
+	token, err := auth.RandomToken(24)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "shared_invite_link_failed")
+		return
+	}
+	maxUses := 0
+	if input.SingleUse {
+		maxUses = 1
+	}
+	link, err := s.modules.Collaboration.CreateInviteLink(request.Context(), collaboration.InviteLink{Token: token, ProjectID: request.PathValue("id"), CreatorUserID: user.ID, MaxUses: maxUses, ExpiresAt: s.now().Add(time.Duration(input.ExpiresInHours) * time.Hour)})
+	if err != nil {
+		writeCollaborationError(writer, err)
+		return
+	}
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationInviteLinkCreate, link.ProjectID, nil, map[string]string{"single_use": strconv.FormatBool(input.SingleUse)})
+	writeJSON(writer, http.StatusCreated, map[string]any{"link": inviteLinkDTO(link)})
+}
+
+func (s *Server) sharedProjectInviteLinkRevoke(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Collaboration == nil {
+		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
+		return
+	}
+	projectID := request.PathValue("id")
+	if err := s.modules.Collaboration.RevokeInviteLink(request.Context(), request.PathValue("token"), projectID, user.ID); err != nil {
+		writeCollaborationError(writer, err)
+		return
+	}
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationInviteLinkRevoke, projectID, nil, nil)
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+// sharedInviteLinkAccept turns a bearer token into membership with the same
+// begin → ACL grant → complete compensation shape as targeted invites.
+func (s *Server) sharedInviteLinkAccept(writer http.ResponseWriter, request *http.Request, user store.User) {
+	if s.modules.Collaboration == nil || s.modules.SharedProjects == nil {
+		writeError(writer, http.StatusServiceUnavailable, "collaboration_unavailable")
+		return
+	}
+	var input struct {
+		Token string `json:"token"`
+	}
+	if !decodeJSON(request, &input, 8*1024) || strings.TrimSpace(input.Token) == "" {
+		writeError(writer, http.StatusNotFound, "shared_invite_link_not_found")
+		return
+	}
+	member, err := s.modules.Collaboration.BeginInviteLinkAcceptance(request.Context(), input.Token, user.ID, user.SID)
+	if errors.Is(err, collaboration.ErrNotFound) {
+		writeError(writer, http.StatusNotFound, "shared_invite_link_not_found")
+		return
+	}
+	if err != nil {
+		writeCollaborationError(writer, err)
+		return
+	}
+	if err := s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID); err != nil {
+		_ = s.modules.Collaboration.AbortInviteLinkAcceptance(request.Context(), input.Token, user.ID)
+		_ = s.modules.SharedProjects.GrantProjectMember(request.Context(), member.ProjectID, member.SID)
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLGrant, member.ProjectID, err, map[string]string{"member_sid": member.SID})
+		writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
+		return
+	}
+	project, err := s.modules.Collaboration.CompleteInviteLinkAcceptance(request.Context(), input.Token, user.ID)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "shared_invite_link_failed")
+		return
+	}
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLGrant, member.ProjectID, nil, map[string]string{"member_sid": member.SID})
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationInviteLinkAccept, member.ProjectID, nil, nil)
+	if owner, lookupErr := s.store.UserByID(request.Context(), project.OwnerUserID); lookupErr == nil {
+		s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: owner.SID, Kind: "shared_member", Title: "Project member joined", Message: user.DisplayName + " joined " + project.Name, DeepLink: "/"})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"project": projectDTO(project)})
 }
 
 func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -421,6 +544,7 @@ func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.R
 	if err := s.modules.SharedProjects.RevokeProjectMember(request.Context(), member.ProjectID, member.SID); err != nil {
 		_ = s.modules.Collaboration.AbortMemberRemoval(request.Context(), member.ProjectID, user.ID, targetUserID)
 		_ = s.modules.SharedProjects.RevokeProjectMember(request.Context(), member.ProjectID, member.SID)
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLRevoke, member.ProjectID, err, map[string]string{"member_sid": member.SID})
 		writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
 		return
 	}
@@ -428,6 +552,7 @@ func (s *Server) sharedProjectMember(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusInternalServerError, "shared_member_failed")
 		return
 	}
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationACLRevoke, member.ProjectID, nil, map[string]string{"member_sid": member.SID})
 	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: member.SID, Kind: "shared_member", Title: "Shared project access changed", Message: "Your access to a shared project was removed", DeepLink: "/"})
 	writer.WriteHeader(http.StatusNoContent)
 }
@@ -475,8 +600,13 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 		writeCollaborationError(writer, err)
 		return
 	}
+	// Once the transfer exists, every outcome is audited; the recovery loop
+	// (RecoverOwnershipTransfers) records the deferred success if this
+	// request cannot reach finalization.
+	transferMetadata := map[string]string{"transfer_id": transfer.ID, "to_username": target.Username}
 	if err := s.modules.SharedProjects.TransferProjectOwnership(request.Context(), transfer.ProjectID, user.SID, target.SID, memberSIDs); err != nil {
 		_ = s.modules.Collaboration.AbortOwnershipTransfer(request.Context(), transfer.ID)
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, err, transferMetadata)
 		writeError(writer, http.StatusServiceUnavailable, "shared_project_acl_failed")
 		return
 	}
@@ -484,17 +614,21 @@ func (s *Server) sharedProjectOwnership(writer http.ResponseWriter, request *htt
 	if err != nil {
 		_ = s.modules.SharedProjects.FinalizeProjectOwnership(context.Background(), transfer.ProjectID, target.SID, false)
 		_ = s.modules.Collaboration.AbortOwnershipTransfer(context.Background(), transfer.ID)
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, err, transferMetadata)
 		writeError(writer, http.StatusInternalServerError, "ownership_transfer_failed")
 		return
 	}
 	if err := s.modules.SharedProjects.FinalizeProjectOwnership(request.Context(), transfer.ProjectID, target.SID, true); err != nil {
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, err, transferMetadata)
 		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
 		return
 	}
 	if err := s.modules.Collaboration.FinalizeOwnershipTransfer(request.Context(), transfer.ID); err != nil {
+		s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, err, transferMetadata)
 		writeError(writer, http.StatusServiceUnavailable, "ownership_transfer_recovery_pending")
 		return
 	}
+	s.recordBusinessEvent(request.Context(), user.Username, audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, nil, transferMetadata)
 	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_ownership", Title: "Project ownership transferred", Message: "You are now the owner of " + project.Name, DeepLink: "/"})
 	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: user.SID, Kind: "shared_ownership", Title: "Project ownership transferred", Message: target.DisplayName + " is now the owner of " + project.Name, DeepLink: "/"})
 	writeJSON(writer, http.StatusOK, map[string]any{"project": projectDTO(project)})
@@ -520,6 +654,10 @@ func inviteDTO(invite collaboration.Invite, inviterName string) sharedInviteDTO 
 	return sharedInviteDTO{ID: invite.ID, ProjectID: invite.ProjectID, ProjectName: invite.ProjectName, InviterName: inviterName, InviterUserID: invite.InviterUserID, TargetUserID: invite.TargetUserID, Status: invite.Status, ExpiresAt: invite.ExpiresAt, CreatedAt: invite.CreatedAt, ActedAt: invite.ActedAt}
 }
 
+func inviteLinkDTO(link collaboration.InviteLink) sharedInviteLinkDTO {
+	return sharedInviteLinkDTO{Token: link.Token, ProjectID: link.ProjectID, SingleUse: link.MaxUses == 1, UseCount: link.UseCount, Status: link.Status, ExpiresAt: link.ExpiresAt, CreatedAt: link.CreatedAt}
+}
+
 func writeCollaborationError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, collaboration.ErrNotFound):
@@ -528,6 +666,10 @@ func writeCollaborationError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusForbidden, "shared_project_forbidden")
 	case errors.Is(err, collaboration.ErrInviteExpired):
 		writeError(writer, http.StatusGone, "shared_invite_expired")
+	case errors.Is(err, collaboration.ErrInviteLinkRevoked):
+		writeError(writer, http.StatusGone, "shared_invite_link_revoked")
+	case errors.Is(err, collaboration.ErrInviteLinkExhausted):
+		writeError(writer, http.StatusGone, "shared_invite_link_exhausted")
 	case errors.Is(err, collaboration.ErrConflict), errors.Is(err, collaboration.ErrTransferPending):
 		writeError(writer, http.StatusConflict, "shared_project_conflict")
 	default:

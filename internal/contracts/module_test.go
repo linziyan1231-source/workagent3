@@ -10,7 +10,7 @@ func TestValidateModuleGraph(t *testing.T) {
 		return ModuleManifest{
 			ID: id, Version: "1.0.0", Layer: "platform", Required: true,
 			Capabilities: []string{id + ".read"}, Dependencies: dependencies,
-			ConfigSchema: "workagent://schemas/" + id + "/v1", DataOwner: id, HealthCheck: "/health",
+			DataOwner: id, HealthCheck: "/health",
 		}
 	}
 	valid := []ModuleManifest{manifest("owner"), manifest("consumer", ModuleDependency{ID: "owner", Contract: "OwnerPort/v1"})}

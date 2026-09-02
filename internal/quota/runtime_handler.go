@@ -20,12 +20,26 @@ type runtimeReserveInput struct {
 	SID            string `json:"sid"`
 	ModelID        string `json:"modelId"`
 	EstimatedUnits int64  `json:"estimatedUnits"`
+	// PayerSID scopes a shared-run reservation to the frozen payer (the member
+	// who mentioned the assistant) while the caller authenticates as the
+	// runtime owner SID.
+	PayerSID string `json:"payerSid,omitempty"`
 }
 
 type runtimeSettleInput struct {
 	RunID       string `json:"runId"`
 	SID         string `json:"sid"`
 	ActualUnits int64  `json:"actualUnits"`
+	PayerSID    string `json:"payerSid,omitempty"`
+}
+
+// runtimePayer returns the SID the reservation belongs to: the caller's own
+// SID, or the frozen shared-run payer when one is pinned.
+func runtimePayer(sid, payerSID string) string {
+	if payerSID != "" {
+		return payerSID
+	}
+	return sid
 }
 
 // RuntimeHandler exposes only the minimal quota capability required by a
@@ -58,8 +72,8 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 				writeRuntimeError(writer, http.StatusUnauthorized, "registration_rejected")
 				return
 			}
-			reservation, err := store.Reserve(request.Context(), ReserveRequest{
-				RunID: input.RunID, SID: input.SID, ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits,
+			reservation, err := store.ReserveForSID(request.Context(), runtimePayer(input.SID, input.PayerSID), ReserveRequest{
+				RunID: input.RunID, SID: runtimePayer(input.SID, input.PayerSID), ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits,
 			})
 			if err != nil {
 				writeQuotaError(writer, err)
@@ -76,7 +90,7 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 				writeRuntimeError(writer, http.StatusUnauthorized, "registration_rejected")
 				return
 			}
-			if err := store.SettleForSID(request.Context(), input.SID, SettleRequest{RunID: input.RunID, ActualUnits: input.ActualUnits}); err != nil {
+			if err := store.SettleForSID(request.Context(), runtimePayer(input.SID, input.PayerSID), SettleRequest{RunID: input.RunID, ActualUnits: input.ActualUnits}); err != nil {
 				writeQuotaError(writer, err)
 				return
 			}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"workagent3/internal/contracts"
 )
 
 type AIRun struct {
@@ -128,7 +130,7 @@ func (s *Store) FinishAIRun(ctx context.Context, run AIRun, resultMessageID, run
 	defer tx.Rollback()
 	state, kind, body := "succeeded", "assistant", assistantBody
 	if runErr != nil {
-		state, kind, body = "failed", "system", "AI run failed; the triggering messages remain available for retry."
+		state, kind, body = "failed", "system", sharedRunFailureBody(runErr)
 	}
 	stamp := s.now().UTC().UnixMilli()
 	result, err := tx.ExecContext(ctx, `UPDATE shared_ai_runs SET state=?,runtime_session_id=?,finished_at=? WHERE id=? AND state='running'`, state, nullableString(runtimeSessionID), stamp, run.ID)
@@ -196,6 +198,22 @@ func (s *Store) StopAIRun(ctx context.Context, conversationID string, userID int
 	}
 	message := Message{Seq: seq, ID: messageID, Conversation: conversationID, AuthorName: "System", Kind: "system", Body: "AI run was stopped. Messages sent during the run remain in the next shared context.", Mentions: []Mention{}, Attachments: []string{}, CreatedAt: time.UnixMilli(stamp).UTC()}
 	return run, message, nil
+}
+
+// sharedRunFailureBody gives conversation participants an actionable reason
+// when the run was rejected at admission; generic failures stay vague because
+// the trigger messages remain retryable.
+func sharedRunFailureBody(runErr error) string {
+	switch {
+	case errors.Is(runErr, contracts.ErrQuotaExceeded):
+		return "AI run was not started: the quota of the member who mentioned the assistant is exhausted."
+	case errors.Is(runErr, contracts.ErrQuotaNotConfigured):
+		return "AI run was not started: no quota budget is configured for the member who mentioned the assistant."
+	case errors.Is(runErr, contracts.ErrModelUnauthorized):
+		return "AI run was not started: the member who mentioned the assistant is not authorized for this model."
+	default:
+		return "AI run failed; the triggering messages remain available for retry."
+	}
 }
 
 func nullableString(value string) any {

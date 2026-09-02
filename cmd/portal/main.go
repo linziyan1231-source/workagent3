@@ -22,6 +22,7 @@ import (
 	"workagent3/internal/collaboration"
 	"workagent3/internal/imdelivery"
 	"workagent3/internal/modelaccess"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/notifications"
 	"workagent3/internal/portal"
 	"workagent3/internal/quota"
@@ -48,9 +49,11 @@ func run() error {
 	collaborationPath := flag.String("collaboration-db", "", "Collaboration SQLite path (defaults beside Portal database)")
 	notificationsPath := flag.String("notifications-db", "", "Notifications SQLite path (defaults beside Portal database)")
 	auditPath := flag.String("audit-db", "", "Audit SQLite path (defaults beside Portal database)")
+	auditRetentionDays := flag.Int("audit-retention-days", 180, "Days to keep audit events before pruning (0 disables retention cleanup)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	assistantResources := flag.String("assistant-resources", filepath.Join("third_party", "aionui", "resources", "puxin-builtin-assistants"), "latest WorkAgent2 builtin assistant resource root")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
+	harnessModel := flag.String("harness-model", os.Getenv("WORKAGENT_HARNESS_MODEL"), "configured Codex model displayed for the managed Harness provider")
 	flag.Parse()
 
 	if err := os.MkdirAll(filepath.Dir(*databasePath), 0o700); err != nil {
@@ -95,7 +98,7 @@ func run() error {
 		return err
 	}
 	defer models.Close()
-	if err := bootstrapModels(models); err != nil {
+	if err := bootstrapModels(models, strings.TrimSpace(*harnessModel)); err != nil {
 		return err
 	}
 	quotas, err := quota.Open(*quotaPath, models)
@@ -128,6 +131,7 @@ func run() error {
 		return err
 	}
 	defer auditStore.Close()
+	quotas.SetAudit(auditStore)
 	speechProxy, err := speech.NewProxy(
 		os.Getenv("WORKAGENT_SPEECH_URL"),
 		os.Getenv("WORKAGENT_SPEECH_TOKEN"),
@@ -187,7 +191,7 @@ func run() error {
 		return err
 	}
 	modules := portal.Modules{
-		ModelAccess: models, Quota: quotas, SpeechQuota: quotas, Speech: speechProxy,
+		ModelAccess: models, Quota: quotas, SpeechQuota: quotas, SharedRunQuota: quotas, Speech: speechProxy,
 		Settings: clientSettings, SkillMarket: market,
 		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles, SharedTurns: sharedTurns,
 		Notifications: notificationStore, Audit: auditStore,
@@ -230,6 +234,8 @@ func run() error {
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
 	root.Handle("/internal/runtime/quota/", quota.RuntimeHandler(quotas, data))
+	root.Handle("/internal/runtime/audit", audit.RuntimeHandler(auditStore, data))
+	root.Handle("/internal/runtime/notifications", notifications.RuntimeHandler(notificationStore, data))
 	if token := os.Getenv("WORKAGENT_IM_DELIVERY_TOKEN"); token != "" {
 		imHandler, err := imdelivery.NewHandler(registry, token)
 		if err != nil {
@@ -253,6 +259,9 @@ func run() error {
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go server.RunOwnershipTransferRecovery(shutdownContext, 5*time.Second)
+	if *auditRetentionDays > 0 {
+		go runAuditRetention(shutdownContext, auditStore, time.Duration(*auditRetentionDays)*24*time.Hour)
+	}
 	go func() {
 		<-shutdownContext.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -268,11 +277,44 @@ func run() error {
 	return nil
 }
 
-func bootstrapModels(models *modelaccess.Store) error {
+// runAuditRetention prunes audit events older than the retention window once
+// at startup and then daily.
+func runAuditRetention(ctx context.Context, store *audit.Store, retention time.Duration) {
+	prune := func() {
+		cutoff := time.Now().Add(-retention)
+		removed, err := store.Prune(ctx, cutoff)
+		if err != nil {
+			log.Printf("Audit retention prune failed: %v", err)
+		} else if removed > 0 {
+			log.Printf("Audit retention pruned %d events older than %s", removed, cutoff.Format(time.RFC3339))
+		}
+	}
+	prune()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prune()
+		}
+	}
+}
+
+func bootstrapModels(models *modelaccess.Store, harnessModel string) error {
+	if !nativeauth.ValidModel(harnessModel) {
+		// The managed Harness provider must display the real configured Codex
+		// model (= employee-manager modelGateway.codexModel), not a placeholder.
+		return errors.New("managed Harness model is required: set -harness-model or WORKAGENT_HARNESS_MODEL to the configured Codex model (see docs/employee-manager.config.example.json)")
+	}
 	ctx := context.Background()
 	for _, model := range []modelaccess.Model{
-		{ID: "harness-default", ProviderID: "harness", DisplayName: "DeepSeek Harness", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
-		{ID: "codex-native", ProviderID: "codex", DisplayName: "Codex", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
+		{ID: "harness-default", ProviderID: "harness", DisplayName: "Harness (" + harnessModel + ")", Aliases: []string{"default", harnessModel}, ContextWindow: 128000, Health: modelaccess.Unknown},
+		// The codex provider runs through the same shared Codex model, so the
+		// alias lets settlement matching attribute gateway usage records (which
+		// carry the real model name) to codex-native reservations.
+		{ID: "codex-native", ProviderID: "codex", DisplayName: "Codex", Aliases: []string{harnessModel}, ContextWindow: 128000, Health: modelaccess.Unknown},
 		{ID: "kimi-native", ProviderID: "kimi", DisplayName: "Kimi", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
 		{ID: quota.SpeechTranscriptionModelID, ProviderID: "speech", DisplayName: "Speech transcription", Aliases: []string{}, ContextWindow: 1, Health: modelaccess.Unknown},
 	} {

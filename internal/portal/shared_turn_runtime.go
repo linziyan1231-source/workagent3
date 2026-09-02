@@ -24,6 +24,9 @@ type SharedTurnRequest struct {
 	Context          string `json:"context"`
 	RecoveryContext  string `json:"recoveryContext"`
 	RuntimeSessionID string `json:"runtimeSessionId,omitempty"`
+	// PayerSID is the frozen triggerer SID the shared run is billed to; the
+	// owner Runtime settles the reservation against it.
+	PayerSID string `json:"payerSid"`
 }
 
 type SharedTurnResult struct {

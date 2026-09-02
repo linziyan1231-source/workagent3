@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"workagent3/internal/audit"
+	"workagent3/internal/contracts"
 	"workagent3/internal/skillmarket"
 	"workagent3/internal/store"
 )
@@ -151,7 +153,12 @@ func TestSkillMarketPublishExportsOnlyThroughSIDRuntime(t *testing.T) {
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
-	server, _ := NewWithModules(users, StaticRouter{user.SID: {BaseURL: target, Token: "publish-token"}}, false, Modules{SkillMarket: market})
+	auditStore, auditErr := audit.Open(filepath.Join(t.TempDir(), "audit.db"))
+	if auditErr != nil {
+		t.Fatal(auditErr)
+	}
+	defer auditStore.Close()
+	server, _ := NewWithModules(users, StaticRouter{user.SID: {BaseURL: target, Token: "publish-token"}}, false, Modules{SkillMarket: market, Audit: auditStore})
 	request := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/skill-market", strings.NewReader(`{"skill_name":"My Skill"}`))
 	request.Header.Set("Origin", "http://portal.test")
 	request.Header.Set("Content-Type", "application/json")
@@ -172,5 +179,12 @@ func TestSkillMarketPublishExportsOnlyThroughSIDRuntime(t *testing.T) {
 	entry, err := market.ByID(t.Context(), result.Skill.ID)
 	if err != nil || entry.PublisherUsername != "alice" || entry.Status != skillmarket.Draft {
 		t.Fatalf("published entry = %#v, %v", entry, err)
+	}
+	publishes, err := auditStore.List(t.Context(), contracts.AuditQuery{Action: audit.ActionSkillMarketPublish})
+	if err != nil || len(publishes) != 1 {
+		t.Fatalf("publishes=%#v err=%v", publishes, err)
+	}
+	if publishes[0].Actor != "alice" || publishes[0].Target != result.Skill.ID || publishes[0].Result != "success" || publishes[0].Metadata["skill_name"] != "My Skill" || publishes[0].Metadata["version"] != "1.2.3" {
+		t.Fatalf("unexpected publish event: %#v", publishes[0])
 	}
 }

@@ -1,11 +1,13 @@
 package portal
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,4 +115,91 @@ func notificationRequest(handler http.Handler, method, path, session string) *ht
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func TestNotificationStreamPushesFeedOnConnectPublishAndSurvivesDisconnect(t *testing.T) {
+	ctx := context.Background()
+	users, err := store.Open(filepath.Join(t.TempDir(), "portal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer users.Close()
+	notices, err := notifications.Open(filepath.Join(t.TempDir(), "notifications.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer notices.Close()
+	aliceSID := "S-1-5-21-3103"
+	alice, err := users.CreateUser(ctx, "alice", aliceSID, "unused-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.CreateSession(ctx, "alice-session", alice.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := notices.Publish(ctx, contracts.NotificationInput{TargetSID: aliceSID, Kind: "team", Message: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewWithModules(users, StaticRouter{}, false, Modules{Notifications: notices})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, httpServer.URL+"/api/portal/me/notifications/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "alice-session"})
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("stream status=%d content-type=%s", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(response.Body)
+	readEvent := func() string {
+		t.Helper()
+		var block strings.Builder
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				t.Fatalf("read stream: %v", err)
+			}
+			if line == "\n" {
+				return block.String()
+			}
+			block.WriteString(line)
+		}
+	}
+	if event := readEvent(); !strings.Contains(event, "event: notifications") || !strings.Contains(event, first.ID) {
+		t.Fatalf("initial feed event = %q", event)
+	}
+	second, err := notices.Publish(ctx, contracts.NotificationInput{TargetSID: aliceSID, Kind: "team", Message: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event := readEvent(); !strings.Contains(event, second.ID) {
+		t.Fatalf("post-publish feed event = %q", event)
+	}
+	// Client disconnect must release the subscription; a later publish to the
+	// abandoned subscriber channel must not block or panic.
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := reader.ReadString('\n'); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stream did not close after client disconnect")
+		}
+	}
+	if _, err := notices.Publish(ctx, contracts.NotificationInput{TargetSID: aliceSID, Kind: "team", Message: "after disconnect"}); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"workagent3/internal/audit"
 )
 
 // RecoverOwnershipTransfers completes the durable filesystem confirmation for
@@ -27,7 +29,11 @@ func (s *Server) RecoverOwnershipTransfers(ctx context.Context) error {
 		}
 		if err := s.modules.Collaboration.FinalizeOwnershipTransfer(ctx, transfer.ID); err != nil {
 			recoveryErr = errors.Join(recoveryErr, fmt.Errorf("confirm ownership transfer %s database: %w", transfer.ID, err))
+			continue
 		}
+		// The originating request already recorded a failure when it returned
+		// ownership_transfer_recovery_pending; this is the deferred success.
+		s.recordBusinessEvent(ctx, "portal-recovery", audit.ActionCollaborationOwnershipTransfer, transfer.ProjectID, nil, map[string]string{"transfer_id": transfer.ID, "recovered": "true"})
 	}
 	return recoveryErr
 }

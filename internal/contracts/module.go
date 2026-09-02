@@ -21,7 +21,6 @@ type ModuleManifest struct {
 	Required     bool               `json:"required"`
 	Capabilities []string           `json:"capabilities"`
 	Dependencies []ModuleDependency `json:"dependencies"`
-	ConfigSchema string             `json:"configSchema"`
 	DataOwner    string             `json:"dataOwner"`
 	HealthCheck  string             `json:"healthCheck"`
 }
@@ -50,7 +49,7 @@ type EngineCapabilities struct {
 func ValidateModuleGraph(manifests []ModuleManifest) error {
 	modules := make(map[string]ModuleManifest, len(manifests))
 	for _, manifest := range manifests {
-		if !moduleIDPattern.MatchString(manifest.ID) || !semanticVersionPattern.MatchString(manifest.Version) || !validModuleLayer(manifest.Layer) || len(manifest.Capabilities) == 0 || strings.TrimSpace(manifest.ConfigSchema) == "" || strings.TrimSpace(manifest.DataOwner) == "" || strings.TrimSpace(manifest.HealthCheck) == "" {
+		if !moduleIDPattern.MatchString(manifest.ID) || !semanticVersionPattern.MatchString(manifest.Version) || !validModuleLayer(manifest.Layer) || len(manifest.Capabilities) == 0 || strings.TrimSpace(manifest.DataOwner) == "" || strings.TrimSpace(manifest.HealthCheck) == "" {
 			return fmt.Errorf("invalid_module_manifest:%s", manifest.ID)
 		}
 		for _, capability := range manifest.Capabilities {

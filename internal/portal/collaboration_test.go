@@ -16,6 +16,7 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
 	"workagent3/internal/contracts"
+	"workagent3/internal/notifications"
 	"workagent3/internal/store"
 )
 
@@ -39,6 +40,9 @@ type fakeSharedProjectPlatform struct {
 	fileOwner    string
 	fileRequest  SharedFileRequest
 	fileRequests []SharedFileRequest
+	previewOwner string
+	previewData  OfficePreviewData
+	previewErr   error
 	turnOwner    string
 	turnRequest  SharedTurnRequest
 	cancelRunID  string
@@ -82,6 +86,11 @@ func (p *fakeSharedProjectPlatform) Operate(_ context.Context, ownerSID string, 
 	default:
 		return json.RawMessage(`[{"name":"notes.md","type":"file"}]`), nil
 	}
+}
+
+func (p *fakeSharedProjectPlatform) OperateOfficePreview(_ context.Context, ownerSID string, input SharedFileRequest) (OfficePreviewData, error) {
+	p.previewOwner, p.fileRequest = ownerSID, input
+	return p.previewData, p.previewErr
 }
 
 func (p *fakeSharedProjectPlatform) Run(_ context.Context, ownerSID string, input SharedTurnRequest) (SharedTurnResult, error) {
@@ -326,6 +335,66 @@ func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
 type collaborationTestUser struct {
 	user    store.User
 	session string
+}
+
+// The shared_invite notification must deep-link to the invite popover (the
+// Team notifications popup), not a placeholder path.
+func TestSharedInviteNotificationDeepLinksToInvitePopover(t *testing.T) {
+	users, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = users.Close() })
+	collaborationData, err := collaboration.Open(filepath.Join(t.TempDir(), "collaboration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = collaborationData.Close() })
+	notices, err := notifications.Open(filepath.Join(t.TempDir(), "notifications.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notices.Close() })
+	hash, err := auth.HashPassword([]byte("test-password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := users.CreateUser(t.Context(), "alice", "S-1-5-21-1000", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := users.CreateUser(t.Context(), "bob", "S-1-5-21-2000", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.CreateSession(t.Context(), "alice-session", alice.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	platform := &fakeSharedProjectPlatform{}
+	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform, Notifications: notices})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := server.Handler()
+
+	created := collaborationRequest(t, handler, "alice-session", http.MethodPost, "/api/portal/shared-projects", `{"name":"Design"}`)
+	var createdBody struct {
+		Project sharedProjectDTO `json:"project"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdBody); err != nil {
+		t.Fatal(err)
+	}
+	invited := collaborationRequest(t, handler, "alice-session", http.MethodPost, "/api/portal/shared-projects/"+createdBody.Project.ID+"/invites", `{"targetUsername":"bob","expiresInHours":24}`)
+	if invited.Code != http.StatusCreated {
+		t.Fatalf("invite response = %d %s", invited.Code, invited.Body.String())
+	}
+	feed, err := notices.List(t.Context(), bob.SID, 10)
+	if err != nil || len(feed) != 1 {
+		t.Fatalf("bob feed = %#v, %v", feed, err)
+	}
+	if feed[0].Kind != "shared_invite" || feed[0].DeepLink != "/guid?open=shared-invites" {
+		t.Fatalf("invite notification = %#v", feed[0])
+	}
 }
 
 func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, *fakeSharedProjectPlatform, collaborationTestUser, collaborationTestUser) {

@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS shared_invites (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS shared_pending_invite
 ON shared_invites(project_id,target_user_id) WHERE status IN ('pending','accepting');
+CREATE TABLE IF NOT EXISTS shared_invite_links (
+  token TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,
+  creator_user_id INTEGER NOT NULL,
+  max_uses INTEGER NOT NULL DEFAULT 0 CHECK (max_uses >= 0),
+  use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0),
+  status TEXT NOT NULL CHECK (status IN ('active','revoked','exhausted')),
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  acted_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS shared_ownership_transfers (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES shared_projects(id) ON DELETE CASCADE,

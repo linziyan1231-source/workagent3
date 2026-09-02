@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/operations"
 	"workagent3/internal/sqlitebackup"
 	portalstore "workagent3/internal/store"
@@ -31,17 +32,37 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (err error) {
 	action := flag.String("action", "create", "create or restore")
 	backupRoot := flag.String("backup-root", filepath.Join("data", "backups"), "Restricted backup root")
 	restoreRoot := flag.String("restore-root", filepath.Join("data", "restore-jobs"), "Isolated restore root")
 	backupPath := flag.String("backup", "", "Backup directory for restore")
 	version := flag.String("version", "", "Application version compatibility boundary")
+	auditPath := flag.String("audit-db", filepath.Join("data", "audit.db"), "Audit SQLite path")
 	var sourceFlags repeatedFlag
 	var allowedSIDFlags repeatedFlag
 	flag.Var(&sourceFlags, "source", "Backup source owner[@SID]=absolute SQLite path; repeat for each owner")
 	flag.Var(&allowedSIDFlags, "allow-sid", "SID permitted in the isolated restore; repeat as needed")
 	flag.Parse()
+	// Audit must never block a backup or restore; an unavailable audit
+	// database is reported on stderr and recording is skipped.
+	auditStore, auditErr := audit.Open(*auditPath)
+	if auditErr != nil {
+		fmt.Fprintf(os.Stderr, "audit unavailable: %v\n", auditErr)
+	} else {
+		defer auditStore.Close()
+	}
+	defer func() {
+		auditAction, ok := map[string]string{"create": audit.ActionBackupCreate, "restore": audit.ActionBackupRestore}[*action]
+		if !ok || auditStore == nil {
+			return
+		}
+		target := *backupRoot
+		if *action == "restore" {
+			target = *backupPath
+		}
+		audit.RecordCLI(context.Background(), auditStore, "backup-manager", auditAction, target, err, map[string]string{"version": *version})
+	}()
 	if *version == "" {
 		return errors.New("-version is required")
 	}

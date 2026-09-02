@@ -49,6 +49,17 @@ func (c *EmployeeManagerClient) call(ctx context.Context, method, path string, i
 		return err
 	}
 	request.Header.Set("Authorization", "Bearer "+c.token)
+	// Propagate the acting administrator and the request correlation ID so
+	// the Employee Manager attributes business audit events correctly. The
+	// audit scope is present on every authenticated Portal request.
+	if scope, ok := ctx.Value(auditContextKey{}).(*auditScope); ok {
+		if scope.actor != "" {
+			request.Header.Set("X-WorkAgent-Actor", scope.actor)
+		}
+		if scope.correlationID != "" {
+			request.Header.Set(correlationHeader, scope.correlationID)
+		}
+	}
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

@@ -45,3 +45,28 @@ func TestSecurityPolicyAllowsOnlyExplicitWorkspaceContentPreviewToFrame(t *testi
 		t.Fatalf("active-content CSP = %s", policy)
 	}
 }
+
+func TestSecurityPolicyAllowsOfficePreviewRoutesToFrame(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	server, _ := New(data, StaticRouter{}, false)
+
+	converted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(converted, httptest.NewRequest(http.MethodGet, "/api/runtime/v1/office-preview/content/"+strings.Repeat("ab", 32)+".pdf", nil))
+	if policy := converted.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'self'") {
+		t.Fatalf("converted office preview CSP = %s", policy)
+	}
+
+	shared := httptest.NewRecorder()
+	server.Handler().ServeHTTP(shared, httptest.NewRequest(http.MethodGet, "/api/portal/shared-office-preview?project_id=project_1234567890&path=deck.pptx", nil))
+	if policy := shared.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'self'") {
+		t.Fatalf("shared office preview CSP = %s", policy)
+	}
+
+	// The convert trigger is a POST and must never be frameable.
+	trigger := httptest.NewRecorder()
+	server.Handler().ServeHTTP(trigger, httptest.NewRequest(http.MethodGet, "/api/runtime/v1/office-preview/convert", nil))
+	if policy := trigger.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'none'") {
+		t.Fatalf("office preview convert CSP = %s", policy)
+	}
+}

@@ -94,6 +94,31 @@ func CorrelationID(ctx context.Context) string {
 	return ""
 }
 
+// recordBusinessEvent writes one business audit event from a Portal handler
+// or background job (collaboration ACL/ownership, skill market). The actor is
+// the acting user or subsystem, the correlation ID ties the event to the HTTP
+// request trail when one exists, and recording never fails the operation.
+func (s *Server) recordBusinessEvent(ctx context.Context, actor, action, target string, operation error, metadata map[string]string) {
+	if s.modules.Audit == nil {
+		return
+	}
+	correlationID := CorrelationID(ctx)
+	if correlationID == "" {
+		generated, err := auth.RandomToken(18)
+		if err != nil {
+			return
+		}
+		correlationID = generated
+	}
+	result := "success"
+	if operation != nil {
+		result = "failure"
+	}
+	_, _ = s.modules.Audit.Record(context.WithoutCancel(ctx), contracts.AuditInput{
+		Actor: actor, Target: target, Action: action, Result: result, CorrelationID: correlationID, Metadata: metadata,
+	})
+}
+
 func setCorrelationHeader(request *http.Request) {
 	if correlationID := CorrelationID(request.Context()); correlationID != "" {
 		request.Header.Set(correlationHeader, correlationID)

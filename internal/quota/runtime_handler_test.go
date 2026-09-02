@@ -72,3 +72,34 @@ func TestRuntimeQuotaSettlementCannotCrossSID(t *testing.T) {
 		t.Fatalf("cross-SID settle returned %d: %s", response.Code, response.Body.String())
 	}
 }
+
+func TestRuntimeQuotaHandlerSharedRunBillsFrozenPayer(t *testing.T) {
+	store := openTestStore(t)
+	const owner = "S-1-5-21-100"
+	const payer = "S-1-5-21-200"
+	if err := store.SetBudget(t.Context(), Budget{SID: payer, ModelID: "gpt-5", Period: Daily, LimitUnits: 10000}); err != nil {
+		t.Fatal(err)
+	}
+	handler := RuntimeHandler(store, runtimeCredentialStub{owner: "owner-secret"})
+	reserved := invokeRuntimeQuota(handler, "/internal/runtime/quota/reserve", `{"runId":"run-shared-1","sid":"`+owner+`","modelId":"gpt-5","estimatedUnits":2048,"payerSid":"`+payer+`"}`, "owner-secret", "127.0.0.1:55000")
+	if reserved.Code != http.StatusOK || !strings.Contains(reserved.Body.String(), `"sid":"`+payer+`"`) {
+		t.Fatalf("payer reserve response %d: %s", reserved.Code, reserved.Body.String())
+	}
+	// Without the frozen payer pin the owner credential cannot touch the
+	// payer's reservation.
+	denied := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":0}`, "owner-secret", "127.0.0.1:55000")
+	if denied.Code != http.StatusNotFound {
+		t.Fatalf("unpinned settle returned %d: %s", denied.Code, denied.Body.String())
+	}
+	settled := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":1500,"payerSid":"`+payer+`"}`, "owner-secret", "127.0.0.1:55000")
+	if settled.Code != http.StatusNoContent {
+		t.Fatalf("payer settle response %d: %s", settled.Code, settled.Body.String())
+	}
+	usage, err := store.Usage(t.Context(), payer, "gpt-5", store.now())
+	if err != nil || usage.ConsumedUnits != 1500 {
+		t.Fatalf("payer usage = %#v, %v", usage, err)
+	}
+	if rejected := invokeRuntimeQuota(handler, "/internal/runtime/quota/reserve", `{"runId":"run-shared-3","sid":"`+owner+`","modelId":"gpt-5","estimatedUnits":1,"payerSid":"`+payer+`"}`, "wrong-secret", "127.0.0.1:55000"); rejected.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong credential returned %d: %s", rejected.Code, rejected.Body.String())
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"workagent3/internal/contracts"
 )
 
 const (
@@ -550,4 +552,65 @@ func acceptInvite(t *testing.T, store *Store, id string, userID int64) Project {
 		t.Fatal(err)
 	}
 	return project
+}
+
+func TestSharedAIRunPayerSurvivesTriggererRemoval(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, err := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptInvite(t, store, invite.ID, 2)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{ID: "conversation_payer_1", ProjectID: project.ID, Name: "Shared AI", AssistantID: "codex", AssistantBackend: "codex", ModelID: "gpt-5", ThinkingEffort: "medium"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := store.AddMessage(t.Context(), Message{ID: "message_payer_12345", Conversation: conversation.ID, AuthorName: "Member", Kind: "user", Body: "Please help", Mentions: []Mention{{Kind: "assistant", ID: "codex"}}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.ReserveAIRun(t.Context(), "run_payer_12345678", message, 2)
+	if err != nil || run.PayerSID != memberSID {
+		t.Fatalf("reserved run = %#v, %v", run, err)
+	}
+	// The owner removes the triggerer mid-run; the frozen payer must not move.
+	if _, err := store.BeginMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteMemberRemoval(t.Context(), project.ID, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _, err := store.StopAIRun(t.Context(), conversation.ID, 1, "message_stop_payer1")
+	if err != nil || stopped.PayerUserID != 2 || stopped.PayerSID != memberSID {
+		t.Fatalf("payer moved after member removal = %#v, %v", stopped, err)
+	}
+}
+
+func TestSharedAIRunFailureExplainsQuotaDenial(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{ID: "conversation_quota_1", ProjectID: project.ID, Name: "Shared AI", AssistantID: "codex", AssistantBackend: "codex", ModelID: "gpt-5", ThinkingEffort: "medium"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := store.AddMessage(t.Context(), Message{ID: "message_quota_12345", Conversation: conversation.ID, AuthorName: "Owner", Kind: "user", Body: "Please help", Mentions: []Mention{{Kind: "assistant", ID: "codex"}}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.ReserveAIRun(t.Context(), "run_quota_12345678", message, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.FinishAIRun(t.Context(), run, "message_ai_quota_1", "", "", contracts.ErrQuotaExceeded)
+	if err != nil || result.Kind != "system" || !strings.Contains(result.Body, "quota") {
+		t.Fatalf("quota denial message = %#v, %v", result, err)
+	}
+	view, err := store.ConversationForUser(t.Context(), conversation.ID, 1, true)
+	if err != nil || view.State != "idle" {
+		t.Fatalf("denied run did not release the conversation = %#v, %v", view, err)
+	}
 }

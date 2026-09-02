@@ -37,7 +37,7 @@ func TestCapabilityReadModelAggregatesPlatformAndRuntimeManifests(t *testing.T) 
 			"modules": []contracts.ModuleManifest{{
 				ID: "runtime-api", Version: "1.0.0", Layer: "runtime", Required: true,
 				Capabilities: []string{"runtime.health"}, Dependencies: []contracts.ModuleDependency{},
-				ConfigSchema: "workagent://schemas/runtime-api/v1", DataOwner: "none; routing only", HealthCheck: "/health",
+				DataOwner: "none; routing only", HealthCheck: "/health",
 			}},
 			"engines": map[string]any{"harness": map[string]bool{"approval": true, "resume": true, "steer": true, "toolEvents": true, "usage": true}},
 		})

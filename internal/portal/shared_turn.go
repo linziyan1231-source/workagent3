@@ -10,6 +10,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
+	"workagent3/internal/contracts"
 	"workagent3/internal/store"
 )
 
@@ -70,6 +71,17 @@ func (s *Server) maybeStartSharedAI(ctx context.Context, message collaboration.M
 		RunID: run.ID, ConversationID: conversation.ID, ProjectID: conversation.ProjectID,
 		Engine: conversation.AssistantBackend, ModelID: conversation.ModelID, ThinkingEffort: conversation.ThinkingEffort,
 		Context: formatSharedAIContext(delta), RecoveryContext: formatSharedAIContext(full), RuntimeSessionID: run.PreviousRuntimeSessionID,
+		PayerSID: run.PayerSID,
+	}
+	if s.modules.SharedRunQuota != nil {
+		if err := s.modules.SharedRunQuota.ReserveSharedRun(ctx, run.PayerSID, run.ID, conversation.ModelID, estimatedSharedTurnUnits(request.Context)); err != nil {
+			s.finishSharedAIRun(run, SharedTurnResult{}, err)
+			s.publishNotification(ctx, contracts.NotificationInput{
+				TargetSID: run.PayerSID, Kind: "shared_quota", Title: "Shared AI run not started",
+				Message: "Your quota could not cover the shared AI run you triggered; ask the owner or an administrator to review your budget.", DeepLink: "/",
+			})
+			return false
+		}
 	}
 	go func() {
 		runContext, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -109,6 +121,13 @@ func formatSharedAIContext(messages []collaboration.Message) string {
 		builder.WriteString("\n\n")
 	}
 	return builder.String()
+}
+
+// estimatedSharedTurnUnits mirrors estimatedAutomationUnits in the UserHost
+// quota runner so the admission reservation and the runtime-side settlement
+// use the same conservative estimate for the same context.
+func estimatedSharedTurnUnits(context string) int64 {
+	return int64((len(context)+3)/4) + 1024
 }
 
 func (s *Server) finishSharedAIRun(run collaboration.AIRun, result SharedTurnResult, runErr error) {

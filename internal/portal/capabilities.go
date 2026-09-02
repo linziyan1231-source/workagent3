@@ -20,7 +20,7 @@ func platformModuleManifests() []contracts.ModuleManifest {
 		return contracts.ModuleManifest{
 			ID: id, Version: "1.0.0", Layer: layer, Required: true,
 			Capabilities: capabilities, Dependencies: dependencies,
-			ConfigSchema: "workagent://schemas/" + id + "/v1", DataOwner: owner, HealthCheck: health,
+			DataOwner: owner, HealthCheck: health,
 		}
 	}
 	return []contracts.ModuleManifest{
@@ -28,10 +28,10 @@ func platformModuleManifests() []contracts.ModuleManifest {
 		manifest("employee-management", "adapter", "central employee lifecycle state", "/api/portal/admin/users", []string{"employee.lifecycle", "employee.windows-account", "employee.runtime-repair"}, dependency("portal-auth", "AuthenticatedAdminPort/v1")),
 		manifest("runtime-router", "platform", "runtime registration credentials and SID routing", "/api/system/status", []string{"runtime.route", "runtime.status", "runtime.restart"}, dependency("portal-auth", "AuthenticatedSIDPort/v1")),
 		manifest("model-access", "platform", "central model catalog, grants and downstream keys", "/api/models", []string{"model.catalog", "model.authorization", "model.downstream-key"}),
-		manifest("quota", "platform", "central budgets and idempotent reservations", "/api/quota/usage", []string{"quota.usage", "quota.reserve", "quota.settle"}, dependency("model-access", "ModelCatalogPort/v1")),
+		manifest("quota", "platform", "central budgets and idempotent reservations", "/api/quota/usage", []string{"quota.usage", "quota.reserve", "quota.settle", "quota.gateway-usage"}, dependency("model-access", "ModelCatalogPort/v1")),
 		manifest("settings", "platform", "central user client settings", "/api/settings/client", []string{"settings.appearance", "settings.language", "settings.defaults"}, dependency("portal-auth", "AuthenticatedUserPort/v1")),
 		manifest("notifications", "platform", "central notifications and per-user receipts", "/api/portal/me/notifications", []string{"notification.publish", "notification.read", "notification.stream"}, dependency("portal-auth", "AuthenticatedUserPort/v1")),
-		manifest("audit", "platform", "append-only security and management audit", "/api/system/diagnostics", []string{"audit.record", "audit.export"}, dependency("portal-auth", "AuditIdentityPort/v1")),
+		manifest("audit", "platform", "append-only security and management audit", "/api/portal/admin/audit", []string{"audit.record", "audit.query", "audit.export"}, dependency("portal-auth", "AuditIdentityPort/v1")),
 		manifest("skill-market", "platform", "central reviewed Skill packages", "/api/skill-market", []string{"skill-market.publish", "skill-market.review", "skill-market.install"}, dependency("portal-auth", "PublisherIdentityPort/v1"), dependency("runtime-router", "SkillInstallPort/v1")),
 		manifest("collaboration", "platform", "central shared projects, membership, messages and runs", "/api/portal/shared-projects", []string{"collaboration.projects", "collaboration.members", "collaboration.messages", "collaboration.runs"}, dependency("portal-auth", "CollaborationIdentityPort/v1"), dependency("runtime-router", "OwnerRuntimePort/v1")),
 		manifest("chatforward", "adapter", "delegation metadata only", "/chatgpt/", []string{"chatforward.delegate"}, dependency("portal-auth", "DelegatedIdentityPort/v1"), dependency("model-access", "ModelAuthorizationPort/v1")),

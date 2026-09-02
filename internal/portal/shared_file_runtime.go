@@ -3,6 +3,7 @@ package portal
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,18 @@ func NewRuntimeSharedFilePlatform(runtimes runtimeapi.EmployeeRuntimeRouter) (*R
 	return &RuntimeSharedFilePlatform{runtimes: runtimes, client: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
-func (p *RuntimeSharedFilePlatform) Operate(ctx context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
+// upstreamRuntimeError preserves the owner Runtime's error code so Portal can
+// relay stable codes (for example OFFICECLI_NOT_FOUND) to the browser.
+type upstreamRuntimeError struct {
+	status int
+	code   string
+}
+
+func (e *upstreamRuntimeError) Error() string {
+	return fmt.Sprintf("owner Runtime shared-file service returned %d: %s", e.status, e.code)
+}
+
+func (p *RuntimeSharedFilePlatform) call(ctx context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
 	endpoint, err := p.runtimes.Resolve(ctx, ownerSID)
 	if err != nil {
 		return nil, err
@@ -49,8 +61,15 @@ func (p *RuntimeSharedFilePlatform) Operate(ctx context.Context, ownerSID string
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4*1024))
-		return nil, fmt.Errorf("owner Runtime shared-file service returned %d: %s", response.StatusCode, bytes.TrimSpace(message))
+		code := string(bytes.TrimSpace(message))
+		if json.Unmarshal(message, &failure) == nil && failure.Error != "" {
+			code = failure.Error
+		}
+		return nil, &upstreamRuntimeError{status: response.StatusCode, code: code}
 	}
 	var result struct {
 		Success bool            `json:"success"`
@@ -61,4 +80,28 @@ func (p *RuntimeSharedFilePlatform) Operate(ctx context.Context, ownerSID string
 		return nil, errors.New("owner Runtime shared-file response is invalid")
 	}
 	return result.Data, nil
+}
+
+func (p *RuntimeSharedFilePlatform) Operate(ctx context.Context, ownerSID string, input SharedFileRequest) (json.RawMessage, error) {
+	return p.call(ctx, ownerSID, input)
+}
+
+func (p *RuntimeSharedFilePlatform) OperateOfficePreview(ctx context.Context, ownerSID string, input SharedFileRequest) (OfficePreviewData, error) {
+	input.Operation = "office-preview"
+	raw, err := p.call(ctx, ownerSID, input)
+	if err != nil {
+		return OfficePreviewData{}, err
+	}
+	var payload struct {
+		Name string `json:"name"`
+		PDF  string `json:"pdf"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name == "" || payload.PDF == "" {
+		return OfficePreviewData{}, errors.New("owner Runtime office preview response is invalid")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload.PDF)
+	if err != nil {
+		return OfficePreviewData{}, errors.New("owner Runtime office preview payload is invalid")
+	}
+	return OfficePreviewData{Name: payload.Name, PDF: decoded}, nil
 }
