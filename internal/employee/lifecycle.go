@@ -92,6 +92,18 @@ func (l Lifecycle) disableKeysBestEffort(ctx context.Context, sid string) {
 	cancel()
 }
 
+// enableKeysBestEffort restores gateway keys while rolling back a failed
+// operation on an active employee so the employee is not left with disabled
+// keys. The restore is replayed by retrying the operation.
+func (l Lifecycle) enableKeysBestEffort(ctx context.Context, sid string) {
+	if l.Keys == nil {
+		return
+	}
+	rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	_ = l.Keys.SetKeysEnabled(rollbackContext, sid, true)
+	cancel()
+}
+
 func (l Lifecycle) SetEnabled(ctx context.Context, username string, enabled bool) (store.User, error) {
 	if l.Platform == nil || l.Users == nil {
 		return store.User{}, errors.New("employee lifecycle dependencies are required")
@@ -152,12 +164,21 @@ func (l Lifecycle) SetEnabled(ctx context.Context, username string, enabled bool
 	return user, nil
 }
 
+// ResetPortalPassword replaces the Portal credential without stopping the
+// runtime. For an active employee the gateway keys are disabled before the
+// reset and restored afterwards, so no model traffic can slip through while
+// the credential is being rotated; for a closed employee the keys are
+// idempotently kept disabled. Key handling is fail-closed: a disable failure
+// aborts the reset, a reset failure restores the keys best effort, and a
+// restore failure is actionable and converges on replay because the reset and
+// both key flips are idempotent.
 func (l Lifecycle) ResetPortalPassword(ctx context.Context, username string, password []byte) error {
 	defer zero(password)
 	if l.Users == nil {
 		return errors.New("employee lifecycle user store is required")
 	}
-	if _, err := l.Users.UserByUsername(ctx, username); err != nil {
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
 		return err
 	}
 	if err := auth.ValidatePassword(password); err != nil {
@@ -167,7 +188,22 @@ func (l Lifecycle) ResetPortalPassword(ctx context.Context, username string, pas
 	if err != nil {
 		return err
 	}
-	return l.Users.ResetUserPassword(ctx, username, hash)
+	if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		return fmt.Errorf("disable model gateway keys before password reset: %w", err)
+	}
+	if user.Disabled {
+		// A closed employee keeps its keys disabled; the reset only changes
+		// the stored credential.
+		return l.Users.ResetUserPassword(ctx, username, hash)
+	}
+	if err := l.Users.ResetUserPassword(ctx, username, hash); err != nil {
+		l.enableKeysBestEffort(ctx, user.SID)
+		return err
+	}
+	if err := l.setKeysEnabled(ctx, user.SID, true); err != nil {
+		return fmt.Errorf("Portal password reset but model gateway keys are still disabled: %w", err)
+	}
+	return nil
 }
 
 func (l Lifecycle) SetPortalAdmin(ctx context.Context, username string, admin bool) (store.User, error) {
@@ -189,7 +225,14 @@ func (l Lifecycle) SetPortalAdmin(ctx context.Context, username string, admin bo
 }
 
 // SetLimits replaces the UserHost Job Object under a closed Portal account.
-// Any mutation or health-check failure leaves the employee disabled.
+// The runtime is restarted with the new limits, so for an active employee the
+// order is: close the account, disable the gateway keys, stop the runtime,
+// apply the limits, restore the keys, then start the runtime and reopen the
+// account — the employee never runs with disabled keys nor with stale limits.
+// Any mutation or health-check failure leaves the employee disabled with
+// disabled keys; the recovery path is a replay (which converges the limits
+// idempotently) followed by an ordinary enable, which restores the keys and
+// starts the runtime with the limits already applied.
 func (l Lifecycle) SetLimits(ctx context.Context, username string, limits winutil.JobLimits) (store.User, error) {
 	platform, ok := l.Platform.(CapacityPlatform)
 	if !ok || l.Users == nil {
@@ -208,9 +251,16 @@ func (l Lifecycle) SetLimits(ctx context.Context, username string, limits winuti
 			return store.User{}, err
 		}
 		user.Disabled = true
+		if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+			return user, fmt.Errorf("Portal account disabled but model gateway keys are still enabled: %w", err)
+		}
 		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
 			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
 		}
+	} else if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		// A disabled employee must not keep working gateway keys; disabling is
+		// idempotent, so a failed earlier attempt is safely replayed here.
+		return user, fmt.Errorf("disable employee model gateway keys before limits update: %w", err)
 	}
 	if err := platform.UpdateInstalledLimits(ctx, user.SID, limits); err != nil {
 		return user, fmt.Errorf("update employee runtime limits: %w", err)
@@ -218,13 +268,20 @@ func (l Lifecycle) SetLimits(ctx context.Context, username string, limits winuti
 	if !wasEnabled {
 		return user, nil
 	}
+	// Restore the gateway keys before the runtime starts, mirroring the enable
+	// flow, so the employee never runs with disabled keys.
+	if err := l.setKeysEnabled(ctx, user.SID, true); err != nil {
+		return user, fmt.Errorf("limits updated but model gateway keys are still disabled: %w", err)
+	}
 	if err := platform.StartInstalledRuntime(ctx, user.SID); err != nil {
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, fmt.Errorf("limits updated but employee runtime health check failed: %w", err)
 	}
 	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
 		rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		_ = platform.StopInstalledRuntime(rollbackContext, user.SID)
 		cancel()
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, err
 	}
 	user.Disabled = false

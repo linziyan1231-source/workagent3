@@ -7,18 +7,22 @@ import (
 	"slices"
 	"testing"
 
+	"workagent3/internal/auth"
 	"workagent3/internal/store"
+	"workagent3/internal/winutil"
 )
 
 // lifecycleKeys is a fake KeyLifecycle that models the two SID downstream
 // gateway keys as a single enabled flag and records the ordered call log.
 type lifecycleKeys struct {
-	events    *[]string
-	enabled   map[string]bool
-	setErr    error
-	revokeErr error
-	sets      int
-	revokes   int
+	events     *[]string
+	enabled    map[string]bool
+	setErr     error
+	disableErr error
+	enableErr  error
+	revokeErr  error
+	sets       int
+	revokes    int
 }
 
 func newLifecycleKeys(events *[]string, sid string, enabled bool) *lifecycleKeys {
@@ -28,6 +32,12 @@ func newLifecycleKeys(events *[]string, sid string, enabled bool) *lifecycleKeys
 func (k *lifecycleKeys) SetKeysEnabled(_ context.Context, sid string, enabled bool) error {
 	if k.events != nil {
 		*k.events = append(*k.events, fmt.Sprintf("keys:%t", enabled))
+	}
+	if !enabled && k.disableErr != nil {
+		return k.disableErr
+	}
+	if enabled && k.enableErr != nil {
+		return k.enableErr
 	}
 	if k.setErr != nil {
 		return k.setErr
@@ -295,5 +305,257 @@ func TestDeleteRetainedEmployeeRevokesKeysBeforeDeletion(t *testing.T) {
 	}
 	if _, err := data.UserByUsername(t.Context(), "alice"); err == nil {
 		t.Fatal("deleted employee mapping survived")
+	}
+}
+
+// failingResetStore fails the Portal password reset while delegating every
+// other store operation.
+type failingResetStore struct{ *store.Store }
+
+func (s failingResetStore) ResetUserPassword(context.Context, string, string) error {
+	return errors.New("database unavailable")
+}
+
+func TestPasswordResetDisablesAndRestoresKeysAroundReset(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "old-hash"); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	keys := newLifecycleKeys(&events, "S-1-5-21-1000", true)
+	if err := (Lifecycle{Users: data, Keys: keys}).ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err != nil {
+		t.Fatal(err)
+	}
+	if !keys.enabled["S-1-5-21-1000"] || keys.sets != 2 {
+		t.Fatalf("keys were not restored after the reset: keys=%v sets=%d", keys.enabled, keys.sets)
+	}
+	disable, restore := slices.Index(events, "keys:false"), slices.Index(events, "keys:true")
+	if disable < 0 || restore < 0 || disable > restore {
+		t.Fatalf("keys were not disabled before and restored after the reset: %v", events)
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !auth.VerifyPassword(stored.PasswordHash, []byte("replacement portal password")) {
+		t.Fatal("new Portal password was not stored")
+	}
+}
+
+func TestPasswordResetKeyDisableFailureAbortsReset(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "old-hash"); err != nil {
+		t.Fatal(err)
+	}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	keys.disableErr = errors.New("gateway unavailable")
+	if err := (Lifecycle{Users: data, Keys: keys}).ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err == nil {
+		t.Fatal("gateway key disable failure was hidden")
+	}
+	if !keys.enabled["S-1-5-21-1000"] {
+		t.Fatal("aborted reset disabled the gateway keys")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if auth.VerifyPassword(stored.PasswordHash, []byte("replacement portal password")) {
+		t.Fatal("password was reset while gateway keys are still enabled")
+	}
+}
+
+func TestPasswordResetFailureRestoresKeysBestEffort(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "old-hash"); err != nil {
+		t.Fatal(err)
+	}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	if err := (Lifecycle{Users: failingResetStore{data}, Keys: keys}).ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err == nil {
+		t.Fatal("store failure was hidden")
+	}
+	if !keys.enabled["S-1-5-21-1000"] || keys.sets != 2 {
+		t.Fatalf("failed reset left gateway keys disabled: keys=%v sets=%d", keys.enabled, keys.sets)
+	}
+}
+
+func TestPasswordResetKeyRestoreFailureConvergesOnReplay(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "old-hash"); err != nil {
+		t.Fatal(err)
+	}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	keys.enableErr = errors.New("gateway unavailable")
+	lifecycle := Lifecycle{Users: data, Keys: keys}
+	if err := lifecycle.ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err == nil {
+		t.Fatal("gateway key restore failure was hidden")
+	}
+	if keys.enabled["S-1-5-21-1000"] {
+		t.Fatal("failed restore left gateway keys enabled")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !auth.VerifyPassword(stored.PasswordHash, []byte("replacement portal password")) {
+		t.Fatal("password reset was rolled back after the key restore failure")
+	}
+	keys.enableErr = nil
+	if err := lifecycle.ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err != nil {
+		t.Fatalf("idempotent replay did not restore the gateway keys: %v", err)
+	}
+	if !keys.enabled["S-1-5-21-1000"] {
+		t.Fatal("replay did not converge the gateway keys to enabled")
+	}
+}
+
+func TestPasswordResetDisabledEmployeeKeepsKeysDisabled(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "old-hash"); err != nil {
+		t.Fatal(err)
+	}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	if err := (Lifecycle{Users: data, Keys: keys}).ResetPortalPassword(t.Context(), "alice", []byte("replacement portal password")); err != nil {
+		t.Fatal(err)
+	}
+	if keys.enabled["S-1-5-21-1000"] || keys.sets != 1 {
+		t.Fatalf("closed employee keys were not kept disabled: keys=%v sets=%d", keys.enabled, keys.sets)
+	}
+}
+
+func TestSetLimitsDisablesKeysAroundUpdate(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	platform := &lifecyclePlatform{events: &events}
+	keys := newLifecycleKeys(&events, "S-1-5-21-1000", true)
+	limits := winutil.JobLimits{MemoryBytes: 2 * 1024 * 1024 * 1024, CPUPercent: 40, ActiveProcesses: 32}
+	updated, err := (Lifecycle{Platform: platform, Users: data, Keys: keys}).SetLimits(t.Context(), "alice", limits)
+	if err != nil || updated.Disabled {
+		t.Fatalf("limits update failed: user=%+v err=%v", updated, err)
+	}
+	if !keys.enabled["S-1-5-21-1000"] || keys.sets != 2 || platform.limits != limits {
+		t.Fatalf("keys were not restored around the limits update: keys=%v sets=%d limits=%+v", keys.enabled, keys.sets, platform.limits)
+	}
+	order := []string{"keys:false", "stop", "update-limits", "keys:true", "start"}
+	for i := 1; i < len(order); i++ {
+		if slices.Index(events, order[i-1]) >= slices.Index(events, order[i]) {
+			t.Fatalf("limits update did not order key flips around the runtime restart: %v", events)
+		}
+	}
+}
+
+func TestSetLimitsKeyDisableFailureAbortsUpdate(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	platform := &lifecyclePlatform{}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	keys.disableErr = errors.New("gateway unavailable")
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	if _, err := (Lifecycle{Platform: platform, Users: data, Keys: keys}).SetLimits(t.Context(), "alice", limits); err == nil {
+		t.Fatal("gateway key disable failure was hidden")
+	}
+	if platform.stops != 0 || platform.limits != (winutil.JobLimits{}) {
+		t.Fatalf("runtime was touched while gateway keys are still enabled: %+v", platform)
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || !keys.enabled["S-1-5-21-1000"] {
+		t.Fatalf("aborted limits update left an inconsistent state: %+v keys=%v", stored, keys.enabled)
+	}
+}
+
+func TestSetLimitsUpdateFailureKeepsKeysDisabledAndRetries(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	platform := &lifecyclePlatform{updateErr: errors.New("job object busy")}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	lifecycle := Lifecycle{Platform: platform, Users: data, Keys: keys}
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	if _, err := lifecycle.SetLimits(t.Context(), "alice", limits); err == nil {
+		t.Fatal("limits update failure was hidden")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || keys.enabled["S-1-5-21-1000"] {
+		t.Fatalf("failed limits update is not fail-closed: %+v keys=%v", stored, keys.enabled)
+	}
+	platform.updateErr = nil
+	updated, err := lifecycle.SetLimits(t.Context(), "alice", limits)
+	if err != nil || !updated.Disabled || platform.limits != limits {
+		t.Fatalf("replay did not converge the limits: user=%+v limits=%+v err=%v", updated, platform.limits, err)
+	}
+	if keys.enabled["S-1-5-21-1000"] {
+		t.Fatal("replay enabled keys of a still-disabled employee")
+	}
+}
+
+func TestSetLimitsStartFailureReDisablesKeys(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	platform := &lifecyclePlatform{events: &events, startErr: errors.New("runtime unhealthy")}
+	keys := newLifecycleKeys(&events, "S-1-5-21-1000", true)
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	if _, err := (Lifecycle{Platform: platform, Users: data, Keys: keys}).SetLimits(t.Context(), "alice", limits); err == nil {
+		t.Fatal("unhealthy runtime accepted capacity change")
+	}
+	if keys.enabled["S-1-5-21-1000"] || events[len(events)-1] != "keys:false" {
+		t.Fatalf("failed restart left gateway keys enabled: keys=%v events=%v", keys.enabled, events)
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled {
+		t.Fatal("capacity failure reopened the Portal account")
+	}
+}
+
+func TestSetLimitsKeyRestoreFailureRecoversViaEnable(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	platform := &lifecyclePlatform{}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	keys.enableErr = errors.New("gateway unavailable")
+	lifecycle := Lifecycle{Platform: platform, Users: data, Keys: keys}
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	if _, err := lifecycle.SetLimits(t.Context(), "alice", limits); err == nil {
+		t.Fatal("gateway key restore failure was hidden")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled || keys.enabled["S-1-5-21-1000"] || platform.limits != limits || platform.starts != 0 {
+		t.Fatalf("restore failure did not converge to disabled with applied limits: %+v keys=%v platform=%+v", stored, keys.enabled, platform)
+	}
+	keys.enableErr = nil
+	enabled, err := lifecycle.SetEnabled(t.Context(), "alice", true)
+	if err != nil || enabled.Disabled {
+		t.Fatalf("enable did not recover the employee: user=%+v err=%v", enabled, err)
+	}
+	if !keys.enabled["S-1-5-21-1000"] || platform.starts != 1 {
+		t.Fatalf("recovery did not restore keys and start the runtime: keys=%v starts=%d", keys.enabled, platform.starts)
+	}
+}
+
+func TestSetLimitsDisabledEmployeeKeepsKeysDisabled(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	if _, err := data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	platform := &lifecyclePlatform{}
+	keys := newLifecycleKeys(nil, "S-1-5-21-1000", true)
+	limits := winutil.JobLimits{MemoryBytes: 1024 * 1024 * 1024, CPUPercent: 25, ActiveProcesses: 16}
+	updated, err := (Lifecycle{Platform: platform, Users: data, Keys: keys}).SetLimits(t.Context(), "alice", limits)
+	if err != nil || !updated.Disabled || platform.limits != limits || platform.starts != 0 {
+		t.Fatalf("disabled employee limits update was not contained: user=%+v platform=%+v err=%v", updated, platform, err)
+	}
+	if keys.enabled["S-1-5-21-1000"] {
+		t.Fatal("disabled employee keys were enabled by the limits update")
 	}
 }
