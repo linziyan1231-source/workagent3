@@ -10,34 +10,47 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
 )
 
-const oauthFlowLifetime = 10 * time.Minute
+const (
+	oauthFlowLifetime = 10 * time.Minute
+	// Refresh starts when the access token expires within the skew window; the
+	// scan runs on a fixed interval because the Harness talks to MCP servers
+	// directly, so UserHost never sees an on-demand 401 to react to.
+	oauthRefreshSkew         = 2 * time.Minute
+	oauthRefreshScanInterval = time.Minute
+)
+
+var errOAuthGrantInvalid = errors.New("oauth_refresh_grant_invalid")
 
 type mcpOAuthManager struct {
 	catalog      *mcpruntime.Catalog
 	credentials  *credentialbroker.Store
 	publisher    mcpProjectionPublisher
+	audit        *auditClient
 	client       *http.Client
 	now          func() time.Time
 	allowPrivate bool
 	mu           sync.Mutex
 	pending      map[string]pendingMCPAuth
+	flights      map[string]chan struct{}
 }
 
 type pendingMCPAuth struct {
-	serverID, resource, redirectURI, clientID, tokenEndpoint, state string
-	verifier                                                        []byte
-	expiresAt                                                       time.Time
+	serverID, resource, redirectURI, clientID, tokenEndpoint, revocationEndpoint, state string
+	verifier                                                                            []byte
+	expiresAt                                                                           time.Time
 }
 
 type oauthStartResult struct {
@@ -58,15 +71,25 @@ type authorizationServerMetadata struct {
 	AuthorizationEndpoint string   `json:"authorization_endpoint"`
 	TokenEndpoint         string   `json:"token_endpoint"`
 	RegistrationEndpoint  string   `json:"registration_endpoint"`
+	RevocationEndpoint    string   `json:"revocation_endpoint"`
 	ScopesSupported       []string `json:"scopes_supported"`
 }
 
-func newMCPOAuthManager(catalog *mcpruntime.Catalog, credentials *credentialbroker.Store, publisher mcpProjectionPublisher) *mcpOAuthManager {
+func newMCPOAuthManager(catalog *mcpruntime.Catalog, credentials *credentialbroker.Store, publisher mcpProjectionPublisher, audits ...*auditClient) *mcpOAuthManager {
 	return &mcpOAuthManager{
-		catalog: catalog, credentials: credentials, publisher: publisher,
+		catalog: catalog, credentials: credentials, publisher: publisher, audit: firstAuditClient(audits),
 		client: &http.Client{Transport: &http.Transport{DialContext: guardedMCPDialer(false)}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("oauth_redirect_rejected") }, Timeout: 15 * time.Second},
-		now:    time.Now, pending: map[string]pendingMCPAuth{},
+		now:    time.Now, pending: map[string]pendingMCPAuth{}, flights: map[string]chan struct{}{},
 	}
+}
+
+// firstAuditClient unwraps the optional trailing audit client used by the
+// variadic handler/manager constructors.
+func firstAuditClient(audits []*auditClient) *auditClient {
+	if len(audits) == 0 {
+		return nil
+	}
+	return audits[0]
 }
 
 func (m *mcpOAuthManager) start(ctx context.Context, serverID, redirectURI string) (oauthStartResult, error) {
@@ -146,13 +169,19 @@ func (m *mcpOAuthManager) start(ctx context.Context, serverID, redirectURI strin
 	}
 	authorizationEndpoint.RawQuery = query.Encode()
 	expiresAt := m.now().Add(oauthFlowLifetime)
+	revocationEndpoint := ""
+	if metadata.RevocationEndpoint != "" {
+		if endpoint, err := m.validateURL(metadata.RevocationEndpoint, false); err == nil {
+			revocationEndpoint = endpoint.String()
+		}
+	}
 	m.mu.Lock()
 	m.purgeLocked()
 	if len(m.pending) >= 32 {
 		m.mu.Unlock()
 		return oauthStartResult{}, errors.New("too_many_oauth_flows")
 	}
-	m.pending[flowID] = pendingMCPAuth{serverID: serverID, resource: resource.String(), redirectURI: redirect.String(), clientID: clientID, tokenEndpoint: tokenEndpoint.String(), verifier: verifier, state: state, expiresAt: expiresAt}
+	m.pending[flowID] = pendingMCPAuth{serverID: serverID, resource: resource.String(), redirectURI: redirect.String(), clientID: clientID, tokenEndpoint: tokenEndpoint.String(), revocationEndpoint: revocationEndpoint, verifier: verifier, state: state, expiresAt: expiresAt}
 	m.mu.Unlock()
 	return oauthStartResult{AuthorizationURL: authorizationEndpoint.String(), FlowID: flowID, State: state, ExpiresAt: expiresAt.UTC()}, nil
 }
@@ -212,6 +241,7 @@ func (m *mcpOAuthManager) complete(ctx context.Context, serverID, flowID, state,
 	}
 	_, err = m.credentials.PutOAuth(ctx, credentialID, server.Name+" OAuth", credentialbroker.OAuthToken{
 		AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, TokenType: token.TokenType, ExpiresAt: expiresAt,
+		TokenEndpoint: flow.tokenEndpoint, RevocationEndpoint: flow.revocationEndpoint, ClientID: flow.clientID, Resource: flow.resource,
 	})
 	token.AccessToken, token.RefreshToken = "", ""
 	if err != nil {
@@ -223,6 +253,18 @@ func (m *mcpOAuthManager) complete(ctx context.Context, serverID, flowID, state,
 	}
 	if server.Transport.HeaderCredentialIDs == nil {
 		server.Transport.HeaderCredentialIDs = map[string]string{}
+	}
+	// Re-authorization replaces the previous grant: revoke the old credential
+	// at the authorization server (best effort) and wipe it locally.
+	if oldID := server.Transport.HeaderCredentialIDs["Authorization"]; oldID != "" && oldID != credentialID {
+		if oldToken, err := m.credentials.ResolveOAuthToken(ctx, oldID); err == nil {
+			m.revokeRemote(ctx, oldToken)
+			oldToken.AccessToken, oldToken.RefreshToken = "", ""
+		}
+		if err := m.credentials.Revoke(ctx, oldID); err != nil && !errors.Is(err, credentialbroker.ErrNotFound) {
+			_ = m.credentials.Revoke(ctx, credentialID)
+			return err
+		}
 	}
 	server.Transport.HeaderCredentialIDs["Authorization"] = credentialID
 	server.OAuthState = "ready"
@@ -258,6 +300,208 @@ func (m *mcpOAuthManager) logout(ctx context.Context, serverID string) error {
 		return err
 	}
 	return m.publisher.Publish(ctx)
+}
+
+// runRefresher scans MCP OAuth credentials on a fixed interval and refreshes
+// access tokens nearing expiry. A periodic scan is the fitting trigger here:
+// the Harness talks to MCP servers directly with projected headers, so
+// UserHost never observes an on-demand 401 it could react to.
+func (m *mcpOAuthManager) runRefresher(ctx context.Context) {
+	ticker := time.NewTicker(oauthRefreshScanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.refreshDue(ctx)
+		}
+	}
+}
+
+// refreshDue performs one scan: every ready HTTP/SSE server whose OAuth
+// credential expires within the skew window gets a singleflight refresh.
+func (m *mcpOAuthManager) refreshDue(ctx context.Context) {
+	servers, err := m.catalog.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, server := range servers {
+		if !server.Enabled || server.Transport.Kind == "stdio" || server.OAuthState != "ready" {
+			continue
+		}
+		credentialID := server.Transport.HeaderCredentialIDs["Authorization"]
+		if credentialID == "" {
+			continue
+		}
+		metadata, err := m.credentials.Metadata(ctx, credentialID)
+		if err != nil || metadata.Kind != credentialbroker.KindMCPOAuth || metadata.ExpiresAt == nil {
+			continue
+		}
+		if m.now().Add(oauthRefreshSkew).Before(*metadata.ExpiresAt) {
+			continue
+		}
+		m.refreshSingleflight(ctx, server.ID, credentialID)
+	}
+}
+
+// refreshSingleflight coalesces concurrent refreshes of the same credential:
+// the first caller performs the exchange, the rest wait for its outcome.
+func (m *mcpOAuthManager) refreshSingleflight(ctx context.Context, serverID, credentialID string) {
+	m.mu.Lock()
+	if done, ok := m.flights[credentialID]; ok {
+		m.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		return
+	}
+	done := make(chan struct{})
+	m.flights[credentialID] = done
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.flights, credentialID)
+		m.mu.Unlock()
+		close(done)
+	}()
+	m.refreshCredential(ctx, serverID, credentialID)
+}
+
+func (m *mcpOAuthManager) refreshCredential(ctx context.Context, serverID, credentialID string) {
+	server, err := m.catalog.Get(ctx, serverID)
+	if err != nil || server.Transport.HeaderCredentialIDs["Authorization"] != credentialID {
+		return
+	}
+	token, err := m.credentials.ResolveOAuthToken(ctx, credentialID)
+	if err != nil {
+		return
+	}
+	defer func() { token.AccessToken, token.RefreshToken = "", "" }()
+	if token.RefreshToken == "" || token.TokenEndpoint == "" {
+		// Nothing renewable left: invalidate locally and require re-auth.
+		m.failOAuthCredential(ctx, server, credentialID)
+		return
+	}
+	refreshed, err := m.exchangeRefreshToken(ctx, token)
+	if errors.Is(err, errOAuthGrantInvalid) {
+		// The grant is dead (invalid_grant etc.): revoke remotely on a best
+		// effort basis, wipe the credential locally, and mark needs_auth.
+		m.revokeRemote(ctx, token)
+		m.failOAuthCredential(ctx, server, credentialID)
+		return
+	}
+	if err != nil {
+		return // transient failure; the next scan retries
+	}
+	defer func() { refreshed.AccessToken, refreshed.RefreshToken = "", "" }()
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = token.RefreshToken
+	}
+	refreshed.TokenEndpoint, refreshed.RevocationEndpoint = token.TokenEndpoint, token.RevocationEndpoint
+	refreshed.ClientID, refreshed.Resource = token.ClientID, token.Resource
+	if _, err := m.credentials.PutOAuth(ctx, credentialID, server.Name+" OAuth", refreshed); err != nil {
+		return
+	}
+	if err := m.publisher.Publish(ctx); err != nil {
+		log.Printf("mcp oauth: refresh projection failed for server %s: %v", serverID, err)
+	}
+}
+
+func (m *mcpOAuthManager) exchangeRefreshToken(ctx context.Context, token credentialbroker.OAuthToken) (credentialbroker.OAuthToken, error) {
+	endpoint, err := m.validateURL(token.TokenEndpoint, false)
+	if err != nil {
+		return credentialbroker.OAuthToken{}, err
+	}
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {token.RefreshToken}}
+	if token.ClientID != "" {
+		form.Set("client_id", token.ClientID)
+	}
+	if token.Resource != "" {
+		form.Set("resource", token.Resource)
+	}
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response, err := m.client.Do(request)
+	if err != nil {
+		return credentialbroker.OAuthToken{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnauthorized {
+		return credentialbroker.OAuthToken{}, errOAuthGrantInvalid
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return credentialbroker.OAuthToken{}, fmt.Errorf("oauth_refresh_http_status:%d", response.StatusCode)
+	}
+	var granted struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int64  `json:"expires_in"`
+	}
+	if decodeLimitedJSON(response.Body, &granted) != nil || granted.AccessToken == "" || !strings.EqualFold(granted.TokenType, "bearer") || granted.ExpiresIn < 0 {
+		return credentialbroker.OAuthToken{}, errors.New("invalid_oauth_token_response")
+	}
+	result := credentialbroker.OAuthToken{AccessToken: granted.AccessToken, RefreshToken: granted.RefreshToken, TokenType: granted.TokenType}
+	granted.AccessToken, granted.RefreshToken = "", ""
+	if granted.ExpiresIn > 0 {
+		value := m.now().Add(time.Duration(granted.ExpiresIn) * time.Second).UTC()
+		result.ExpiresAt = &value
+	}
+	return result, nil
+}
+
+// revokeRemote asks the authorization server to revoke the grant's tokens
+// (RFC 7009). Best effort: when the server advertises no revocation endpoint
+// or the request fails, the caller's local wipe is the authoritative
+// revocation and the gap is logged here.
+func (m *mcpOAuthManager) revokeRemote(ctx context.Context, token credentialbroker.OAuthToken) {
+	if token.RevocationEndpoint == "" {
+		log.Printf("mcp oauth: authorization server advertises no revocation endpoint; credential revoked locally only")
+		return
+	}
+	endpoint, err := m.validateURL(token.RevocationEndpoint, false)
+	if err != nil {
+		log.Printf("mcp oauth: revocation endpoint rejected; credential revoked locally only")
+		return
+	}
+	for _, value := range []string{token.RefreshToken, token.AccessToken} {
+		if value == "" {
+			continue
+		}
+		form := url.Values{"token": {value}}
+		if token.ClientID != "" {
+			form.Set("client_id", token.ClientID)
+		}
+		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response, err := m.client.Do(request)
+		if err != nil {
+			log.Printf("mcp oauth: remote revocation failed, credential revoked locally only: %v", err)
+			continue
+		}
+		response.Body.Close()
+	}
+}
+
+func (m *mcpOAuthManager) failOAuthCredential(ctx context.Context, server mcpruntime.Server, credentialID string) {
+	if err := m.credentials.Revoke(ctx, credentialID); err != nil && !errors.Is(err, credentialbroker.ErrNotFound) {
+		return
+	}
+	delete(server.Transport.HeaderCredentialIDs, "Authorization")
+	server.OAuthState = "needs_auth"
+	server.Health = "unknown"
+	if _, err := m.catalog.Replace(ctx, server); err != nil {
+		return
+	}
+	// The refresh loop revoked the grant without a user present; record the
+	// system-side revocation.
+	m.audit.Record(ctx, audit.ActionMCPOAuthRevoke, server.ID, "success", "", map[string]string{"reason": "refresh_failed"})
+	if err := m.publisher.Publish(ctx); err != nil {
+		log.Printf("mcp oauth: needs_auth projection failed for server %s: %v", server.ID, err)
+	}
 }
 
 func (m *mcpOAuthManager) discoverProtectedResource(ctx context.Context, resource *url.URL) (protectedResourceMetadata, error) {

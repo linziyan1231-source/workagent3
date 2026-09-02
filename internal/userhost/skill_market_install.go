@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/skillruntime"
 )
 
@@ -51,7 +52,7 @@ func exportUserSkill(skills *skillruntime.Store) http.HandlerFunc {
 	}
 }
 
-func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {
+func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		metadata, err := decodeMarketSkillMetadata(request.Header.Get("X-WorkAgent-Skill-Metadata"))
 		if err != nil || request.Header.Get("Content-Type") != "application/zip" {
@@ -94,6 +95,7 @@ func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPub
 			SourceDirectory: source,
 		})
 		if err != nil {
+			auditSink.Record(request.Context(), audit.ActionSkillInstall, metadata.ID, "failure", requestCorrelationID(request), map[string]string{"skill_name": metadata.Name})
 			writeRuntimeError(writer, http.StatusBadRequest, "skill_install_failed")
 			return
 		}
@@ -101,6 +103,7 @@ func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPub
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionSkillInstall, entry.ID, "success", requestCorrelationID(request), map[string]string{"skill_name": entry.Name, "version": entry.Version, "source": "market"})
 		writeRuntimeJSON(writer, http.StatusCreated, entry)
 	}
 }

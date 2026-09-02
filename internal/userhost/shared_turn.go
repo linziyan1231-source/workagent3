@@ -24,6 +24,7 @@ type sharedTurnRequest struct {
 	Context          string `json:"context"`
 	RecoveryContext  string `json:"recoveryContext"`
 	RuntimeSessionID string `json:"runtimeSessionId,omitempty"`
+	PayerSID         string `json:"payerSid"`
 	WorkspacePath    string `json:"workspacePath"`
 }
 
@@ -41,7 +42,8 @@ func sharedTurnHandler(projects sharedTurnProjectResolver, target *url.URL, toke
 			strings.TrimSpace(input.ModelID) == "" || len(input.ModelID) > 256 ||
 			(input.ThinkingEffort != "low" && input.ThinkingEffort != "medium" && input.ThinkingEffort != "high") ||
 			strings.TrimSpace(input.Context) == "" || len(input.Context) > 512*1024 ||
-			strings.TrimSpace(input.RecoveryContext) == "" || len(input.RecoveryContext) > 768*1024 {
+			strings.TrimSpace(input.RecoveryContext) == "" || len(input.RecoveryContext) > 768*1024 ||
+			!strings.HasPrefix(input.PayerSID, "S-1-") || len(input.PayerSID) > 128 {
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_shared_turn")
 			return
 		}

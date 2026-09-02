@@ -39,6 +39,12 @@ type Config struct {
 	ManagedMCPServers  []mcpruntime.Server
 	PlatformURL        string
 	PlatformCredential string
+	// HarnessModel and ModelGatewayBaseURL describe the managed model route the
+	// Harness shares with native Codex: the same SID-private CLIProxyAPI
+	// loopback and the configured Codex model. Both are empty only when the
+	// deployment has no managed model gateway.
+	HarnessModel        string
+	ModelGatewayBaseURL string
 }
 
 type Supervisor struct {
@@ -70,6 +76,17 @@ func New(config Config) (*Supervisor, error) {
 	if config.StartupTimeout <= 0 {
 		config.StartupTimeout = 45 * time.Second
 	}
+	if (config.HarnessModel == "") != (config.ModelGatewayBaseURL == "") {
+		return nil, errors.New("Harness model and model gateway base URL must be configured together")
+	}
+	if config.ModelGatewayBaseURL != "" {
+		if err := nativeauth.ValidateBaseURL(config.ModelGatewayBaseURL); err != nil {
+			return nil, err
+		}
+		if !nativeauth.ValidModel(config.HarnessModel) {
+			return nil, errors.New("Harness model is invalid")
+		}
+	}
 	return &Supervisor{config: config, restartRequested: make(chan struct{}, 1)}, nil
 }
 
@@ -87,9 +104,27 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		lock.Close()
 		return runtimeapi.Registration{}, err
 	}
-	if err := nativeauth.Apply(s.config.DataRoot); err != nil {
+	if s.config.HarnessModel != "" {
+		if err := projectModelAccess(directories.dshHome, s.config.HarnessModel); err != nil {
+			lock.Close()
+			return runtimeapi.Registration{}, fmt.Errorf("project Harness model access: %w", err)
+		}
+	}
+	// A staged bootstrap is the version marker for managed model delivery: its
+	// presence means the newest bundle has not reached every consumer yet, so
+	// startup (and Repair, which always stages a fresh bundle) replays the
+	// ordered delivery below.
+	bundle, staged, err := nativeauth.Load(s.config.DataRoot)
+	if err != nil {
 		lock.Close()
-		return runtimeapi.Registration{}, fmt.Errorf("apply SID-private native model access: %w", err)
+		return runtimeapi.Registration{}, fmt.Errorf("load SID-private native model access: %w", err)
+	}
+	if staged {
+		// Ordered delivery step 1: write the native Codex/Kimi credentials.
+		if err := nativeauth.Apply(s.config.DataRoot); err != nil {
+			lock.Close()
+			return runtimeapi.Registration{}, fmt.Errorf("apply SID-private native model access: %w", err)
+		}
 	}
 	port, err := reserveLoopbackPort()
 	if err != nil {
@@ -116,7 +151,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
-	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot)
+	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot, s.config.ModelGatewayBaseURL, s.config.HarnessModel)
 	command.Stdout = harnessLog
 	command.Stderr = harnessLog
 	if err := command.Start(); err != nil {
@@ -142,7 +177,15 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.ManagedMCPServers, s.config.DataRoot, s.config.SID, target, token, func() {
+	var stagedBundle *nativeauth.Bundle
+	if staged {
+		stagedBundle = &bundle
+	}
+	// Business audit reporting (Skill/MCP lifecycle, MCP OAuth) goes through
+	// the Portal loopback endpoint; a misconfigured audit path must not block
+	// the runtime, so the client is nil on error.
+	auditSink, _ := newAuditClient(s.config.PlatformURL, s.config.PlatformCredential, s.config.SID)
+	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.ManagedMCPServers, s.config.ManagedToolsRoot, s.config.DataRoot, s.config.SID, target, token, stagedBundle, auditSink, func() {
 		select {
 		case s.restartRequested <- struct{}{}:
 		default:
@@ -151,6 +194,16 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	if err != nil {
 		s.Close()
 		return runtimeapi.Registration{}, err
+	}
+	if staged {
+		// Ordered delivery steps 2 and 3 (broker record plus Harness
+		// re-projection) completed inside newRuntimeGateway; only now is the
+		// bundle consumed.
+		if err := nativeauth.Consume(s.config.DataRoot); err != nil {
+			gateway.Close()
+			s.Close()
+			return runtimeapi.Registration{}, err
+		}
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -271,7 +324,7 @@ func reserveLoopbackPort() (int, error) {
 	return port, nil
 }
 
-func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot string) []string {
+func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot, gatewayBaseURL, harnessModel string) []string {
 	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
@@ -307,6 +360,14 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 				break
 			}
 		}
+	}
+	if gatewayBaseURL != "" {
+		// The managed Harness provider always targets the SID-local CLIProxyAPI
+		// loopback from configuration, never an inherited environment value.
+		environment = append(environment,
+			"DEEPSEEK_BASE_URL="+gatewayBaseURL,
+			"WORKAGENT_HARNESS_MODEL="+harnessModel,
+		)
 	}
 	return environment
 }

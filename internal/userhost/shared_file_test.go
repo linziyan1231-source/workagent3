@@ -1,6 +1,7 @@
 package userhost
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -76,5 +77,49 @@ func TestSharedFileManagerRejectsSymlinkTraversal(t *testing.T) {
 	}
 	if _, err := manager.OperateFile(t.Context(), sharedFileRequest{ProjectID: projectID, Operation: "list"}); err == nil {
 		t.Fatal("workspace list accepted a symlink")
+	}
+}
+
+func TestSharedFileOfficePreviewConvertsOnOwnerRuntime(t *testing.T) {
+	ownerSID := "S-1-5-21-1000"
+	base := t.TempDir()
+	dataRoot := filepath.Join(base, ownerSID)
+	projectID := "project_1234567890"
+	projectRoot := filepath.Join(base, "shared", ownerSID, projectID)
+	if err := os.MkdirAll(projectRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "deck.pptx"), []byte("deck"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := newSharedFileManager(dataRoot, ownerSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the preview service the operation reports the managed tool as
+	// unavailable instead of failing opaquely.
+	if _, err := manager.OperateFile(t.Context(), sharedFileRequest{ProjectID: projectID, Operation: "office-preview", Path: "deck.pptx"}); err == nil || err.Error() != "OFFICECLI_NOT_FOUND" {
+		t.Fatalf("no-service error = %v", err)
+	}
+
+	manager.officePreview = newTestOfficePreviewService(t, nil)
+	result, err := manager.OperateFile(t.Context(), sharedFileRequest{ProjectID: projectID, Operation: "office-preview", Path: "deck.pptx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Name string `json:"name"`
+		PDF  string `json:"pdf"`
+	}
+	if json.Unmarshal(result, &payload) != nil || !strings.HasSuffix(payload.Name, ".pdf") || payload.PDF == "" {
+		t.Fatalf("preview payload = %s", result)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload.PDF)
+	if err != nil || string(decoded) != "%PDF-1.7 test" {
+		t.Fatalf("decoded pdf = %q, %v", decoded, err)
+	}
+	if _, err := manager.OperateFile(t.Context(), sharedFileRequest{ProjectID: projectID, Operation: "office-preview", Path: "missing.docx"}); err == nil {
+		t.Fatal("missing shared Office file was accepted")
 	}
 }

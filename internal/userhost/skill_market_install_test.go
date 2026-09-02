@@ -21,7 +21,7 @@ func TestMarketSkillInstallExtractsOneValidatedSkill(t *testing.T) {
 	request.Header.Set("Content-Type", "application/zip")
 	request.Header.Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
 	response := httptest.NewRecorder()
-	installMarketSkill(skills, gatewayTestPublisher{}).ServeHTTP(response, request)
+	installMarketSkill(skills, gatewayTestPublisher{}, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("install status %d: %s", response.Code, response.Body.String())
 	}
@@ -39,7 +39,7 @@ func TestMarketSkillInstallRejectsArchiveTraversal(t *testing.T) {
 	request.Header.Set("Content-Type", "application/zip")
 	request.Header.Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
 	response := httptest.NewRecorder()
-	installMarketSkill(skills, gatewayTestPublisher{}).ServeHTTP(response, request)
+	installMarketSkill(skills, gatewayTestPublisher{}, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("traversal status %d: %s", response.Code, response.Body.String())
 	}

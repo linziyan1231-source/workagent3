@@ -1,11 +1,11 @@
 package userhost
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -15,24 +15,27 @@ import (
 	"strings"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/managedskills"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
 )
 
 type runtimeGateway struct {
-	server      *http.Server
-	catalog     *mcpruntime.Catalog
-	credentials *credentialbroker.Store
-	skills      *skillruntime.Store
-	migration   *skillmigration.Store
-	oauth       *mcpOAuthManager
+	server        *http.Server
+	catalog       *mcpruntime.Catalog
+	credentials   *credentialbroker.Store
+	skills        *skillruntime.Store
+	migration     *skillmigration.Store
+	oauth         *mcpOAuthManager
+	cancelRefresh context.CancelFunc
 }
 
-func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, dataRoot, ownerSID string, target *url.URL, token string, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, managedToolsRoot, dataRoot, ownerSID string, target *url.URL, token string, bundle *nativeauth.Bundle, auditSink *auditClient, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -78,6 +81,26 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		return nil, err
 	}
 	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
+	if bundle != nil {
+		// Ordered delivery step 2: the Harness shares the same SID-private
+		// ChatGPT downstream key as native Codex. The key travels only through
+		// this UserHost-internal path into the SID Credential Broker; Portal and
+		// the browser never see the plaintext.
+		secret := []byte(bundle.CodexAPIKey)
+		_, err := credentials.Put(context.Background(), credentialbroker.Input{
+			ID: managedHarnessProviderCredentialID, Kind: credentialbroker.KindProvider, Label: "Harness managed Provider", Secret: secret, State: credentialbroker.StateReady,
+		})
+		clearBytes(secret)
+		if err != nil {
+			migration.Close()
+			skills.Close()
+			credentials.Close()
+			catalog.Close()
+			return nil, fmt.Errorf("store managed Harness Provider credential: %w", err)
+		}
+	}
+	// Ordered delivery step 3: re-project the managed Provider into the running
+	// Harness so it switches to the new key without a restart.
 	if err := providerPublisher.Publish(context.Background()); err != nil {
 		migration.Close()
 		skills.Close()
@@ -101,9 +124,12 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		catalog.Close()
 		return nil, err
 	}
-	oauth := newMCPOAuthManager(catalog, credentials, publisher)
+	oauth := newMCPOAuthManager(catalog, credentials, publisher, auditSink)
+	refreshContext, cancelRefresh := context.WithCancel(context.Background())
+	go oauth.runRefresher(refreshContext)
 	sharedProjects, err := newSharedProjectManager(dataRoot, ownerSID)
 	if err != nil {
+		cancelRefresh()
 		migration.Close()
 		skills.Close()
 		credentials.Close()
@@ -112,17 +138,35 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	}
 	sharedFiles, err := newSharedFileManager(dataRoot, ownerSID)
 	if err != nil {
+		cancelRefresh()
 		migration.Close()
 		skills.Close()
 		credentials.Close()
 		catalog.Close()
 		return nil, err
 	}
-	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, sharedFiles, restart, assigners...)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth}, nil
+	var assigner mcpProcessAssigner
+	if len(assigners) > 0 {
+		assigner = assigners[0]
+	}
+	officePreview, err := newOfficePreviewService(filepath.Join(dataRoot, "cache", "office-pdf"), managedToolsRoot, assigner)
+	if err != nil {
+		cancelRefresh()
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	sharedFiles.officePreview = officePreview
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, assigners...)
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh}, nil
 }
 
 func (g *runtimeGateway) Close() error {
+	if g.cancelRefresh != nil {
+		g.cancelRefresh()
+	}
 	serverErr := g.server.Close()
 	catalogErr := g.catalog.Close()
 	credentialErr := g.credentials.Close()
@@ -161,10 +205,10 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 }
 
 func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, assigners ...mcpProcessAssigner) http.Handler {
-	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, nil, assigners...)
+	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, nil, "", nil, nil, nil, assigners...)
 }
 
-func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, restart func(), assigners ...mcpProcessAssigner) http.Handler {
+func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, officePreview *officePreviewService, workspaceRoot string, restart func(), auditSink *auditClient, presetPublisher *harnessPresetMigrationPublisher, assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	mux := http.NewServeMux()
@@ -173,27 +217,30 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))
 	mux.HandleFunc("POST /v1/credentials", createCredential(credentials))
 	mux.HandleFunc("DELETE /v1/credentials/{id}", revokeCredential(credentials, publisher))
-	mux.HandleFunc("PUT /v1/provider-credentials/harness", putManagedProviderCredential(credentials, providerPublisher))
-	mux.HandleFunc("DELETE /v1/provider-credentials/harness", revokeManagedProviderCredential(credentials, providerPublisher))
+	// The managed Harness Provider key is owned by the UserHost-internal
+	// delivery path (see newRuntimeGateway); the browser gets status and health
+	// only, never a write route.
 	mux.HandleFunc("POST /v1/provider-credentials/harness/test", testManagedProvider(providerPublisher))
 	mux.HandleFunc("GET /v1/mcp-servers", listMCPServers(catalog, credentials))
-	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher))
-	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher))
-	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher))
+	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher, auditSink))
+	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher, auditSink))
+	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher, auditSink))
 	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher, assigners...))
 	mux.HandleFunc("GET /v1/skills", listSkills(skills))
 	mux.HandleFunc("GET /v1/skills/export", exportUserSkill(skills))
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
-	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher))
-	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher))
-	mux.HandleFunc("POST /v1/skills/market-install", installMarketSkill(skills, skillPublisher))
+	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher, auditSink))
+	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher, auditSink))
+	mux.HandleFunc("POST /v1/skills/market-install", installMarketSkill(skills, skillPublisher, auditSink))
 	if migration != nil {
 		mux.HandleFunc("GET /v1/migrations/skills-mcp", listSkillMCPMigration(migration))
+		mux.HandleFunc("POST /v1/migrations/retry", retryMigration(migration, catalog, credentials, publisher, skillPublisher, presetPublisher))
+		mux.HandleFunc("POST /v1/migrations/resolve", resolveMigration(migration))
 	}
 	if oauth != nil {
 		mux.HandleFunc("POST /v1/mcp-servers/{id}/oauth/start", startMCPOAuth(oauth))
-		mux.HandleFunc("POST /v1/mcp-servers/{id}/oauth/complete", completeMCPOAuth(oauth))
-		mux.HandleFunc("DELETE /v1/mcp-servers/{id}/oauth", logoutMCPOAuth(oauth))
+		mux.HandleFunc("POST /v1/mcp-servers/{id}/oauth/complete", completeMCPOAuth(oauth, auditSink))
+		mux.HandleFunc("DELETE /v1/mcp-servers/{id}/oauth", logoutMCPOAuth(oauth, auditSink))
 	}
 	if sharedProjects != nil {
 		mux.HandleFunc("PUT /internal/shared-projects/{id}", sharedProjectPlatformHandler(sharedProjects))
@@ -204,6 +251,10 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 			mux.HandleFunc("POST /internal/shared-turns", sharedTurnHandler(projects, target, token))
 			mux.HandleFunc("POST /internal/shared-turns/{id}/cancel", sharedTurnCancelHandler(target, token))
 		}
+	}
+	if officePreview != nil {
+		mux.HandleFunc("POST /v1/office-preview/convert", officePreviewConvertHandler(officePreview, workspaceRoot))
+		mux.HandleFunc("GET /v1/office-preview/content/{name}", officePreviewContentHandler(officePreview))
 	}
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")
@@ -268,7 +319,7 @@ func startMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
 	}
 }
 
-func completeMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
+func completeMCPOAuth(manager *mcpOAuthManager, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input struct {
 			FlowID string `json:"flowId"`
@@ -282,6 +333,7 @@ func completeMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
 			return
 		}
 		if err := manager.complete(request.Context(), request.PathValue("id"), input.FlowID, input.State, input.Code); err != nil {
+			auditSink.Record(request.Context(), audit.ActionMCPOAuthAuthorize, request.PathValue("id"), "failure", requestCorrelationID(request), nil)
 			writeRuntimeError(writer, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -290,16 +342,19 @@ func completeMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
 			writeRuntimeError(writer, http.StatusNotFound, "mcp_server_not_found")
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionMCPOAuthAuthorize, server.ID, "success", requestCorrelationID(request), map[string]string{"server_name": server.Name})
 		writeRuntimeJSON(writer, http.StatusOK, server)
 	}
 }
 
-func logoutMCPOAuth(manager *mcpOAuthManager) http.HandlerFunc {
+func logoutMCPOAuth(manager *mcpOAuthManager, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		if err := manager.logout(request.Context(), request.PathValue("id")); err != nil {
+			auditSink.Record(request.Context(), audit.ActionMCPOAuthRevoke, request.PathValue("id"), "failure", requestCorrelationID(request), nil)
 			writeRuntimeError(writer, http.StatusBadRequest, err.Error())
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionMCPOAuthRevoke, request.PathValue("id"), "success", requestCorrelationID(request), nil)
 		writer.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -377,57 +432,6 @@ func createCredential(credentials runtimeCredentialCatalog) http.HandlerFunc {
 	}
 }
 
-func putManagedProviderCredential(credentials runtimeCredentialCatalog, publisher providerCredentialPublisher) http.HandlerFunc {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		secret, err := io.ReadAll(io.LimitReader(request.Body, (32*1024)+1))
-		if err != nil || len(secret) == 0 || len(secret) > 32*1024 || bytes.IndexByte(secret, 0) >= 0 {
-			clearBytes(secret)
-			writeRuntimeError(writer, http.StatusBadRequest, "invalid_provider_credential")
-			return
-		}
-		metadata, err := credentials.Put(request.Context(), credentialbroker.Input{
-			ID: managedHarnessProviderCredentialID, Kind: credentialbroker.KindProvider, Label: "Harness managed Provider", Secret: secret, State: credentialbroker.StateReady,
-		})
-		clearBytes(secret)
-		if err != nil {
-			writeRuntimeError(writer, http.StatusBadRequest, "invalid_provider_credential")
-			return
-		}
-		if err := publisher.Publish(request.Context()); err != nil {
-			writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
-			return
-		}
-		writeRuntimeJSON(writer, http.StatusOK, metadata)
-	}
-}
-
-func revokeManagedProviderCredential(credentials runtimeCredentialCatalog, publisher providerCredentialPublisher) http.HandlerFunc {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		metadata, err := credentials.Metadata(request.Context(), managedHarnessProviderCredentialID)
-		if errors.Is(err, credentialbroker.ErrNotFound) {
-			if err := publisher.Publish(request.Context()); err != nil {
-				writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
-				return
-			}
-			writer.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if err != nil || metadata.Kind != credentialbroker.KindProvider {
-			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
-			return
-		}
-		if err := credentials.Revoke(request.Context(), managedHarnessProviderCredentialID); err != nil {
-			writeRuntimeError(writer, http.StatusInternalServerError, "credential_broker_failed")
-			return
-		}
-		if err := publisher.Publish(request.Context()); err != nil {
-			writeRuntimeError(writer, http.StatusServiceUnavailable, "provider_projection_failed")
-			return
-		}
-		writer.WriteHeader(http.StatusNoContent)
-	}
-}
-
 func testManagedProvider(tester providerHealthTester) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		health, err := tester.Test(request.Context())
@@ -496,7 +500,7 @@ func getSkill(skills *skillruntime.Store) http.HandlerFunc {
 	}
 }
 
-func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {
+func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input struct {
 			Enabled *bool `json:"enabled"`
@@ -523,12 +527,17 @@ func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 				return
 			}
 		}
+		action := audit.ActionSkillDisable
+		if *input.Enabled {
+			action = audit.ActionSkillEnable
+		}
 		entry, err := skills.SetEnabled(request.Context(), request.PathValue("id"), *input.Enabled)
 		if errors.Is(err, skillruntime.ErrNotFound) {
 			writeRuntimeError(writer, http.StatusNotFound, "skill_not_found")
 			return
 		}
 		if err != nil {
+			auditSink.Record(request.Context(), action, request.PathValue("id"), "failure", requestCorrelationID(request), nil)
 			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
 			return
 		}
@@ -536,11 +545,12 @@ func updateSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), action, entry.ID, "success", requestCorrelationID(request), map[string]string{"skill_name": entry.Name})
 		writeRuntimeJSON(writer, http.StatusOK, resolveSkillEntry(entry, exec.LookPath))
 	}
 }
 
-func deleteSkill(skills *skillruntime.Store, publisher skillProjectionPublisher) http.HandlerFunc {
+func deleteSkill(skills *skillruntime.Store, publisher skillProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		entry, err := skills.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, skillruntime.ErrNotFound) {
@@ -556,6 +566,7 @@ func deleteSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 			return
 		}
 		if err := skills.Remove(request.Context(), entry.ID); err != nil {
+			auditSink.Record(request.Context(), audit.ActionSkillUninstall, entry.ID, "failure", requestCorrelationID(request), map[string]string{"skill_name": entry.Name})
 			writeRuntimeError(writer, http.StatusInternalServerError, "skill_catalog_failed")
 			return
 		}
@@ -563,6 +574,7 @@ func deleteSkill(skills *skillruntime.Store, publisher skillProjectionPublisher)
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "skill_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionSkillUninstall, entry.ID, "success", requestCorrelationID(request), map[string]string{"skill_name": entry.Name, "source": entry.Source})
 		writer.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -620,7 +632,7 @@ func listMCPServers(catalog *mcpruntime.Catalog, credentials credentialCatalog) 
 	}
 }
 
-func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher) http.HandlerFunc {
+func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input mcpMutation
 		decoder := json.NewDecoder(io.LimitReader(request.Body, 64*1024))
@@ -650,6 +662,7 @@ func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog,
 			OAuthState: "none", Health: health,
 		})
 		if err != nil {
+			auditSink.Record(request.Context(), audit.ActionMCPInstall, id, "failure", requestCorrelationID(request), map[string]string{"server_name": *input.Name})
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_mcp_server")
 			return
 		}
@@ -657,11 +670,12 @@ func createMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog,
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionMCPInstall, server.ID, "success", requestCorrelationID(request), map[string]string{"server_name": server.Name, "transport": server.Transport.Kind})
 		writeRuntimeJSON(writer, http.StatusCreated, server)
 	}
 }
 
-func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher) http.HandlerFunc {
+func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog, publisher mcpProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		server, err := catalog.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, mcpruntime.ErrNotFound) {
@@ -690,6 +704,13 @@ func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog,
 		if input.Description != nil {
 			server.Description = *input.Description
 		}
+		auditAction := audit.ActionMCPUpdate
+		if input.Enabled != nil && *input.Enabled != server.Enabled {
+			auditAction = audit.ActionMCPEnable
+			if !*input.Enabled {
+				auditAction = audit.ActionMCPDisable
+			}
+		}
 		if input.Enabled != nil {
 			server.Enabled = *input.Enabled
 		}
@@ -712,6 +733,7 @@ func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog,
 		}
 		server, err = catalog.Replace(request.Context(), server)
 		if err != nil {
+			auditSink.Record(request.Context(), auditAction, request.PathValue("id"), "failure", requestCorrelationID(request), map[string]string{"server_name": server.Name})
 			writeRuntimeError(writer, http.StatusBadRequest, "invalid_mcp_server")
 			return
 		}
@@ -719,6 +741,7 @@ func updateMCPServer(catalog *mcpruntime.Catalog, credentials credentialCatalog,
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), auditAction, server.ID, "success", requestCorrelationID(request), map[string]string{"server_name": server.Name})
 		writeRuntimeJSON(writer, http.StatusOK, server)
 	}
 }
@@ -739,7 +762,7 @@ func validCredentialReferences(ctx context.Context, credentials credentialCatalo
 	return true
 }
 
-func deleteMCPServer(catalog *mcpruntime.Catalog, publisher mcpProjectionPublisher) http.HandlerFunc {
+func deleteMCPServer(catalog *mcpruntime.Catalog, publisher mcpProjectionPublisher, auditSink *auditClient) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		server, err := catalog.Get(request.Context(), request.PathValue("id"))
 		if errors.Is(err, mcpruntime.ErrNotFound) {
@@ -755,6 +778,7 @@ func deleteMCPServer(catalog *mcpruntime.Catalog, publisher mcpProjectionPublish
 			return
 		}
 		if err := catalog.Delete(request.Context(), server.ID); err != nil {
+			auditSink.Record(request.Context(), audit.ActionMCPUninstall, server.ID, "failure", requestCorrelationID(request), map[string]string{"server_name": server.Name})
 			writeRuntimeError(writer, http.StatusInternalServerError, "mcp_catalog_failed")
 			return
 		}
@@ -762,6 +786,7 @@ func deleteMCPServer(catalog *mcpruntime.Catalog, publisher mcpProjectionPublish
 			writeRuntimeError(writer, http.StatusServiceUnavailable, "mcp_projection_failed")
 			return
 		}
+		auditSink.Record(request.Context(), audit.ActionMCPUninstall, server.ID, "success", requestCorrelationID(request), map[string]string{"server_name": server.Name})
 		writer.WriteHeader(http.StatusNoContent)
 	}
 }

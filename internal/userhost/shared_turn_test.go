@@ -24,7 +24,7 @@ func TestSharedTurnHandlerInjectsOwnerRuntimeProjectRoot(t *testing.T) {
 			t.Fatalf("request = %s auth=%q", request.URL.Path, request.Header.Get("Authorization"))
 		}
 		var input sharedTurnRequest
-		if json.NewDecoder(request.Body).Decode(&input) != nil || input.WorkspacePath != root {
+		if json.NewDecoder(request.Body).Decode(&input) != nil || input.WorkspacePath != root || input.PayerSID != "S-1-5-21-2000" {
 			t.Fatalf("input = %#v", input)
 		}
 		writeRuntimeJSON(writer, http.StatusOK, map[string]any{"runId": input.RunID, "runtimeSessionId": "session-shared", "assistantBody": "done", "recovered": false})
@@ -32,7 +32,7 @@ func TestSharedTurnHandlerInjectsOwnerRuntimeProjectRoot(t *testing.T) {
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 	handler := sharedTurnHandler(sharedTurnProjectStub{root: root}, target, "runtime-token")
-	body := `{"runId":"run_1234567890123456","conversationId":"conversation_123456","projectId":"project_1234567890","engine":"codex","modelId":"gpt-5","thinkingEffort":"high","context":"delta","recoveryContext":"full"}`
+	body := `{"runId":"run_1234567890123456","conversationId":"conversation_123456","projectId":"project_1234567890","engine":"codex","modelId":"gpt-5","thinkingEffort":"high","context":"delta","recoveryContext":"full","payerSid":"S-1-5-21-2000"}`
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/internal/shared-turns", strings.NewReader(body)))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"assistantBody":"done"`) {

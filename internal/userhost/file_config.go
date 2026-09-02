@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/winutil"
 )
 
@@ -27,6 +28,11 @@ type FileConfig struct {
 	ManagedSkillsRoot          string              `json:"managedSkillsRoot,omitempty"`
 	ManagedToolsRoot           string              `json:"managedToolsRoot,omitempty"`
 	ManagedMCPServers          []mcpruntime.Server `json:"managedMcpServers,omitempty"`
+	// HarnessModel and ModelGatewayBaseURL come from the employee-manager
+	// modelGateway configuration (docs/employee-manager.config.example.json);
+	// both are empty only in deployments without a managed model gateway.
+	HarnessModel        string `json:"harnessModel,omitempty"`
+	ModelGatewayBaseURL string `json:"modelGatewayBaseUrl,omitempty"`
 }
 
 func LoadFileConfig(path string) (FileConfig, error) {
@@ -49,6 +55,17 @@ func LoadFileConfig(path string) (FileConfig, error) {
 	}
 	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
 		return FileConfig{}, errors.New("managed tools root must be absolute")
+	}
+	if (config.HarnessModel == "") != (config.ModelGatewayBaseURL == "") {
+		return FileConfig{}, errors.New("harness model and model gateway base URL must be configured together")
+	}
+	if config.ModelGatewayBaseURL != "" {
+		if err := nativeauth.ValidateBaseURL(config.ModelGatewayBaseURL); err != nil {
+			return FileConfig{}, err
+		}
+		if !nativeauth.ValidModel(config.HarnessModel) {
+			return FileConfig{}, errors.New("harness model is invalid")
+		}
 	}
 	return config, nil
 }

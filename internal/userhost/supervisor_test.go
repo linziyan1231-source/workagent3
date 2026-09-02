@@ -11,9 +11,10 @@ import (
 
 func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "must-not-leak")
+	t.Setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 	t.Setenv("WORKAGENT_TEST_ALLOWED", "must-not-leak")
 	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
-	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`, `C:\release\managed-tools\officecli`)
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`, `C:\release\managed-tools\officecli`, "http://127.0.0.1:8317/v1", "gpt-5.6-sol")
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "must-not-leak") {
 		t.Fatal("unrelated service credential inherited")
@@ -35,6 +36,46 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	}
 	if !strings.Contains(joined, `PATH=C:\release\managed-tools\officecli`) {
 		t.Fatal("managed tools were not prepended to the Harness PATH")
+	}
+	// The managed provider endpoint must come from configuration only, never
+	// from the inherited environment.
+	if strings.Contains(joined, "https://api.deepseek.com") {
+		t.Fatal("inherited public DeepSeek endpoint leaked into the Harness environment")
+	}
+	if !strings.Contains(joined, "DEEPSEEK_BASE_URL=http://127.0.0.1:8317/v1") || !strings.Contains(joined, "WORKAGENT_HARNESS_MODEL=gpt-5.6-sol") {
+		t.Fatalf("managed Harness model route missing from runtime environment: %v", environment)
+	}
+}
+
+func TestRuntimeEnvironmentOmitsManagedModelRouteWithoutGateway(t *testing.T) {
+	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", "", "", "", "", "")
+	joined := strings.Join(environment, "\n")
+	if strings.Contains(joined, "DEEPSEEK_BASE_URL=") || strings.Contains(joined, "WORKAGENT_HARNESS_MODEL=") {
+		t.Fatalf("unmanaged deployment gained a managed model route: %v", environment)
+	}
+}
+
+func TestConfigRequiresPairedHarnessModelAndGateway(t *testing.T) {
+	root := t.TempDir()
+	base := Config{SID: "S-1-5-21-1000", DataRoot: root, Command: "dsh", Profile: "workagent", PlatformURL: "http://127.0.0.1:8080", PlatformCredential: "token", Limits: winutil.JobLimits{}}
+	if _, err := New(base); err != nil {
+		t.Fatal(err)
+	}
+	unpaired := base
+	unpaired.HarnessModel = "gpt-5.6-sol"
+	if _, err := New(unpaired); err == nil {
+		t.Fatal("accepted a Harness model without the gateway base URL")
+	}
+	nonLoopback := base
+	nonLoopback.HarnessModel, nonLoopback.ModelGatewayBaseURL = "gpt-5.6-sol", "https://api.deepseek.com/v1"
+	if _, err := New(nonLoopback); err == nil {
+		t.Fatal("accepted a non-loopback model gateway base URL")
+	}
+	managed := base
+	managed.HarnessModel, managed.ModelGatewayBaseURL = "gpt-5.6-sol", "http://127.0.0.1:8317/v1"
+	if _, err := New(managed); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/nativeauth"
 	"workagent3/internal/skillmigration"
 	"workagent3/internal/skillruntime"
 )
@@ -195,61 +197,101 @@ func TestRuntimeGatewayCreatesAndRevokesMCPSecrets(t *testing.T) {
 	}
 }
 
-func TestRuntimeGatewayProjectsManagedProviderCredentialWithoutReturningSecret(t *testing.T) {
+func TestRuntimeGatewayHasNoBrowserProviderCredentialWriteRoute(t *testing.T) {
 	catalog, err := mcpruntime.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer catalog.Close()
 	credentials := openGatewayCredentials(t)
-	type projection struct {
-		method, authorization, secret string
-	}
-	projected := make(chan projection, 2)
-	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/internal/provider-credentials/deepseek-official" {
-			writer.WriteHeader(http.StatusNotFound)
-			return
-		}
-		body, _ := io.ReadAll(request.Body)
-		projected <- projection{method: request.Method, authorization: request.Header.Get("Authorization"), secret: string(body)}
-		clearBytes(body)
-		writer.WriteHeader(http.StatusNoContent)
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNotFound)
 	}))
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 	handler := newRuntimeGatewayHandler(catalog, credentials, gatewayTestPublisher{}, openGatewaySkills(t), gatewayTestPublisher{}, nil, nil, target, "runtime-token")
 
-	put := httptest.NewRequest(http.MethodPut, "/v1/provider-credentials/harness", strings.NewReader("private-provider-key"))
-	put.Header.Set("Authorization", "Bearer runtime-token")
-	putResponse := httptest.NewRecorder()
-	handler.ServeHTTP(putResponse, put)
-	if putResponse.Code != http.StatusOK || strings.Contains(putResponse.Body.String(), "private-provider-key") {
-		t.Fatalf("Provider credential response %d: %s", putResponse.Code, putResponse.Body.String())
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		request := httptest.NewRequest(method, "/v1/provider-credentials/harness", strings.NewReader("private-provider-key"))
+		request.Header.Set("Authorization", "Bearer runtime-token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code == http.StatusOK || response.Code == http.StatusNoContent {
+			t.Fatalf("browser %s of the managed Provider credential was accepted", method)
+		}
 	}
-	first := <-projected
-	if first.method != http.MethodPut || first.authorization != "Bearer runtime-token" || first.secret != "private-provider-key" {
-		t.Fatalf("Provider projection = %#v", first)
+	if _, err := credentials.Metadata(context.Background(), managedHarnessProviderCredentialID); !errors.Is(err, credentialbroker.ErrNotFound) {
+		t.Fatalf("browser write created the managed Provider credential: %v", err)
 	}
-	secret, err := credentials.Resolve(context.Background(), managedHarnessProviderCredentialID)
-	if err != nil || string(secret) != "private-provider-key" {
-		t.Fatalf("protected Provider credential = %q, %v", secret, err)
+}
+
+func TestRuntimeGatewayDeliversStagedBundleThroughInternalPath(t *testing.T) {
+	root := t.TempDir()
+	sid := "S-1-5-21-1000"
+	dataRoot := filepath.Join(root, sid)
+	runtimeDirectory := filepath.Join(dataRoot, "runtime")
+	dshHome := filepath.Join(dataRoot, "dsh-home")
+	for _, directory := range []string{runtimeDirectory, dshHome} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type projection struct{ method, authorization, secret string }
+	projected := make(chan projection, 1)
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/internal/provider-credentials/deepseek-official":
+			body, _ := io.ReadAll(request.Body)
+			projected <- projection{method: request.Method, authorization: request.Header.Get("Authorization"), secret: string(body)}
+			clearBytes(body)
+			writer.WriteHeader(http.StatusNoContent)
+		case "/internal/mcp-projection", "/internal/skill-projection":
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+	target, _ := url.Parse(downstream.URL)
+	bundle := &nativeauth.Bundle{FormatVersion: 1, BaseURL: "http://127.0.0.1:8317/v1", CodexAPIKey: "cpa_abcdefghijklmnopqrstuvwxyz", KimiAPIKey: "cpa_zyxwvutsrqponmlkjihgfedcba", CodexModel: "gpt-5.6-sol", KimiModel: "kimi-k3"}
+	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+
+	// Step 2: the shared ChatGPT downstream key sits in the SID broker record.
+	secret, err := gateway.credentials.Resolve(context.Background(), managedHarnessProviderCredentialID)
+	if err != nil || string(secret) != bundle.CodexAPIKey {
+		t.Fatalf("managed Provider credential = %q, %v", secret, err)
 	}
 	clearBytes(secret)
+	// Step 3: the running Harness received the re-projection with the new key.
+	first := <-projected
+	if first.method != http.MethodPut || first.authorization != "Bearer runtime-token" || first.secret != bundle.CodexAPIKey {
+		t.Fatalf("Provider projection = %#v", first)
+	}
+}
 
-	revoke := httptest.NewRequest(http.MethodDelete, "/v1/provider-credentials/harness", nil)
-	revoke.Header.Set("Authorization", "Bearer runtime-token")
-	revokeResponse := httptest.NewRecorder()
-	handler.ServeHTTP(revokeResponse, revoke)
-	if revokeResponse.Code != http.StatusNoContent {
-		t.Fatalf("Provider revoke response %d: %s", revokeResponse.Code, revokeResponse.Body.String())
+func TestRuntimeGatewayKeepsStagedBundleWhenProjectionFails(t *testing.T) {
+	root := t.TempDir()
+	sid := "S-1-5-21-1001"
+	dataRoot := filepath.Join(root, sid)
+	runtimeDirectory := filepath.Join(dataRoot, "runtime")
+	dshHome := filepath.Join(dataRoot, "dsh-home")
+	for _, directory := range []string{runtimeDirectory, dshHome} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	second := <-projected
-	if second.method != http.MethodDelete || second.authorization != "Bearer runtime-token" || second.secret != "" {
-		t.Fatalf("Provider revoke projection = %#v", second)
-	}
-	if _, err := credentials.Resolve(context.Background(), managedHarnessProviderCredentialID); !errors.Is(err, credentialbroker.ErrCredentialExpired) {
-		t.Fatalf("revoked Provider credential remains resolvable: %v", err)
+	downstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer downstream.Close()
+	target, _ := url.Parse(downstream.URL)
+	bundle := &nativeauth.Bundle{FormatVersion: 1, BaseURL: "http://127.0.0.1:8317/v1", CodexAPIKey: "cpa_abcdefghijklmnopqrstuvwxyz", KimiAPIKey: "cpa_zyxwvutsrqponmlkjihgfedcba", CodexModel: "gpt-5.6-sol", KimiModel: "kimi-k3"}
+	if _, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {}); err == nil {
+		t.Fatal("failed Harness re-projection was accepted")
 	}
 }
 

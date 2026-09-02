@@ -34,6 +34,9 @@ type sharedFileOperator interface {
 type sharedFileManager struct {
 	base     string
 	ownerSID string
+	// officePreview converts Office documents to cached PDFs for the
+	// "office-preview" operation; wired by newRuntimeGateway.
+	officePreview *officePreviewService
 }
 
 func (m *sharedFileManager) ProjectRoot(_ context.Context, projectID string) (string, error) {
@@ -58,7 +61,7 @@ func newSharedFileManager(dataRoot, ownerSID string) (*sharedFileManager, error)
 	return &sharedFileManager{base: filepath.Dir(dataRoot), ownerSID: ownerSID}, nil
 }
 
-func (m *sharedFileManager) OperateFile(_ context.Context, request sharedFileRequest) (json.RawMessage, error) {
+func (m *sharedFileManager) OperateFile(ctx context.Context, request sharedFileRequest) (json.RawMessage, error) {
 	if !sharedProjectIDPattern.MatchString(request.ProjectID) {
 		return nil, errors.New("shared file project is invalid")
 	}
@@ -195,6 +198,33 @@ func (m *sharedFileManager) OperateFile(_ context.Context, request sharedFileReq
 			newRelative = parent + "/" + newRelative
 		}
 		return json.Marshal(map[string]string{"new_path": "shared://" + request.ProjectID + "/" + newRelative})
+	case "office-preview":
+		// Shared Office files convert on the owner's UserHost through the same
+		// SID-private cache as personal previews; the PDF travels back as
+		// base64 inside the shared-files envelope and is rendered by the
+		// caller's sandboxed PDF pipeline.
+		if relative == "" {
+			return nil, errors.New("shared file path is required")
+		}
+		if m.officePreview == nil {
+			return nil, errOfficeCLINotFound
+		}
+		info, err := os.Stat(targetPath)
+		if err != nil || info.IsDir() {
+			return nil, errOfficePreviewNotFound
+		}
+		hash, err := m.officePreview.convert(ctx, targetPath)
+		if err != nil {
+			return nil, err
+		}
+		content, err := os.ReadFile(filepath.Join(m.officePreview.cacheDir, hash+".pdf"))
+		if err != nil {
+			return nil, errOfficePreviewFailed
+		}
+		if len(content) > maxSharedFileData {
+			return nil, errOfficePreviewTooLarge
+		}
+		return json.Marshal(map[string]string{"name": hash + ".pdf", "pdf": base64.StdEncoding.EncodeToString(content)})
 	default:
 		return nil, errors.New("unsupported shared file operation")
 	}
