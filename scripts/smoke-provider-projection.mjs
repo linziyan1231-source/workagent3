@@ -96,6 +96,7 @@ try {
       ...process.env,
       DSH_HOME: dshHome,
       DEEPSEEK_BASE_URL: `http://127.0.0.1:${providerAddress.port}`,
+      WORKAGENT_HARNESS_MODEL: "gpt-5.6-sol",
       WORKAGENT_RUNTIME_PORT: String(port),
       WORKAGENT_RUNTIME_TOKEN: token,
       WORKAGENT_WORKSPACE_ROOT: workspaceRoot,

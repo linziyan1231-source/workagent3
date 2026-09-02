@@ -25,7 +25,12 @@ pnpm build
 ```
 
 The Portal serves `apps/web/dist` and defaults to secure cookies. For a local
-HTTP-only development run, pass `-secure-cookie=false`. A first local user can
+HTTP-only development run, pass `-secure-cookie=false`. The managed Harness
+provider model must be declared with `-harness-model` (or
+`WORKAGENT_HARNESS_MODEL`) set to the configured Codex model — the same value
+as `modelGateway.codexModel` in the employee-manager configuration (see
+`docs/employee-manager.config.example.json`); Portal refuses to start without
+it. A first local user can
 be created once with `WORKAGENT_BOOTSTRAP_USERNAME`,
 `WORKAGENT_BOOTSTRAP_PASSWORD`, and `WORKAGENT_BOOTSTRAP_SID`; do not place
 those values in source control. `WORKAGENT_RUNTIME_URL`,

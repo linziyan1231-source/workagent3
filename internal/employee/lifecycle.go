@@ -53,12 +53,43 @@ type LifecycleUserStore interface {
 	DeleteOffboardedUser(context.Context, string) error
 }
 
+// KeyLifecycle manages the SID-scoped downstream model gateway keys backing
+// an employee runtime (implemented by modelgateway.Client). It is optional:
+// when no model gateway is configured, lifecycle flows skip key handling.
+type KeyLifecycle interface {
+	SetKeysEnabled(ctx context.Context, sid string, enabled bool) error
+	RevokeKeys(ctx context.Context, sid string) error
+}
+
 // Lifecycle coordinates Portal account state with the SID-owned runtime. Its
-// ordering is fail-closed: disable the account before stopping the runtime,
-// and prove the runtime healthy before enabling the account.
+// ordering is fail-closed: disable the account and the gateway keys before
+// stopping the runtime, and prove the runtime healthy before enabling the
+// account.
 type Lifecycle struct {
 	Platform LifecyclePlatform
 	Users    LifecycleUserStore
+	Keys     KeyLifecycle
+}
+
+func (l Lifecycle) setKeysEnabled(ctx context.Context, sid string, enabled bool) error {
+	if l.Keys == nil {
+		return nil
+	}
+	if err := l.Keys.SetKeysEnabled(ctx, sid, enabled); err != nil {
+		return fmt.Errorf("set employee model gateway keys enabled=%t: %w", enabled, err)
+	}
+	return nil
+}
+
+// disableKeysBestEffort re-disables gateway keys while rolling back a failed
+// enable/repair/rename so a closed employee never keeps working keys.
+func (l Lifecycle) disableKeysBestEffort(ctx context.Context, sid string) {
+	if l.Keys == nil {
+		return
+	}
+	rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	_ = l.Keys.SetKeysEnabled(rollbackContext, sid, false)
+	cancel()
 }
 
 func (l Lifecycle) SetEnabled(ctx context.Context, username string, enabled bool) (store.User, error) {
@@ -73,13 +104,20 @@ func (l Lifecycle) SetEnabled(ctx context.Context, username string, enabled bool
 		if !user.Disabled {
 			return user, nil
 		}
+		// Restore the gateway keys before the runtime starts so the employee
+		// never runs with disabled keys, and never enables with dead ones.
+		if err := l.setKeysEnabled(ctx, user.SID, true); err != nil {
+			return store.User{}, err
+		}
 		if err := l.Platform.StartInstalledRuntime(ctx, user.SID); err != nil {
+			l.disableKeysBestEffort(ctx, user.SID)
 			return store.User{}, fmt.Errorf("start employee runtime: %w", err)
 		}
 		if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
 			rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			_ = l.Platform.StopInstalledRuntime(rollbackContext, user.SID)
 			cancel()
+			l.disableKeysBestEffort(ctx, user.SID)
 			return store.User{}, err
 		}
 		user.Disabled = false
@@ -87,12 +125,27 @@ func (l Lifecycle) SetEnabled(ctx context.Context, username string, enabled bool
 	}
 
 	if user.Disabled {
+		if user.Offboarded {
+			return user, nil
+		}
+		// A previous disable may have failed after closing the account but
+		// before the keys were disabled or the runtime stopped; replay both
+		// shutdown steps idempotently so the operation stays retryable.
+		if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+			return user, err
+		}
+		if err := l.Platform.StopInstalledRuntime(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("employee runtime stop failed: %w", err)
+		}
 		return user, nil
 	}
 	if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
 		return store.User{}, err
 	}
 	user.Disabled = true
+	if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		return user, fmt.Errorf("Portal account disabled but model gateway keys are still enabled: %w", err)
+	}
 	if err := l.Platform.StopInstalledRuntime(ctx, user.SID); err != nil {
 		return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
 	}
@@ -198,9 +251,16 @@ func (l Lifecycle) OffboardRetain(ctx context.Context, username string) (store.U
 			return store.User{}, err
 		}
 		user.Disabled = true
+		if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+			return user, fmt.Errorf("Portal account disabled but model gateway keys are still enabled: %w", err)
+		}
 		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
 			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
 		}
+	} else if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		// A retained employee must not keep working gateway keys; disabling is
+		// idempotent, so a failed earlier attempt is safely replayed here.
+		return user, fmt.Errorf("disable retained employee model gateway keys: %w", err)
 	}
 	if err := platform.RemoveInstalledRuntime(ctx, user.SID); err != nil {
 		return user, fmt.Errorf("employee data retained but scheduled runtime removal failed: %w", err)
@@ -230,22 +290,35 @@ func (l Lifecycle) Repair(ctx context.Context, username string, windowsPassword 
 			return store.User{}, err
 		}
 		user.Disabled = true
+		if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+			return user, fmt.Errorf("Portal account disabled but model gateway keys are still enabled: %w", err)
+		}
 		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
 			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
 		}
+	} else if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		// Disable the old keys before the in-place rotation below reissues
+		// them, even when the account was already closed.
+		return user, fmt.Errorf("disable employee model gateway keys before repair: %w", err)
 	}
+	// Repair re-provisions the gateway keys in place (rotate + enable) before
+	// the runtime starts again. On failure the employee stays disabled, so
+	// any re-enabled keys are disabled again best effort.
 	if err := platform.RepairInstalledRuntime(ctx, user, windowsPassword); err != nil {
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, fmt.Errorf("repair employee runtime: %w", err)
 	}
 	if user.Offboarded {
 		if err := l.Users.SetUserOffboarded(ctx, username, false); err != nil {
 			_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+			l.disableKeysBestEffort(ctx, user.SID)
 			return user, err
 		}
 		user.Offboarded = false
 	}
 	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
 		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, err
 	}
 	user.Disabled = false
@@ -277,24 +350,37 @@ func (l Lifecycle) RenameWindowsAccount(ctx context.Context, username, newWindow
 			return store.User{}, err
 		}
 		user.Disabled = true
+		if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+			return user, fmt.Errorf("Portal account disabled but model gateway keys are still enabled: %w", err)
+		}
 		if err := platform.StopInstalledRuntime(ctx, user.SID); err != nil {
 			return user, fmt.Errorf("Portal account disabled but employee runtime stop failed: %w", err)
 		}
+	} else if err := l.setKeysEnabled(ctx, user.SID, false); err != nil {
+		return user, fmt.Errorf("disable employee model gateway keys before rename: %w", err)
 	}
 	canonical, err := platform.RenameInstalledAccount(ctx, user, newWindowsUsername, windowsPassword)
 	if err != nil {
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, fmt.Errorf("rename Windows account: %w", err)
 	}
 	if err := l.Users.SetWindowsUsername(ctx, user.ID, canonical); err != nil {
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, err
 	}
 	user.WindowsUsername = canonical
 	if !wasEnabled {
 		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		// Rename re-provisions (re-enables) the gateway keys; the employee
+		// stays disabled, so the keys must be disabled again before return.
+		if err := l.setKeysEnabled(context.WithoutCancel(ctx), user.SID, false); err != nil {
+			return user, fmt.Errorf("Windows account renamed but model gateway keys are still enabled: %w", err)
+		}
 		return user, nil
 	}
 	if err := l.Users.SetUserEnabled(ctx, username, true); err != nil {
 		_ = platform.StopInstalledRuntime(context.WithoutCancel(ctx), user.SID)
+		l.disableKeysBestEffort(ctx, user.SID)
 		return user, err
 	}
 	user.Disabled = false
@@ -315,6 +401,15 @@ func (l Lifecycle) DeleteRetainedEmployee(ctx context.Context, username, confirm
 	}
 	if user.Admin || !user.Disabled || !user.Offboarded {
 		return errors.New("only a retained offboarded employee can be deleted")
+	}
+	// Revoke the gateway keys before any local data or the Windows account is
+	// removed; a revocation failure must not leave enabled keys behind while
+	// the employee is erased. Revocation is idempotent, so a retry after a
+	// later failure is safe.
+	if l.Keys != nil {
+		if err := l.Keys.RevokeKeys(ctx, user.SID); err != nil {
+			return fmt.Errorf("revoke employee model gateway keys: %w", err)
+		}
 	}
 	if err := platform.DeleteRetainedEmployee(ctx, user); err != nil {
 		return fmt.Errorf("delete retained employee data: %w", err)

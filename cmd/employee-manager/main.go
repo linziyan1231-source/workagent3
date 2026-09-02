@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -17,31 +19,45 @@ import (
 	"syscall"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/employee"
 	"workagent3/internal/employeemanager"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/modelgateway"
+	"workagent3/internal/quota"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
 type managerConfig struct {
-	DatabasePath         string               `json:"databasePath"`
-	DataRootBase         string               `json:"dataRootBase"`
-	UserHostExecutable   string               `json:"userHostExecutable"`
-	HarnessCommand       string               `json:"harnessCommand"`
-	HarnessEntrypoint    string               `json:"harnessEntrypoint"`
-	CodexCommand         string               `json:"codexCommand,omitempty"`
-	KimiCommand          string               `json:"kimiCommand,omitempty"`
-	HarnessArguments     []string             `json:"harnessArguments,omitempty"`
-	Profile              string               `json:"profile"`
-	HarnessProfileSource string               `json:"harnessProfileSource"`
-	ManagedSkillsRoot    string               `json:"managedSkillsRoot"`
-	ManagedToolsRoot     string               `json:"managedToolsRoot,omitempty"`
-	ManagedMCPServers    []mcpruntime.Server  `json:"managedMcpServers,omitempty"`
-	PortalURL            string               `json:"portalUrl"`
-	Limits               winutil.JobLimits    `json:"limits"`
-	ModelGateway         *modelgateway.Config `json:"modelGateway,omitempty"`
+	DatabasePath         string              `json:"databasePath"`
+	DataRootBase         string              `json:"dataRootBase"`
+	UserHostExecutable   string              `json:"userHostExecutable"`
+	HarnessCommand       string              `json:"harnessCommand"`
+	HarnessEntrypoint    string              `json:"harnessEntrypoint"`
+	CodexCommand         string              `json:"codexCommand,omitempty"`
+	KimiCommand          string              `json:"kimiCommand,omitempty"`
+	HarnessArguments     []string            `json:"harnessArguments,omitempty"`
+	Profile              string              `json:"profile"`
+	HarnessProfileSource string              `json:"harnessProfileSource"`
+	ManagedSkillsRoot    string              `json:"managedSkillsRoot"`
+	ManagedToolsRoot     string              `json:"managedToolsRoot,omitempty"`
+	ManagedMCPServers    []mcpruntime.Server `json:"managedMcpServers,omitempty"`
+	PortalURL            string              `json:"portalUrl"`
+	Limits               winutil.JobLimits   `json:"limits"`
+	// ModelGateway holds the CLIProxyAPI downstream key policy. Model and quota
+	// values are mandatory when present — no code defaults exist; see
+	// docs/employee-manager.config.example.json for the full template.
+	ModelGateway *modelgateway.Config `json:"modelGateway,omitempty"`
+	// AuditDatabasePath stores business audit events (employee lifecycle and
+	// model gateway key lifecycle). It defaults to audit.db beside the Portal
+	// database, shared with the Portal process.
+	AuditDatabasePath string `json:"auditDatabasePath,omitempty"`
+	// QuotaDatabasePath is the quota database the usage drain writes gateway
+	// key digests and drained usage records into. It must point at the same
+	// quota.db the Portal serves (it defaults beside this database), because
+	// settlement matching and the usage page read what the drain writes.
+	QuotaDatabasePath string `json:"quotaDatabasePath,omitempty"`
 }
 
 func main() {
@@ -84,11 +100,49 @@ func run() error {
 	}
 	defer data.Close()
 	var nativeModels employee.NativeModelProvisioner
+	var keys employee.KeyLifecycle
+	var harnessModel, modelGatewayBaseURL string
+	auditPath := config.AuditDatabasePath
+	if auditPath == "" {
+		auditPath = filepath.Join(filepath.Dir(config.DatabasePath), "audit.db")
+	}
+	if err := os.MkdirAll(filepath.Dir(auditPath), 0o700); err != nil {
+		return fmt.Errorf("create audit data directory: %w", err)
+	}
+	auditStore, err := audit.Open(auditPath)
+	if err != nil {
+		return err
+	}
+	defer auditStore.Close()
+	var drainer *modelgateway.UsageDrainer
 	if config.ModelGateway != nil {
-		nativeModels, err = modelgateway.NewCLIProxy(*config.ModelGateway)
+		gateway, err := modelgateway.NewCLIProxy(*config.ModelGateway)
 		if err != nil {
 			return err
 		}
+		gateway.SetAudit(auditStore, "employee-manager")
+		quotaPath := config.QuotaDatabasePath
+		if quotaPath == "" {
+			quotaPath = filepath.Join(filepath.Dir(config.DatabasePath), "quota.db")
+		}
+		if err := os.MkdirAll(filepath.Dir(quotaPath), 0o700); err != nil {
+			return fmt.Errorf("create quota data directory: %w", err)
+		}
+		// The drain store shares quota.db with the Portal: the drain is the
+		// single writer of gateway usage and key digests, the Portal reads them
+		// for settlement matching and the usage page.
+		quotaRecorder, err := quota.OpenRecorder(quotaPath)
+		if err != nil {
+			return err
+		}
+		defer quotaRecorder.Close()
+		gateway.SetKeyIndexer(quotaRecorder)
+		drainer, err = gateway.NewUsageDrainer(quotaRecorder)
+		if err != nil {
+			return err
+		}
+		nativeModels, keys = gateway, gateway
+		harnessModel, modelGatewayBaseURL = config.ModelGateway.CodexModel, config.ModelGateway.BaseURL
 	}
 	platform, err := employee.NewWindowsPlatform(employee.WindowsPlatformConfig{
 		DataRootBase: config.DataRootBase, UserHostExecutable: config.UserHostExecutable,
@@ -100,6 +154,7 @@ func run() error {
 		ManagedToolsRoot:  config.ManagedToolsRoot,
 		ManagedMCPServers: config.ManagedMCPServers,
 		PortalURL:         config.PortalURL, Limits: config.Limits, NativeModels: nativeModels,
+		HarnessModel: harnessModel, ModelGatewayBaseURL: modelGatewayBaseURL,
 	})
 	if err != nil {
 		return err
@@ -107,9 +162,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
-	lifecycle := employee.Lifecycle{Platform: platform, Users: data}
+	lifecycle := employee.Lifecycle{Platform: platform, Users: data, Keys: keys}
 	if *listen != "" {
-		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data})
+		if drainer != nil {
+			go runUsageDrain(ctx, drainer, usageDrainInterval)
+		}
+		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, Audit: auditStore})
 	}
 	var user store.User
 	switch *action {
@@ -139,10 +197,68 @@ func run() error {
 	default:
 		return errors.New("unsupported employee lifecycle action")
 	}
+	recordCLIAudit(ctx, auditStore, *action, *username, err)
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled, "admin": user.Admin})
+}
+
+// cliAuditActions maps the CLI lifecycle actions to the business audit
+// vocabulary. CLI invocations are attributed to the subsystem itself; the
+// Portal-driven path records the acting administrator instead.
+var cliAuditActions = map[string]string{
+	"add":             audit.ActionEmployeeProvision,
+	"enable":          audit.ActionEmployeeEnable,
+	"disable":         audit.ActionEmployeeDisable,
+	"reset-password":  audit.ActionEmployeePasswordReset,
+	"set-limits":      audit.ActionEmployeeLimitsUpdate,
+	"offboard-retain": audit.ActionEmployeeOffboardRetain,
+	"repair":          audit.ActionEmployeeRepair,
+	"rename-windows":  audit.ActionEmployeeRename,
+	"offboard-delete": audit.ActionEmployeeOffboardDelete,
+	"grant-admin":     audit.ActionEmployeeAdminGrant,
+	"revoke-admin":    audit.ActionEmployeeAdminRevoke,
+}
+
+// recordCLIAudit writes the terminal business audit event for a CLI lifecycle
+// action. Recording never fails the action itself.
+func recordCLIAudit(ctx context.Context, sink audit.Sink, action, username string, operation error) {
+	auditAction, ok := cliAuditActions[action]
+	if !ok {
+		return
+	}
+	audit.RecordCLI(ctx, sink, "employee-manager", auditAction, username, operation, nil)
+}
+
+// usageDrainInterval paces the gateway usage queue consumer. The queue retains
+// records only briefly upstream, so the interval stays well under a minute.
+const usageDrainInterval = 30 * time.Second
+
+// runUsageDrain is the single consumer of the gateway usage queue (the
+// endpoint pops records on read). It runs for the lifetime of the service
+// process; a failed cycle is logged and retried at the next tick, with
+// un-persisted records retried from the drainer's buffer before new pops.
+func runUsageDrain(ctx context.Context, drainer *modelgateway.UsageDrainer, interval time.Duration) {
+	drain := func() {
+		persisted, skipped, err := drainer.Drain(ctx)
+		if err != nil {
+			log.Printf("Gateway usage drain failed after %d records: %v", persisted, err)
+		} else if persisted > 0 || skipped > 0 {
+			log.Printf("Gateway usage drain persisted %d records (%d skipped as unmanaged)", persisted, skipped)
+		}
+	}
+	drain()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			drain()
+		}
+	}
 }
 
 func serveManager(ctx context.Context, address, tokenPath string, service *employeemanager.Service) error {
@@ -195,10 +311,67 @@ func loadManagerConfig(path string) (managerConfig, error) {
 	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
 		return managerConfig{}, errors.New("managed tools root must be absolute")
 	}
+	if config.ManagedToolsRoot != "" {
+		if err := verifyManagedTools(config.ManagedToolsRoot); err != nil {
+			return managerConfig{}, err
+		}
+	}
 	if strings.TrimSpace(config.Profile) == "" || strings.TrimSpace(config.PortalURL) == "" {
 		return managerConfig{}, errors.New("Harness profile and Portal URL are required")
 	}
 	return config, nil
+}
+
+// managedToolRecord is the pinned OfficeCLI record shipped with the release
+// (release/managed-tools/officecli/manifest.json). It fixes the tool version,
+// its license, and the expected binary hash.
+type managedToolRecord struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	License       string `json:"license"`
+	SHA256        string `json:"sha256"`
+}
+
+// verifyManagedTools is the startup gate for the managed OfficeCLI tool: the
+// pinned record must be present and well formed, and officecli.exe in the
+// managed tools root must exist and match the recorded SHA-256.
+func verifyManagedTools(root string) error {
+	payload, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil {
+		return fmt.Errorf("read managed tools manifest: %w", err)
+	}
+	var record managedToolRecord
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return fmt.Errorf("decode managed tools manifest: %w", err)
+	}
+	hash, hashErr := hex.DecodeString(record.SHA256)
+	if record.SchemaVersion != 1 || record.Name != "OfficeCLI" || strings.TrimSpace(record.Version) == "" ||
+		strings.TrimSpace(record.License) == "" || hashErr != nil || len(hash) != sha256.Size {
+		return errors.New("managed tools manifest is invalid")
+	}
+	binary := filepath.Join(root, "officecli.exe")
+	info, err := os.Lstat(binary)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("managed OfficeCLI binary is missing or not a regular file")
+	}
+	file, err := os.Open(binary)
+	if err != nil {
+		return fmt.Errorf("open managed OfficeCLI binary: %w", err)
+	}
+	digest := sha256.New()
+	_, copyErr := io.Copy(digest, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if actual := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(actual, record.SHA256) {
+		return fmt.Errorf("managed OfficeCLI binary failed integrity verification: expected %s, got %s", record.SHA256, actual)
+	}
+	return nil
 }
 
 func bytesTrimLineEnding(value []byte) []byte {

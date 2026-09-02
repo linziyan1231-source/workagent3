@@ -42,6 +42,11 @@ type WindowsPlatformConfig struct {
 	PortalURL            string
 	Limits               winutil.JobLimits
 	NativeModels         NativeModelProvisioner
+	// HarnessModel and ModelGatewayBaseURL mirror the model gateway
+	// configuration so each SID UserHost can point its Harness at the shared
+	// CLIProxyAPI loopback with the configured Codex model.
+	HarnessModel        string
+	ModelGatewayBaseURL string
 }
 
 type NativeModelProvisioner interface {
@@ -92,7 +97,10 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(ctx context.Context, account Acc
 	if err := projectHarnessProfile(p.config.HarnessProfileSource, profileDirectory); err != nil {
 		return "", fmt.Errorf("project Harness profile: %w", err)
 	}
-	if p.config.NativeModels != nil && !nativeauth.Ready(root) {
+	// Provisioning rotates the SID downstream keys in place, so every Add and
+	// Repair stages a fresh bundle; UserHost then replays the ordered delivery
+	// (native credentials, broker record, Harness re-projection) at startup.
+	if p.config.NativeModels != nil {
 		bundle, err := p.config.NativeModels.Provision(ctx, account.Canonical, account.SID)
 		if err != nil {
 			return "", fmt.Errorf("provision native model access: %w", err)
@@ -137,6 +145,7 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 		ManagedSkillsRoot: p.config.ManagedSkillsRoot, ManagedToolsRoot: p.config.ManagedToolsRoot,
 		ManagedMCPServers: expandManagedMCPServers(p.config.ManagedMCPServers, spec),
 		Limits:            p.config.Limits,
+		HarnessModel:      p.config.HarnessModel, ModelGatewayBaseURL: p.config.ModelGatewayBaseURL,
 	}
 }
 

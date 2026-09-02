@@ -17,6 +17,9 @@ import (
 	"strings"
 	"time"
 
+	"workagent3/internal/audit"
+	"workagent3/internal/auth"
+	"workagent3/internal/contracts"
 	"workagent3/internal/nativeauth"
 )
 
@@ -41,10 +44,35 @@ type Config struct {
 }
 
 type Client struct {
-	config Config
-	base   string
-	key    string
-	http   *http.Client
+	config     Config
+	base       string
+	key        string
+	http       *http.Client
+	audit      audit.Sink
+	actor      string
+	keyIndexer KeyIndexer
+}
+
+// KeyIndexer persists the opaque digest → SID mapping for issued downstream
+// keys. quota.Store implements it. The usage drain cannot attribute gateway
+// records without it, and plaintext keys are never persisted — only their
+// SHA-256 digests.
+type KeyIndexer interface {
+	IndexGatewayKeys(ctx context.Context, sid string, plainKeys []string) error
+}
+
+// SetKeyIndexer wires the gateway key index updated on every successful
+// Provision. A nil indexer disables indexing.
+func (c *Client) SetKeyIndexer(indexer KeyIndexer) {
+	c.keyIndexer = indexer
+}
+
+// SetAudit wires the business audit sink for downstream key lifecycle events.
+// The actor identifies the calling subsystem (for example
+// "employee-manager"). Plain key material is never recorded: event targets
+// are the opaque managed key IDs. A nil sink disables business auditing.
+func (c *Client) SetAudit(sink audit.Sink, actor string) {
+	c.audit, c.actor = sink, strings.TrimSpace(actor)
 }
 
 type keyModel struct {
@@ -71,26 +99,39 @@ type keyWrite struct {
 }
 
 func NewCLIProxy(config Config) (*Client, error) {
+	// Model and quota values are deployment decisions: they must come from the
+	// employee-manager configuration file (see
+	// docs/employee-manager.config.example.json), never from code defaults.
+	var missing []string
 	if len(config.CodexModels) == 0 {
-		config.CodexModels = []string{"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
+		missing = append(missing, "codexModels")
 	}
 	if len(config.KimiModels) == 0 {
-		config.KimiModels = []string{"kimi-for-coding", "kimi-for-coding-highspeed", "kimi-k3"}
+		missing = append(missing, "kimiModels")
 	}
 	if config.CodexModel == "" {
-		config.CodexModel = "gpt-5.6-sol"
+		missing = append(missing, "codexModel")
 	}
 	if config.KimiModel == "" {
-		config.KimiModel = "kimi-k3"
+		missing = append(missing, "kimiModel")
 	}
 	if config.RPM == 0 {
-		config.RPM = 30
+		missing = append(missing, "rpm")
 	}
 	if config.CodexDailyUSD == 0 {
-		config.CodexDailyUSD, config.CodexWeeklyUSD = 40, 80
+		missing = append(missing, "codexDailyUsd")
+	}
+	if config.CodexWeeklyUSD == 0 {
+		missing = append(missing, "codexWeeklyUsd")
 	}
 	if config.KimiDailyUSD == 0 {
-		config.KimiDailyUSD, config.KimiWeeklyUSD = 10, 20
+		missing = append(missing, "kimiDailyUsd")
+	}
+	if config.KimiWeeklyUSD == 0 {
+		missing = append(missing, "kimiWeeklyUsd")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("CLIProxyAPI model gateway configuration is missing required keys: %s (see docs/employee-manager.config.example.json)", strings.Join(missing, ", "))
 	}
 	endpoint, err := url.Parse(config.ManagementURL)
 	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.Port() == "" || endpoint.Path != "/v0/management/plugins/cpa-key-policy" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
@@ -102,6 +143,9 @@ func NewCLIProxy(config Config) (*Client, error) {
 	info, err := os.Lstat(config.ManagementKeyFile)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1024 {
 		return nil, errors.New("CLIProxyAPI management key file must be a bounded regular non-symlink file")
+	}
+	if err := verifyManagementKeyFileACL(config.ManagementKeyFile); err != nil {
+		return nil, err
 	}
 	payload, err := os.ReadFile(config.ManagementKeyFile)
 	if err != nil {
@@ -132,17 +176,13 @@ func (c *Client) Provision(ctx context.Context, username, sid string) (nativeaut
 	if err != nil {
 		return nativeauth.Bundle{}, err
 	}
-	var listed struct {
-		Keys []struct {
-			ID string `json:"id"`
-		} `json:"keys"`
-	}
-	if err := c.json(ctx, http.MethodGet, "/keys", nil, &listed); err != nil {
+	existing, err := c.listKeys(ctx)
+	if err != nil {
 		return nativeauth.Bundle{}, err
 	}
-	existing := make(map[string]bool, len(listed.Keys))
-	for _, key := range listed.Keys {
-		existing[key.ID] = true
+	correlationID, correlationErr := auth.RandomToken(18)
+	if correlationErr != nil {
+		correlationID = ""
 	}
 	prefix := keyPrefix(sid)
 	desired := []struct {
@@ -164,17 +204,21 @@ func (c *Client) Provision(ctx context.Context, username, sid string) (nativeaut
 		var result struct {
 			PlainKey string `json:"plain_key"`
 		}
-		if existing[desired[index].key.ID] {
-			if err := c.json(ctx, http.MethodPatch, "/keys", desired[index].key, &struct {
+		var operation error
+		action := audit.ActionModelGatewayKeyProvision
+		if _, found := existing[desired[index].key.ID]; found {
+			action = audit.ActionModelGatewayKeyRotate
+			if operation = c.json(ctx, http.MethodPatch, "/keys", desired[index].key, &struct {
 				Key json.RawMessage `json:"key"`
-			}{}); err != nil {
-				return nativeauth.Bundle{}, err
+			}{}); operation == nil {
+				operation = c.json(ctx, http.MethodPost, "/keys/rotate", map[string]string{"id": desired[index].key.ID}, &result)
 			}
-			if err := c.json(ctx, http.MethodPost, "/keys/rotate", map[string]string{"id": desired[index].key.ID}, &result); err != nil {
-				return nativeauth.Bundle{}, err
-			}
-		} else if err := c.json(ctx, http.MethodPost, "/keys", desired[index].key, &result); err != nil {
-			return nativeauth.Bundle{}, err
+		} else {
+			operation = c.json(ctx, http.MethodPost, "/keys", desired[index].key, &result)
+		}
+		c.recordKeyEvent(ctx, correlationID, action, desired[index].key.ID, operation)
+		if operation != nil {
+			return nativeauth.Bundle{}, operation
 		}
 		if !plainKeyPattern.MatchString(result.PlainKey) {
 			return nativeauth.Bundle{}, errors.New("CLIProxyAPI did not return a valid one-time key")
@@ -185,7 +229,123 @@ func (c *Client) Provision(ctx context.Context, username, sid string) (nativeaut
 	if err := bundle.Validate(); err != nil {
 		return nativeauth.Bundle{}, err
 	}
+	// The new keys are live at the gateway now; their digests must reach the
+	// usage key index before the bundle is handed out, or the drain cannot
+	// attribute the usage they generate. Indexing failure fails the provision.
+	if c.keyIndexer != nil {
+		if err := c.keyIndexer.IndexGatewayKeys(ctx, sid, []string{bundle.CodexAPIKey, bundle.KimiAPIKey}); err != nil {
+			return nativeauth.Bundle{}, fmt.Errorf("index CLIProxyAPI downstream keys: %w", err)
+		}
+	}
 	return bundle, nil
+}
+
+// SetKeysEnabled flips the enabled flag on both SID downstream keys
+// (<prefix>-chatgpt and <prefix>-kimi). The current record is read back and
+// re-sent with only Enabled changed, so the call is safe whether the
+// cpa-key-policy plugin treats PATCH as a partial or a full update. Keys
+// absent from the listing are already out of service and are skipped, which
+// makes the operation idempotent under replay.
+func (c *Client) SetKeysEnabled(ctx context.Context, sid string, enabled bool) error {
+	if !strings.HasPrefix(sid, "S-1-") {
+		return errors.New("employee SID is invalid for model gateway key management")
+	}
+	existing, err := c.listKeys(ctx)
+	if err != nil {
+		return err
+	}
+	action := audit.ActionModelGatewayKeyDisable
+	if enabled {
+		action = audit.ActionModelGatewayKeyEnable
+	}
+	correlationID, correlationErr := auth.RandomToken(18)
+	if correlationErr != nil {
+		correlationID = ""
+	}
+	for _, id := range managedKeyIDs(sid) {
+		record, found := existing[id]
+		if !found || record.Enabled == enabled {
+			continue
+		}
+		record.Enabled = enabled
+		operation := c.json(ctx, http.MethodPatch, "/keys", record, nil)
+		c.recordKeyEvent(ctx, correlationID, action, id, operation)
+		if operation != nil {
+			return operation
+		}
+	}
+	return nil
+}
+
+// RevokeKeys permanently removes both SID downstream keys. The plugin has no
+// dedicated revocation concept: deletion via DELETE /keys is preferred, and
+// where the deployed plugin does not expose deletion (HTTP 404/405) the
+// closest available semantics — permanently disabling the key — is applied
+// instead. Keys already absent are skipped, so the operation is idempotent.
+func (c *Client) RevokeKeys(ctx context.Context, sid string) error {
+	if !strings.HasPrefix(sid, "S-1-") {
+		return errors.New("employee SID is invalid for model gateway key management")
+	}
+	existing, err := c.listKeys(ctx)
+	if err != nil {
+		return err
+	}
+	correlationID, correlationErr := auth.RandomToken(18)
+	if correlationErr != nil {
+		correlationID = ""
+	}
+	for _, id := range managedKeyIDs(sid) {
+		record, found := existing[id]
+		if !found {
+			continue
+		}
+		operation := c.json(ctx, http.MethodDelete, "/keys", map[string]string{"id": id}, nil)
+		var status *statusError
+		if errors.As(operation, &status) && (status.status == http.StatusNotFound || status.status == http.StatusMethodNotAllowed) {
+			record.Enabled = false
+			operation = c.json(ctx, http.MethodPatch, "/keys", record, nil)
+		}
+		c.recordKeyEvent(ctx, correlationID, audit.ActionModelGatewayKeyRevoke, id, operation)
+		if operation != nil {
+			return operation
+		}
+	}
+	return nil
+}
+
+func (c *Client) listKeys(ctx context.Context) (map[string]keyWrite, error) {
+	var listed struct {
+		Keys []keyWrite `json:"keys"`
+	}
+	if err := c.json(ctx, http.MethodGet, "/keys", nil, &listed); err != nil {
+		return nil, err
+	}
+	result := make(map[string]keyWrite, len(listed.Keys))
+	for _, key := range listed.Keys {
+		result[key.ID] = key
+	}
+	return result, nil
+}
+
+// recordKeyEvent writes one business audit event per managed key. Recording
+// never fails the key operation itself, matching the Portal middleware
+// policy; plain key material is never part of the event.
+func (c *Client) recordKeyEvent(ctx context.Context, correlationID, action, keyID string, operation error) {
+	if c.audit == nil || correlationID == "" {
+		return
+	}
+	result := "success"
+	if operation != nil {
+		result = "failure"
+	}
+	_, _ = c.audit.Record(context.WithoutCancel(ctx), contracts.AuditInput{
+		Actor: c.actor, Target: keyID, Action: action, Result: result, CorrelationID: correlationID,
+	})
+}
+
+func managedKeyIDs(sid string) []string {
+	prefix := keyPrefix(sid)
+	return []string{prefix + "-chatgpt", prefix + "-kimi"}
 }
 
 func (c *Client) aliasCatalog(ctx context.Context) (map[string][]keyModel, error) {
@@ -224,7 +384,17 @@ func (c *Client) aliasCatalog(ctx context.Context) (map[string][]keyModel, error
 	return result, nil
 }
 
+type statusError struct{ status int }
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("CLIProxyAPI management returned HTTP %d", e.status)
+}
+
 func (c *Client) json(ctx context.Context, method, route string, input, output any) error {
+	return c.jsonURL(ctx, method, c.base+route, input, output)
+}
+
+func (c *Client) jsonURL(ctx context.Context, method, fullURL string, input, output any) error {
 	var body io.Reader
 	if input != nil {
 		payload, err := json.Marshal(input)
@@ -233,7 +403,7 @@ func (c *Client) json(ctx context.Context, method, route string, input, output a
 		}
 		body = bytes.NewReader(payload)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.base+route, body)
+	request, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return errors.New("create CLIProxyAPI request")
 	}
@@ -249,7 +419,7 @@ func (c *Client) json(ctx context.Context, method, route string, input, output a
 		return errors.New("CLIProxyAPI management response is unreadable or oversized")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("CLIProxyAPI management returned HTTP %d", response.StatusCode)
+		return &statusError{status: response.StatusCode}
 	}
 	if output == nil {
 		return nil

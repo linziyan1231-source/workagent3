@@ -40,6 +40,10 @@ const child = spawn(process.execPath, [dsh, "--profile", "workagent"], {
     CODEX_HOME: process.env.CODEX_HOME ?? join(nativeHome, "codex"),
     DSH_HOME: home,
     KIMI_CODE_HOME: process.env.KIMI_CODE_HOME ?? join(nativeHome, "kimi"),
+    DEEPSEEK_BASE_URL:
+      process.env.DEEPSEEK_BASE_URL ?? "http://127.0.0.1:8317/v1",
+    WORKAGENT_HARNESS_MODEL:
+      process.env.WORKAGENT_HARNESS_MODEL ?? "gpt-5.6-sol",
     WORKAGENT_RUNTIME_PORT: String(port),
     WORKAGENT_RUNTIME_TOKEN: token,
     WORKAGENT_WORKSPACE_ROOT: workspaceRoot,

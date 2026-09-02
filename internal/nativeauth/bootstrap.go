@@ -28,17 +28,40 @@ type Bundle struct {
 }
 
 func (b Bundle) Validate() error {
-	endpoint, err := url.Parse(b.BaseURL)
-	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.Port() == "" || endpoint.Path != "/v1" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return errors.New("native model gateway must be an exact IPv4 loopback /v1 HTTP URL")
+	if err := ValidateBaseURL(b.BaseURL); err != nil {
+		return err
 	}
 	if b.FormatVersion != 1 || !apiKeyPattern.MatchString(b.CodexAPIKey) || !apiKeyPattern.MatchString(b.KimiAPIKey) {
 		return errors.New("native model bootstrap contains invalid credentials")
 	}
-	if !validModel(b.CodexModel) || !validModel(b.KimiModel) {
+	if !ValidModel(b.CodexModel) || !ValidModel(b.KimiModel) {
 		return errors.New("native model bootstrap contains an invalid model")
 	}
 	return nil
+}
+
+// ValidateBaseURL enforces the exact IPv4 loopback /v1 HTTP shape every
+// consumer of the native model gateway relies on.
+func ValidateBaseURL(raw string) error {
+	endpoint, err := url.Parse(raw)
+	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.Port() == "" || endpoint.Path != "/v1" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return errors.New("native model gateway must be an exact IPv4 loopback /v1 HTTP URL")
+	}
+	return nil
+}
+
+// ValidModel reports whether value is an acceptable managed model identifier.
+func ValidModel(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("._:-", character)) {
+			return false
+		}
+	}
+	return true
 }
 
 func Ready(dataRoot string) bool {
@@ -57,28 +80,45 @@ func Stage(dataRoot string, bundle Bundle) error {
 	return writePrivate(filepath.Join(dataRoot, "runtime", bootstrapFileName), append(encoded, '\n'))
 }
 
-func Apply(dataRoot string) error {
+// Load reads the staged one-time bootstrap without consuming it. The second
+// return value reports whether a bundle is staged at all.
+func Load(dataRoot string) (Bundle, bool, error) {
 	path := filepath.Join(dataRoot, "runtime", bootstrapFileName)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return Bundle{}, false, nil
 	}
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64*1024 {
-		return errors.New("native model bootstrap must be a bounded regular non-symlink file")
+		return Bundle{}, false, errors.New("native model bootstrap must be a bounded regular non-symlink file")
 	}
 	payload, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return Bundle{}, false, err
 	}
 	defer clear(payload)
 	var bundle Bundle
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&bundle) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return errors.New("native model bootstrap is invalid")
+		return Bundle{}, false, errors.New("native model bootstrap is invalid")
 	}
 	if err := bundle.Validate(); err != nil {
+		return Bundle{}, false, err
+	}
+	return bundle, true, nil
+}
+
+// Apply writes the staged bundle into the native engine homes (ordered
+// delivery step 1). The staged file stays in place until Consume marks the
+// whole delivery complete, so a failed later step is replayed on the next
+// start.
+func Apply(dataRoot string) error {
+	bundle, staged, err := Load(dataRoot)
+	if err != nil {
 		return err
+	}
+	if !staged {
+		return nil
 	}
 	codexHome := filepath.Join(dataRoot, "native", "codex")
 	kimiHome := filepath.Join(dataRoot, "native", "kimi")
@@ -106,7 +146,14 @@ func Apply(dataRoot string) error {
 	if !Ready(dataRoot) {
 		return errors.New("native model authentication readback failed")
 	}
-	if err := os.Remove(path); err != nil {
+	return nil
+}
+
+// Consume marks the staged bootstrap fully delivered to every consumer (native
+// engine homes and the SID Credential Broker) and removes the one-time file.
+func Consume(dataRoot string) error {
+	path := filepath.Join(dataRoot, "runtime", bootstrapFileName)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("consume native model bootstrap: %w", err)
 	}
 	return nil
@@ -137,19 +184,6 @@ func kimiConfiguration(bundle Bundle) string {
 		"[services.moonshot_fetch]\n" +
 		"base_url = " + strconv.Quote(bundle.BaseURL+"/fetch?model="+bundle.KimiModel) + "\n" +
 		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n"
-}
-
-func validModel(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 128 {
-		return false
-	}
-	for _, character := range value {
-		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || strings.ContainsRune("._:-", character)) {
-			return false
-		}
-	}
-	return true
 }
 
 func regular(path string) bool {

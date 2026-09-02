@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/contracts"
 	"workagent3/internal/employee"
@@ -23,6 +25,8 @@ type Service struct {
 	Provisioner *employee.Provisioner
 	Lifecycle   employee.Lifecycle
 	Users       UserStore
+	// Audit receives business lifecycle events; nil disables auditing.
+	Audit audit.Sink
 
 	mu   sync.Mutex
 	jobs map[string]contracts.EmployeeProvisionJob
@@ -43,7 +47,7 @@ func (s *Service) ListManagedUsers(ctx context.Context) ([]contracts.ManagedEmpl
 	return items, nil, nil
 }
 
-func (s *Service) StartProvision(_ context.Context, username string, password []byte) (contracts.EmployeeProvisionJob, error) {
+func (s *Service) StartProvision(ctx context.Context, username string, password []byte) (contracts.EmployeeProvisionJob, error) {
 	if s.Provisioner == nil {
 		return contracts.EmployeeProvisionJob{}, errors.New("employee provisioner is required")
 	}
@@ -65,13 +69,16 @@ func (s *Service) StartProvision(_ context.Context, username string, password []
 	s.jobs[id] = job
 	s.mu.Unlock()
 	secret := append([]byte(nil), password...)
-	go s.runProvision(job, secret)
+	// The audit scope (acting admin + request correlation) outlives the
+	// request: capture it now so the asynchronous job terminal event is
+	// attributed correctly.
+	go s.runProvision(job, secret, auditScopeFrom(ctx))
 	return job, nil
 }
 
-func (s *Service) runProvision(job contracts.EmployeeProvisionJob, password []byte) {
+func (s *Service) runProvision(job contracts.EmployeeProvisionJob, password []byte, scope auditScope) {
 	defer zero(password)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(withAuditScope(context.Background(), scope.actor, scope.correlationID), 10*time.Minute)
 	defer cancel()
 	s.updateJob(job.ID, 20, "configuring_windows_account")
 	_, err := s.Provisioner.Add(ctx, job.Username, password)
@@ -81,6 +88,7 @@ func (s *Service) runProvision(job contracts.EmployeeProvisionJob, password []by
 		current.Status, current.Step, current.ErrorCode, current.ErrorMessage = "failed", "failed", "PROVISION_FAILED", err.Error()
 		s.jobs[job.ID] = current
 		s.mu.Unlock()
+		s.record(ctx, audit.ActionEmployeeProvision, job.Username, err, map[string]string{"step": "failed", "error_code": "PROVISION_FAILED"})
 		return
 	}
 	s.mu.Lock()
@@ -88,6 +96,7 @@ func (s *Service) runProvision(job contracts.EmployeeProvisionJob, password []by
 	current.Status, current.Percent, current.Step = "succeeded", 100, "completed"
 	s.jobs[job.ID] = current
 	s.mu.Unlock()
+	s.record(ctx, audit.ActionEmployeeProvision, job.Username, nil, map[string]string{"step": "completed"})
 }
 
 func (s *Service) updateJob(id string, percent int, step string) {
@@ -124,37 +133,53 @@ func (s *Service) ManagedUsersUsage(ctx context.Context) ([]contracts.ManagedEmp
 
 func (s *Service) SetEnabled(ctx context.Context, username string, enabled bool) error {
 	_, err := s.Lifecycle.SetEnabled(ctx, username, enabled)
+	action := audit.ActionEmployeeDisable
+	if enabled {
+		action = audit.ActionEmployeeEnable
+	}
+	s.record(ctx, action, username, err, nil)
 	return err
 }
 
 func (s *Service) ResetPassword(ctx context.Context, username string, password []byte) error {
-	return s.Lifecycle.ResetPortalPassword(ctx, username, password)
+	err := s.Lifecycle.ResetPortalPassword(ctx, username, password)
+	s.record(ctx, audit.ActionEmployeePasswordReset, username, err, nil)
+	return err
 }
 
 func (s *Service) SetLimits(ctx context.Context, username string, limits contracts.EmployeeResourceLimits) error {
 	_, err := s.Lifecycle.SetLimits(ctx, username, winutil.JobLimits{
 		MemoryBytes: limits.MemoryBytes, CPUPercent: limits.CPUPercent, ActiveProcesses: limits.ActiveProcesses,
 	})
+	s.record(ctx, audit.ActionEmployeeLimitsUpdate, username, err, map[string]string{
+		"memory_bytes": strconv.FormatUint(limits.MemoryBytes, 10),
+		"cpu_percent":  strconv.FormatUint(uint64(limits.CPUPercent), 10),
+	})
 	return err
 }
 
 func (s *Service) OffboardRetain(ctx context.Context, username string) error {
 	_, err := s.Lifecycle.OffboardRetain(ctx, username)
+	s.record(ctx, audit.ActionEmployeeOffboardRetain, username, err, nil)
 	return err
 }
 
 func (s *Service) Repair(ctx context.Context, username string, password []byte) error {
 	_, err := s.Lifecycle.Repair(ctx, username, password)
+	s.record(ctx, audit.ActionEmployeeRepair, username, err, nil)
 	return err
 }
 
 func (s *Service) RenameWindowsAccount(ctx context.Context, username, newWindowsUsername string, password []byte) error {
 	_, err := s.Lifecycle.RenameWindowsAccount(ctx, username, newWindowsUsername, password)
+	s.record(ctx, audit.ActionEmployeeRename, username, err, map[string]string{"new_windows_username": newWindowsUsername})
 	return err
 }
 
 func (s *Service) DeleteRetainedEmployee(ctx context.Context, username, confirmation string) error {
-	return s.Lifecycle.DeleteRetainedEmployee(ctx, username, confirmation)
+	err := s.Lifecycle.DeleteRetainedEmployee(ctx, username, confirmation)
+	s.record(ctx, audit.ActionEmployeeOffboardDelete, username, err, nil)
+	return err
 }
 
 func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {

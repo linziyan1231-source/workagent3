@@ -27,6 +27,8 @@ type WindowsPlatformConfig struct {
 	PortalURL            string
 	Limits               winutil.JobLimits
 	NativeModels         NativeModelProvisioner
+	HarnessModel         string
+	ModelGatewayBaseURL  string
 }
 
 type NativeModelProvisioner interface{}

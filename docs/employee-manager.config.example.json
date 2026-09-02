@@ -1,0 +1,35 @@
+{
+  "databasePath": "C:\\WorkAgent3\\employee-manager\\employees.db",
+  "dataRootBase": "C:\\WorkAgent3\\employees",
+  "userHostExecutable": "C:\\WorkAgent3\\bin\\userhost.exe",
+  "harnessCommand": "C:\\WorkAgent3\\bin\\dsh.exe",
+  "harnessEntrypoint": "dist\\index.js",
+  "codexCommand": "C:\\WorkAgent3\\bin\\codex.exe",
+  "kimiCommand": "C:\\WorkAgent3\\bin\\kimi.exe",
+  "profile": "workagent",
+  "harnessProfileSource": "C:\\WorkAgent3\\release\\profiles\\workagent",
+  "managedSkillsRoot": "C:\\WorkAgent3\\release\\managed-skills",
+  "managedToolsRoot": "C:\\WorkAgent3\\release\\managed-tools\\officecli",
+  "portalUrl": "http://127.0.0.1:8080",
+  "limits": {
+    "MemoryBytes": 4294967296,
+    "CPUPercent": 80,
+    "ActiveProcesses": 64
+  },
+  "modelGateway": {
+    "managementUrl": "http://127.0.0.1:8317/v0/management/plugins/cpa-key-policy",
+    "managementKeyFile": "C:\\WorkAgent3\\cliproxy\\management.key",
+    "baseUrl": "http://127.0.0.1:8317/v1",
+    "codexModel": "gpt-5.6-sol",
+    "codexModels": ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"],
+    "kimiModel": "kimi-k3",
+    "kimiModels": ["kimi-for-coding", "kimi-for-coding-highspeed", "kimi-k3"],
+    "rpm": 30,
+    "codexDailyUsd": 40,
+    "codexWeeklyUsd": 80,
+    "kimiDailyUsd": 10,
+    "kimiWeeklyUsd": 20
+  },
+  "auditDatabasePath": "C:\\WorkAgent3\\employee-manager\\audit.db",
+  "quotaDatabasePath": "C:\\WorkAgent3\\portal\\data\\quota.db"
+}

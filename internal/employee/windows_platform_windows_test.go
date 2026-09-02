@@ -68,6 +68,23 @@ func TestRuntimeConfigProjectsManagedSkillsRelease(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigProjectsManagedHarnessModelRoute(t *testing.T) {
+	root := t.TempDir()
+	platform := &WindowsPlatform{config: WindowsPlatformConfig{
+		HarnessCommand:      filepath.Join(root, "dsh.exe"),
+		HarnessEntrypoint:   filepath.Join("dist", "index.js"),
+		Profile:             "workagent",
+		PortalURL:           "http://127.0.0.1:8080",
+		HarnessModel:        "gpt-5.6-sol",
+		ModelGatewayBaseURL: "http://127.0.0.1:8317/v1",
+	}}
+	spec := RuntimeSpec{SID: "S-1-5-21-1000", DataRoot: filepath.Join(root, "employee")}
+	config := platform.runtimeFileConfig(spec, filepath.Join(root, "registration.token"))
+	if config.HarnessModel != "gpt-5.6-sol" || config.ModelGatewayBaseURL != "http://127.0.0.1:8317/v1" {
+		t.Fatalf("managed Harness model route was not projected: %+v", config)
+	}
+}
+
 func TestUpdateInstalledLimitsPreservesSIDOwnedRuntimeConfig(t *testing.T) {
 	root := t.TempDir()
 	sid := "S-1-5-21-1000"

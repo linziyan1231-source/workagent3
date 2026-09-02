@@ -12,6 +12,7 @@ import (
 )
 
 type lifecyclePlatform struct {
+	events    *[]string
 	starts    int
 	stops     int
 	startErr  error
@@ -28,6 +29,12 @@ type lifecyclePlatform struct {
 	deleteErr error
 }
 
+func (p *lifecyclePlatform) record(event string) {
+	if p.events != nil {
+		*p.events = append(*p.events, event)
+	}
+}
+
 type failingEnableStore struct{ *store.Store }
 
 func (s failingEnableStore) SetUserEnabled(ctx context.Context, username string, enabled bool) error {
@@ -38,22 +45,27 @@ func (s failingEnableStore) SetUserEnabled(ctx context.Context, username string,
 }
 
 func (p *lifecyclePlatform) StartInstalledRuntime(context.Context, string) error {
+	p.record("start")
 	p.starts++
 	return p.startErr
 }
 func (p *lifecyclePlatform) StopInstalledRuntime(context.Context, string) error {
+	p.record("stop")
 	p.stops++
 	return p.stopErr
 }
 func (p *lifecyclePlatform) UpdateInstalledLimits(_ context.Context, _ string, limits winutil.JobLimits) error {
+	p.record("update-limits")
 	p.limits = limits
 	return p.updateErr
 }
 func (p *lifecyclePlatform) RemoveInstalledRuntime(context.Context, string) error {
+	p.record("remove")
 	p.removes++
 	return p.removeErr
 }
 func (p *lifecyclePlatform) RepairInstalledRuntime(_ context.Context, _ store.User, password []byte) error {
+	p.record("repair")
 	p.repairs++
 	if len(password) == 0 {
 		return errors.New("missing password")
@@ -61,6 +73,7 @@ func (p *lifecyclePlatform) RepairInstalledRuntime(_ context.Context, _ store.Us
 	return p.repairErr
 }
 func (p *lifecyclePlatform) RenameInstalledAccount(_ context.Context, user store.User, newUsername string, password []byte) (string, error) {
+	p.record("rename")
 	p.renames++
 	if p.renameErr != nil {
 		return "", p.renameErr
@@ -71,6 +84,7 @@ func (p *lifecyclePlatform) RenameInstalledAccount(_ context.Context, user store
 	return `WORKSTATION\` + newUsername, nil
 }
 func (p *lifecyclePlatform) DeleteRetainedEmployee(context.Context, store.User) error {
+	p.record("delete")
 	p.deletes++
 	return p.deleteErr
 }

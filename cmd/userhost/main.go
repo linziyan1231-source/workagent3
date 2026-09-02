@@ -65,6 +65,7 @@ func run() error {
 		ManagedMCPServers:  config.ManagedMCPServers,
 		PlatformURL:        config.PortalURL,
 		PlatformCredential: credential,
+		HarnessModel:       config.HarnessModel, ModelGatewayBaseURL: config.ModelGatewayBaseURL,
 	})
 	if err != nil {
 		return err

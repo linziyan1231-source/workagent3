@@ -94,6 +94,9 @@ func Handler(service *Service, token string) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Carry the Portal-propagated actor and correlation ID into the
+		// request context so business audit events attribute the real admin.
+		r = r.WithContext(withAuditScope(r.Context(), r.Header.Get(actorHeader), r.Header.Get(correlationHeader)))
 		mux.ServeHTTP(w, r)
 	})
 }
