@@ -56,6 +56,12 @@ type OAuthToken struct {
 	RefreshToken string     `json:"refreshToken,omitempty"`
 	TokenType    string     `json:"tokenType"`
 	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
+	// Non-secret grant metadata persisted with the token so refresh and
+	// revocation work after a restart without re-running discovery.
+	TokenEndpoint      string `json:"tokenEndpoint,omitempty"`
+	RevocationEndpoint string `json:"revocationEndpoint,omitempty"`
+	ClientID           string `json:"clientId,omitempty"`
+	Resource           string `json:"resource,omitempty"`
 }
 
 // Metadata is the only credential representation intended for HTTP APIs. It
@@ -212,6 +218,37 @@ func (s *Store) ResolveMCPValue(ctx context.Context, id string) ([]byte, error) 
 	token.AccessToken = ""
 	token.RefreshToken = ""
 	return result, nil
+}
+
+// ResolveOAuthToken returns the stored OAuth grant for refresh processing.
+// Unlike Resolve it does not enforce access-token expiry — an expired access
+// token is exactly when the refresh token is needed. Revoked credentials and
+// non-OAuth kinds are rejected.
+func (s *Store) ResolveOAuthToken(ctx context.Context, id string) (OAuthToken, error) {
+	var sealed []byte
+	var kind Kind
+	var state State
+	err := s.db.QueryRowContext(ctx, `SELECT sealed_value,kind,state FROM credentials WHERE id=?`, id).Scan(&sealed, &kind, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OAuthToken{}, ErrNotFound
+	}
+	if err != nil {
+		return OAuthToken{}, fmt.Errorf("read credential: %w", err)
+	}
+	defer clearBytes(sealed)
+	if kind != KindMCPOAuth || state != StateReady {
+		return OAuthToken{}, ErrCredentialExpired
+	}
+	plain, err := s.protector.Open(sealed)
+	if err != nil {
+		return OAuthToken{}, fmt.Errorf("unprotect credential: %w", err)
+	}
+	defer clearBytes(plain)
+	var token OAuthToken
+	if json.Unmarshal(plain, &token) != nil {
+		return OAuthToken{}, errors.New("invalid OAuth credential")
+	}
+	return token, nil
 }
 
 func (s *Store) Revoke(ctx context.Context, id string) error {
