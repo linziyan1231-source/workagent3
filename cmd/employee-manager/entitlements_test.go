@@ -13,7 +13,7 @@ import (
 	"workagent3/internal/quota"
 )
 
-func openSeeder(t *testing.T, config modelgateway.Config) entitlementSeeder {
+func openSeeder(t *testing.T, config modelgateway.Config) (entitlementSeeder, string) {
 	t.Helper()
 	root := t.TempDir()
 	models, err := modelaccess.Open(filepath.Join(root, "model-access.db"))
@@ -21,18 +21,19 @@ func openSeeder(t *testing.T, config modelgateway.Config) entitlementSeeder {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { models.Close() })
-	quotas, err := quota.OpenRecorder(filepath.Join(root, "quota.db"))
+	quotaPath := filepath.Join(root, "quota.db")
+	quotas, err := quota.OpenRecorder(quotaPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { quotas.Close() })
-	return entitlementSeeder{models: models, quotas: quotas, config: config}
+	return entitlementSeeder{models: models, quotas: quotas, config: config}, quotaPath
 }
 
 func TestEntitlementSeederGrantsInternalModelsAndBudgets(t *testing.T) {
-	seeder := openSeeder(t, modelgateway.Config{
-		CodexModel: "gpt-5.6-sol", CodexDailyUSD: 40, CodexWeeklyUSD: 80,
-		KimiModel: "kimi-k3", KimiDailyUSD: 10, KimiWeeklyUSD: 20,
+	seeder, _ := openSeeder(t, modelgateway.Config{
+		CodexModel: "gpt-5.6-sol", CodexModels: []string{"gpt-5.6-luna", "gpt-5.6-sol"}, CodexDailyUSD: 40, CodexWeeklyUSD: 80,
+		KimiModel: "kimi-k3", KimiModels: []string{"kimi-for-coding", "kimi-k3"}, KimiDailyUSD: 10, KimiWeeklyUSD: 20,
 	})
 	ctx := context.Background()
 	sid := "S-1-5-21-1000"
@@ -60,10 +61,56 @@ func TestEntitlementSeederGrantsInternalModelsAndBudgets(t *testing.T) {
 			t.Fatalf("budget %s = %#v, expected daily %d", modelID, usage, expected)
 		}
 	}
+	// Configured upstream model IDs (shared-run settlement and native
+	// providers reserve against these directly) are authorized and budgeted
+	// with the same per-provider allowance.
+	for modelID, expected := range map[string]int64{
+		"gpt-5.6-sol":     codexTokens,
+		"gpt-5.6-luna":    codexTokens,
+		"kimi-k3":         kimiTokens,
+		"kimi-for-coding": kimiTokens,
+	} {
+		authorized, err := seeder.models.Authorized(ctx, sid, modelID)
+		if err != nil || !authorized {
+			t.Fatalf("upstream model %s not authorized: authorized=%t err=%v", modelID, authorized, err)
+		}
+		usage, err := seeder.quotas.Usage(ctx, sid, modelID, time.Time{})
+		if err != nil {
+			t.Fatalf("upstream budget %s missing: %v", modelID, err)
+		}
+		if usage.Period != string(quota.Daily) || usage.LimitUnits != expected {
+			t.Fatalf("upstream budget %s = %#v, expected daily %d", modelID, usage, expected)
+		}
+	}
+}
+
+// TestEntitlementSeederAllowsReserveByUpstreamModelID proves the acceptance
+// failure is gone: a reserving quota store (as the Portal holds it) accepts a
+// reservation pinned to the real configured model ID after seeding.
+func TestEntitlementSeederAllowsReserveByUpstreamModelID(t *testing.T) {
+	seeder, quotaPath := openSeeder(t, modelgateway.Config{
+		CodexModel: "gpt-5.6-sol", CodexModels: []string{"gpt-5.6-luna", "gpt-5.6-sol"}, CodexDailyUSD: 40, CodexWeeklyUSD: 80,
+		KimiModel: "kimi-k3", KimiModels: []string{"kimi-for-coding", "kimi-k3"}, KimiDailyUSD: 10, KimiWeeklyUSD: 20,
+	})
+	ctx := context.Background()
+	sid := "S-1-5-21-1000"
+	if err := seeder.SeedDefaults(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
+	reserving, err := quota.Open(quotaPath, seeder.models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reserving.Close()
+	for _, modelID := range []string{"gpt-5.6-sol", "kimi-k3"} {
+		if _, err := reserving.Reserve(ctx, quota.ReserveRequest{RunID: "run-" + modelID, SID: sid, ModelID: modelID, EstimatedUnits: 100}); err != nil {
+			t.Fatalf("reserve by upstream model %s denied after seeding: %v", modelID, err)
+		}
+	}
 }
 
 func TestEntitlementSeederReplayPreservesAdministratorAdjustments(t *testing.T) {
-	seeder := openSeeder(t, modelgateway.Config{
+	seeder, _ := openSeeder(t, modelgateway.Config{
 		CodexModel: "gpt-5.6-sol", CodexDailyUSD: 40, CodexWeeklyUSD: 80,
 		KimiModel: "kimi-k3", KimiDailyUSD: 10, KimiWeeklyUSD: 20,
 	})
