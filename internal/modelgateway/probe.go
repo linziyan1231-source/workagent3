@@ -161,7 +161,9 @@ func (c *Client) chatTurn(ctx context.Context, plainKey, model, engine string) e
 			"role":    "user",
 			"content": "Reply with exactly " + marker + ". Do not call tools or modify files.",
 		}},
-		"max_tokens": 32,
+		// 512 leaves headroom for reasoning models (kimi k3 spends reasoning
+		// tokens before the answer; 32 was fully consumed by them).
+		"max_tokens": 512,
 		"stream":     false,
 	})
 	if err != nil {
