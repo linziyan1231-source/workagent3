@@ -27,6 +27,15 @@ type statusWriter struct {
 }
 
 func (w *statusWriter) WriteHeader(status int) {
+	// 1xx responses other than 101 Switching Protocols are interim, not
+	// final: httputil.ReverseProxy relays the runtime's 100 Continue (and
+	// any other 1xx) through WriteHeader. Recording one here would drop the
+	// real status that follows, and the body write would then implicitly
+	// turn the response into a 200. Forward interim statuses untouched.
+	if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
 	if w.status != 0 {
 		return
 	}
