@@ -402,19 +402,55 @@ var startEmployeeTask = func(ctx context.Context, name string) error {
 	return runPowerShell(ctx, `Start-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop`, map[string]string{"WA3_TASK": name}, nil)
 }
 
+// powerShellResultMarker prefixes the single result line a query script
+// prints via [Console]::WriteLine. stdout and stderr are captured separately
+// and only an explicit marker line on stdout is accepted as the result: a
+// -NonInteractive PowerShell process can serialize progress records and
+// CLIXML fragments into its output streams, so positional "trim the output"
+// parsing never sees a clean value.
+const powerShellResultMarker = "WA3-RESULT:"
+
+// employeeTaskState reads the task state through the Task Scheduler COM API
+// (Schedule.Service) rather than the ScheduledTasks module cmdlets for two
+// reasons: New-Object -ComObject triggers no module autoload (the autoload
+// progress records were the CLIXML noise source under SYSTEM), and the
+// module's Get-ScheduledTask -TaskName query breaks with HRESULT 0x80070057
+// on machines hosting a task the CIM provider cannot parse, while the COM
+// API (which schtasks itself uses) stays reliable.
 var employeeTaskState = func(ctx context.Context, name string) (string, error) {
-	return runPowerShellQuery(ctx, `(Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop).State.ToString()`, map[string]string{"WA3_TASK": name})
+	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
+		`$service=New-Object -ComObject 'Schedule.Service'; $service.Connect(); ` +
+		`$task=$service.GetFolder('\').GetTask($env:WA3_TASK); ` +
+		`$names=@{0='Unknown';1='Disabled';2='Queued';3='Ready';4='Running'}; $state=$names[[int]$task.State]; ` +
+		`if ($null -eq $state) { $state='Unknown' }; [Console]::WriteLine('` + powerShellResultMarker + `' + $state)`
+	return runPowerShellQuery(ctx, script, map[string]string{"WA3_TASK": name})
 }
 
 func runPowerShellQuery(ctx context.Context, script string, values map[string]string) (string, error) {
 	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShell(script))
 	command.Env = restrictedEnvironment(values)
-	var output bytes.Buffer
-	command.Stdout, command.Stderr = &output, &output
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("Windows Task Scheduler query failed: %w: %s", err, powerShellOutput(output))
+		message := powerShellOutput(stderr)
+		if message == "" {
+			message = powerShellOutput(stdout)
+		}
+		return "", fmt.Errorf("Windows Task Scheduler query failed: %w: %s", err, message)
 	}
-	return strings.TrimSpace(output.String()), nil
+	// Only the explicit marker line on stdout is the result; surrounding
+	// CLIXML/progress noise is ignored. The last marker line wins.
+	var result string
+	found := false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), powerShellResultMarker); ok {
+			result, found = strings.TrimSpace(value), true
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("Windows Task Scheduler query produced no result line: %s", powerShellOutput(stdout))
+	}
+	return result, nil
 }
 
 func powerShellOutput(output bytes.Buffer) string {

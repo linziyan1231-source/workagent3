@@ -5,7 +5,9 @@ package employee
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -134,5 +136,85 @@ func TestTaskPowerShellEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	}
 	if !strings.Contains(environment, "WA3_TASK=WorkAgent3-test") {
 		t.Fatal("task input missing")
+	}
+}
+
+func TestPowerShellQueryParsesResultMarkerThroughCLIXMLNoise(t *testing.T) {
+	// Real powershell.exe subprocess reproducing the server failure mode:
+	// module-autoload progress records and CLIXML fragments pollute both
+	// streams of a -NonInteractive SYSTEM process; only the explicit marker
+	// line on stdout may be parsed.
+	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
+		`Write-Progress -Activity 'ScheduledTasks autoload' -Status 'loading' -PercentComplete 50; ` +
+		`[Console]::Error.WriteLine('#< CLIXML'); ` +
+		`[Console]::Error.WriteLine('<Objs Version="1.1.0.1"><Obj S="progress">noise</Obj></Objs>'); ` +
+		`[Console]::WriteLine('#< CLIXML'); ` +
+		`[Console]::WriteLine('<Objs>stdout progress noise</Objs>'); ` +
+		`[Console]::WriteLine('` + powerShellResultMarker + `Running')`
+	state, err := runPowerShellQuery(context.Background(), script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "Running" {
+		t.Fatalf("parsed state %q through CLIXML noise", state)
+	}
+}
+
+func TestPowerShellQueryFailsWithoutResultMarker(t *testing.T) {
+	// A query that only emits noise must fail loudly instead of returning
+	// garbage as a task state (the original regression parsed CLIXML as the
+	// state and confirmed nothing).
+	script := `[Console]::WriteLine('#< CLIXML'); [Console]::WriteLine('<Objs>noise</Objs>')`
+	if _, err := runPowerShellQuery(context.Background(), script, nil); err == nil {
+		t.Fatal("query without a result marker was accepted")
+	}
+}
+
+func TestEmployeeTaskStateQueriesRealScheduledTask(t *testing.T) {
+	// End-to-end: create a real scheduled task, then read its state through
+	// the production employeeTaskState path (encoded command, restricted
+	// environment, ScheduledTasks module autoload, marker parsing).
+	name := fmt.Sprintf("WorkAgent3-QueryTest-%d", os.Getpid())
+	create := exec.Command("schtasks", "/create", "/tn", name, "/tr", "cmd.exe /c exit", "/sc", "once", "/st", "00:00", "/f")
+	if output, err := create.CombinedOutput(); err != nil {
+		t.Skipf("scheduled task creation requires elevation: %v: %s", err, output)
+	}
+	defer exec.Command("schtasks", "/delete", "/tn", name, "/f").Run()
+	state, err := employeeTaskState(context.Background(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "Ready" && state != "Disabled" {
+		t.Fatalf("real task state = %q", state)
+	}
+}
+
+func TestStartScheduledTaskStartsRealTask(t *testing.T) {
+	// End-to-end with the real Task Scheduler: a nil return must mean the task
+	// is truly Running (the MultipleInstances IgnoreNew regression swallowed
+	// starts silently). Requires elevation; skips otherwise.
+	name := fmt.Sprintf("WorkAgent3-StartTest-%d", os.Getpid())
+	create := exec.Command("schtasks", "/create", "/tn", name, "/tr", `C:\Windows\System32\cmd.exe /c ping -n 20 127.0.0.1`, "/sc", "once", "/st", "00:00", "/f")
+	if output, err := create.CombinedOutput(); err != nil {
+		t.Skipf("scheduled task creation requires elevation: %v: %s", err, output)
+	}
+	defer exec.Command("schtasks", "/delete", "/tn", name, "/f").Run()
+	if err := startScheduledTask(context.Background(), name, startEmployeeTask, employeeTaskState); err != nil {
+		t.Fatalf("real task start was not confirmed: %v", err)
+	}
+	state, err := employeeTaskState(context.Background(), name)
+	if err != nil || state != "Running" {
+		t.Fatalf("confirmed start but task state = %q, %v", state, err)
+	}
+	// Stop the task and wait for the asynchronous stop to settle; a repeated
+	// start must succeed again (this is exactly the stop/start race window).
+	if output, err := exec.Command("schtasks", "/end", "/tn", name).CombinedOutput(); err != nil {
+		t.Fatalf("stop real task: %v: %s", err, output)
+	}
+	if err := startScheduledTask(context.Background(), name, startEmployeeTask, employeeTaskState); err != nil {
+		t.Fatalf("restart after asynchronous stop was not confirmed: %v", err)
+	}
+	if output, err := exec.Command("schtasks", "/end", "/tn", name).CombinedOutput(); err != nil {
+		t.Fatalf("final stop: %v: %s", err, output)
 	}
 }
