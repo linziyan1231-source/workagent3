@@ -2,15 +2,19 @@ package quota
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"workagent3/internal/contracts"
 )
+
+// gatewayKeyIDPattern matches the managed downstream key IDs the gateway
+// usage records carry ("aionui-<hex>-chatgpt" / "aionui-<hex>-kimi").
+var gatewayKeyIDPattern = regexp.MustCompile(`^aionui-[0-9a-f]{20}-(chatgpt|kimi)$`)
 
 // gatewayMatchSkew widens the settlement match window to absorb clock skew and
 // the gap between a reservation's creation and the first upstream request.
@@ -23,22 +27,22 @@ type modelCatalogPort interface {
 	ListAuthorized(ctx context.Context, sid string) ([]contracts.AuthorizedModel, error)
 }
 
-// IndexGatewayKeys records the opaque digest → SID mapping for freshly
-// provisioned downstream keys. Plaintext keys are hashed in memory and never
-// persisted; the usage drain needs the mapping to attribute gateway records
-// (which carry the plaintext api_key) without storing any key material.
-func (s *Store) IndexGatewayKeys(ctx context.Context, sid string, plainKeys []string) error {
+// IndexGatewayKeys records the opaque key ID → SID mapping for freshly
+// provisioned downstream keys. Gateway usage records identify the caller by
+// the managed key ID (for example "aionui-…-chatgpt"), never by key material,
+// so the drain can attribute them without any plaintext key leaving the
+// gateway.
+func (s *Store) IndexGatewayKeys(ctx context.Context, sid string, keyIDs []string) error {
 	if err := validateSID(sid); err != nil {
 		return err
 	}
-	for _, key := range plainKeys {
-		if strings.TrimSpace(key) == "" {
-			return errors.New("gateway key is empty")
+	for _, id := range keyIDs {
+		if !gatewayKeyIDPattern.MatchString(id) {
+			return errors.New("gateway key ID is invalid")
 		}
-		digest := sha256.Sum256([]byte(key))
 		_, err := s.db.ExecContext(ctx, `
-INSERT OR IGNORE INTO quota_gateway_keys(key_digest, sid, created_at) VALUES(?, ?, ?)`,
-			digest[:], sid, s.now().Unix())
+INSERT OR IGNORE INTO quota_gateway_keys(key_id, sid, created_at) VALUES(?, ?, ?)`,
+			id, sid, s.now().Unix())
 		if err != nil {
 			return fmt.Errorf("index gateway key: %w", err)
 		}
@@ -46,13 +50,12 @@ INSERT OR IGNORE INTO quota_gateway_keys(key_digest, sid, created_at) VALUES(?, 
 	return nil
 }
 
-// MapGatewayKey resolves a plaintext downstream key from a gateway usage
-// record to the owning SID. The plaintext is used only for the lookup.
-func (s *Store) MapGatewayKey(ctx context.Context, plainKey string) (string, bool, error) {
-	digest := sha256.Sum256([]byte(plainKey))
+// MapGatewayKey resolves the key ID a gateway usage record carries to the
+// owning SID.
+func (s *Store) MapGatewayKey(ctx context.Context, keyID string) (string, bool, error) {
 	var sid string
 	err := s.db.QueryRowContext(ctx, `
-SELECT sid FROM quota_gateway_keys WHERE key_digest = ?`, digest[:]).Scan(&sid)
+SELECT sid FROM quota_gateway_keys WHERE key_id = ?`, keyID).Scan(&sid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS quota_reservations (
 CREATE INDEX IF NOT EXISTS quota_reservations_window
 ON quota_reservations(sid, model_id, period, period_key, status);
 CREATE TABLE IF NOT EXISTS quota_gateway_keys (
-  key_digest BLOB PRIMARY KEY CHECK (length(key_digest) = 32),
+  key_id TEXT PRIMARY KEY CHECK (key_id <> ''),
   sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
   created_at INTEGER NOT NULL
 );
@@ -170,6 +170,26 @@ ON quota_gateway_usage(sid, failed, matched_run_id, occurred_at);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate quota database: %w", err)
+	}
+	// The first drain design indexed SHA-256 digests of plaintext keys, but
+	// deployed gateway records carry the opaque key ID instead, making digest
+	// rows unmappable. Drop such a legacy table and rebuild it keyed by ID;
+	// keys are re-indexed on the next provision or repair.
+	var legacyDigest int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM pragma_table_info('quota_gateway_keys') WHERE name = 'key_digest'`).Scan(&legacyDigest); err != nil {
+		return fmt.Errorf("inspect gateway key index schema: %w", err)
+	}
+	if legacyDigest > 0 {
+		if _, err := s.db.ExecContext(ctx, `
+DROP TABLE quota_gateway_keys;
+CREATE TABLE quota_gateway_keys (
+  key_id TEXT PRIMARY KEY CHECK (key_id <> ''),
+  sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
+  created_at INTEGER NOT NULL
+);`); err != nil {
+			return fmt.Errorf("rebuild gateway key index: %w", err)
+		}
 	}
 	// settle_source ('gateway' | 'estimated') records whether a settlement used
 	// authoritative gateway tokens or the caller's conservative estimate.

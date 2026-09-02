@@ -148,4 +148,3 @@ func xrefEntries(document []byte) (map[int]int, bool) {
 	}
 	return entries, true
 }
-

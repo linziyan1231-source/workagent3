@@ -42,6 +42,14 @@ and repair copy that immutable release location into the SID-private UserHost
 configuration; UserHost then synchronizes the catalog under the employee SID.
 Do not point it at a developer checkout or an employee-writable directory.
 
+`databasePath` must be the same Portal database file the Portal serves (the
+employee records live in the Portal store), and `auditDatabasePath` and
+`quotaDatabasePath` must point at the `audit.db`/`quota.db` beside it — see
+`docs/employee-manager.config.example.json`. The Portal additionally needs the
+builtin assistant resources: pass `-assistant-resources` pointing at the
+release copy of `third_party/aionui/resources/puxin-builtin-assistants`, or it
+refuses to serve.
+
 The optional `managedMcpServers` array is the release-owned half of the same
 contract. Employee Manager expands `${SID}`, `${DATA_ROOT}`, and
 `${WORKSPACE_ROOT}` in transport commands, arguments, and URLs before writing
@@ -344,11 +352,11 @@ other principal holds access.
 Employee Manager (service mode) is the single consumer of
 `GET /v0/management/usage-queue`: the endpoint pops records on read, so the
 drain persists every record into the quota database before popping the next
-batch and retries a failed batch from memory before fetching more. Each record
-carries the plaintext downstream `api_key`; the drain maps it to the owning
-SID through an opaque SHA-256 digest index (populated at every key provision)
-and discards the plaintext — it is never written to disk. Records are
-deduplicated by `request_id`.
+batch and retries a failed batch from memory before fetching more. Gateway
+records identify the caller by the managed key ID (for example
+`aionui-…-chatgpt`), never by key material; the drain maps that ID to the
+owning SID through the key index populated at every key provision or repair.
+Records are deduplicated by `request_id`.
 
 `quotaDatabasePath` must point at the same `quota.db` the Portal serves: the
 Portal reads the drained detail for settlement matching (a settling run
@@ -576,3 +584,30 @@ then retain evidence for all of these gates:
   SID allow-list.
 - `integrity_mismatch` or `size_mismatch`: quarantine the backup and create a new
   snapshot from authoritative owners; do not retry with modified manifest data.
+
+## Deployment notes
+
+Lessons from the first real-server acceptance run:
+
+- Build the Harness profile in place on the target host (`pnpm install` inside
+  the release's profile directory). Copying a profile with directory junctions
+  expanded breaks Node module resolution
+  (`Cannot find package '@deepseek-ai/dsh-app-boot'`).
+- In the CLIProxyAPI `config.yaml`, write Windows paths with forward slashes
+  inside double-quoted YAML scalars.
+- Pipe secrets to Employee Manager as UTF-8 **without** BOM
+  (`[Text.UTF8Encoding]::new($false)`). PowerShell 5.1's default UTF-8 encoding
+  prepends a BOM, which corrupts the password hash and surfaces later as login
+  401s.
+- Password-logon scheduled tasks can only be started by SYSTEM. Run
+  Employee Manager lifecycle actions (`enable`, `repair`, `set-limits`)
+  through its loopback service (which runs as SYSTEM) or from a SYSTEM shell;
+  an interactive Administrator CLI call fails at `Start-ScheduledTask` with
+  0x80070005.
+- On hosts with a global HTTP proxy environment, loopback calls from scripts
+  must bypass the proxy (Python's urllib honours `http_proxy` even for
+  127.0.0.1); conversely `pnpm` needs the proxy explicitly for registry
+  access.
+- Disabling, password-resetting, or changing the admin role of an employee
+  revokes all of that user's browser sessions by design; sign in again after
+  each lifecycle action during drills.

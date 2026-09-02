@@ -161,9 +161,8 @@ func (c *Client) chatTurn(ctx context.Context, plainKey, model, engine string) e
 			"role":    "user",
 			"content": "Reply with exactly " + marker + ". Do not call tools or modify files.",
 		}},
-		"max_tokens":  32,
-		"temperature": 0,
-		"stream":      false,
+		"max_tokens": 32,
+		"stream":     false,
 	})
 	if err != nil {
 		return errors.New("encode readiness probe request")

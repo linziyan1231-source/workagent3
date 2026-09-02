@@ -46,47 +46,39 @@ func gatewayRecord(requestID, sid, model string, total int64, at time.Time) cont
 	}
 }
 
-func TestGatewayKeyIndexMapsWithoutPersistingPlaintext(t *testing.T) {
+func TestGatewayKeyIndexMapsKeyIDs(t *testing.T) {
 	ctx := t.Context()
 	store := openRecorderStore(t)
 	const sid = "S-1-5-21-4000"
-	const plaintext = "cpa_test-plaintext-key-material"
-	if err := store.IndexGatewayKeys(ctx, sid, []string{plaintext}); err != nil {
+	const keyID = "aionui-0123456789abcdef0123-chatgpt"
+	if err := store.IndexGatewayKeys(ctx, sid, []string{keyID}); err != nil {
 		t.Fatal(err)
 	}
-	mapped, found, err := store.MapGatewayKey(ctx, plaintext)
+	mapped, found, err := store.MapGatewayKey(ctx, keyID)
 	if err != nil || !found || mapped != sid {
 		t.Fatalf("map = %q, %v, %v", mapped, found, err)
 	}
-	if _, found, err := store.MapGatewayKey(ctx, "cpa_other-key"); err != nil || found {
-		t.Fatalf("unknown key mapped: found=%v err=%v", found, err)
+	if _, found, err := store.MapGatewayKey(ctx, "aionui-ffffffffffffffffffff-kimi"); err != nil || found {
+		t.Fatalf("unknown key ID mapped: found=%v err=%v", found, err)
 	}
-	// Re-indexing is idempotent (key rotation replays).
-	if err := store.IndexGatewayKeys(ctx, sid, []string{plaintext}); err != nil {
+	// Re-indexing is idempotent (key rotation replays; IDs survive rotation).
+	if err := store.IndexGatewayKeys(ctx, sid, []string{keyID}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := store.db.Query(`SELECT hex(key_digest), sid FROM quota_gateway_keys`)
-	if err != nil {
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM quota_gateway_keys WHERE key_id = ?`, keyID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var digest, storedSID string
-		if err := rows.Scan(&digest, &storedSID); err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(digest, plaintext) || strings.Contains(storedSID, plaintext) {
-			t.Fatal("plaintext key material reached the key index table")
-		}
-		if len(digest) != 64 {
-			t.Fatalf("key digest is not a SHA-256 hex: %q", digest)
-		}
+	if count != 1 {
+		t.Fatalf("index rows for key ID = %d", count)
 	}
-	if err := store.IndexGatewayKeys(ctx, "not-a-sid", []string{plaintext}); err == nil {
+	if err := store.IndexGatewayKeys(ctx, "not-a-sid", []string{keyID}); err == nil {
 		t.Fatal("invalid SID was accepted")
 	}
-	if err := store.IndexGatewayKeys(ctx, sid, []string{"  "}); err == nil {
-		t.Fatal("empty key was accepted")
+	for _, invalid := range []string{"  ", "cpa_plaintext-key-material", "aionui-0123"} {
+		if err := store.IndexGatewayKeys(ctx, sid, []string{invalid}); err == nil {
+			t.Fatalf("invalid key ID was accepted: %q", invalid)
+		}
 	}
 }
 

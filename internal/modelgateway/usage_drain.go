@@ -15,11 +15,11 @@ import (
 // UsageDrainBatch is the number of queue records popped per drain cycle.
 const UsageDrainBatch = 200
 
-// UsageSink persists drained gateway usage. quota.Store implements it. The
-// plaintext downstream key a queue record carries is passed only to
-// MapGatewayKey for the SID lookup and is discarded immediately afterwards.
+// UsageSink persists drained gateway usage. quota.Store implements it.
+// Gateway records identify the caller by the managed key ID (never by key
+// material), which MapGatewayKey resolves to the owning SID.
 type UsageSink interface {
-	MapGatewayKey(ctx context.Context, plainKey string) (sid string, found bool, err error)
+	MapGatewayKey(ctx context.Context, keyID string) (sid string, found bool, err error)
 	RecordGatewayUsage(ctx context.Context, record contracts.GatewayUsageRecord) error
 }
 
@@ -47,10 +47,9 @@ type usageQueueRecord struct {
 // read, so a popped batch is retained in memory and every record is persisted
 // before the next batch is popped: a mapping or persistence failure leaves the
 // remaining records buffered and the next Drain retries them instead of
-// fetching more. Plaintext keys are dropped as each record is mapped; a
-// buffered tail retains them in memory only (never on disk, never logged)
-// until the mapping store recovers. There must be exactly one drainer per
-// deployment (the Employee Manager).
+// fetching more. Records attribute callers by managed key ID, never by key
+// material. There must be exactly one drainer per deployment (the Employee
+// Manager).
 type UsageDrainer struct {
 	client  *Client
 	sink    UsageSink
@@ -68,7 +67,7 @@ func (c *Client) NewUsageDrainer(sink UsageSink) (*UsageDrainer, error) {
 
 // Drain maps and persists any buffered batch, then pops and persists the next
 // one. It returns the number of records persisted and the number skipped
-// because their api_key belongs to no managed employee key or the record is
+// because their key ID belongs to no managed employee key or the record is
 // unusable (missing request ID or timestamp).
 func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err error) {
 	if len(d.pending) == 0 && len(d.raw) == 0 {
@@ -101,18 +100,17 @@ func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err e
 	return persisted, d.skipped, nil
 }
 
-// mapRecord attributes one queue record to its owning SID and clears the
-// plaintext key from the decoded record before anything else can observe it.
-// Records without a usable request ID or timestamp, or whose key belongs to no
-// managed employee, are reported unusable and dropped.
+// mapRecord attributes one queue record to its owning SID through the managed
+// key ID the record carries. Records without a usable request ID or timestamp,
+// or whose key ID belongs to no managed employee, are reported unusable and
+// dropped.
 func (d *UsageDrainer) mapRecord(ctx context.Context, raw *usageQueueRecord) (contracts.GatewayUsageRecord, bool, error) {
 	sid, found, err := d.sink.MapGatewayKey(ctx, raw.APIKey)
 	if err != nil {
-		// The record stays buffered (plaintext included, in memory only) so the
-		// next Drain can retry the mapping once the store recovers.
+		// The record stays buffered so the next Drain can retry the mapping
+		// once the store recovers.
 		return contracts.GatewayUsageRecord{}, false, fmt.Errorf("map gateway usage key: %w", err)
 	}
-	raw.APIKey = ""
 	occurredAt, parseErr := time.Parse(time.RFC3339, raw.Timestamp)
 	if !found || raw.RequestID == "" || parseErr != nil {
 		return contracts.GatewayUsageRecord{}, false, nil

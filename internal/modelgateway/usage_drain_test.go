@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,7 +45,10 @@ func (q *fakeUsageQueue) serve(writer http.ResponseWriter, request *http.Request
 	_, _ = writer.Write(payload)
 }
 
-func usageQueueItem(requestID, apiKey, model string, total int64, timestamp string) map[string]any {
+// usageQueueItem builds one queue record the way the deployed gateway emits
+// it: the caller is identified by the managed key ID in api_key, never by key
+// material.
+func usageQueueItem(requestID, keyID, model string, total int64, timestamp string) map[string]any {
 	return map[string]any{
 		"timestamp":  timestamp,
 		"tokens":     map[string]int64{"input_tokens": total, "output_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "total_tokens": total},
@@ -57,31 +58,35 @@ func usageQueueItem(requestID, apiKey, model string, total int64, timestamp stri
 		"alias":      model,
 		"endpoint":   "POST /v1/responses",
 		"auth_type":  "api_key",
-		"api_key":    apiKey,
+		"api_key":    keyID,
 		"request_id": requestID,
 	}
 }
 
+const (
+	knownKeyID   = "aionui-0123456789abcdef0123-chatgpt"
+	foreignKeyID = "aionui-ffffffffffffffffffff-kimi"
+)
+
 // fakeUsageSink records mapped SIDs and persisted records, capturing every
-// plaintext it is shown so tests can prove plaintext never crosses into
-// persistence.
+// key ID it is shown.
 type fakeUsageSink struct {
 	mu           sync.Mutex
 	keys         map[string]string
-	plainSeen    []string
+	seen         []string
 	records      []contracts.GatewayUsageRecord
 	failRecordID string
 	mapErr       error
 }
 
-func (s *fakeUsageSink) MapGatewayKey(_ context.Context, plainKey string) (string, bool, error) {
+func (s *fakeUsageSink) MapGatewayKey(_ context.Context, keyID string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.plainSeen = append(s.plainSeen, plainKey)
+	s.seen = append(s.seen, keyID)
 	if s.mapErr != nil {
 		return "", false, s.mapErr
 	}
-	sid, found := s.keys[plainKey]
+	sid, found := s.keys[keyID]
 	return sid, found, nil
 }
 
@@ -112,12 +117,12 @@ func newUsageDrain(t *testing.T, queue *fakeUsageQueue, sink UsageSink) *UsageDr
 	return drainer
 }
 
-func TestDrainUsageMapsSIDAndDiscardsPlaintext(t *testing.T) {
+func TestDrainUsageMapsSIDByKeyID(t *testing.T) {
 	queue := &fakeUsageQueue{records: []map[string]any{
-		usageQueueItem("req-1", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 30, "2026-08-31T01:00:00Z"),
-		usageQueueItem("req-2", "cpa_foreign-key-bbbbbbbbbbbbbbbb", "gpt-5.6-sol", 10, "2026-08-31T01:01:00Z"),
+		usageQueueItem("req-1", knownKeyID, "gpt-5.6-sol", 30, "2026-08-31T01:00:00Z"),
+		usageQueueItem("req-2", foreignKeyID, "gpt-5.6-sol", 10, "2026-08-31T01:01:00Z"),
 	}}
-	sink := &fakeUsageSink{keys: map[string]string{"cpa_known-key-aaaaaaaaaaaaaaaa": testSID}}
+	sink := &fakeUsageSink{keys: map[string]string{knownKeyID: testSID}}
 	drainer := newUsageDrain(t, queue, sink)
 	persisted, skipped, err := drainer.Drain(t.Context())
 	if err != nil || persisted != 1 || skipped != 1 {
@@ -129,20 +134,6 @@ func TestDrainUsageMapsSIDAndDiscardsPlaintext(t *testing.T) {
 	}
 	if record.OccurredAt != time.Date(2026, 8, 31, 1, 0, 0, 0, time.UTC) {
 		t.Fatalf("occurred at = %s", record.OccurredAt)
-	}
-	// The plaintext key appears only in the mapping lookups, never in anything
-	// the sink persisted, and the decoded queue record was cleared in place.
-	for _, record := range sink.records {
-		if strings.Contains(fmt.Sprintf("%+v", record), "cpa_") {
-			t.Fatalf("plaintext key material reached persistence: %+v", record)
-		}
-	}
-	raw := usageQueueRecord{APIKey: "cpa_secret"}
-	if _, _, err := drainer.mapRecord(t.Context(), &raw); err != nil {
-		t.Fatal(err)
-	}
-	if raw.APIKey != "" {
-		t.Fatal("plaintext key was not cleared from the decoded record")
 	}
 	// The queue was popped once; a second drain fetches the (now empty) queue.
 	if queue.pops != 1 {
@@ -158,11 +149,11 @@ func TestDrainUsageMapsSIDAndDiscardsPlaintext(t *testing.T) {
 
 func TestDrainUsageSkipsUnusableRecords(t *testing.T) {
 	queue := &fakeUsageQueue{records: []map[string]any{
-		usageQueueItem("", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 5, "2026-08-31T01:00:00Z"),
-		usageQueueItem("req-bad-ts", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 5, "not-a-timestamp"),
-		usageQueueItem("req-ok", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 5, "2026-08-31T01:00:00Z"),
+		usageQueueItem("", knownKeyID, "gpt-5.6-sol", 5, "2026-08-31T01:00:00Z"),
+		usageQueueItem("req-bad-ts", knownKeyID, "gpt-5.6-sol", 5, "not-a-timestamp"),
+		usageQueueItem("req-ok", knownKeyID, "gpt-5.6-sol", 5, "2026-08-31T01:00:00Z"),
 	}}
-	sink := &fakeUsageSink{keys: map[string]string{"cpa_known-key-aaaaaaaaaaaaaaaa": testSID}}
+	sink := &fakeUsageSink{keys: map[string]string{knownKeyID: testSID}}
 	drainer := newUsageDrain(t, queue, sink)
 	persisted, skipped, err := drainer.Drain(t.Context())
 	if err != nil || persisted != 1 || skipped != 2 {
@@ -172,11 +163,11 @@ func TestDrainUsageSkipsUnusableRecords(t *testing.T) {
 
 func TestDrainUsagePersistsBeforePoppingMoreAndResumesPartialFailure(t *testing.T) {
 	queue := &fakeUsageQueue{records: []map[string]any{
-		usageQueueItem("req-1", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 10, "2026-08-31T01:00:00Z"),
-		usageQueueItem("req-2", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 20, "2026-08-31T01:01:00Z"),
-		usageQueueItem("req-3", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 40, "2026-08-31T01:02:00Z"),
+		usageQueueItem("req-1", knownKeyID, "gpt-5.6-sol", 10, "2026-08-31T01:00:00Z"),
+		usageQueueItem("req-2", knownKeyID, "gpt-5.6-sol", 20, "2026-08-31T01:01:00Z"),
+		usageQueueItem("req-3", knownKeyID, "gpt-5.6-sol", 40, "2026-08-31T01:02:00Z"),
 	}}
-	sink := &fakeUsageSink{keys: map[string]string{"cpa_known-key-aaaaaaaaaaaaaaaa": testSID}, failRecordID: "req-2"}
+	sink := &fakeUsageSink{keys: map[string]string{knownKeyID: testSID}, failRecordID: "req-2"}
 	drainer := newUsageDrain(t, queue, sink)
 	persisted, _, err := drainer.Drain(t.Context())
 	if err == nil || persisted != 1 {
@@ -203,9 +194,9 @@ func TestDrainUsagePersistsBeforePoppingMoreAndResumesPartialFailure(t *testing.
 
 func TestDrainUsageRetriesMappingFailures(t *testing.T) {
 	queue := &fakeUsageQueue{records: []map[string]any{
-		usageQueueItem("req-1", "cpa_known-key-aaaaaaaaaaaaaaaa", "gpt-5.6-sol", 10, "2026-08-31T01:00:00Z"),
+		usageQueueItem("req-1", knownKeyID, "gpt-5.6-sol", 10, "2026-08-31T01:00:00Z"),
 	}}
-	sink := &fakeUsageSink{keys: map[string]string{"cpa_known-key-aaaaaaaaaaaaaaaa": testSID}, mapErr: errors.New("quota database locked")}
+	sink := &fakeUsageSink{keys: map[string]string{knownKeyID: testSID}, mapErr: errors.New("quota database locked")}
 	drainer := newUsageDrain(t, queue, sink)
 	if _, _, err := drainer.Drain(t.Context()); err == nil {
 		t.Fatal("mapping failure was swallowed")
@@ -217,21 +208,20 @@ func TestDrainUsageRetriesMappingFailures(t *testing.T) {
 	}
 }
 
-// TestDrainUsageEndToEndKeepsPlaintextOutOfTheDatabase runs the drainer
-// against a real quota store and asserts no plaintext key material is on disk.
-func TestDrainUsageEndToEndKeepsPlaintextOutOfTheDatabase(t *testing.T) {
+// TestDrainUsageEndToEnd runs the drainer against a real quota store and
+// asserts records are attributed by key ID and deduplicated on redelivery.
+func TestDrainUsageEndToEnd(t *testing.T) {
 	ctx := t.Context()
 	store, err := quota.OpenRecorder(t.TempDir() + "/quota.db")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	const plaintext = "cpa_end-to-end-plaintext-key"
-	if err := store.IndexGatewayKeys(ctx, testSID, []string{plaintext}); err != nil {
+	if err := store.IndexGatewayKeys(ctx, testSID, []string{knownKeyID}); err != nil {
 		t.Fatal(err)
 	}
 	queue := &fakeUsageQueue{records: []map[string]any{
-		usageQueueItem("req-1", plaintext, "gpt-5.6-sol", 64, "2026-08-31T01:00:00Z"),
+		usageQueueItem("req-1", knownKeyID, "gpt-5.6-sol", 64, "2026-08-31T01:00:00Z"),
 	}}
 	drainer := newUsageDrain(t, queue, store)
 	persisted, _, err := drainer.Drain(ctx)
@@ -243,7 +233,7 @@ func TestDrainUsageEndToEndKeepsPlaintextOutOfTheDatabase(t *testing.T) {
 		t.Fatalf("usage = %#v, %v", usage, err)
 	}
 	// Redelivery of the same request ID is deduplicated.
-	queue.records = []map[string]any{usageQueueItem("req-1", plaintext, "gpt-5.6-sol", 64, "2026-08-31T01:00:00Z")}
+	queue.records = []map[string]any{usageQueueItem("req-1", knownKeyID, "gpt-5.6-sol", 64, "2026-08-31T01:00:00Z")}
 	if _, _, err := drainer.Drain(ctx); err != nil {
 		t.Fatal(err)
 	}

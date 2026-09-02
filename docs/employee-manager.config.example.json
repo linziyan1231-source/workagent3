@@ -1,5 +1,5 @@
 {
-  "databasePath": "C:\\WorkAgent3\\employee-manager\\employees.db",
+  "databasePath": "C:\\WorkAgent3\\portal\\data\\portal.db",
   "dataRootBase": "C:\\WorkAgent3\\employees",
   "userHostExecutable": "C:\\WorkAgent3\\bin\\userhost.exe",
   "harnessCommand": "C:\\WorkAgent3\\bin\\dsh.exe",
@@ -30,6 +30,6 @@
     "kimiDailyUsd": 10,
     "kimiWeeklyUsd": 20
   },
-  "auditDatabasePath": "C:\\WorkAgent3\\employee-manager\\audit.db",
+  "auditDatabasePath": "C:\\WorkAgent3\\portal\\data\\audit.db",
   "quotaDatabasePath": "C:\\WorkAgent3\\portal\\data\\quota.db"
 }

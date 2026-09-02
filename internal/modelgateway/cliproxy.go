@@ -53,12 +53,12 @@ type Client struct {
 	keyIndexer KeyIndexer
 }
 
-// KeyIndexer persists the opaque digest → SID mapping for issued downstream
-// keys. quota.Store implements it. The usage drain cannot attribute gateway
-// records without it, and plaintext keys are never persisted — only their
-// SHA-256 digests.
+// KeyIndexer persists the opaque key ID → SID mapping for issued downstream
+// keys. quota.Store implements it. Gateway usage records identify callers by
+// managed key ID, so the usage drain needs this mapping to attribute them; no
+// key material is involved on either side.
 type KeyIndexer interface {
-	IndexGatewayKeys(ctx context.Context, sid string, plainKeys []string) error
+	IndexGatewayKeys(ctx context.Context, sid string, keyIDs []string) error
 }
 
 // SetKeyIndexer wires the gateway key index updated on every successful
@@ -229,11 +229,12 @@ func (c *Client) Provision(ctx context.Context, username, sid string) (nativeaut
 	if err := bundle.Validate(); err != nil {
 		return nativeauth.Bundle{}, err
 	}
-	// The new keys are live at the gateway now; their digests must reach the
-	// usage key index before the bundle is handed out, or the drain cannot
-	// attribute the usage they generate. Indexing failure fails the provision.
+	// The new keys are live at the gateway now; their IDs must reach the usage
+	// key index before the bundle is handed out, or the drain cannot attribute
+	// the usage they generate. Key IDs survive in-place rotation, so indexing
+	// here also covers rotated keys. Indexing failure fails the provision.
 	if c.keyIndexer != nil {
-		if err := c.keyIndexer.IndexGatewayKeys(ctx, sid, []string{bundle.CodexAPIKey, bundle.KimiAPIKey}); err != nil {
+		if err := c.keyIndexer.IndexGatewayKeys(ctx, sid, managedKeyIDs(sid)); err != nil {
 			return nativeauth.Bundle{}, fmt.Errorf("index CLIProxyAPI downstream keys: %w", err)
 		}
 	}
