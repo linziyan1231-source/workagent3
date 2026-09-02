@@ -266,6 +266,10 @@ func TestRuntimeGatewayDeliversStagedBundleThroughInternalPath(t *testing.T) {
 		t.Fatalf("managed Provider credential = %q, %v", secret, err)
 	}
 	clearBytes(secret)
+	// The Harness-facing delivery runs after the listener and lease are up.
+	if err := gateway.deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	// Step 3: the running Harness received the re-projection with the new key.
 	first := <-projected
 	if first.method != http.MethodPut || first.authorization != "Bearer runtime-token" || first.secret != bundle.CodexAPIKey {
@@ -290,7 +294,14 @@ func TestRuntimeGatewayKeepsStagedBundleWhenProjectionFails(t *testing.T) {
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 	bundle := &nativeauth.Bundle{FormatVersion: 1, BaseURL: "http://127.0.0.1:8317/v1", CodexAPIKey: "cpa_abcdefghijklmnopqrstuvwxyz", KimiAPIKey: "cpa_zyxwvutsrqponmlkjihgfedcba", CodexModel: "gpt-5.6-sol", KimiModel: "kimi-k3"}
-	if _, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {}); err == nil {
+	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	// The failed Harness re-projection surfaces from the startup delivery and
+	// leaves the staged bundle unconsumed for the next start.
+	if err := gateway.deliver(context.Background()); err == nil {
 		t.Fatal("failed Harness re-projection was accepted")
 	}
 }

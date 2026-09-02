@@ -195,16 +195,6 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		s.Close()
 		return runtimeapi.Registration{}, err
 	}
-	if staged {
-		// Ordered delivery steps 2 and 3 (broker record plus Harness
-		// re-projection) completed inside newRuntimeGateway; only now is the
-		// bundle consumed.
-		if err := nativeauth.Consume(s.config.DataRoot); err != nil {
-			gateway.Close()
-			s.Close()
-			return runtimeapi.Registration{}, err
-		}
-	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		gateway.Close()
@@ -237,6 +227,13 @@ func (s *Supervisor) Serve(ctx context.Context, reporter LeaseReporter) error {
 		defer cancel()
 		_ = reporter.Remove(removeContext, registration)
 	}()
+	// The lease is out and the listener is up, so the local runtime API —
+	// including the migration journal — is reachable while the Harness-facing
+	// startup delivery runs. A delivery failure still fails the runtime and
+	// replays on the next start, preserving fail-closed ordered delivery.
+	if err := s.gateway.deliver(ctx); err != nil {
+		return err
+	}
 	ticker := time.NewTicker(runtimeapi.DefaultLeaseDuration / 3)
 	defer ticker.Stop()
 	for {

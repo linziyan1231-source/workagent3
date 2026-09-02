@@ -33,6 +33,13 @@ type runtimeGateway struct {
 	migration     *skillmigration.Store
 	oauth         *mcpOAuthManager
 	cancelRefresh context.CancelFunc
+	// deliver performs the Harness-facing startup round-trips (MCP/Provider/
+	// Skill/Preset projections and, for a staged bundle, the final consume).
+	// It runs after the listener and lease are up so a slow or cold Harness
+	// cannot blind the local runtime API — the migration journal included —
+	// for minutes after every restart. A delivery failure still fails the
+	// runtime, preserving the ordered-delivery fail-closed semantics.
+	deliver func(context.Context) error
 }
 
 func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, managedToolsRoot, dataRoot, ownerSID string, target *url.URL, token string, bundle *nativeauth.Bundle, auditSink *auditClient, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
@@ -73,13 +80,6 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		return nil, err
 	}
 	publisher := &harnessProjectionPublisher{catalog: catalog, credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
-	if err := publisher.Publish(context.Background()); err != nil {
-		migration.Close()
-		skills.Close()
-		credentials.Close()
-		catalog.Close()
-		return nil, err
-	}
 	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	if bundle != nil {
 		// Ordered delivery step 2: the Harness shares the same SID-private
@@ -99,30 +99,31 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 			return nil, fmt.Errorf("store managed Harness Provider credential: %w", err)
 		}
 	}
-	// Ordered delivery step 3: re-project the managed Provider into the running
-	// Harness so it switches to the new key without a restart.
-	if err := providerPublisher.Publish(context.Background()); err != nil {
-		migration.Close()
-		skills.Close()
-		credentials.Close()
-		catalog.Close()
-		return nil, err
-	}
 	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
-	if err := skillPublisher.Publish(context.Background()); err != nil {
-		migration.Close()
-		skills.Close()
-		credentials.Close()
-		catalog.Close()
-		return nil, err
-	}
 	presetPublisher := &harnessPresetMigrationPublisher{path: filepath.Join(dshHome, "workagent", "preset-migration.json"), target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}, migration: migration}
-	if err := presetPublisher.Publish(context.Background()); err != nil {
-		migration.Close()
-		skills.Close()
-		credentials.Close()
-		catalog.Close()
-		return nil, err
+	deliver := func(ctx context.Context) error {
+		if err := publisher.Publish(ctx); err != nil {
+			return err
+		}
+		// Ordered delivery step 3: re-project the managed Provider into the
+		// running Harness so it switches to the new key without a restart.
+		if err := providerPublisher.Publish(ctx); err != nil {
+			return err
+		}
+		if err := skillPublisher.Publish(ctx); err != nil {
+			return err
+		}
+		if err := presetPublisher.Publish(ctx); err != nil {
+			return err
+		}
+		if bundle != nil {
+			// Ordered delivery steps 2 and 3 completed; only now is the bundle
+			// consumed, so a failed delivery is replayed on the next start.
+			if err := nativeauth.Consume(dataRoot); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	oauth := newMCPOAuthManager(catalog, credentials, publisher, auditSink)
 	refreshContext, cancelRefresh := context.WithCancel(context.Background())
@@ -160,7 +161,7 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	}
 	sharedFiles.officePreview = officePreview
 	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, assigners...)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh}, nil
+	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
 }
 
 func (g *runtimeGateway) Close() error {
