@@ -201,6 +201,11 @@ $env:WORKAGENT_EMPLOYEE_MANAGER_TOKEN_FILE = 'E:\WorkAgent3\secrets\employee-man
 portal.exe # include the normal Portal arguments
 ```
 
+Portal refuses to start without the managed Harness model: pass
+`-harness-model` or set `WORKAGENT_HARNESS_MODEL` to the configured Codex
+model, the same value as `modelGateway.codexModel` in the Employee Manager
+configuration.
+
 Granting or revoking the administrator role invalidates that user's existing
 browser sessions. After signing in again, an administrator is routed by the
 formal WorkAgent Renderer to `/admin/accounts`; non-administrators receive 403
@@ -263,6 +268,85 @@ official Harness MCP client, Codex app-server and Kimi ACP. It verifies the MCP
 handshake plus a real Harness `ping` tool call without sending a model prompt or
 printing native credentials.
 
+## Managed tools (OfficeCLI)
+
+OfficeCLI ships as the release-owned `managed-tools` component; the Office
+Skills rely on it and employees never install it themselves. The pinned record
+`release/managed-tools/officecli/manifest.json` fixes the version, SHA-256,
+upstream source, and license (Apache-2.0). Install or update from an elevated
+deployment shell:
+
+```powershell
+scripts\install-officecli.ps1
+```
+
+The script downloads the pinned release asset (BITS, falling back to
+`Invoke-WebRequest` when BITS is unavailable), verifies its SHA-256 against
+the pinned record, proves the staged binary reports the pinned version, then
+atomically swaps it into `release\managed-tools\officecli\officecli.exe`. Any
+failure rolls back to the previous binary.
+
+When `managedToolsRoot` is configured, Employee Manager refuses to start
+unless `officecli.exe` exists there and matches the pinned manifest hash.
+Include the component in release manifests so the immutable release root
+carries the verified binary:
+
+```powershell
+-component managed-tools=managed-tools/officecli/officecli.exe
+```
+
+## CLIProxyAPI model gateway
+
+Install CLIProxyAPI from its pinned release and configure it from
+`docs/cliproxy.config.example.yaml`. That template pairs with
+`docs/employee-manager.config.example.json`: the listener host/port must match
+`modelGateway.managementUrl` and `modelGateway.baseUrl`,
+`remote-management.secret-key` must equal the key file referenced by
+`modelGateway.managementKeyFile`, and `usage-statistics-enabled: true` is
+mandatory because the quota drain reads `/v0/management/usage-queue`. Employee
+downstream keys are provisioned only through the cpa-key-policy management
+plugin, never through static `api-keys`.
+
+Create the management key file with a restricted ACL — only Administrators,
+SYSTEM, and the Employee Manager service account may hold access:
+
+```powershell
+$keyFile = 'E:\WorkAgent3\cliproxy\management.key'
+icacls $keyFile /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "<service-account>:R"
+```
+
+Employee Manager verifies this ACL at startup and refuses to start when any
+other principal holds access.
+
+### Usage drain and authoritative quota
+
+Employee Manager (service mode) is the single consumer of
+`GET /v0/management/usage-queue`: the endpoint pops records on read, so the
+drain persists every record into the quota database before popping the next
+batch and retries a failed batch from memory before fetching more. Each record
+carries the plaintext downstream `api_key`; the drain maps it to the owning
+SID through an opaque SHA-256 digest index (populated at every key provision)
+and discards the plaintext — it is never written to disk. Records are
+deduplicated by `request_id`.
+
+`quotaDatabasePath` must point at the same `quota.db` the Portal serves: the
+Portal reads the drained detail for settlement matching (a settling run
+prefers real tokens from matched gateway records over the conservative
+estimate, and marks unmatched settlements `estimated`) and for the
+authoritative daily/weekly usage shown on the usage page
+(`GET /api/quota/gateway-usage`). Never run a second drain consumer against
+the same gateway.
+
+Release readiness executes real probes against the installed gateway: an
+authenticated management API round trip
+(`GET http://127.0.0.1:8317/v0/management/plugins/cpa-key-policy/aliases`)
+plus one real model turn per engine boundary (Codex, Kimi, and the Harness
+shared-key projection) through temporary, immediately revoked probe keys. Each
+probe produces structured redacted evidence (engine, version, run id, time,
+result); the release controller records only that structure, never free text,
+keys, or URLs with credentials. Readiness records are append-only — the
+evidence an activation relied on is never overwritten.
+
 ## Component release and rollback
 
 Before operating a real release root, run the local production-CLI lifecycle
@@ -272,7 +356,10 @@ gate:
 pnpm release:smoke
 ```
 
-It uses real temporary artifacts and SQLite stores, waits through the same
+It uses real temporary artifacts and SQLite stores, runs the real readiness
+probes (which fail by design when no deployed CLIProxyAPI with real engine
+credentials is reachable; set `WORKAGENT_RELEASE_SMOKE_GATEWAY_CONFIG` to a
+real Employee Manager configuration for the full pass), waits through the same
 mandatory 60-second notification window, verifies activated component pointers
 and immutable bytes, rolls the activation journal back, and removes its
 temporary release root.
@@ -287,6 +374,7 @@ The release controller accepts only these independently activatable components:
 - `harness-plugin`
 - `chatforward`
 - `im-connector`
+- `managed-tools`
 
 Prepare one immutable archive or binary per included component under a new
 candidate directory. Build and install its manifest:
@@ -320,17 +408,17 @@ the task-interruption warning. Other known components publish the page-refresh
 warning. Unknown component names are rejected. Activation is impossible until
 the notice is at least 60 seconds old.
 
-Exercise a real request through each candidate engine/provider boundary. Record
-only redacted request or test-run identifiers, never URLs or credentials:
+Run the real readiness probes against the deployed CLIProxyAPI, then activate.
+The probes need the same Employee Manager configuration the deployment uses
+(the `modelGateway` section with its management key file); without a deployed
+gateway and real upstream engine credentials the readiness action fails and
+nothing is recorded:
 
 ```powershell
 go run ./cmd/release-manager `
   -action readiness `
   -version 3.0.0-rc.1 `
-  -harness-evidence harness-run-20260831-01 `
-  -codex-evidence codex-run-20260831-01 `
-  -kimi-evidence kimi-run-20260831-01 `
-  -provider-evidence provider-run-20260831-01
+  -gateway-config E:\WorkAgent3\employee-manager\config.json
 
 go run ./cmd/release-manager -action activate -version 3.0.0-rc.1
 go run ./cmd/release-manager -action status
@@ -370,6 +458,28 @@ credential stripping, reserve/settle, and pre-adapter quota rejection:
 ```powershell
 go test ./internal/portal ./internal/quota ./internal/speech
 ```
+
+## Audit retention and export
+
+Portal prunes audit events older than `-audit-retention-days` (default 180;
+`0` disables retention cleanup) once at startup and then daily. Pruned events
+are unrecoverable, so export before the window closes when evidence must be
+retained longer.
+
+Privileged operators can export bounded, redacted results locally; the
+database path must be a regular non-symlink file and `-limit` is 1-1000:
+
+```powershell
+go run ./cmd/audit-export `
+  -db E:\WorkAgent3\data\audit.db `
+  -actor alice -action quota.settle -from 2026-09-01T00:00:00Z -limit 100
+```
+
+Administrators can run the same query from the formal admin page or through
+`GET /api/portal/admin/audit` and `GET /api/portal/admin/audit/export`; the
+export variant downloads the same indented redacted JSON array as
+`cmd/audit-export`. Both routes require an administrator session and never
+return request bodies, passwords, tokens, prompts, or file contents.
 
 ## Restricted metadata backup
 
@@ -434,8 +544,9 @@ then retain evidence for all of these gates:
 
 - `upgrade notification must be published`: publish the notice and wait the full
   60 seconds; do not alter timestamps.
-- `fresh post-notification readiness evidence is required`: rerun all four real
-  requests after the notice and record new redacted evidence IDs.
+- `fresh post-notification readiness evidence is required`: rerun every
+  readiness check (engines, provider, and the CLIProxyAPI health gate) after
+  the notice and record new redacted evidence IDs.
 - `failed integrity verification`: discard the candidate and rebuild under a new
   version. Never edit an installed release directory.
 - `component changed after activation`: a later activation owns that component;
