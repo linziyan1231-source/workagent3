@@ -26,24 +26,34 @@ func (values *repeatedFlag) Set(value string) error {
 }
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run() (err error) {
-	action := flag.String("action", "create", "create or restore")
-	backupRoot := flag.String("backup-root", filepath.Join("data", "backups"), "Restricted backup root")
-	restoreRoot := flag.String("restore-root", filepath.Join("data", "restore-jobs"), "Isolated restore root")
-	backupPath := flag.String("backup", "", "Backup directory for restore")
-	version := flag.String("version", "", "Application version compatibility boundary")
-	auditPath := flag.String("audit-db", filepath.Join("data", "audit.db"), "Audit SQLite path")
+func run(args []string) (err error) {
+	flags := flag.NewFlagSet("backup-manager", flag.ContinueOnError)
+	action := flags.String("action", "create", "create or restore")
+	backupRoot := flags.String("backup-root", filepath.Join("data", "backups"), "Restricted backup root")
+	restoreRoot := flags.String("restore-root", filepath.Join("data", "restore-jobs"), "Isolated restore root")
+	backupPath := flags.String("backup", "", "Backup directory for restore")
+	version := flags.String("version", "", "Application version compatibility boundary")
+	auditPath := flags.String("audit-db", "", "Absolute audit SQLite path (the server's data/audit.db)")
 	var sourceFlags repeatedFlag
 	var allowedSIDFlags repeatedFlag
-	flag.Var(&sourceFlags, "source", "Backup source owner[@SID]=absolute SQLite path; repeat for each owner")
-	flag.Var(&allowedSIDFlags, "allow-sid", "SID permitted in the isolated restore; repeat as needed")
-	flag.Parse()
+	flags.Var(&sourceFlags, "source", "Backup source owner[@SID]=absolute SQLite path; repeat for each owner")
+	flags.Var(&allowedSIDFlags, "allow-sid", "SID permitted in the isolated restore; repeat as needed")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	// The audit path must be explicit and absolute: the previous relative
+	// default (data/audit.db) resolved against the caller's working directory,
+	// so server runs from another directory recorded nothing (or wrote a stray
+	// database) and the real audit trail never saw backup.* events.
+	if !filepath.IsAbs(*auditPath) {
+		return errors.New("absolute -audit-db is required (the server's audit database, e.g. E:\\WorkAgent3\\data\\audit.db)")
+	}
 	// Audit must never block a backup or restore; an unavailable audit
 	// database is reported on stderr and recording is skipped.
 	auditStore, auditErr := audit.Open(*auditPath)

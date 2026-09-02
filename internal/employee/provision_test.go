@@ -91,3 +91,53 @@ func TestProvisionerDoesNotModifyEnabledUser(t *testing.T) {
 		t.Fatalf("platform was called for existing user: %v", platform.calls)
 	}
 }
+
+type recordingEntitlements struct {
+	sids []string
+	err  error
+}
+
+func (r *recordingEntitlements) SeedDefaults(_ context.Context, sid string) error {
+	r.sids = append(r.sids, sid)
+	return r.err
+}
+
+func TestProvisionerSeedsEntitlementsBeforeRuntimeStart(t *testing.T) {
+	users, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer users.Close()
+	platform := &fakePlatform{}
+	entitlements := &recordingEntitlements{}
+	provisioner := Provisioner{Platform: platform, Users: users, Runtimes: runtimeapi.NewRegistry(), Secrets: fixedSecrets{}, Entitlements: entitlements}
+	if _, err := provisioner.Add(t.Context(), "alice", []byte("correct horse battery staple")); err != nil {
+		t.Fatal(err)
+	}
+	if len(entitlements.sids) != 1 || entitlements.sids[0] != "S-1-5-21-1000" {
+		t.Fatalf("entitlements seeded for %v", entitlements.sids)
+	}
+}
+
+func TestProvisionerFailsClosedWhenEntitlementSeedFails(t *testing.T) {
+	users, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer users.Close()
+	platform := &fakePlatform{}
+	entitlements := &recordingEntitlements{err: errors.New("model access database unavailable")}
+	provisioner := Provisioner{Platform: platform, Users: users, Runtimes: runtimeapi.NewRegistry(), Secrets: fixedSecrets{}, Entitlements: entitlements}
+	if _, err := provisioner.Add(t.Context(), "alice", []byte("correct horse battery staple")); err == nil {
+		t.Fatal("failed entitlement seed was accepted")
+	}
+	user, err := users.UserByUsername(t.Context(), "alice")
+	if err != nil || !user.Disabled {
+		t.Fatalf("user with unseeded entitlements is not disabled: user=%+v err=%v", user, err)
+	}
+	for _, call := range platform.calls {
+		if call == "install" || call == "start" {
+			t.Fatalf("runtime was installed despite failed entitlement seed: %v", platform.calls)
+		}
+	}
+}

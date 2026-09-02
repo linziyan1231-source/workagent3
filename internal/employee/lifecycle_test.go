@@ -332,3 +332,46 @@ func TestPermanentEmployeeDeletionPlatformFailureRetainsMapping(t *testing.T) {
 		t.Fatalf("failed deletion lost recoverable mapping: %+v %v", user, err)
 	}
 }
+
+type lifecycleEntitlements struct {
+	sids []string
+	err  error
+}
+
+func (r *lifecycleEntitlements) SeedDefaults(_ context.Context, sid string) error {
+	r.sids = append(r.sids, sid)
+	return r.err
+}
+
+func TestRepairReseedsEntitlements(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	platform := &lifecyclePlatform{}
+	entitlements := &lifecycleEntitlements{}
+	result, err := (Lifecycle{Platform: platform, Users: data, Entitlements: entitlements}).Repair(t.Context(), "alice", []byte("windows repair password"))
+	if err != nil || result.Disabled {
+		t.Fatalf("repair failed: user=%+v err=%v", result, err)
+	}
+	if len(entitlements.sids) != 1 || entitlements.sids[0] != "S-1-5-21-1000" {
+		t.Fatalf("entitlements reseeded for %v", entitlements.sids)
+	}
+}
+
+func TestRepairSeedFailureKeepsEmployeeClosed(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	_, _ = data.CreateDisabledUser(t.Context(), "alice", "S-1-5-21-1000", "hash")
+	platform := &lifecyclePlatform{}
+	entitlements := &lifecycleEntitlements{err: errors.New("model access database unavailable")}
+	if _, err := (Lifecycle{Platform: platform, Users: data, Entitlements: entitlements}).Repair(t.Context(), "alice", []byte("windows repair password")); err == nil {
+		t.Fatal("failed entitlement reseed was accepted")
+	}
+	if platform.repairs != 0 {
+		t.Fatal("runtime was repaired despite failed entitlement reseed")
+	}
+	stored, _ := data.UserByUsername(t.Context(), "alice")
+	if !stored.Disabled {
+		t.Fatalf("employee reopened despite failed reseed: %+v", stored)
+	}
+}

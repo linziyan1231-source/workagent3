@@ -23,6 +23,7 @@ import (
 	"workagent3/internal/employee"
 	"workagent3/internal/employeemanager"
 	"workagent3/internal/mcpruntime"
+	"workagent3/internal/modelaccess"
 	"workagent3/internal/modelgateway"
 	"workagent3/internal/quota"
 	"workagent3/internal/store"
@@ -58,6 +59,11 @@ type managerConfig struct {
 	// quota.db the Portal serves (it defaults beside this database), because
 	// settlement matching and the usage page read what the drain writes.
 	QuotaDatabasePath string `json:"quotaDatabasePath,omitempty"`
+	// ModelAccessDatabasePath is the model access database holding the model
+	// catalog and per-SID authorizations. It must point at the same
+	// model-access.db the Portal serves (it defaults beside this database);
+	// provision and repair seed the employee's default authorizations into it.
+	ModelAccessDatabasePath string `json:"modelAccessDatabasePath,omitempty"`
 }
 
 func main() {
@@ -84,6 +90,16 @@ func run() error {
 	config, err := loadManagerConfig(*configPath)
 	if err != nil {
 		return err
+	}
+	// Fail fast before touching any state: the employee scheduled tasks are
+	// SDDL-isolated to SYSTEM, so an interactive Administrator run of a
+	// task-controlling action would otherwise fail halfway through (e.g. at
+	// Start-ScheduledTask) and leave the account disabled. The loopback
+	// service mode is excluded here: it is deployed as SYSTEM.
+	if *listen == "" {
+		if err := requireTaskControlIdentity(*action); err != nil {
+			return err
+		}
 	}
 	var password []byte
 	if *listen == "" && (*action == "add" || *action == "reset-password" || *action == "repair" || *action == "rename-windows") {
@@ -115,6 +131,7 @@ func run() error {
 	}
 	defer auditStore.Close()
 	var drainer *modelgateway.UsageDrainer
+	var entitlements employee.EntitlementSeeder
 	if config.ModelGateway != nil {
 		gateway, err := modelgateway.NewCLIProxy(*config.ModelGateway)
 		if err != nil {
@@ -141,6 +158,22 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		modelAccessPath := config.ModelAccessDatabasePath
+		if modelAccessPath == "" {
+			modelAccessPath = filepath.Join(filepath.Dir(config.DatabasePath), "model-access.db")
+		}
+		if err := os.MkdirAll(filepath.Dir(modelAccessPath), 0o700); err != nil {
+			return fmt.Errorf("create model access data directory: %w", err)
+		}
+		// The model access store is shared with the Portal over the same
+		// model-access.db; provision/repair seeds the employee's default
+		// authorizations and quota budgets into it.
+		modelAccess, err := modelaccess.Open(modelAccessPath)
+		if err != nil {
+			return err
+		}
+		defer modelAccess.Close()
+		entitlements = entitlementSeeder{models: modelAccess, quotas: quotaRecorder, config: *config.ModelGateway}
 		nativeModels, keys = gateway, gateway
 		harnessModel, modelGatewayBaseURL = config.ModelGateway.CodexModel, config.ModelGateway.BaseURL
 	}
@@ -161,8 +194,8 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}}
-	lifecycle := employee.Lifecycle{Platform: platform, Users: data, Keys: keys}
+	provisioner := employee.Provisioner{Platform: platform, Users: data, Runtimes: data, Secrets: employee.RandomSecrets{}, Entitlements: entitlements}
+	lifecycle := employee.Lifecycle{Platform: platform, Users: data, Keys: keys, Entitlements: entitlements}
 	if *listen != "" {
 		if drainer != nil {
 			go runUsageDrain(ctx, drainer, usageDrainInterval)
@@ -202,6 +235,44 @@ func run() error {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"action": *action, "id": user.ID, "username": user.Username, "enabled": !user.Disabled, "admin": user.Admin})
+}
+
+// currentProcessSID is injectable for tests.
+var currentProcessSID = winutil.CurrentSID
+
+// taskControlActions register, start, stop, or unregister the employee
+// scheduled task (WorkAgent3-<SID>). The task SDDL grants control to SYSTEM
+// only, so these CLI actions must run as SYSTEM (or through the loopback
+// Employee Manager service, which runs as SYSTEM). The remaining actions
+// (reset-password, grant-admin, revoke-admin) never touch scheduled tasks.
+var taskControlActions = map[string]bool{
+	"add":             true,
+	"enable":          true,
+	"disable":         true,
+	"repair":          true,
+	"rename-windows":  true,
+	"set-limits":      true,
+	"offboard-retain": true,
+	"offboard-delete": true,
+}
+
+// requireTaskControlIdentity fails fast — before any state is changed — when a
+// task-controlling action runs under an identity that cannot start or stop the
+// SDDL-isolated employee scheduled task. Without this gate an interactive
+// Administrator run fails halfway (0x80070005 at Start-ScheduledTask) and
+// leaves the account disabled.
+func requireTaskControlIdentity(action string) error {
+	if !taskControlActions[action] {
+		return nil
+	}
+	sid, err := currentProcessSID()
+	if err != nil {
+		return fmt.Errorf("verify current identity before %s: %w", action, err)
+	}
+	if !strings.EqualFold(sid, "S-1-5-18") {
+		return fmt.Errorf("employee action %s controls the SDDL-isolated WorkAgent3-<SID> scheduled task, which only SYSTEM may start/stop: run it through the loopback Employee Manager service or as SYSTEM", action)
+	}
+	return nil
 }
 
 // cliAuditActions maps the CLI lifecycle actions to the business audit

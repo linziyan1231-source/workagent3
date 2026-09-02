@@ -153,6 +153,34 @@ ON CONFLICT(sid, model_id) DO UPDATE SET authorized = excluded.authorized, reaso
 	return nil
 }
 
+// EnsureAuthorization grants the model only when no authorization row exists
+// for the (SID, model) pair, so provisioning/repair replays never overwrite a
+// later administrator adjustment (SetAuthorization remains the overwrite
+// path).
+func (s *Store) EnsureAuthorization(ctx context.Context, sid, modelID, reason string) error {
+	if err := validateSID(sid); err != nil {
+		return err
+	}
+	if strings.TrimSpace(modelID) == "" {
+		return errors.New("model ID is required")
+	}
+	var exists bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_catalog WHERE model_id = ?)`, modelID).Scan(&exists); err != nil {
+		return fmt.Errorf("look up model catalog: %w", err)
+	}
+	if !exists {
+		return ErrModelNotFound
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO model_authorizations(sid, model_id, authorized, reason) VALUES(?, ?, 1, ?)
+ON CONFLICT(sid, model_id) DO NOTHING`,
+		sid, modelID, strings.TrimSpace(reason))
+	if err != nil {
+		return fmt.Errorf("ensure model authorization: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) Authorized(ctx context.Context, sid, modelID string) (bool, error) {
 	var authorized bool
 	err := s.db.QueryRowContext(ctx, `

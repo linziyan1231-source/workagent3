@@ -46,11 +46,21 @@ type SecretSource interface {
 	RegistrationCredential() (string, error)
 }
 
+// EntitlementSeeder grants the default model authorizations and quota budgets
+// for a freshly provisioned (or repaired) employee, so a new SID can call the
+// managed models without manual database inserts. Seeding must be idempotent
+// and must never overwrite later administrator adjustments. It is optional:
+// nil when no model gateway is configured.
+type EntitlementSeeder interface {
+	SeedDefaults(ctx context.Context, sid string) error
+}
+
 type Provisioner struct {
-	Platform Platform
-	Users    UserStore
-	Runtimes RuntimeAuthorizer
-	Secrets  SecretSource
+	Platform     Platform
+	Users        UserStore
+	Runtimes     RuntimeAuthorizer
+	Secrets      SecretSource
+	Entitlements EntitlementSeeder
 }
 
 func (p *Provisioner) Add(ctx context.Context, username string, portalPassword []byte) (result store.User, resultErr error) {
@@ -111,6 +121,15 @@ func (p *Provisioner) Add(ctx context.Context, username string, portalPassword [
 		return store.User{}, err
 	}
 	user.WindowsUsername = account.Canonical
+	// Seed the model authorizations and quota budgets before the runtime
+	// starts so the employee never comes up without managed model access. The
+	// seed is insert-if-absent, so a repair replay preserves administrator
+	// adjustments.
+	if p.Entitlements != nil {
+		if err := p.Entitlements.SeedDefaults(ctx, account.SID); err != nil {
+			return store.User{}, fmt.Errorf("seed employee model entitlements: %w", err)
+		}
+	}
 	credential, err := p.Secrets.RegistrationCredential()
 	if err != nil {
 		return store.User{}, err

@@ -522,6 +522,7 @@ go run ./cmd/backup-manager `
   -action create `
   -version 3.0.0-rc.1 `
   -backup-root E:\WorkAgent3\restricted-backups `
+  -audit-db E:\WorkAgent3\data\audit.db `
   -source portal-auth=E:\WorkAgent3\data\portal.db `
   -source collaboration=E:\WorkAgent3\data\collaboration.db `
   -source notifications=E:\WorkAgent3\data\notifications.db `
@@ -550,6 +551,7 @@ go run ./cmd/backup-manager `
   -version 3.0.0-rc.1 `
   -backup E:\WorkAgent3\restricted-backups\backup-20260831T030000Z-0123456789abcdef `
   -restore-root E:\WorkAgent3\restore-drills `
+  -audit-db E:\WorkAgent3\data\audit.db `
   -allow-sid S-1-5-21-1000
 ```
 

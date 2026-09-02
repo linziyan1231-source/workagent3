@@ -69,6 +69,9 @@ type Lifecycle struct {
 	Platform LifecyclePlatform
 	Users    LifecycleUserStore
 	Keys     KeyLifecycle
+	// Entitlements re-seeds the default model authorizations and quota budgets
+	// during repair; nil when no model gateway is configured.
+	Entitlements EntitlementSeeder
 }
 
 func (l Lifecycle) setKeysEnabled(ctx context.Context, sid string, enabled bool) error {
@@ -360,7 +363,14 @@ func (l Lifecycle) Repair(ctx context.Context, username string, windowsPassword 
 	}
 	// Repair re-provisions the gateway keys in place (rotate + enable) before
 	// the runtime starts again. On failure the employee stays disabled, so
-	// any re-enabled keys are disabled again best effort.
+	// any re-enabled keys are disabled again best effort. The entitlement
+	// re-seed is insert-if-absent: it restores defaults lost to a broken
+	// provision without overwriting administrator adjustments.
+	if l.Entitlements != nil {
+		if err := l.Entitlements.SeedDefaults(ctx, user.SID); err != nil {
+			return user, fmt.Errorf("seed employee model entitlements: %w", err)
+		}
+	}
 	if err := platform.RepairInstalledRuntime(ctx, user, windowsPassword); err != nil {
 		l.disableKeysBestEffort(ctx, user.SID)
 		return user, fmt.Errorf("repair employee runtime: %w", err)

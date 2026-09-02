@@ -309,18 +309,12 @@ func bootstrapModels(models *modelaccess.Store, harnessModel string) error {
 		return errors.New("managed Harness model is required: set -harness-model or WORKAGENT_HARNESS_MODEL to the configured Codex model (see docs/employee-manager.config.example.json)")
 	}
 	ctx := context.Background()
-	for _, model := range []modelaccess.Model{
-		{ID: "harness-default", ProviderID: "harness", DisplayName: "Harness (" + harnessModel + ")", Aliases: []string{"default", harnessModel}, ContextWindow: 128000, Health: modelaccess.Unknown},
-		// The codex provider runs through the same shared Codex model, so the
-		// alias lets settlement matching attribute gateway usage records (which
-		// carry the real model name) to codex-native reservations.
-		{ID: "codex-native", ProviderID: "codex", DisplayName: "Codex", Aliases: []string{harnessModel}, ContextWindow: 128000, Health: modelaccess.Unknown},
-		{ID: "kimi-native", ProviderID: "kimi", DisplayName: "Kimi", Aliases: []string{}, ContextWindow: 128000, Health: modelaccess.Unknown},
-		{ID: quota.SpeechTranscriptionModelID, ProviderID: "speech", DisplayName: "Speech transcription", Aliases: []string{}, ContextWindow: 1, Health: modelaccess.Unknown},
-	} {
-		if err := models.UpsertModel(ctx, model); err != nil {
-			return fmt.Errorf("seed model %s: %w", model.ID, err)
-		}
+	// The catalog seed is shared with the Employee Manager provision path
+	// (modelaccess.SeedCatalog); per-SID authorizations and quota budgets are
+	// seeded at provision/repair time, not here — this bootstrap only covers
+	// the optional WORKAGENT_BOOTSTRAP_* administrator below.
+	if err := modelaccess.SeedCatalog(ctx, models, harnessModel); err != nil {
+		return err
 	}
 	sid := strings.TrimSpace(os.Getenv("WORKAGENT_BOOTSTRAP_SID"))
 	for _, modelID := range strings.Split(os.Getenv("WORKAGENT_BOOTSTRAP_MODEL_IDS"), ",") {

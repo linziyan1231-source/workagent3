@@ -31,5 +31,6 @@
     "kimiWeeklyUsd": 20
   },
   "auditDatabasePath": "C:\\WorkAgent3\\portal\\data\\audit.db",
-  "quotaDatabasePath": "C:\\WorkAgent3\\portal\\data\\quota.db"
+  "quotaDatabasePath": "C:\\WorkAgent3\\portal\\data\\quota.db",
+  "modelAccessDatabasePath": "C:\\WorkAgent3\\portal\\data\\model-access.db"
 }
