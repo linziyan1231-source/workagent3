@@ -175,8 +175,7 @@ func expandManagedMCPServers(servers []mcpruntime.Server, spec RuntimeSpec) []mc
 }
 
 func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) error {
-	script := `Start-ScheduledTask -TaskName $env:WA3_TASK`
-	if err := runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(spec.SID)}, nil); err != nil {
+	if err := startScheduledTask(ctx, taskName(spec.SID), startEmployeeTask, employeeTaskState); err != nil {
 		return err
 	}
 	return waitForRuntimeLease(ctx, p.config.PortalURL, spec.SID, spec.RegistrationCredential, 45*time.Second)
@@ -197,7 +196,7 @@ func (p *WindowsPlatform) StartInstalledRuntime(ctx context.Context, sid string)
 	if value == "" {
 		return errors.New("employee runtime registration credential is empty")
 	}
-	if err := runPowerShell(ctx, `Start-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop`, map[string]string{"WA3_TASK": taskName(sid)}, nil); err != nil {
+	if err := startScheduledTask(ctx, taskName(sid), startEmployeeTask, employeeTaskState); err != nil {
 		return err
 	}
 	return waitForRuntimeLease(ctx, p.config.PortalURL, sid, value, 45*time.Second)
@@ -392,13 +391,38 @@ func runPowerShell(ctx context.Context, script string, values map[string]string,
 	var output bytes.Buffer
 	command.Stdout, command.Stderr = &output, &output
 	if err := command.Run(); err != nil {
-		message := strings.TrimSpace(output.String())
-		if len(message) > 2048 {
-			message = message[:2048]
-		}
-		return fmt.Errorf("Windows Task Scheduler command failed: %w: %s", err, message)
+		return fmt.Errorf("Windows Task Scheduler command failed: %w: %s", err, powerShellOutput(output))
 	}
 	return nil
+}
+
+// startEmployeeTask and employeeTaskState are the scheduled task primitives
+// behind startScheduledTask; they are variables so tests can inject fakes.
+var startEmployeeTask = func(ctx context.Context, name string) error {
+	return runPowerShell(ctx, `Start-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop`, map[string]string{"WA3_TASK": name}, nil)
+}
+
+var employeeTaskState = func(ctx context.Context, name string) (string, error) {
+	return runPowerShellQuery(ctx, `(Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop).State.ToString()`, map[string]string{"WA3_TASK": name})
+}
+
+func runPowerShellQuery(ctx context.Context, script string, values map[string]string) (string, error) {
+	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShell(script))
+	command.Env = restrictedEnvironment(values)
+	var output bytes.Buffer
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("Windows Task Scheduler query failed: %w: %s", err, powerShellOutput(output))
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+func powerShellOutput(output bytes.Buffer) string {
+	message := strings.TrimSpace(output.String())
+	if len(message) > 2048 {
+		message = message[:2048]
+	}
+	return message
 }
 
 func encodedPowerShell(script string) string {
