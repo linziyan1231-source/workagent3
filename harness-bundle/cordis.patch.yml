@@ -1,3 +1,28 @@
+# The managed Harness shares the SID-private ChatGPT downstream key with native
+# Codex: llm-deepseek always targets the local CLIProxyAPI loopback
+# ($DEEPSEEK_BASE_URL, exported by the UserHost supervisor from the
+# employee-manager modelGateway configuration) and the default model is the
+# configured Codex model ($WORKAGENT_HARNESS_MODEL). The catalog declares the
+# model text-only because CLIProxyAPI has no DeepSeek /files endpoint, which
+# removes the image attachment entry for Harness sessions.
+- id: llm-deepseek
+  config:
+    baseURL: !!js process.env.DEEPSEEK_BASE_URL
+    models:
+      - id: !!js process.env.WORKAGENT_HARNESS_MODEL
+        name: WorkAgent Harness
+        contextWindow: 1000000
+        maxTokens: 256000
+        inputModalities: ["text"]
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: !!js process.env.WORKAGENT_HARNESS_MODEL
+# web-search-deepseek hardcodes https://api.deepseek.com/anthropic/v1; with the
+# internal CLIProxyAPI key present it would carry that key to the public
+# internet, so the provider stays disabled and web_search fails closed.
+- id: web-search-deepseek
+  disabled: true
 - id: credentials
   name: "@deepseek-ai/dsh-credentials-local"
   disabled: true

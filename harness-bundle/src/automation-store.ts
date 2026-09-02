@@ -20,6 +20,11 @@ import {
   type AutomationSchedule,
 } from "@workagent/contracts";
 
+import {
+  PlatformNotificationClient,
+  type TerminalNotificationPort,
+} from "./notification-client.js";
+
 type Clock = { now(): Date };
 
 const defaultClock: Clock = { now: () => new Date() };
@@ -413,6 +418,9 @@ export class AutomationScheduler {
   constructor(
     readonly store: AutomationStore,
     readonly runner: AutomationRunnerPort,
+    readonly notifier:
+      | TerminalNotificationPort
+      | undefined = PlatformNotificationClient.fromEnvironment(),
   ) {}
 
   start(intervalMs = 30_000): void {
@@ -443,28 +451,70 @@ export class AutomationScheduler {
     this.#ticking = true;
     try {
       for (const pending of this.store.claimRunnable()) {
-        let run: AutomationRun;
+        // Isolate each run: a failing begin/execute/finish must not abort the
+        // loop and starve the remaining pending runs of this tick.
         try {
-          run = this.store.begin(pending.id);
+          let run: AutomationRun;
+          try {
+            run = this.store.begin(pending.id);
+          } catch {
+            continue;
+          }
+          try {
+            const result = await this.runner.execute({
+              automationRunId: run.id,
+              definition: run.definitionSnapshot,
+            });
+            this.#notifyTerminal(
+              this.store.finish(run.id, { status: "succeeded", ...result }),
+            );
+          } catch (error) {
+            this.#notifyTerminal(
+              this.store.finish(run.id, {
+                status: "failed",
+                error:
+                  error instanceof Error ? error.message : "automation_failed",
+              }),
+            );
+          }
         } catch {
-          continue;
-        }
-        try {
-          const result = await this.runner.execute({
-            automationRunId: run.id,
-            definition: run.definitionSnapshot,
-          });
-          this.store.finish(run.id, { status: "succeeded", ...result });
-        } catch (error) {
-          this.store.finish(run.id, {
-            status: "failed",
-            error: error instanceof Error ? error.message : "automation_failed",
-          });
+          // The run is no longer finishable (e.g. completed elsewhere); skip
+          // it and keep scheduling the rest.
         }
       }
     } finally {
       this.#ticking = false;
     }
+  }
+
+  // Delivers the terminal-state notification through the platform
+  // Notifications module. Publish failures must never break the run, so the
+  // promise is fire-and-forget.
+  #notifyTerminal(run: AutomationRun): void {
+    if (this.notifier === undefined) return;
+    // A cancel can race execute; finish() then returns the cancelled run.
+    if (run.status !== "succeeded" && run.status !== "failed") return;
+    const policy = run.definitionSnapshot.notificationPolicy;
+    if (
+      policy === "none" ||
+      (policy === "on_failure" && run.status !== "failed")
+    )
+      return;
+    const name = run.definitionSnapshot.name;
+    void this.notifier
+      .publish({
+        kind: "automation",
+        title:
+          run.status === "failed"
+            ? "Automation failed"
+            : "Automation completed",
+        message:
+          run.status === "failed"
+            ? `Automation "${name}" failed: ${run.error ?? "unknown error"}`
+            : `Automation "${name}" finished successfully.`,
+        deepLink: `/scheduled/${run.automationId}`,
+      })
+      .catch(() => undefined);
   }
 
   async #recoverInterruptedRuns(): Promise<void> {

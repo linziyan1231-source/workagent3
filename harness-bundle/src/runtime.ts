@@ -42,7 +42,12 @@ import type { PresetStore } from "./preset-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { ResolvedMcpServer } from "./mcp-projection.js";
 import type { ResolvedSkill } from "./skill-projection.js";
-import type { TeamExecution, TeamRunnerPort } from "./team-store.js";
+import type {
+  TeamExecution,
+  TeamRunnerPort,
+  TeamSessionPort,
+  TeamSessionRequest,
+} from "./team-store.js";
 import type { InboxExecution, InboxRunnerPort } from "./inbox-api.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
 import type { CredentialStatusStore } from "./model-access-store.js";
@@ -278,7 +283,11 @@ export const normalizeEvent = (
 };
 
 export class RuntimeController
-  implements AutomationRunnerPort, TeamRunnerPort, InboxRunnerPort
+  implements
+    AutomationRunnerPort,
+    TeamRunnerPort,
+    InboxRunnerPort,
+    TeamSessionPort
 {
   readonly #ctx: Context;
   readonly #token: string;
@@ -393,9 +402,77 @@ export class RuntimeController
     return execution;
   }
 
-  executeTeamTask(
+  async openTeamSession(request: TeamSessionRequest): Promise<void> {
+    const existing = this.#sessions.get(request.sessionId);
+    if (existing !== undefined) {
+      if (existing.handle === undefined && existing.native === undefined)
+        await this.#activate(request.sessionId, existing);
+      return;
+    }
+    const workspace = this.#workspaces.get(request.workspaceId);
+    if (workspace === undefined) throw new Error("workspace_not_found");
+    const preset = this.#presets.resolve(request.presetId);
+    if (preset.resolvedSnapshot.engine !== request.engine)
+      throw new Error("preset_engine_mismatch");
+    const resolvedSkills = this.#resolvedSkills(preset);
+    this.#validateSkillCompatibility(request.engine, resolvedSkills);
+    const mcpServers = this.#resolvedMcpServers(preset);
+    this.#validateMcpCompatibility(request.engine, mcpServers);
+    const now = new Date().toISOString();
+    const record: SessionRecord = {
+      activating: undefined,
+      engine: request.engine,
+      events: [],
+      handle: undefined,
+      native: undefined,
+      nativeId: request.sessionId,
+      nextEventSequence: 1,
+      title: request.title,
+      createdAt: now,
+      updatedAt: now,
+      workspaceId: workspace.id,
+      preset,
+    };
+    if (request.engine === "harness") {
+      record.handle = await this.#createHarness(
+        request.sessionId,
+        this.#workspaces.engineRoot(record.workspaceId),
+        mcpServers,
+        resolvedSkills,
+      );
+    } else {
+      const credentialError = nativeCredentialError(
+        request.engine,
+        this.#credentials.statusFor(`${request.engine}-native`),
+      );
+      if (credentialError !== undefined) throw new Error(credentialError);
+      const bridge = this.#bridges.get(request.engine);
+      if (bridge === undefined) throw new Error("engine_unavailable");
+      record.native = await bridge.create(
+        this.#workspaces.engineRoot(record.workspaceId),
+        (event) =>
+          this.#publish(
+            record,
+            this.#nativeEvent(request.sessionId, record, event),
+          ),
+        { mcpServers },
+      );
+      record.nativeId = record.native.nativeId;
+    }
+    this.#sessions.set(request.sessionId, record);
+    this.#persist(request.sessionId, record);
+  }
+
+  async executeTeamTask(
     request: TeamExecution,
   ): Promise<{ sessionId: string; result?: string }> {
+    await this.openTeamSession({
+      sessionId: request.sessionId,
+      title: request.name,
+      engine: request.engine,
+      presetId: request.presetId,
+      workspaceId: request.workspaceId,
+    });
     const now = new Date().toISOString();
     return this.execute({
       automationRunId: request.taskId,
@@ -410,8 +487,8 @@ export class RuntimeController
         workspaceId: request.workspaceId,
         input: request.input,
         notificationPolicy: "none",
-        executionMode: "new_conversation",
-        conversationId: null,
+        executionMode: "existing",
+        conversationId: request.sessionId,
         nextRunAt: null,
         lastRunAt: null,
         createdAt: now,

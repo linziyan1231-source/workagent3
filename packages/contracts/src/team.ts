@@ -8,6 +8,7 @@ export const teamMemberSchema = z.object({
   presetId: z.string().min(1),
   role: z.enum(["lead", "member"]),
   status: z.enum(["idle", "running", "error"]),
+  sessionId: z.string().min(1).nullable().default(null),
   createdAt: z.iso.datetime({ offset: true }),
 });
 export type TeamMember = z.infer<typeof teamMemberSchema>;
@@ -53,6 +54,12 @@ export const teamEventSchema = z.object({
   sequence: z.number().int().positive(),
   type: z.enum([
     "team.updated",
+    "team.created",
+    "team.renamed",
+    "team.removed",
+    "member.added",
+    "member.renamed",
+    "member.removed",
     "task.queued",
     "task.started",
     "task.completed",
@@ -70,6 +77,7 @@ export const teamSchema = z.object({
   version: z.number().int().positive(),
   name: z.string().trim().min(1).max(120),
   workspaceId: z.string().min(1),
+  sessionMode: z.string().trim().min(1).max(40).nullable().default(null),
   members: z.array(teamMemberSchema).min(1),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
@@ -97,5 +105,6 @@ export const teamDocumentSchema = z.object({
   tasks: z.array(teamTaskSchema),
   messages: z.array(teamMailboxMessageSchema),
   events: z.array(teamEventSchema),
+  eventSequence: z.number().int().nonnegative().default(0),
   quotaReconciledTaskIds: z.array(z.string().min(1)).default([]),
 });

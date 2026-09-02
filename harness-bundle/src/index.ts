@@ -24,7 +24,15 @@ import { TeamOrchestrator, TeamStore } from "./team-store.js";
 import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
-import { QuotaAutomationRunner, QuotaTeamRunner } from "./quota-runner.js";
+import {
+  FailClosedAutomationRunner,
+  FailClosedSharedTurnRunner,
+  FailClosedTeamRunner,
+  QuotaAutomationRunner,
+  QuotaSharedTurnRunner,
+  QuotaTeamRunner,
+  SharedTurnQuotaJournal,
+} from "./quota-runner.js";
 import { SharedTurnController } from "./shared-turn-api.js";
 import { createManagedProviderCredentialHandler } from "./provider-credential-api.js";
 import { createManagedProviderHealthHandler } from "./provider-health-api.js";
@@ -202,12 +210,32 @@ export function apply(ctx: Context): void {
     credentials,
   );
   runtime.mount();
-  new SharedTurnController(ctx, token, runtime);
-  const automations = new AutomationStore(dshHome);
   const platformQuota = PlatformQuotaClient.fromEnvironment();
+  // Fail-closed run entries: without the platform quota channel no run can be
+  // reserved or settled, so automation, team, and shared runs refuse to start
+  // instead of running unbilled.
+  if (platformQuota === undefined) {
+    console.error(
+      "workagent-runtime-api: platform quota is not configured; automation, team, and shared AI runs are disabled",
+    );
+    new SharedTurnController(
+      ctx,
+      token,
+      new FailClosedSharedTurnRunner(runtime),
+    );
+  } else {
+    const sharedTurnRunner = new QuotaSharedTurnRunner(
+      runtime,
+      platformQuota,
+      new SharedTurnQuotaJournal(dshHome),
+    );
+    void sharedTurnRunner.reconcileInterrupted().catch(() => undefined);
+    new SharedTurnController(ctx, token, sharedTurnRunner);
+  }
+  const automations = new AutomationStore(dshHome);
   const automationRunner =
     platformQuota === undefined
-      ? runtime
+      ? new FailClosedAutomationRunner(runtime)
       : new QuotaAutomationRunner(runtime, presets, platformQuota);
   new AutomationController(
     ctx,
@@ -218,13 +246,14 @@ export function apply(ctx: Context): void {
   const teams = new TeamStore(dshHome);
   const teamRunner =
     platformQuota === undefined
-      ? runtime
+      ? new FailClosedTeamRunner(runtime)
       : new QuotaTeamRunner(runtime, presets, platformQuota);
   new TeamController(
     ctx,
     token,
     teams,
     new TeamOrchestrator(teams, teamRunner),
+    runtime,
   );
   new InboxController(ctx, token, new InboxStore(dshHome), runtime);
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>

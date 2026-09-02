@@ -22,6 +22,8 @@ export type SharedTurnRequest = z.infer<typeof sharedTurnRequestSchema>;
 
 export const sharedTurnRuntimeRequestSchema = sharedTurnRequestSchema.extend({
   workspacePath: z.string().min(1),
+  // Frozen at run admission: the member who mentioned the assistant pays.
+  payerSid: z.string().startsWith("S-1-"),
 });
 export type SharedTurnRuntimeRequest = z.infer<
   typeof sharedTurnRuntimeRequestSchema

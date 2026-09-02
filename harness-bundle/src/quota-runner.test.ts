@@ -1,8 +1,21 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  SharedTurnResult,
+  SharedTurnRuntimeRequest,
+} from "@workagent/contracts";
 import type { AutomationExecution } from "./automation-store.js";
+import type { TeamExecution } from "./team-store.js";
 import {
+  FailClosedAutomationRunner,
+  FailClosedSharedTurnRunner,
+  FailClosedTeamRunner,
   QuotaAutomationRunner,
+  QuotaSharedTurnRunner,
   QuotaTeamRunner,
+  SharedTurnQuotaJournal,
   estimatedAutomationUnits,
 } from "./quota-runner.js";
 
@@ -138,6 +151,7 @@ describe("QuotaTeamRunner", () => {
     taskId: "team-task-1",
     teamId: "team-1",
     memberId: "member-1",
+    sessionId: "session-member-1",
     name: "Launch · Reviewer",
     engine: "codex" as const,
     presetId: "preset-1",
@@ -224,5 +238,244 @@ describe("QuotaTeamRunner", () => {
     await runner.reconcileInterruptedTeamTask(teamRequest);
 
     expect(settle).not.toHaveBeenCalled();
+  });
+});
+
+describe("QuotaSharedTurnRunner", () => {
+  const sharedRequest: SharedTurnRuntimeRequest = {
+    runId: "run-shared-1234567890",
+    conversationId: "conversation-1234567",
+    projectId: "project-1234567890",
+    engine: "codex",
+    modelId: "gpt-5",
+    thinkingEffort: "medium",
+    context: "Shared context",
+    recoveryContext: "Full shared context",
+    workspacePath: "/tmp/shared-project",
+    payerSid: "S-1-5-21-2000",
+  };
+  const sharedResult: SharedTurnResult = {
+    runId: sharedRequest.runId,
+    runtimeSessionId: "session-shared-1",
+    assistantBody: "Shared answer",
+    recovered: false,
+  };
+  const sharedUnits = estimatedAutomationUnits(sharedRequest.context);
+  const reservation = (status: "reserved" | "settled") => ({
+    runId: sharedRequest.runId,
+    sid: sharedRequest.payerSid,
+    modelId: "gpt-5",
+    period: "daily" as const,
+    periodKey: "2026-09-01",
+    reservedUnits: sharedUnits,
+    actualUnits: null,
+    status,
+  });
+
+  const sharedHome = () => mkdtempSync(join(tmpdir(), "shared-turn-quota-"));
+
+  it("reserves against the frozen payer and settles the payer reservation", async () => {
+    const order: string[] = [];
+    const reserve = vi.fn(async () => {
+      order.push("reserve");
+      return reservation("reserved");
+    });
+    const executeSharedTurn = vi.fn(async () => {
+      order.push("execute");
+      return sharedResult;
+    });
+    const settle = vi.fn(async () => {
+      order.push("settle");
+    });
+    const runner = new QuotaSharedTurnRunner(
+      { executeSharedTurn, cancelSharedTurn: vi.fn() },
+      { reserve, settle },
+      new SharedTurnQuotaJournal(sharedHome()),
+    );
+
+    await expect(runner.executeSharedTurn(sharedRequest)).resolves.toEqual(
+      sharedResult,
+    );
+    expect(order).toEqual(["reserve", "execute", "settle"]);
+    expect(reserve).toHaveBeenCalledWith({
+      runId: sharedRequest.runId,
+      modelId: "gpt-5",
+      estimatedUnits: sharedUnits,
+      payerSid: sharedRequest.payerSid,
+    });
+    expect(settle).toHaveBeenCalledWith({
+      runId: sharedRequest.runId,
+      actualUnits: sharedUnits,
+      payerSid: sharedRequest.payerSid,
+    });
+  });
+
+  it("releases the payer reservation with zero usage when the turn fails", async () => {
+    const failure = new Error("engine_failed");
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const journal = new SharedTurnQuotaJournal(sharedHome());
+    const runner = new QuotaSharedTurnRunner(
+      {
+        executeSharedTurn: vi.fn().mockRejectedValue(failure),
+        cancelSharedTurn: vi.fn(),
+      },
+      { reserve: vi.fn().mockResolvedValue(reservation("reserved")), settle },
+      journal,
+    );
+
+    await expect(runner.executeSharedTurn(sharedRequest)).rejects.toBe(failure);
+    expect(settle).toHaveBeenCalledWith({
+      runId: sharedRequest.runId,
+      actualUnits: 0,
+      payerSid: sharedRequest.payerSid,
+    });
+    expect(journal.pending()).toEqual([]);
+  });
+
+  it("keeps the journaled reservation when settlement fails", async () => {
+    const home = sharedHome();
+    const settle = vi.fn().mockRejectedValue(new Error("platform_unreachable"));
+    const runner = new QuotaSharedTurnRunner(
+      {
+        executeSharedTurn: vi.fn().mockResolvedValue(sharedResult),
+        cancelSharedTurn: vi.fn(),
+      },
+      { reserve: vi.fn().mockResolvedValue(reservation("reserved")), settle },
+      new SharedTurnQuotaJournal(home),
+    );
+
+    const rejection = await runner
+      .executeSharedTurn(sharedRequest)
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(AggregateError);
+    // A fresh journal instance (process restart) still sees the reservation.
+    expect(new SharedTurnQuotaJournal(home).pending()).toEqual([
+      {
+        runId: sharedRequest.runId,
+        payerSid: sharedRequest.payerSid,
+        modelId: "gpt-5",
+        estimatedUnits: sharedUnits,
+      },
+    ]);
+  });
+
+  it("reconciles a reservation the process journaled before being killed", async () => {
+    const home = sharedHome();
+    // The process died between Reserve and Settle: the entry survived on disk.
+    new SharedTurnQuotaJournal(home).track({
+      runId: sharedRequest.runId,
+      payerSid: sharedRequest.payerSid,
+      modelId: "gpt-5",
+      estimatedUnits: sharedUnits,
+    });
+    const recovered = new SharedTurnQuotaJournal(home);
+    expect(recovered.pending()).toHaveLength(1);
+
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const reconciler = new QuotaSharedTurnRunner(
+      { executeSharedTurn: vi.fn(), cancelSharedTurn: vi.fn() },
+      { reserve: vi.fn().mockResolvedValue(reservation("reserved")), settle },
+      recovered,
+    );
+    await reconciler.reconcileInterrupted();
+    expect(settle).toHaveBeenCalledWith({
+      runId: sharedRequest.runId,
+      actualUnits: sharedUnits,
+      payerSid: sharedRequest.payerSid,
+    });
+    expect(recovered.pending()).toEqual([]);
+  });
+
+  it("skips reconciliation for a reservation settled before the crash", async () => {
+    const home = sharedHome();
+    const journal = new SharedTurnQuotaJournal(home);
+    journal.track({
+      runId: sharedRequest.runId,
+      payerSid: sharedRequest.payerSid,
+      modelId: "gpt-5",
+      estimatedUnits: sharedUnits,
+    });
+    const settle = vi.fn();
+    const runner = new QuotaSharedTurnRunner(
+      { executeSharedTurn: vi.fn(), cancelSharedTurn: vi.fn() },
+      { reserve: vi.fn().mockResolvedValue(reservation("settled")), settle },
+      journal,
+    );
+
+    await runner.reconcileInterrupted();
+    expect(settle).not.toHaveBeenCalled();
+    expect(journal.pending()).toEqual([]);
+  });
+
+  it("delegates cancellation to the inner runner", async () => {
+    const cancelSharedTurn = vi.fn().mockResolvedValue(undefined);
+    const runner = new QuotaSharedTurnRunner(
+      { executeSharedTurn: vi.fn(), cancelSharedTurn },
+      { reserve: vi.fn(), settle: vi.fn() },
+      new SharedTurnQuotaJournal(sharedHome()),
+    );
+    await runner.cancelSharedTurn(sharedRequest.runId);
+    expect(cancelSharedTurn).toHaveBeenCalledWith(sharedRequest.runId);
+  });
+});
+
+describe("fail-closed runners without platform quota", () => {
+  it("refuses to start automation runs and still delegates cancellation", async () => {
+    const execute = vi.fn();
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const runner = new FailClosedAutomationRunner({ execute, cancel });
+    await expect(runner.execute(request)).rejects.toThrow(
+      "platform_quota_unconfigured",
+    );
+    expect(execute).not.toHaveBeenCalled();
+    await expect(runner.reconcileInterrupted(request)).resolves.toBeUndefined();
+    await runner.cancel(request.automationRunId);
+    expect(cancel).toHaveBeenCalledWith(request.automationRunId);
+  });
+
+  it("refuses to start team tasks", async () => {
+    const executeTeamTask = vi.fn();
+    const runner = new FailClosedTeamRunner({ executeTeamTask });
+    const teamRequest: TeamExecution = {
+      taskId: "task-1",
+      teamId: "team-1",
+      memberId: "member-1",
+      sessionId: "session-1",
+      name: "Launch · Reviewer",
+      engine: "codex",
+      presetId: "preset-1",
+      workspaceId: "workspace-default",
+      input: "Review launch",
+    };
+    await expect(runner.executeTeamTask(teamRequest)).rejects.toThrow(
+      "platform_quota_unconfigured",
+    );
+    expect(executeTeamTask).not.toHaveBeenCalled();
+    await expect(
+      runner.reconcileInterruptedTeamTask(teamRequest),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to start shared turns", async () => {
+    const executeSharedTurn = vi.fn();
+    const runner = new FailClosedSharedTurnRunner({
+      executeSharedTurn,
+      cancelSharedTurn: vi.fn().mockResolvedValue(undefined),
+    });
+    await expect(
+      runner.executeSharedTurn({
+        runId: "run-shared-1",
+        conversationId: "conversation-1",
+        projectId: "project-1",
+        engine: "codex",
+        modelId: "gpt-5",
+        thinkingEffort: "medium",
+        context: "Shared context",
+        recoveryContext: "Full shared context",
+        workspacePath: "/tmp/shared-project",
+        payerSid: "S-1-5-21-2000",
+      }),
+    ).rejects.toThrow("platform_quota_unconfigured");
+    expect(executeSharedTurn).not.toHaveBeenCalled();
   });
 });

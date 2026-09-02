@@ -13,8 +13,10 @@ describe("@workagent/shared-turn contract", () => {
       context: "[Alice]\nPlease help",
       recoveryContext: "[Alice]\nPlease help",
       workspacePath: "C:\\shared\\owner\\project_1234567890",
+      payerSid: "S-1-5-21-2000",
     });
     expect(parsed.workspacePath).toContain("project_1234567890");
+    expect(parsed.payerSid).toBe("S-1-5-21-2000");
     expect(parsed.runId).toBe("run_1234567890123456");
   });
 });

@@ -24,6 +24,11 @@ import {
   type TeamTask,
 } from "@workagent/contracts";
 
+import {
+  PlatformNotificationClient,
+  type TerminalNotificationPort,
+} from "./notification-client.js";
+
 type Clock = { now(): Date };
 const defaultClock: Clock = { now: () => new Date() };
 
@@ -33,7 +38,8 @@ export class TeamStore {
   readonly #teams = new Map<string, Team>();
   readonly #tasks = new Map<string, TeamTask>();
   readonly #messages = new Map<string, TeamMailboxMessage>();
-  readonly #events = new Map<string, TeamEvent[]>();
+  readonly #events: TeamEvent[] = [];
+  #sequence = 0;
   readonly #quotaReconciledTaskIds = new Set<string>();
 
   constructor(dshHome: string, clock: Clock = defaultClock) {
@@ -60,8 +66,12 @@ export class TeamStore {
     }
     for (const message of document.messages)
       this.#messages.set(message.id, message);
-    for (const event of document.events)
-      this.#eventList(event.teamId).push(event);
+    for (const event of document.events) this.#events.push(event);
+    this.#sequence = Math.max(
+      document.eventSequence,
+      ...document.events.map((event) => event.sequence),
+      0,
+    );
     for (const id of document.quotaReconciledTaskIds)
       this.#quotaReconciledTaskIds.add(id);
     if (recovered) {
@@ -96,6 +106,7 @@ export class TeamStore {
       ...value.lead,
       role: "lead",
       status: "idle",
+      sessionId: `session-${randomUUID()}`,
       createdAt: now,
     });
     const team = teamSchema.parse({
@@ -103,28 +114,40 @@ export class TeamStore {
       version: 1,
       name: value.name,
       workspaceId: value.workspaceId,
+      sessionMode: null,
       members: [lead],
       createdAt: now,
       updatedAt: now,
     });
     this.#teams.set(id, team);
-    this.#event(id, "team.updated", id);
+    this.#event(id, "team.created", id);
     this.#save();
     return team;
   }
 
-  rename(id: string, expectedVersion: number, name: string): Team {
+  update(
+    id: string,
+    expectedVersion: number,
+    mutation: { name?: string; sessionMode?: string | null },
+  ): Team {
     const team = this.#requiredTeam(id);
     if (team.version !== expectedVersion)
       throw new Error("team_version_conflict");
     const next = teamSchema.parse({
       ...team,
-      name,
+      ...(mutation.name === undefined ? {} : { name: mutation.name }),
+      ...(mutation.sessionMode === undefined
+        ? {}
+        : { sessionMode: mutation.sessionMode }),
       version: team.version + 1,
       updatedAt: this.#now(),
     });
     this.#teams.set(id, next);
-    this.#event(id, "team.updated", id);
+    this.#event(
+      id,
+      mutation.name === undefined ? "team.updated" : "team.renamed",
+      id,
+    );
     this.#save();
     return next;
   }
@@ -147,6 +170,7 @@ export class TeamStore {
       ...input,
       role: "member",
       status: "idle",
+      sessionId: `session-${randomUUID()}`,
       createdAt: this.#now(),
     });
     const next = teamSchema.parse({
@@ -156,7 +180,7 @@ export class TeamStore {
       updatedAt: this.#now(),
     });
     this.#teams.set(teamId, next);
-    this.#event(teamId, "team.updated", member.id);
+    this.#event(teamId, "member.added", member.id);
     this.#save();
     return next;
   }
@@ -189,7 +213,13 @@ export class TeamStore {
       updatedAt: this.#now(),
     });
     this.#teams.set(teamId, next);
-    this.#event(teamId, "team.updated", memberId);
+    this.#event(
+      teamId,
+      input.name !== undefined && input.name !== current.name
+        ? "member.renamed"
+        : "team.updated",
+      memberId,
+    );
     this.#save();
     return next;
   }
@@ -214,7 +244,7 @@ export class TeamStore {
       updatedAt: this.#now(),
     });
     this.#teams.set(teamId, next);
-    this.#event(teamId, "team.updated", memberId);
+    this.#event(teamId, "member.removed", memberId);
     this.#save();
     return next;
   }
@@ -227,12 +257,18 @@ export class TeamStore {
       )
     )
       throw new Error("team_has_active_task");
+    this.#event(teamId, "team.removed", teamId);
     this.#teams.delete(teamId);
     for (const [id, task] of this.#tasks)
       if (task.teamId === teamId) this.#tasks.delete(id);
     for (const [id, message] of this.#messages)
       if (message.teamId === teamId) this.#messages.delete(id);
-    this.#events.delete(teamId);
+    for (let index = this.#events.length - 1; index >= 0; index--)
+      if (
+        this.#events[index]!.teamId === teamId &&
+        this.#events[index]!.type !== "team.removed"
+      )
+        this.#events.splice(index, 1);
     this.#save();
   }
 
@@ -307,7 +343,11 @@ export class TeamStore {
       status: "running",
       startedAt: this.#now(),
     });
-    const running = teamMemberSchema.parse({ ...member, status: "running" });
+    const running = teamMemberSchema.parse({
+      ...member,
+      status: "running",
+      sessionId: member.sessionId ?? `session-${randomUUID()}`,
+    });
     const nextTeam = teamSchema.parse({
       ...team,
       members: team.members.map((value) =>
@@ -408,7 +448,12 @@ export class TeamStore {
   }
   events(teamId: string, after = 0): TeamEvent[] {
     this.#requiredTeam(teamId);
-    return this.#eventList(teamId).filter((event) => event.sequence > after);
+    return this.#events.filter(
+      (event) => event.teamId === teamId && event.sequence > after,
+    );
+  }
+  allEvents(after = 0): TeamEvent[] {
+    return this.#events.filter((event) => event.sequence > after);
   }
 
   #idleMember(teamId: string, memberId: string, failed: boolean): void {
@@ -424,25 +469,16 @@ export class TeamStore {
     });
   }
   #event(teamId: string, type: TeamEvent["type"], subjectId: string): void {
-    const events = this.#eventList(teamId);
-    events.push(
+    this.#events.push(
       teamEventSchema.parse({
         id: `team-event-${randomUUID()}`,
         teamId,
-        sequence: events.length + 1,
+        sequence: ++this.#sequence,
         type,
         subjectId,
         occurredAt: this.#now(),
       }),
     );
-  }
-  #eventList(teamId: string): TeamEvent[] {
-    let events = this.#events.get(teamId);
-    if (events === undefined) {
-      events = [];
-      this.#events.set(teamId, events);
-    }
-    return events;
   }
   #requiredTeam(id: string): Team {
     const value = this.#teams.get(id);
@@ -464,6 +500,7 @@ export class TeamStore {
       taskId: task.id,
       teamId: team.id,
       memberId: member.id,
+      sessionId: member.sessionId ?? `session-${task.id}`,
       name: `${team.name} · ${member.name}`,
       engine: member.engine,
       presetId: member.presetId,
@@ -479,7 +516,7 @@ export class TeamStore {
     const temporary = `${this.#path}.${process.pid}.tmp`;
     writeFileSync(
       temporary,
-      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: [...this.#events.values()].flat(), quotaReconciledTaskIds: [...this.#quotaReconciledTaskIds].sort() }, null, 2)}\n`,
+      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: this.#events, eventSequence: this.#sequence, quotaReconciledTaskIds: [...this.#quotaReconciledTaskIds].sort() }, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     renameSync(temporary, this.#path);
@@ -490,6 +527,7 @@ export type TeamExecution = {
   taskId: string;
   teamId: string;
   memberId: string;
+  sessionId: string;
   name: string;
   engine: EngineId;
   presetId: string;
@@ -504,6 +542,17 @@ export interface TeamRunnerPort {
   reconcileInterruptedTeamTask?(request: TeamExecution): Promise<void>;
 }
 
+export type TeamSessionRequest = {
+  sessionId: string;
+  title: string;
+  engine: EngineId;
+  presetId: string;
+  workspaceId: string;
+};
+export interface TeamSessionPort {
+  openTeamSession(request: TeamSessionRequest): Promise<void>;
+}
+
 export class TeamOrchestrator {
   #ticking = false;
   #recovered = false;
@@ -511,6 +560,9 @@ export class TeamOrchestrator {
   constructor(
     readonly store: TeamStore,
     readonly runner: TeamRunnerPort,
+    readonly notifier:
+      | TerminalNotificationPort
+      | undefined = PlatformNotificationClient.fromEnvironment(),
   ) {}
   start(): void {
     void this.tick().catch(() => undefined);
@@ -562,22 +614,50 @@ export class TeamOrchestrator {
         taskId: begun.task.id,
         teamId: begun.team.id,
         memberId: begun.member.id,
+        sessionId: begun.member.sessionId ?? `session-${begun.task.id}`,
         name: `${begun.team.name} · ${begun.member.name}`,
         engine: begun.member.engine,
         presetId: begun.member.presetId,
         workspaceId: begun.team.workspaceId,
         input: begun.task.input,
       });
-      this.store.finishTask(begun.task.id, {
-        status: "succeeded",
-        ...result,
-      });
+      this.#notifyTerminal(
+        begun.team,
+        this.store.finishTask(begun.task.id, {
+          status: "succeeded",
+          ...result,
+        }),
+      );
     } catch (error) {
-      this.store.finishTask(begun.task.id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "team_task_failed",
-      });
+      this.#notifyTerminal(
+        begun.team,
+        this.store.finishTask(begun.task.id, {
+          status: "failed",
+          error: error instanceof Error ? error.message : "team_task_failed",
+        }),
+      );
     }
+  }
+
+  // Delivers the terminal-state notification through the platform
+  // Notifications module. Publish failures must never break the task, so the
+  // promise is fire-and-forget.
+  #notifyTerminal(team: Team, task: TeamTask): void {
+    if (this.notifier === undefined) return;
+    // A cancel can race execute; finishTask() then returns the cancelled task.
+    if (task.status !== "succeeded" && task.status !== "failed") return;
+    void this.notifier
+      .publish({
+        kind: "team",
+        title:
+          task.status === "failed" ? "Team task failed" : "Team task completed",
+        message:
+          task.status === "failed"
+            ? `Team "${team.name}" task "${task.title}" failed: ${task.error ?? "unknown error"}`
+            : `Team "${team.name}" task "${task.title}" completed.`,
+        deepLink: `/team/${team.id}`,
+      })
+      .catch(() => undefined);
   }
   async cancel(teamId: string, taskId: string): Promise<TeamTask> {
     const task = this.store.cancelTask(teamId, taskId);

@@ -17,7 +17,6 @@ export const moduleManifestSchema = z.object({
   required: z.boolean(),
   capabilities: z.array(z.string().min(1)).min(1),
   dependencies: z.array(moduleDependencySchema),
-  configSchema: z.string().min(1),
   dataOwner: z.string().min(1),
   healthCheck: z.string().min(1),
 });

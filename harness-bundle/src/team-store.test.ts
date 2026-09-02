@@ -311,4 +311,136 @@ describe("TeamStore", () => {
       store.removeMember(team.id, team.members[1]!.id).members,
     ).toHaveLength(1);
   });
+
+  it("assigns a durable session id to every member", () => {
+    const home = root();
+    const store = new TeamStore(home);
+    let team = createTeam(store);
+    const lead = team.members[0]!;
+    expect(lead.sessionId).toMatch(/^session-/);
+    team = store.addMember(team.id, {
+      name: "Reviewer",
+      engine: "codex",
+      presetId: "preset-review",
+    });
+    const reviewer = team.members[1]!;
+    expect(reviewer.sessionId).toMatch(/^session-/);
+    expect(reviewer.sessionId).not.toBe(lead.sessionId);
+    const reopened = new TeamStore(home);
+    expect(
+      reopened.get(team.id)?.members.map((member) => member.sessionId),
+    ).toEqual([lead.sessionId, reviewer.sessionId]);
+  });
+
+  it("emits explicit lifecycle events on a globally ordered stream", () => {
+    const home = root();
+    const store = new TeamStore(home);
+    let team = createTeam(store);
+    team = store.addMember(team.id, {
+      name: "Reviewer",
+      engine: "codex",
+      presetId: "preset-review",
+    });
+    const reviewer = team.members[1]!;
+    team = store.update(team.id, team.version, { name: "Launch v2" });
+    store.updateMember(team.id, reviewer.id, { name: "Reviewer v2" });
+    team = store.update(team.id, team.version + 1, { sessionMode: "auto" });
+    expect(team.sessionMode).toBe("auto");
+
+    const types = store.allEvents().map((event) => event.type);
+    expect(types).toEqual([
+      "team.created",
+      "member.added",
+      "team.renamed",
+      "member.renamed",
+      "team.updated",
+    ]);
+    const sequences = store.allEvents().map((event) => event.sequence);
+    expect([...sequences].sort((a, b) => a - b)).toEqual(sequences);
+
+    store.removeMember(team.id, reviewer.id);
+    store.delete(team.id);
+    // Deletion purges the team's history; only the removal marker remains so
+    // global-stream consumers can observe it.
+    expect(store.allEvents().map((event) => event.type)).toEqual([
+      "team.removed",
+    ]);
+    expect(() => store.events(team.id)).toThrow("team_not_found");
+
+    const reopened = new TeamStore(home);
+    expect(reopened.allEvents().at(-1)?.type).toBe("team.removed");
+    const afterDelete = reopened.allEvents().at(-1)!.sequence;
+    reopened.create({
+      name: "Next",
+      workspaceId: "workspace-1",
+      lead: { name: "Lead", engine: "kimi", presetId: "preset-lead" },
+    });
+    expect(reopened.allEvents().at(-1)!.sequence).toBeGreaterThan(afterDelete);
+  });
+
+  it("publishes terminal task notifications with the team history deep link", async () => {
+    const home = root();
+    const store = new TeamStore(home);
+    const team = createTeam(store);
+    const publish = vi.fn().mockResolvedValue(undefined);
+    const executeTeamTask = vi
+      .fn()
+      .mockResolvedValue({ sessionId: "session-1", result: "done" });
+    const orchestrator = new TeamOrchestrator(
+      store,
+      { executeTeamTask },
+      { publish },
+    );
+
+    store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Draft",
+      input: "Draft launch",
+    });
+    await orchestrator.tick();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "team",
+        title: "Team task completed",
+        deepLink: `/team/${team.id}`,
+      }),
+    );
+
+    executeTeamTask.mockRejectedValueOnce(new Error("engine_crashed"));
+    store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Risk",
+      input: "Find risks",
+    });
+    await orchestrator.tick();
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "team",
+        title: "Team task failed",
+        message: expect.stringContaining("engine_crashed"),
+        deepLink: `/team/${team.id}`,
+      }),
+    );
+  });
+
+  it("keeps the task result when notification publishing fails", async () => {
+    const home = root();
+    const store = new TeamStore(home);
+    const team = createTeam(store);
+    const publish = vi.fn().mockRejectedValue(new Error("portal_down"));
+    const orchestrator = new TeamOrchestrator(
+      store,
+      { executeTeamTask: async () => ({ sessionId: "session-1" }) },
+      { publish },
+    );
+    const task = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Draft",
+      input: "Draft launch",
+    });
+    await orchestrator.tick();
+    expect(store.task(task.id)?.status).toBe("succeeded");
+  });
 });

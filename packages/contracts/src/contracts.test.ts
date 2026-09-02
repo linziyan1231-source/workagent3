@@ -268,7 +268,6 @@ describe("module manifests", () => {
       id: dependency,
       contract: `${dependency}/v1`,
     })),
-    configSchema: `${id}/config/v1`,
     dataOwner: id,
     healthCheck: `${id}/health/v1`,
   });

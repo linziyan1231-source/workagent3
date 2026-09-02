@@ -1,8 +1,16 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { engineIdSchema, teamCreateSchema } from "@workagent/contracts";
+import {
+  engineIdSchema,
+  teamCreateSchema,
+  type TeamEvent,
+} from "@workagent/contracts";
 import { authorized } from "./index.js";
-import { TeamOrchestrator, TeamStore } from "./team-store.js";
+import {
+  TeamOrchestrator,
+  type TeamSessionPort,
+  TeamStore,
+} from "./team-store.js";
 
 const json = (
   response: ServerResponse,
@@ -34,8 +42,47 @@ const text = (value: unknown, name: string): string => {
   return value;
 };
 
+const streamEvents = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  collect: (after: number) => TeamEvent[],
+  after: number,
+): void => {
+  response.writeHead(200, {
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "content-type": "text/event-stream",
+  });
+  let sequence = after;
+  const timer = setInterval(publish, 250);
+  timer.unref();
+  request.once("close", () => clearInterval(timer));
+  function publish(): void {
+    let events: TeamEvent[];
+    try {
+      events = collect(sequence);
+    } catch {
+      clearInterval(timer);
+      response.end();
+      return;
+    }
+    for (const event of events) {
+      sequence = event.sequence;
+      response.write(
+        `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      );
+    }
+  }
+  publish();
+};
+
 export const createTeamHandler =
-  (token: string, store: TeamStore, orchestrator: TeamOrchestrator) =>
+  (
+    token: string,
+    store: TeamStore,
+    orchestrator: TeamOrchestrator,
+    sessions: TeamSessionPort,
+  ) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (!authorized(request, token))
       return json(response, 401, { error: "authentication_required" });
@@ -44,13 +91,39 @@ export const createTeamHandler =
       const path = url.pathname;
       if (path === "/v1/teams") {
         if (request.method === "GET") return json(response, 200, store.list());
-        if (request.method === "POST")
-          return json(
-            response,
-            201,
-            store.create(teamCreateSchema.parse(await body(request))),
+        if (request.method === "POST") {
+          const team = store.create(
+            teamCreateSchema.parse(await body(request)),
           );
+          const lead = team.members[0]!;
+          try {
+            await sessions.openTeamSession({
+              sessionId: lead.sessionId!,
+              title: `${team.name} · ${lead.name}`,
+              engine: lead.engine,
+              presetId: lead.presetId,
+              workspaceId: team.workspaceId,
+            });
+          } catch (error) {
+            store.delete(team.id);
+            throw error;
+          }
+          return json(response, 201, team);
+        }
         return method(response, "GET, POST");
+      }
+      if (path === "/v1/teams/events") {
+        if (request.method !== "GET") return method(response, "GET");
+        const after = Number(
+          url.searchParams.get("after") ??
+            request.headers["last-event-id"] ??
+            "0",
+        );
+        const since = Number.isSafeInteger(after) && after >= 0 ? after : 0;
+        if (!request.headers.accept?.includes("text/event-stream"))
+          return json(response, 200, store.allEvents(since));
+        streamEvents(request, response, store.allEvents.bind(store), since);
+        return;
       }
       const match =
         /^\/v1\/teams\/([^/]+)(?:\/(members|tasks|messages|events)(?:\/([^/]+)(?:\/(cancel))?)?)?$/.exec(
@@ -70,14 +143,18 @@ export const createTeamHandler =
         }
         if (request.method === "PATCH") {
           const input = await body(request);
+          const mutation: { name?: string; sessionMode?: string | null } = {};
+          if (input.name !== undefined)
+            mutation.name = text(input.name, "name");
+          if (input.sessionMode !== undefined)
+            mutation.sessionMode =
+              input.sessionMode === null
+                ? null
+                : text(input.sessionMode, "session_mode");
           return json(
             response,
             200,
-            store.rename(
-              teamId,
-              Number(input.version),
-              text(input.name, "name"),
-            ),
+            store.update(teamId, Number(input.version), mutation),
           );
         }
         if (request.method === "DELETE") {
@@ -91,15 +168,25 @@ export const createTeamHandler =
       if (resource === "members") {
         if (childId === undefined && request.method === "POST") {
           const input = await body(request);
-          return json(
-            response,
-            201,
-            store.addMember(teamId, {
-              name: text(input.name, "name"),
-              engine: engineIdSchema.parse(input.engine),
-              presetId: text(input.presetId, "preset"),
-            }),
-          );
+          const team = store.addMember(teamId, {
+            name: text(input.name, "name"),
+            engine: engineIdSchema.parse(input.engine),
+            presetId: text(input.presetId, "preset"),
+          });
+          const member = team.members[team.members.length - 1]!;
+          try {
+            await sessions.openTeamSession({
+              sessionId: member.sessionId!,
+              title: `${team.name} · ${member.name}`,
+              engine: member.engine,
+              presetId: member.presetId,
+              workspaceId: team.workspaceId,
+            });
+          } catch (error) {
+            store.removeMember(teamId, member.id);
+            throw error;
+          }
+          return json(response, 201, team);
         }
         if (childId !== undefined && request.method === "PATCH") {
           const input = await body(request);
@@ -192,26 +279,15 @@ export const createTeamHandler =
             request.headers["last-event-id"] ??
             "0",
         );
+        const since = Number.isSafeInteger(after) && after >= 0 ? after : 0;
         if (!request.headers.accept?.includes("text/event-stream"))
-          return json(response, 200, store.events(teamId, after));
-        response.writeHead(200, {
-          "cache-control": "no-store",
-          connection: "keep-alive",
-          "content-type": "text/event-stream",
-        });
-        let sequence = Number.isSafeInteger(after) && after >= 0 ? after : 0;
-        const publish = () => {
-          for (const event of store.events(teamId, sequence)) {
-            sequence = event.sequence;
-            response.write(
-              `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
-            );
-          }
-        };
-        publish();
-        const timer = setInterval(publish, 250);
-        timer.unref();
-        request.once("close", () => clearInterval(timer));
+          return json(response, 200, store.events(teamId, since));
+        streamEvents(
+          request,
+          response,
+          (sequence) => store.events(teamId, sequence),
+          since,
+        );
         return;
       }
       return method(response, "GET");
@@ -244,8 +320,9 @@ export class TeamController {
     token: string,
     store: TeamStore,
     orchestrator: TeamOrchestrator,
+    sessions: TeamSessionPort,
   ) {
-    const handler = createTeamHandler(token, store, orchestrator);
+    const handler = createTeamHandler(token, store, orchestrator, sessions);
     ctx.effect(
       () =>
         ctx.webServer.register({ kind: "prefix", path: "/v1/teams", handler }),

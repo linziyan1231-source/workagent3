@@ -184,6 +184,58 @@ describe("AutomationStore", () => {
     writeFileSync(join(directory, "automations.json"), "{}\n");
     expect(() => new AutomationStore(data)).toThrow();
   });
+
+  it("lets a cancellation win over a late finish in either outcome", () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create(mutation);
+    const run = store.begin(store.runNow(definition.id).id);
+    store.cancel(definition.id, run.id);
+
+    // finish() on a cancelled run is an idempotent no-op: the cancellation
+    // stays, for both a late success and a late failure.
+    const succeeded = store.finish(run.id, {
+      status: "succeeded",
+      sessionId: "session-late",
+    });
+    expect(succeeded.status).toBe("cancelled");
+    const failed = store.finish(run.id, {
+      status: "failed",
+      error: "late_failure",
+    });
+    expect(failed.status).toBe("cancelled");
+    expect(store.getRun(run.id)).toMatchObject({
+      status: "cancelled",
+      sessionId: null,
+      result: null,
+      error: null,
+    });
+  });
+
+  it("rejects cancel and repeated finish once a run reached a terminal state", () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create(mutation);
+    const run = store.begin(store.runNow(definition.id).id);
+    store.finish(run.id, { status: "succeeded", sessionId: "session-done" });
+
+    // First completion wins: a later cancel or finish is refused.
+    expect(() => store.cancel(definition.id, run.id)).toThrow(
+      "automation_run_not_cancellable",
+    );
+    expect(() =>
+      store.finish(run.id, { status: "succeeded", sessionId: "again" }),
+    ).toThrow("automation_run_not_running");
+    expect(store.getRun(run.id)?.status).toBe("succeeded");
+
+    // Cancelling twice is refused as well.
+    const other = store.begin(store.runNow(definition.id).id);
+    store.cancel(definition.id, other.id);
+    expect(() => store.cancel(definition.id, other.id)).toThrow(
+      "automation_run_not_cancellable",
+    );
+    expect(store.getRun(other.id)?.status).toBe("cancelled");
+  });
 });
 
 describe("AutomationScheduler", () => {
@@ -226,6 +278,121 @@ describe("AutomationScheduler", () => {
     await scheduler.cancel(definition.id, pending.id);
     release();
     await ticking;
+    expect(store.getRun(pending.id)?.status).toBe("cancelled");
+  });
+
+  it("publishes terminal notifications according to notificationPolicy", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const onFailure = store.create(mutation);
+    const always = store.create({
+      ...mutation,
+      name: "Hourly sync",
+      notificationPolicy: "always" as const,
+    });
+    const silent = store.create({
+      ...mutation,
+      name: "Quiet",
+      notificationPolicy: "none" as const,
+    });
+    const publish = vi.fn().mockResolvedValue(undefined);
+    const execute = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const scheduler = new AutomationScheduler(store, { execute }, { publish });
+
+    store.runNow(onFailure.id);
+    store.runNow(always.id);
+    store.runNow(silent.id);
+    await scheduler.tick();
+    // on_failure skips a success, none stays silent, always publishes with the
+    // run-history deep link.
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "automation",
+        title: "Automation completed",
+        deepLink: `/scheduled/${always.id}`,
+      }),
+    );
+
+    execute.mockRejectedValueOnce(new Error("quota_exceeded"));
+    store.runNow(onFailure.id);
+    await scheduler.tick();
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "automation",
+        title: "Automation failed",
+        message: expect.stringContaining("quota_exceeded"),
+        deepLink: `/scheduled/${onFailure.id}`,
+      }),
+    );
+  });
+
+  it("keeps the run result when notification publishing fails", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create({
+      ...mutation,
+      notificationPolicy: "always" as const,
+    });
+    const publish = vi.fn().mockRejectedValue(new Error("portal_down"));
+    const scheduler = new AutomationScheduler(
+      store,
+      { execute: async () => ({ sessionId: "session-1" }) },
+      { publish },
+    );
+    store.runNow(definition.id);
+    await scheduler.tick();
+    expect(store.history(definition.id)[0]?.status).toBe("succeeded");
+  });
+
+  it("keeps scheduling remaining runs when one run fails to finalize", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const stuck = store.create({ ...mutation, name: "Stuck" });
+    const healthy = store.create({ ...mutation, name: "Healthy" });
+    const stuckRun = store.runNow(stuck.id);
+    const healthyRun = store.runNow(healthy.id);
+    const execute = vi.fn(
+      async ({ automationRunId }: { automationRunId: string }) => {
+        if (automationRunId === stuckRun.id) {
+          // A double completion races the scheduler's own finish(), so both
+          // finish attempts throw; the loop must still reach the next run.
+          store.finish(stuckRun.id, {
+            status: "succeeded",
+            sessionId: "session-external",
+          });
+        }
+        return { sessionId: `session-for-${automationRunId}` };
+      },
+    );
+    await new AutomationScheduler(store, { execute }).tick();
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(store.getRun(healthyRun.id)?.status).toBe("succeeded");
+  });
+
+  it("preserves cancellation when an in-flight runner fails later", async () => {
+    const data = root();
+    const store = new AutomationStore(data);
+    const definition = store.create({ ...mutation, enabled: false });
+    const pending = store.runNow(definition.id);
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const scheduler = new AutomationScheduler(store, {
+      execute: async () => {
+        await waiting;
+        throw new Error("runner_exploded");
+      },
+    });
+    const ticking = scheduler.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await scheduler.cancel(definition.id, pending.id);
+    release();
+    await ticking;
+    // The late failure loses to the cancellation.
     expect(store.getRun(pending.id)?.status).toBe("cancelled");
   });
 });
