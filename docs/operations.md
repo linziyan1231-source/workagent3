@@ -286,13 +286,34 @@ the pinned record, proves the staged binary reports the pinned version, then
 atomically swaps it into `release\managed-tools\officecli\officecli.exe`. Any
 failure rolls back to the previous binary.
 
+The same script also installs the managed PDF exporter plugin used by
+`officecli view <file> pdf` (Office→PDF preview). Upstream publishes no
+official exporter plugin — the plugin registry is unreachable and
+[iOfficeAI/OfficeCLI#171](https://github.com/iOfficeAI/OfficeCLI/issues/171)
+is unanswered — so the release builds the internal
+`cmd/officecli-exporter-pdf` (plugin protocol v1, kind `exporter`) from
+source and installs it to the bundled plugin path
+`release\managed-tools\officecli\plugins\exporter\pdf\plugin.exe`, where
+`officecli.exe` discovers it automatically (`officecli plugins list` shows
+it). The plugin renders text-fidelity PDFs: it extracts document text through
+the managed `officecli view <file> text` and paginates it onto A4 pages with
+a non-embedded standard CJK font, so previews show full document text but not
+the original layout. The build is reproducible with the pinned go1.26.5
+toolchain and fixed flags; the manifest `plugins[]` entry pins the plugin
+version, SHA-256, and license, and the script verifies the staged plugin's
+hash and `--info` identity before the same transactional swap with rollback.
+If Go is not on PATH, pass `-GoCommand` (the deployment host carries the
+pinned toolchain under the codex tools directory).
+
 When `managedToolsRoot` is configured, Employee Manager refuses to start
-unless `officecli.exe` exists there and matches the pinned manifest hash.
-Include the component in release manifests so the immutable release root
-carries the verified binary:
+unless `officecli.exe` and every manifest-recorded plugin exist there and
+match their pinned hashes. Include the component in release manifests so the
+immutable release root carries the verified binary and plugin — repeat
+`-component` once per artifact file of the component:
 
 ```powershell
--component managed-tools=managed-tools/officecli/officecli.exe
+-component managed-tools=managed-tools/officecli/officecli.exe `
+-component managed-tools=managed-tools/officecli/plugins/exporter/pdf/plugin.exe
 ```
 
 ## CLIProxyAPI model gateway

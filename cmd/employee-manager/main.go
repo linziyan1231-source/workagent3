@@ -176,7 +176,7 @@ func run() error {
 	case "enable", "disable":
 		user, err = lifecycle.SetEnabled(ctx, *username, *action == "enable")
 	case "reset-password":
-		err = (employee.Lifecycle{Users: data}).ResetPortalPassword(ctx, *username, password)
+		err = lifecycle.ResetPortalPassword(ctx, *username, password)
 		if err == nil {
 			user, err = data.UserByUsername(ctx, *username)
 		}
@@ -324,18 +324,34 @@ func loadManagerConfig(path string) (managerConfig, error) {
 
 // managedToolRecord is the pinned OfficeCLI record shipped with the release
 // (release/managed-tools/officecli/manifest.json). It fixes the tool version,
-// its license, and the expected binary hash.
+// its license, and the expected binary hash, plus the pinned plugins the
+// managed install must carry (the Office→PDF preview needs the exporter
+// plugin).
 type managedToolRecord struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	Name          string `json:"name"`
-	Version       string `json:"version"`
-	License       string `json:"license"`
-	SHA256        string `json:"sha256"`
+	SchemaVersion int                   `json:"schemaVersion"`
+	Name          string                `json:"name"`
+	Version       string                `json:"version"`
+	License       string                `json:"license"`
+	SHA256        string                `json:"sha256"`
+	Plugins       []managedPluginRecord `json:"plugins"`
+}
+
+// managedPluginRecord pins one OfficeCLI plugin discovered by officecli.exe
+// from the bundled plugins directory. Path is the slash-separated location
+// relative to the managed tools root (plugins/<kind>/<ext>/plugin.exe).
+type managedPluginRecord struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Version string `json:"version"`
+	License string `json:"license"`
+	Path    string `json:"path"`
+	SHA256  string `json:"sha256"`
 }
 
 // verifyManagedTools is the startup gate for the managed OfficeCLI tool: the
-// pinned record must be present and well formed, and officecli.exe in the
-// managed tools root must exist and match the recorded SHA-256.
+// pinned record must be present and well formed, officecli.exe in the managed
+// tools root must exist and match the recorded SHA-256, and every pinned
+// plugin must be installed at its recorded path with a matching hash.
 func verifyManagedTools(root string) error {
 	payload, err := os.ReadFile(filepath.Join(root, "manifest.json"))
 	if err != nil {
@@ -350,14 +366,47 @@ func verifyManagedTools(root string) error {
 		strings.TrimSpace(record.License) == "" || hashErr != nil || len(hash) != sha256.Size {
 		return errors.New("managed tools manifest is invalid")
 	}
-	binary := filepath.Join(root, "officecli.exe")
-	info, err := os.Lstat(binary)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("managed OfficeCLI binary is missing or not a regular file")
+	if err := verifyManagedFile(root, "officecli.exe", record.SHA256, "managed OfficeCLI binary"); err != nil {
+		return err
 	}
-	file, err := os.Open(binary)
+	if len(record.Plugins) == 0 {
+		return errors.New("managed tools manifest records no plugins; the PDF exporter plugin is required for Office preview")
+	}
+	for _, plugin := range record.Plugins {
+		pluginHash, pluginHashErr := hex.DecodeString(plugin.SHA256)
+		if strings.TrimSpace(plugin.Name) == "" || strings.TrimSpace(plugin.Kind) == "" ||
+			strings.TrimSpace(plugin.Version) == "" || strings.TrimSpace(plugin.License) == "" ||
+			!validManagedPluginPath(plugin.Path) || pluginHashErr != nil || len(pluginHash) != sha256.Size {
+			return fmt.Errorf("managed tools manifest plugin record %q is invalid", plugin.Name)
+		}
+		if err := verifyManagedFile(root, plugin.Path, plugin.SHA256, "managed OfficeCLI plugin "+plugin.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validManagedPluginPath accepts only slash-separated relative paths that stay
+// inside the managed tools root.
+func validManagedPluginPath(path string) bool {
+	if path == "" || strings.Contains(path, "\\") || strings.HasPrefix(path, "/") || strings.Contains(path, ":") {
+		return false
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	return clean == path && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+// verifyManagedFile requires the file at root/relativePath to be a regular,
+// non-symlink file whose SHA-256 matches the pinned digest.
+func verifyManagedFile(root, relativePath, expectedSHA256, label string) error {
+	target := filepath.Join(root, filepath.FromSlash(relativePath))
+	info, err := os.Lstat(target)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is missing or not a regular file", label)
+	}
+	file, err := os.Open(target)
 	if err != nil {
-		return fmt.Errorf("open managed OfficeCLI binary: %w", err)
+		return fmt.Errorf("open %s: %w", label, err)
 	}
 	digest := sha256.New()
 	_, copyErr := io.Copy(digest, file)
@@ -368,8 +417,8 @@ func verifyManagedTools(root string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if actual := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(actual, record.SHA256) {
-		return fmt.Errorf("managed OfficeCLI binary failed integrity verification: expected %s, got %s", record.SHA256, actual)
+	if actual := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(actual, expectedSHA256) {
+		return fmt.Errorf("%s failed integrity verification: expected %s, got %s", label, expectedSHA256, actual)
 	}
 	return nil
 }

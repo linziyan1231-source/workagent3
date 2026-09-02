@@ -39,7 +39,7 @@ func run() (err error) {
 	activationID := flag.Int64("activation-id", 0, "Activation journal ID for rollback")
 	gatewayConfigPath := flag.String("gateway-config", "", "Employee Manager configuration JSON whose modelGateway section the real readiness probes use")
 	var componentFlags repeatedFlag
-	flag.Var(&componentFlags, "component", "Release component=relative artifact path; repeat when building a manifest")
+	flag.Var(&componentFlags, "component", "Release component=relative artifact path; repeat per artifact file when building a manifest")
 	flag.Parse()
 
 	root, err := filepath.Abs(*releaseRoot)
@@ -245,18 +245,20 @@ func (values *repeatedFlag) Set(value string) error {
 	return nil
 }
 
-func parseComponents(values []string) (map[operations.Component]string, error) {
-	components := make(map[operations.Component]string, len(values))
+func parseComponents(values []string) (map[operations.Component][]string, error) {
+	components := make(map[operations.Component][]string, len(values))
+	seen := make(map[string]bool, len(values))
 	for _, value := range values {
 		parts := strings.SplitN(value, "=", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return nil, fmt.Errorf("invalid component artifact %q", value)
 		}
-		component := operations.Component(parts[0])
-		if _, exists := components[component]; exists {
-			return nil, fmt.Errorf("duplicate component artifact %q", component)
+		if seen[value] {
+			return nil, fmt.Errorf("duplicate component artifact %q", value)
 		}
-		components[component] = filepath.ToSlash(parts[1])
+		seen[value] = true
+		component := operations.Component(parts[0])
+		components[component] = append(components[component], filepath.ToSlash(parts[1]))
 	}
 	return components, nil
 }

@@ -5,5 +5,17 @@
   "license": "Apache-2.0",
   "source": "https://github.com/iOfficeAI/OfficeCLI/releases/tag/v1.0.146",
   "asset": "officecli-win-x64.exe",
-  "sha256": "ad36ca99a50102d8f953e8ed1742fab65c9e201a29733601ea6ca9e676b2eed0"
+  "sha256": "ad36ca99a50102d8f953e8ed1742fab65c9e201a29733601ea6ca9e676b2eed0",
+  "plugins": [
+    {
+      "name": "officecli-exporter-pdf",
+      "kind": "exporter",
+      "extension": "pdf",
+      "version": "1.0.0",
+      "license": "Proprietary",
+      "source": "internal build: cmd/officecli-exporter-pdf (go1.26.5, -trimpath -buildvcs=false -ldflags \"-s -w\")",
+      "path": "plugins/exporter/pdf/plugin.exe",
+      "sha256": "3545c86d3d7b49095f8f5cf7f99f7a0b6fba57a416fc9a1692ccfcecd30d33e5"
+    }
+  ]
 }

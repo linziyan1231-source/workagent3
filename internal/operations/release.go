@@ -110,22 +110,33 @@ func (m ReleaseManifest) Validate() error {
 	if err := validateComponents(m.IncludedComponents); err != nil {
 		return err
 	}
-	if len(m.Artifacts) != len(m.IncludedComponents) {
-		return errors.New("release manifest requires exactly one artifact per component")
+	if len(m.Artifacts) < len(m.IncludedComponents) {
+		return errors.New("release manifest requires at least one artifact per component")
 	}
 	included := make(map[Component]bool, len(m.IncludedComponents))
 	for _, component := range m.IncludedComponents {
 		included[component] = true
 	}
 	seen := make(map[Component]bool, len(m.Artifacts))
+	seenFiles := make(map[string]bool, len(m.Artifacts))
 	for _, artifact := range m.Artifacts {
-		if !included[artifact.Component] || seen[artifact.Component] {
+		if !included[artifact.Component] {
 			return fmt.Errorf("release artifact component %q is missing or duplicated", artifact.Component)
 		}
 		if !validRelative(artifact.File) || artifact.Size < 0 || !validSHA256(artifact.SHA256) {
 			return fmt.Errorf("release artifact for %q is invalid", artifact.Component)
 		}
+		key := string(artifact.Component) + "\x00" + artifact.File
+		if seenFiles[key] {
+			return fmt.Errorf("release artifact %q is duplicated for component %q", artifact.File, artifact.Component)
+		}
+		seenFiles[key] = true
 		seen[artifact.Component] = true
+	}
+	for component := range included {
+		if !seen[component] {
+			return fmt.Errorf("release component %q has no artifact", component)
+		}
 	}
 	return nil
 }
@@ -151,35 +162,49 @@ func ReadManifest(path string) (ReleaseManifest, error) {
 	return manifest, nil
 }
 
-func BuildReleaseManifest(sourceRoot, version string, componentFiles map[Component]string) (ReleaseManifest, error) {
+// BuildReleaseManifest hashes every artifact file of every included
+// component. Components that ship several files (managed-tools carries
+// officecli.exe plus its bundled plugins tree) pass all of them; each file
+// lands at the same relative path in the immutable release root.
+func BuildReleaseManifest(sourceRoot, version string, componentFiles map[Component][]string) (ReleaseManifest, error) {
 	if !filepath.IsAbs(sourceRoot) || !validVersion(version) || len(componentFiles) == 0 {
 		return ReleaseManifest{}, errors.New("absolute source root, valid version, and component files are required")
 	}
 	manifest := ReleaseManifest{FormatVersion: 1, Version: version}
-	for component, file := range componentFiles {
+	for component, files := range componentFiles {
 		if _, ok := allowedComponents[component]; !ok {
 			return ReleaseManifest{}, fmt.Errorf("unknown release component %q", component)
 		}
-		if !validRelative(file) {
-			return ReleaseManifest{}, fmt.Errorf("invalid artifact path for %s", component)
+		if len(files) == 0 {
+			return ReleaseManifest{}, fmt.Errorf("release component %q has no artifact", component)
 		}
-		path := filepath.Join(sourceRoot, filepath.FromSlash(file))
-		if err := ensureRegularBeneath(sourceRoot, path); err != nil {
-			return ReleaseManifest{}, err
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return ReleaseManifest{}, err
-		}
-		digest, err := hashFile(path)
-		if err != nil {
-			return ReleaseManifest{}, err
+		for _, file := range files {
+			if !validRelative(file) {
+				return ReleaseManifest{}, fmt.Errorf("invalid artifact path for %s", component)
+			}
+			path := filepath.Join(sourceRoot, filepath.FromSlash(file))
+			if err := ensureRegularBeneath(sourceRoot, path); err != nil {
+				return ReleaseManifest{}, err
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				return ReleaseManifest{}, err
+			}
+			digest, err := hashFile(path)
+			if err != nil {
+				return ReleaseManifest{}, err
+			}
+			manifest.Artifacts = append(manifest.Artifacts, Artifact{Component: component, File: file, Size: info.Size(), SHA256: digest})
 		}
 		manifest.IncludedComponents = append(manifest.IncludedComponents, component)
-		manifest.Artifacts = append(manifest.Artifacts, Artifact{Component: component, File: file, Size: info.Size(), SHA256: digest})
 	}
 	manifest.IncludedComponents = sortedComponents(manifest.IncludedComponents)
-	sort.Slice(manifest.Artifacts, func(i, j int) bool { return manifest.Artifacts[i].Component < manifest.Artifacts[j].Component })
+	sort.Slice(manifest.Artifacts, func(i, j int) bool {
+		if manifest.Artifacts[i].Component != manifest.Artifacts[j].Component {
+			return manifest.Artifacts[i].Component < manifest.Artifacts[j].Component
+		}
+		return manifest.Artifacts[i].File < manifest.Artifacts[j].File
+	})
 	return manifest, manifest.Validate()
 }
 

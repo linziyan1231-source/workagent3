@@ -23,7 +23,7 @@ description: "Use this skill any time a .docx file is involved -- as input, outp
 
 ## Setup
 
-OfficeCLI is a managed tool: the WorkAgent3 release installs a pinned, hash-verified `officecli.exe` into the release managed-tools directory, and the employee runtime places it on `PATH`. Never download or install it by hand.
+OfficeCLI is a managed tool: the WorkAgent3 release installs a pinned, hash-verified `officecli.exe` into the release managed-tools directory, and the employee runtime places it on `PATH`. Never download or install it by hand. The release also installs the managed PDF exporter plugin (`plugins/exporter/pdf/plugin.exe` next to `officecli.exe`), so `officecli view <file> pdf -o out.pdf` works out of the box; a `No exporter plugin found` error means the managed install is incomplete.
 
 If `officecli` is missing, verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If it is still not found, ask the administrator to re-run the managed OfficeCLI installation or repair from the operations runbook.
 

@@ -67,6 +67,10 @@ func TestManagerConfigKeepsLifecycleActionsOnThePrivilegedBoundary(t *testing.T)
 	}
 }
 
+// managedPluginTestBinary stands in for the pinned exporter plugin; the record
+// helper pins its digest exactly like the real manifest pins plugin.exe.
+var managedPluginTestBinary = []byte("officecli-exporter-pdf-test-binary")
+
 func writeManagedToolsRoot(t *testing.T, binary []byte, record string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -74,6 +78,13 @@ func writeManagedToolsRoot(t *testing.T, binary []byte, record string) string {
 		if err := os.WriteFile(filepath.Join(root, "officecli.exe"), binary, 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	pluginDir := filepath.Join(root, "plugins", "exporter", "pdf")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.exe"), managedPluginTestBinary, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if record != "" {
 		if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(record), 0o600); err != nil {
@@ -86,7 +97,11 @@ func writeManagedToolsRoot(t *testing.T, binary []byte, record string) string {
 func managedToolsRecord(t *testing.T, binary []byte) string {
 	t.Helper()
 	digest := sha256.Sum256(binary)
-	return fmt.Sprintf(`{"schemaVersion":1,"name":"OfficeCLI","version":"1.0.146","license":"Apache-2.0","sha256":"%s"}`, hex.EncodeToString(digest[:]))
+	pluginDigest := sha256.Sum256(managedPluginTestBinary)
+	return fmt.Sprintf(`{"schemaVersion":1,"name":"OfficeCLI","version":"1.0.146","license":"Apache-2.0","sha256":"%s",`+
+		`"plugins":[{"name":"officecli-exporter-pdf","kind":"exporter","version":"1.0.0","license":"Proprietary",`+
+		`"path":"plugins/exporter/pdf/plugin.exe","sha256":"%s"}]}`,
+		hex.EncodeToString(digest[:]), hex.EncodeToString(pluginDigest[:]))
 }
 
 func TestVerifyManagedToolsAcceptsPinnedBinary(t *testing.T) {
@@ -126,6 +141,41 @@ func TestVerifyManagedToolsRejectsMissingManifest(t *testing.T) {
 	root := writeManagedToolsRoot(t, []byte("officecli-test-binary"), "")
 	if err := verifyManagedTools(root); err == nil {
 		t.Fatal("missing manifest was not rejected")
+	}
+}
+
+func TestVerifyManagedToolsRejectsManifestWithoutPlugins(t *testing.T) {
+	binary := []byte("officecli-test-binary")
+	digest := sha256.Sum256(binary)
+	record := fmt.Sprintf(`{"schemaVersion":1,"name":"OfficeCLI","version":"1.0.146","license":"Apache-2.0","sha256":"%s"}`, hex.EncodeToString(digest[:]))
+	root := writeManagedToolsRoot(t, binary, record)
+	err := verifyManagedTools(root)
+	if err == nil || !strings.Contains(err.Error(), "no plugins") {
+		t.Fatalf("manifest without plugin records was not rejected: %v", err)
+	}
+}
+
+func TestVerifyManagedToolsRejectsMissingPlugin(t *testing.T) {
+	binary := []byte("officecli-test-binary")
+	root := writeManagedToolsRoot(t, binary, managedToolsRecord(t, binary))
+	if err := os.Remove(filepath.Join(root, "plugins", "exporter", "pdf", "plugin.exe")); err != nil {
+		t.Fatal(err)
+	}
+	err := verifyManagedTools(root)
+	if err == nil || !strings.Contains(err.Error(), "officecli-exporter-pdf") {
+		t.Fatalf("missing exporter plugin was not rejected: %v", err)
+	}
+}
+
+func TestVerifyManagedToolsRejectsPluginHashMismatch(t *testing.T) {
+	binary := []byte("officecli-test-binary")
+	root := writeManagedToolsRoot(t, binary, managedToolsRecord(t, binary))
+	if err := os.WriteFile(filepath.Join(root, "plugins", "exporter", "pdf", "plugin.exe"), []byte("tampered-plugin"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := verifyManagedTools(root)
+	if err == nil || !strings.Contains(err.Error(), "integrity verification") {
+		t.Fatalf("tampered plugin was not rejected: %v", err)
 	}
 }
 

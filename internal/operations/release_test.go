@@ -331,3 +331,43 @@ func TestReadinessHistoryIsAppendOnlyAcrossActivation(t *testing.T) {
 		t.Fatalf("rejected readiness mutated the history: %#v %v", history, err)
 	}
 }
+
+func TestBuildReleaseManifestAcceptsMultiFileComponent(t *testing.T) {
+	root := t.TempDir()
+	files := []string{"managed-tools/officecli/officecli.exe", "managed-tools/officecli/plugins/exporter/pdf/plugin.exe"}
+	for _, name := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("content of "+name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest, err := BuildReleaseManifest(root, "3.1.0", map[Component][]string{ComponentManagedTools: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Artifacts) != 2 || len(manifest.IncludedComponents) != 1 {
+		t.Fatalf("unexpected manifest: %#v", manifest)
+	}
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Component != ComponentManagedTools {
+			t.Fatalf("artifact component drifted: %#v", artifact)
+		}
+	}
+
+	// Duplicated artifact files and components without artifacts stay invalid.
+	duplicated := ReleaseManifest{FormatVersion: 1, Version: "3.1.0",
+		IncludedComponents: []Component{ComponentManagedTools},
+		Artifacts:          append(manifest.Artifacts, manifest.Artifacts[0])}
+	if err := duplicated.Validate(); err == nil {
+		t.Fatal("duplicated artifact file was accepted")
+	}
+	orphan := ReleaseManifest{FormatVersion: 1, Version: "3.1.0",
+		IncludedComponents: []Component{ComponentManagedTools, ComponentPortal},
+		Artifacts:          manifest.Artifacts}
+	if err := orphan.Validate(); err == nil {
+		t.Fatal("component without an artifact was accepted")
+	}
+}
