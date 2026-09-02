@@ -274,6 +274,61 @@ describe("TeamStore", () => {
     expect(store.task(second.id)?.status).toBe("succeeded");
   });
 
+  it("dispatches a task queued after cancel while the cancelled execution is still unsettled", async () => {
+    // Mirrors the HTTP route shape: the task route queues and then calls
+    // void orchestrator.tick(). The cancelled engine turn may never settle,
+    // so a tick that only short-circuits on #ticking would leave the loop
+    // asleep behind the stale execution and the new task queued forever.
+    const store = new TeamStore(root());
+    const team = createTeam(store);
+    const releases = new Map<
+      string,
+      (result: { sessionId: string; result?: string }) => void
+    >();
+    const executeTeamTask = vi.fn(
+      (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
+        new Promise<{ sessionId: string; result?: string }>((resolve) => {
+          releases.set(request.taskId, resolve);
+        }),
+    );
+    const cancelTeamTask = vi.fn(async () => undefined);
+    const orchestrator = new TeamOrchestrator(store, {
+      executeTeamTask,
+      cancelTeamTask,
+    });
+    const first = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Long",
+      input: "Long running work",
+    });
+    const tick = orchestrator.tick();
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(1));
+    expect(store.task(first.id)?.status).toBe("running");
+
+    await orchestrator.cancel(team.id, first.id);
+    expect(store.task(first.id)?.status).toBe("cancelled");
+
+    // Let a macrotask pass so the loop is definitely parked again behind the
+    // still-unsettled first execution before the second task is queued —
+    // this is the real HTTP timing, where the cancel and the next queue are
+    // separate requests.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Marker",
+      input: "Marker work",
+    });
+    void orchestrator.tick();
+
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(2));
+    expect(store.task(second.id)?.status).toBe("running");
+
+    releases.get(second.id)?.({ sessionId: "session-2", result: "done" });
+    releases.get(first.id)?.({ sessionId: "session-1" });
+    await tick;
+    expect(store.task(second.id)?.status).toBe("succeeded");
+  });
+
   it("runs separate members in parallel and drains tasks queued while active", async () => {
     const store = new TeamStore(root());
     let team = createTeam(store);

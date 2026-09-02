@@ -570,7 +570,14 @@ export class TeamOrchestrator {
   }
   async tick(): Promise<void> {
     await this.#recoverInterruptedTasks();
-    if (this.#ticking) return;
+    if (this.#ticking) {
+      // The loop is parked behind in-flight executions and work may have
+      // just been queued (the task route fires tick() after queueTask);
+      // wake it so it re-scans instead of sleeping until an execution
+      // settles — a cancelled turn may never settle at all.
+      this.#wake?.();
+      return;
+    }
     this.#ticking = true;
     try {
       const pending = new Set<Promise<void>>();
