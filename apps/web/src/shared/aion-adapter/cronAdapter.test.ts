@@ -187,6 +187,46 @@ describe("formal Renderer cron adapter", () => {
     );
   });
 
+  it("resolves picker pseudo-paths to the workspace id on create", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/runtime/v1/presets") return json([preset]);
+      if (url === "/api/runtime/v1/workspaces") return json([workspace]);
+      if (url === "/api/runtime/v1/automations" && init?.method === "POST")
+        return json(definition);
+      if (url === "/api/runtime/v1/automations/automation-1/runs")
+        return json([]);
+      throw new Error(`unexpected:${url}:${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await cronBridge.addJob.invoke({
+      name: definition.name,
+      schedule: {
+        kind: "cron",
+        expr: "15 9 * * MON-FRI",
+        tz: "Asia/Shanghai",
+        description: "Weekdays",
+      },
+      prompt: definition.input,
+      conversation_id: "conversation-1",
+      created_by: "user",
+      execution_mode: "existing",
+      agent_config: {
+        name: preset.name,
+        assistant_id: preset.id,
+        workspace: "workagent-workspace:workspace-1\\Default",
+      },
+    });
+
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        url === "/api/runtime/v1/automations" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual(
+      expect.objectContaining({ workspaceId: "workspace-1" }),
+    );
+  });
+
   it("returns the real run conversation after run-now completes", async () => {
     vi.stubGlobal(
       "fetch",

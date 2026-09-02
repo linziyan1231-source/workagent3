@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipcBridge } from "./common.js";
 import { FileService } from "./fileService.js";
+import { isBackendHttpError } from "./httpBridge.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -78,53 +79,26 @@ describe("production Renderer Skill Market adapter", () => {
 });
 
 describe("production Renderer managed Provider adapter", () => {
-  it("keeps the formal Provider edit action and writes only through the SID Runtime Port", async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            id: "provider-harness",
-            kind: "provider",
-            state: "ready",
-            label: "Harness managed Provider",
-            updatedAt: "2026-09-01T00:00:00Z",
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    );
-    vi.stubGlobal("fetch", fetch);
-
-    await ipcBridge.mode.updateProvider.invoke({
-      id: "managed-workagent-harness",
-      api_key: "private-provider-key",
-    });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/runtime/v1/provider-credentials/harness",
-      expect.objectContaining({ method: "PUT", body: "private-provider-key" }),
-    );
-  });
-
-  it("does not overwrite a configured Provider when the formal editor returns its mask", async () => {
+  it("rejects every Provider key write: the managed key arrives through UserHost only", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    await ipcBridge.mode.updateProvider.invoke({
-      id: "managed-workagent-harness",
-      api_key: "••••••••",
-    });
-    expect(fetch).not.toHaveBeenCalled();
-  });
 
-  it("revokes the credential without deleting the managed model catalog", async () => {
-    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetch);
-    await ipcBridge.mode.deleteProvider.invoke({
-      id: "managed-workagent-harness",
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/runtime/v1/provider-credentials/harness",
-      expect.objectContaining({ method: "DELETE" }),
-    );
+    await expect(
+      ipcBridge.mode.updateProvider.invoke({
+        id: "managed-workagent-harness",
+        api_key: "private-provider-key",
+      }),
+    ).rejects.toThrow("managed_model_catalog_read_only");
+    await expect(
+      ipcBridge.mode.updateProvider.invoke({
+        id: "managed-workagent-harness",
+        api_key: "••••••••",
+      }),
+    ).rejects.toThrow("managed_model_catalog_read_only");
+    await expect(
+      ipcBridge.mode.deleteProvider.invoke({ id: "managed-workagent-harness" }),
+    ).rejects.toThrow("managed_model_catalog_read_only");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("connects the formal health action to a real managed Provider probe", async () => {
@@ -456,6 +430,241 @@ describe("production Renderer employee lifecycle adapter", () => {
         body: { username: "alice", confirmation: "DELETE alice" },
       },
     ]);
+  });
+});
+
+describe("production Renderer admin audit adapter", () => {
+  const auditEvent = {
+    id: "evt-1",
+    actor: "admin",
+    target: "alice",
+    action: "user.disable",
+    result: "success",
+    correlation_id: "corr-1",
+    occurred_at: "2026-09-01T08:00:00.000Z",
+    metadata: { reason: "offboard" },
+  };
+
+  it("appends every provided filter to the audit query endpoint", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, events: [auditEvent] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.listAuditEvents.invoke({
+      actor: "admin",
+      action: "user.disable",
+      target: "alice",
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-01T12:00:00.000Z",
+      limit: 50,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/audit?actor=admin&action=user.disable&target=alice&from=2026-09-01T00%3A00%3A00.000Z&to=2026-09-01T12%3A00%3A00.000Z&limit=50",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(response).toEqual({ success: true, events: [auditEvent] });
+  });
+
+  it("omits the query string when no filter is provided", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, events: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.listAuditEvents.invoke();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/audit",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(response).toEqual({ success: true, events: [] });
+  });
+
+  it("requests the export endpoint with the same filters", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify([auditEvent]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const createObjectURL = vi.fn(() => "blob:audit-export");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      value: createObjectURL,
+      configurable: true,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: revokeObjectURL,
+      configurable: true,
+    });
+    const anchor = { click: vi.fn() } as unknown as HTMLAnchorElement;
+    const createElement = vi
+      .spyOn(document, "createElement")
+      .mockReturnValue(anchor);
+
+    const response = await ipcBridge.portal.exportAuditEvents.invoke({
+      actor: "admin",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/audit/export?actor=admin",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(anchor.download).toMatch(/^audit-export-.*\.json$/);
+    expect(anchor.click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:audit-export");
+    expect(response.success).toBe(true);
+    createElement.mockRestore();
+  });
+});
+
+describe("production Renderer admin migration adapter", () => {
+  const migrationItem = {
+    id: "aXRlbQ",
+    sid: "S-1-5-21-9101",
+    username: "alice",
+    source_id: "legacy-mcp",
+    target_id: "mcp-1",
+    kind: "mcp_server",
+    status: "needs_auth",
+    reason: "oauth_reauthorization_required",
+  };
+
+  it("appends sid and status filters to the migration list endpoint", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            items: [migrationItem],
+            unreachable_sids: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.listMigrations.invoke({
+      sid: "S-1-5-21-9101",
+      status: "needs_auth",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/migrations?sid=S-1-5-21-9101&status=needs_auth",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(response.items).toEqual([migrationItem]);
+  });
+
+  it("omits the query string when no migration filter is provided", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            items: [],
+            unreachable_sids: ["S-1-5-21-9102"],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.listMigrations.invoke();
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/migrations",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(response.unreachable_sids).toEqual(["S-1-5-21-9102"]);
+  });
+
+  it("starts the retry disposition as a polled job", async () => {
+    const job = { id: "job-1", status: "running", percent: 5, step: "queued" };
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, job }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.retryMigration.invoke({
+      id: "aXRlbQ",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/migrations/aXRlbQ/retry",
+      expect.objectContaining({ method: "POST", credentials: "same-origin" }),
+    );
+    expect(response.job).toEqual(job);
+  });
+
+  it("polls the migration job endpoint by id", async () => {
+    const job = {
+      id: "job-1",
+      status: "succeeded",
+      percent: 100,
+      step: "completed",
+      item: { ...migrationItem, status: "ready" },
+    };
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, job }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await ipcBridge.portal.getMigrationJob.invoke({
+      id: "job-1",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/admin/migration-jobs?id=job-1",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(response.job.status).toBe("succeeded");
+    expect(response.job.item?.source_id).toBe("legacy-mcp");
+  });
+
+  it("posts resolve and reauthorize to the item disposition routes", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await ipcBridge.portal.resolveMigration.invoke({ id: "aXRlbQ" });
+    await ipcBridge.portal.reauthorizeMigration.invoke({ id: "aXRlbQ" });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/portal/admin/migrations/aXRlbQ/resolve",
+      expect.objectContaining({ method: "POST", credentials: "same-origin" }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/portal/admin/migrations/aXRlbQ/reauthorize",
+      expect.objectContaining({ method: "POST", credentials: "same-origin" }),
+    );
   });
 });
 
@@ -1073,6 +1282,90 @@ describe("production Renderer collaboration adapter", () => {
         body: JSON.stringify({ conversation_id: "conversation-1" }),
       }),
     );
+  });
+
+  it("creates invite links through the project invite-link endpoint", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json(
+        {
+          link: {
+            token: "invite_link_token_1234567890",
+            projectId: "project-1",
+            singleUse: true,
+            useCount: 0,
+            status: "active",
+            expiresAt: "2026-09-04T00:00:00Z",
+            createdAt: "2026-09-01T00:00:00Z",
+          },
+        },
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.portal.createSharedInviteLink.invoke({
+        project_id: "project/1",
+        single_use: true,
+      }),
+    ).resolves.toEqual({
+      token: "invite_link_token_1234567890",
+      project_id: "project-1",
+      single_use: true,
+      expires_at: "2026-09-04T00:00:00Z",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-projects/project%2F1/invite-links",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ singleUse: true }),
+      }),
+    );
+  });
+
+  it("accepts invite links through the dedicated Portal endpoint", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ project: { id: "project-1" } }, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      ipcBridge.portal.acceptSharedInviteLink.invoke({
+        token: "invite_link_token_1234567890",
+      }),
+    ).resolves.toEqual({ success: true, project_id: "project-1" });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/portal/shared-invite-links/accept",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: "invite_link_token_1234567890" }),
+      }),
+    );
+  });
+
+  it("surfaces invite-link lifecycle codes for the route error page", async () => {
+    const cases = [
+      [404, "shared_invite_link_not_found"],
+      [410, "shared_invite_expired"],
+      [410, "shared_invite_link_revoked"],
+      [410, "shared_invite_link_exhausted"],
+      [409, "shared_project_conflict"],
+    ] as const;
+    for (const [status, code] of cases) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ error: code }, { status })),
+      );
+      const failure = await ipcBridge.portal.acceptSharedInviteLink
+        .invoke({ token: "invite_link_token_1234567890" })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(isBackendHttpError(failure)).toBe(true);
+      expect((failure as { code: string }).code).toBe(code);
+      expect((failure as { status: number }).status).toBe(status);
+    }
   });
 });
 

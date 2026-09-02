@@ -220,6 +220,12 @@ export default defineConfig({
         replacement: adapter("EmptyRendererComponent.tsx"),
       },
       {
+        // The browser host has no fileSnapshot/branch service, so the
+        // workspace "changes" tab is replaced by a files-only tab bar.
+        find: "./components/WorkspaceTabBar",
+        replacement: adapter("workspaceTabBar.tsx"),
+      },
+      {
         find: "../WindowControls",
         replacement: adapter("EmptyRendererComponent.tsx"),
       },
@@ -247,10 +253,6 @@ export default defineConfig({
       {
         find: "@renderer/pages/conversation/runtime/useConversationRuntimeView",
         replacement: adapter("messageRuntime.ts"),
-      },
-      {
-        find: "@renderer/hooks/file/useAutoPreviewOfficeFiles",
-        replacement: adapter("autoPreviewOfficeFiles.ts"),
       },
       {
         find: "../viewers/PDFViewer",

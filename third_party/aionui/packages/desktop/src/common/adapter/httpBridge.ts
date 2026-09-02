@@ -502,6 +502,51 @@ export function reconnectSharedEvents(): void {
   if (sharedEventConsumers > 0) ensureSharedEvents();
 }
 
+// ---------------------------------------------------------------------------
+// Portal notification feed (SSE singleton)
+// ---------------------------------------------------------------------------
+
+type NotificationFeedPayload = { notifications?: unknown[] };
+const notificationFeedListeners = new Set<(feed: NotificationFeedPayload) => void>();
+let notificationFeed: EventSource | null = null;
+
+function ensureNotificationFeed(): void {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined' || notificationFeed) return;
+  const source = new EventSource(`${getBaseUrl()}/api/portal/me/notifications/stream`, { withCredentials: true });
+  notificationFeed = source;
+  source.addEventListener('notifications', (event) => {
+    try {
+      const feed = JSON.parse((event as MessageEvent<string>).data) as NotificationFeedPayload;
+      for (const listener of notificationFeedListeners) listener(feed);
+    } catch {
+      // A malformed feed event is ignored; the next publish or reconnect
+      // delivers the full feed again.
+    }
+  });
+  source.addEventListener('error', () => {
+    if (source.readyState === EventSource.CLOSED && notificationFeed === source) {
+      // A pre-login 401 closes EventSource permanently in Chromium; the next
+      // subscriber recreates the stream after authentication.
+      notificationFeed = null;
+    }
+  });
+}
+
+/** App-lifetime notification feed emitter; the SSE connection is shared by all subscribers. */
+export function notificationFeedEmitter<Params extends NotificationFeedPayload>(): EmitterLike<Params> {
+  return {
+    on: (callback: (params: Params) => void) => {
+      ensureNotificationFeed();
+      const listener = callback as (feed: NotificationFeedPayload) => void;
+      notificationFeedListeners.add(listener);
+      return () => {
+        notificationFeedListeners.delete(listener);
+      };
+    },
+    emit: (() => {}) as EmitterLike<Params>['emit'],
+  };
+}
+
 export function subscribeSharedEvents(): () => void {
   sharedEventConsumers++;
   ensureSharedEvents();

@@ -173,14 +173,9 @@ const ModalMcpManagementSection: React.FC<{
               showAddMcpModal();
             },
           },
-          {
-            key: 'oneclick',
-            label: t('settings.mcpOneKeyImport'),
-            onClick: () => {
-              setImportMode('oneclick');
-              showAddMcpModal();
-            },
-          },
+          // WorkAgent3: the one-click CLI scan entry is removed — the browser
+          // host has no local CLI config source (getAgentMcpConfigs reports
+          // unavailable), so the wizard would always come up empty.
         ]}
       />
     );

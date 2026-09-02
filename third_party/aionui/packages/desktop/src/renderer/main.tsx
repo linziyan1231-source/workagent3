@@ -313,7 +313,7 @@ const Main = () => {
 
   return (
     <>
-      {!user?.admin ? <PortalNotificationHost /> : null}
+      <PortalNotificationHost />
       <Router
         layout={
           <ConversationHistoryProvider>

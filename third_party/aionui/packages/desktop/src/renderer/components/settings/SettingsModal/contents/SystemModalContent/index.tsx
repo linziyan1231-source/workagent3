@@ -737,8 +737,13 @@ const SystemModalContent: React.FC = () => {
               </Collapse.Item>
             </Collapse>
             <Form form={form} layout='vertical' className='!mt-32px space-y-16px' onValuesChange={handleValuesChange}>
-              <DirInputItem label={t('settings.workDir')} field='workDir' />
-              <DirInputItem label={t('settings.logDir')} field='logDir' />
+              {/* WorkAgent3: host directory settings are desktop-only; the browser host has no workDir/logDir to configure. */}
+              {isDesktop && (
+                <>
+                  <DirInputItem label={t('settings.workDir')} field='workDir' />
+                  <DirInputItem label={t('settings.logDir')} field='logDir' />
+                </>
+              )}
               {error && (
                 <Alert
                   className='mt-16px'

@@ -3,7 +3,19 @@ import { usePreviewToolbarExtras } from "@/renderer/pages/conversation/Preview/c
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { workspacePort } from "../../features/workspace/workspacePort.js";
-import { ipcBridge, personalWorkspaceLocation } from "./common.js";
+import {
+  ipcBridge,
+  personalWorkspaceLocation,
+  sharedProjectIDFromPath,
+} from "./common.js";
+
+const base64ToBytes = (encoded: string) => {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes;
+};
 
 interface BrowserPdfViewerProps {
   file_path?: string;
@@ -23,7 +35,45 @@ const BrowserPdfViewer: React.FC<BrowserPdfViewerProps> = ({
   const [messageApi, messageContextHolder] = Message.useMessage();
   const toolbarExtrasContext = usePreviewToolbarExtras();
   const usePortalToolbar = Boolean(toolbarExtrasContext) && !hideToolbar;
+  const sharedPath =
+    file_path && sharedProjectIDFromPath(file_path) ? file_path : null;
+  const [sharedSrc, setSharedSrc] = useState<string | null>(null);
+  const [sharedLoadFailed, setSharedLoadFailed] = useState(false);
+
+  // Shared project files have no runtime-workspace preview URL; pull the bytes
+  // through the shared read-buffer port and render them via the same sandboxed
+  // iframe pipeline as personal PDFs.
+  useEffect(() => {
+    if (!sharedPath) return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setSharedSrc(null);
+    setSharedLoadFailed(false);
+    ipcBridge.fs.readFileBuffer
+      .invoke({ path: sharedPath })
+      .then((encoded) => {
+        if (cancelled) return;
+        const bytes = encoded ? base64ToBytes(encoded) : null;
+        if (!bytes || bytes.length === 0) {
+          setSharedLoadFailed(true);
+          return;
+        }
+        objectUrl = URL.createObjectURL(
+          new Blob([bytes], { type: "application/pdf" }),
+        );
+        setSharedSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setSharedLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [sharedPath]);
+
   const pdfSrc = useMemo(() => {
+    if (sharedPath) return sharedSrc ?? "";
     if (file_path) {
       const location = personalWorkspaceLocation(undefined, file_path);
       if (location)
@@ -33,7 +83,7 @@ const BrowserPdfViewer: React.FC<BrowserPdfViewerProps> = ({
         );
     }
     return content ?? "";
-  }, [content, file_path]);
+  }, [content, file_path, sharedPath, sharedSrc]);
 
   const handleOpenInSystem = useCallback(async () => {
     if (!file_path) {
@@ -49,9 +99,14 @@ const BrowserPdfViewer: React.FC<BrowserPdfViewerProps> = ({
   }, [file_path, messageApi, t]);
 
   useEffect(() => {
+    if (sharedPath) {
+      setError(sharedLoadFailed ? t("preview.pdf.loadFailed") : null);
+      setLoading(!sharedLoadFailed);
+      return;
+    }
     setError(pdfSrc ? null : t("preview.pdf.pathMissing"));
     setLoading(Boolean(pdfSrc));
-  }, [pdfSrc, t]);
+  }, [pdfSrc, sharedLoadFailed, sharedPath, t]);
 
   useEffect(() => {
     if (!usePortalToolbar || !toolbarExtrasContext || loading || error) return;

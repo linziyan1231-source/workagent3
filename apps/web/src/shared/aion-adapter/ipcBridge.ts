@@ -119,6 +119,60 @@ export type PortalProvisionJob = {
   error_code?: string;
   error_message?: string;
 };
+export type PortalAuditEvent = {
+  id: string;
+  actor: string;
+  target: string;
+  action: string;
+  result: "success" | "failure" | "denied";
+  correlation_id: string;
+  occurred_at: string;
+  metadata?: Record<string, string>;
+};
+export type PortalAuditQuery = {
+  actor?: string;
+  action?: string;
+  target?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+};
+export type PortalAuditEventsResponse = {
+  success: boolean;
+  events: PortalAuditEvent[];
+};
+export type PortalMigrationItem = {
+  id: string;
+  sid: string;
+  username: string;
+  source_id: string;
+  target_id?: string;
+  kind: string;
+  status: "needs_auth" | "needs_review";
+  reason?: string;
+};
+export type PortalMigrationQuery = {
+  sid?: string;
+  status?: "needs_auth" | "needs_review";
+};
+export type PortalMigrationListResponse = {
+  success: boolean;
+  items: PortalMigrationItem[];
+  unreachable_sids: string[];
+};
+export type PortalMigrationJob = {
+  id: string;
+  status: "running" | "succeeded" | "failed";
+  percent: number;
+  step: string;
+  error_code?: string;
+  error_message?: string;
+  item?: PortalMigrationItem;
+};
+export type PortalMigrationJobResponse = {
+  success: boolean;
+  job: PortalMigrationJob;
+};
 
 const unavailableCommand = {
   provider: () => {},
@@ -505,7 +559,12 @@ export const mcpService = {
       await mcpPort.update(id, { enabled: !current.enabled }),
     );
   }),
-  getAgentMcpConfigs: command<void, []>(async () => []),
+  // The browser host cannot scan local CLI agents for MCP configs; the
+  // one-click import entry is removed from the settings UI (ToolsModalContent
+  // and McpManagement no longer offer it). JSON import stays fully supported.
+  getAgentMcpConfigs: command<void, []>(async () => {
+    throw new Error("mcp_cli_scan_unavailable_in_browser");
+  }),
   testMcpConnection: command<
     IMcpServer,
     {

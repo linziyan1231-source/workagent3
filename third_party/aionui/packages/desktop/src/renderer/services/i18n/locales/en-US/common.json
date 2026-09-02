@@ -40,6 +40,7 @@
   "expandMore": "Expand More",
   "collapse": "Collapse",
   "viewMoreLines": "View More ({{count}} lines)",
+  "view": "View",
   "success": "Success",
   "error": "Error",
   "saveSuccess": "Saved successfully",

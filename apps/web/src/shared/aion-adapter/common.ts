@@ -1,11 +1,13 @@
 import { modelAccessPort } from "../../features/models/modelAccessPort.js";
-import { maskedProviderCredential } from "../../features/models/modelAccessPort.js";
 import { providerCredentialPort } from "../../features/credentials/providerCredentialPort.js";
 import { automationPort } from "../../features/automation/automationPort.js";
 import { skillPort } from "../../features/skills/skillPort.js";
 import { conversationPort } from "../../features/conversation/conversationPort.js";
 import { presetPort } from "../../features/presets/presetPort.js";
-import { notificationPort } from "../../features/notifications/notificationPort.js";
+import {
+  notificationPort,
+  type PortalNotificationFeed,
+} from "../../features/notifications/notificationPort.js";
 import { systemPort } from "../../features/system/systemPort.js";
 import { workspacePort } from "../../features/workspace/workspacePort.js";
 import {
@@ -13,21 +15,27 @@ import {
   type SharedConversation,
   type SharedStreamMessage,
 } from "../../features/collaboration/collaborationPort.js";
-import { requestJson } from "../api/http.js";
+import { requestJson, requestRaw, ApiError } from "../api/http.js";
 import type { TChatConversation } from "@/common/config/storage";
 import type { PreviewContentType } from "@/common/types/office/preview";
 import type { Theme } from "@/common/theme/types";
 import type {
   IDirOrFile,
   IFileMetadata,
+  PortalAuditEvent,
+  PortalAuditQuery,
   PortalKimiDatasourceGrant,
   PortalManagedUser,
+  PortalMigrationItem,
+  PortalMigrationJob,
+  PortalMigrationQuery,
   PortalProvisionJob,
   PortalSkillMarketEntry,
   PortalUsageSummary,
 } from "./ipcBridge.js";
 import { getManagedAgents } from "./assistantHooks.js";
 import { cronBridge } from "./cronAdapter.js";
+import { teamBridge } from "./teamAdapter.js";
 import {
   displayConversationFilePath,
   materializeConversationFiles,
@@ -72,7 +80,51 @@ type PreviewOpenEvent = {
 const fileContentListeners = new Set<(event: FileContentUpdate) => void>();
 const previewOpenListeners = new Set<(event: PreviewOpenEvent) => void>();
 
-const sharedProjectIDFromPath = (value?: string): string | null =>
+// Pending directory pick requests resolve through the workspace picker modal
+// (see dialog.showOpen and layoutHooks.tsx useDirectorySelection).
+export type DirectoryPickRequest = { resolve: (paths: string[]) => void };
+const directoryPickListeners = new Set<
+  (request: DirectoryPickRequest) => void
+>();
+export const onDirectoryPickRequest = (
+  listener: (request: DirectoryPickRequest) => void,
+) => {
+  directoryPickListeners.add(listener);
+  return () => {
+    directoryPickListeners.delete(listener);
+  };
+};
+
+const auditQuerySuffix = (query: PortalAuditQuery = {}): string => {
+  const params = new URLSearchParams();
+  if (query.actor) params.set("actor", query.actor);
+  if (query.action) params.set("action", query.action);
+  if (query.target) params.set("target", query.target);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const text = params.toString();
+  return text ? `?${text}` : "";
+};
+
+const migrationQuerySuffix = (query: PortalMigrationQuery = {}): string => {
+  const params = new URLSearchParams();
+  if (query.sid) params.set("sid", query.sid);
+  if (query.status) params.set("status", query.status);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+};
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+export const sharedProjectIDFromPath = (value?: string): string | null =>
   value?.replaceAll("\\", "/").match(/^shared:\/\/([^/]+)(?:\/|$)/)?.[1] ??
   null;
 
@@ -148,6 +200,16 @@ type SharedInviteResponse = {
   status: "pending";
   createdAt: string;
   expiresAt: string;
+};
+
+type SharedInviteLinkResponse = {
+  token: string;
+  projectId: string;
+  singleUse: boolean;
+  useCount: number;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
 };
 
 const toRendererSharedProject = (project: SharedProjectResponse) => ({
@@ -474,10 +536,12 @@ const toRendererConversation = (
     },
   }) as TChatConversation;
 
-const rendererWorkspacePath = (workspace: { id: string; name: string }) =>
-  `workagent-workspace:${workspace.id}\\${workspace.name}`;
+export const rendererWorkspacePath = (workspace: {
+  id: string;
+  name: string;
+}) => `workagent-workspace:${workspace.id}\\${workspace.name}`;
 
-const runtimeWorkspaceId = (workspace: string | undefined) => {
+export const runtimeWorkspaceId = (workspace: string | undefined) => {
   if (!workspace?.startsWith("workagent-workspace:"))
     return workspace || "default";
   const separator = workspace.indexOf("\\");
@@ -595,13 +659,67 @@ const personalWorkspaceFiles = async (workspace: string) => {
   return result;
 };
 
-const unavailableOfficePreview = () => ({
-  start: {
-    invoke: async (_input: { file_path: string; workspace?: string }) => ({
-      url: null,
-      error: "OFFICECLI_NOT_FOUND",
-    }),
-  },
+// Office previews convert DOCX/XLSX/PPTX to PDF on the UserHost (via the
+// managed OfficeCLI) and render the cached PDF through the same sandboxed
+// inline + CSP iframe pipeline as PDF files. `start` returns a same-origin
+// sandbox URL; `stop`/`status` stay inert because conversion is stateless.
+const officePreviewErrorCode = (error: unknown): string =>
+  error instanceof ApiError ? error.code : "OFFICECLI_START_FAILED";
+
+const startOfficePreview = async (input: {
+  file_path: string;
+  workspace?: string;
+}): Promise<{ url: string | null; error?: string }> => {
+  const sharedId =
+    sharedProjectIDFromPath(input.file_path) ??
+    sharedProjectIDFromPath(input.workspace);
+  try {
+    if (sharedId) {
+      // Shared Office files convert on the owner's UserHost through the
+      // shared-files forwarding channel; Portal returns the streaming URL.
+      const result = await requestJson<{ url: string }>(
+        "/api/portal/shared-office-preview",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            project_id: sharedId,
+            path:
+              sharedRelativePath(sharedId, input.file_path) ?? input.file_path,
+          }),
+        },
+      );
+      return { url: result.url };
+    }
+    const location = personalWorkspaceLocation(
+      input.workspace,
+      input.file_path,
+    );
+    if (!location || !location.relativePath)
+      return { url: null, error: "PATH_OUTSIDE_SANDBOX" };
+    const result = await requestJson<{ hash: string }>(
+      "/api/runtime/v1/office-preview/convert",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspace: location.workspaceId,
+          path: location.relativePath,
+        }),
+      },
+    );
+    return {
+      url: `/api/runtime/v1/office-preview/content/${result.hash}.pdf`,
+    };
+  } catch (error) {
+    return { url: null, error: officePreviewErrorCode(error) };
+  }
+};
+
+const officePreview = () => ({
+  start: { invoke: startOfficePreview },
+  // Conversion is synchronous and cached; there is no watch process to stop
+  // and no install/start phase to report in the browser host.
   stop: { invoke: async () => undefined },
   status: {
     on:
@@ -611,9 +729,83 @@ const unavailableOfficePreview = () => ({
   },
 });
 
-const pptPreview = unavailableOfficePreview();
-const wordPreview = unavailableOfficePreview();
-const excelPreview = unavailableOfficePreview();
+const pptPreview = officePreview();
+const wordPreview = officePreview();
+const excelPreview = officePreview();
+
+// Browser-side office watch. The UserHost exposes no filesystem watcher, so
+// the adapter polls the workspace listing and diffs it; the upstream hook
+// (useAutoPreviewOfficeFiles) keeps its own baseline and only opens previews
+// for files reported here as newly added.
+const OFFICE_WATCH_EXTENSIONS = new Set([
+  "docx",
+  "xlsx",
+  "pptx",
+  "doc",
+  "xls",
+  "ppt",
+]);
+const OFFICE_WATCH_POLL_MS = 3000;
+type OfficeWatchEvent = { file_path: string; workspace: string };
+const officeWatchListeners = new Set<(event: OfficeWatchEvent) => void>();
+type OfficeWatcher = {
+  known: Set<string>;
+  primed: boolean;
+  refs: number;
+  timer: ReturnType<typeof setInterval>;
+};
+const officeWatchers = new Map<string, OfficeWatcher>();
+
+const pollOfficeWatcher = async (workspace: string, watcher: OfficeWatcher) => {
+  try {
+    const files = await personalWorkspaceFiles(workspace);
+    const current = new Set(files.map((file) => file.fullPath));
+    if (watcher.primed) {
+      for (const fullPath of current) {
+        if (watcher.known.has(fullPath)) continue;
+        const extension = fullPath.split(".").pop()?.toLowerCase() ?? "";
+        if (OFFICE_WATCH_EXTENSIONS.has(extension))
+          for (const listener of officeWatchListeners)
+            listener({ file_path: fullPath, workspace });
+      }
+    }
+    watcher.known = current;
+    watcher.primed = true;
+  } catch {
+    // Listing failures (runtime restart, deleted workspace) stay inert.
+  }
+};
+
+const startOfficeWatch = async ({ workspace }: { workspace: string }) => {
+  // shared:// workspaces are skipped upstream; only personal workspaces can
+  // be listed through the runtime workspace port.
+  if (sharedProjectIDFromPath(workspace)) return;
+  const existing = officeWatchers.get(workspace);
+  if (existing) {
+    existing.refs += 1;
+    return;
+  }
+  const watcher: OfficeWatcher = {
+    known: new Set(),
+    primed: false,
+    refs: 1,
+    timer: setInterval(
+      () => void pollOfficeWatcher(workspace, watcher),
+      OFFICE_WATCH_POLL_MS,
+    ),
+  };
+  officeWatchers.set(workspace, watcher);
+  await pollOfficeWatcher(workspace, watcher);
+};
+
+const stopOfficeWatch = async ({ workspace }: { workspace: string }) => {
+  const watcher = officeWatchers.get(workspace);
+  if (!watcher) return;
+  watcher.refs -= 1;
+  if (watcher.refs > 0) return;
+  clearInterval(watcher.timer);
+  officeWatchers.delete(workspace);
+};
 
 const createRendererConversation = async (input: {
   name?: string;
@@ -923,9 +1115,14 @@ export const ipcBridge = {
     },
   },
   workspaceOfficeWatch: {
-    start: { invoke: async () => undefined },
-    stop: { invoke: async () => undefined },
-    fileAdded: { on: () => () => undefined },
+    start: { invoke: startOfficeWatch },
+    stop: { invoke: stopOfficeWatch },
+    fileAdded: {
+      on: (listener: (event: OfficeWatchEvent) => void) => {
+        officeWatchListeners.add(listener);
+        return () => officeWatchListeners.delete(listener);
+      },
+    },
   },
   fileStream: {
     contentUpdate: {
@@ -949,6 +1146,16 @@ export const ipcBridge = {
       },
     },
   },
+  // Preview history and file snapshots are desktop-only services. WorkAgent3
+  // v1 deliberately does not copy the old snapshot/branch API (plan.md P2);
+  // the UI entries are hidden instead of backed by fake data:
+  // - previewHistory: the upstream toolbar gates its snapshot/history buttons
+  //   behind SHOW_SNAPSHOT_HISTORY = false (PreviewToolbar.tsx), so the entry
+  //   never renders. list() is still invoked by the upstream hook on preview
+  //   mount, so it stays an inert empty result.
+  // - fileSnapshot: the workspace "changes" tab is replaced by a files-only
+  //   tab bar (vite alias -> workspaceTabBar.tsx), so compare/stage/discard
+  //   are unreachable; init/dispose stay inert for the upstream hook.
   previewHistory: {
     list: { invoke: async () => [] },
     save: { invoke: async () => undefined },
@@ -968,12 +1175,22 @@ export const ipcBridge = {
     resetFile: { invoke: async () => undefined },
     getBaselineContent: { invoke: async () => "" },
   },
+  // Native file dialogs do not exist in the browser host. Directory picks are
+  // answered with a real WorkAgent workspace chosen in the picker modal
+  // mounted by useDirectorySelection (layoutHooks.tsx); file picks, and picks
+  // requested before the modal is mounted, resolve as a cancel.
   dialog: {
     showOpen: {
-      invoke: async (_input?: {
+      invoke: async (input?: {
         properties?: string[];
         filters?: Array<{ name: string; extensions: string[] }>;
-      }) => [] as string[],
+      }) => {
+        if (!input?.properties?.includes("openDirectory")) return [];
+        if (directoryPickListeners.size === 0) return [];
+        return new Promise<string[]>((resolve) => {
+          for (const listener of directoryPickListeners) listener({ resolve });
+        });
+      },
     },
   },
   extensions: {
@@ -986,27 +1203,17 @@ export const ipcBridge = {
         throw new Error("managed_model_catalog_read_only");
       },
     },
+    // The managed Harness Provider key is delivered through the
+    // UserHost-internal path only; the Models page shows status, never a key
+    // form, so every provider mutation is rejected.
     updateProvider: {
-      invoke: async (provider: { id: string; api_key?: string }) => {
-        if (provider.id !== "managed-workagent-harness") {
-          throw new Error("managed_model_catalog_read_only");
-        }
-        const secret = provider.api_key?.trim();
-        if (
-          secret === undefined ||
-          secret === "" ||
-          secret === maskedProviderCredential
-        )
-          return;
-        await providerCredentialPort.put(secret);
+      invoke: async (_provider: { id: string; api_key?: string }) => {
+        throw new Error("managed_model_catalog_read_only");
       },
     },
     deleteProvider: {
-      invoke: async ({ id }: { id: string }) => {
-        if (id !== "managed-workagent-harness") {
-          throw new Error("managed_model_catalog_read_only");
-        }
-        await providerCredentialPort.revoke();
+      invoke: async (_input: { id: string }) => {
+        throw new Error("managed_model_catalog_read_only");
       },
     },
   },
@@ -1044,6 +1251,10 @@ export const ipcBridge = {
     getNotifications: { invoke: notificationPort.list },
     acknowledgeNotification: {
       invoke: ({ id }: { id: string }) => notificationPort.acknowledge(id),
+    },
+    notificationsStream: {
+      on: (listener: (feed: PortalNotificationFeed) => void) =>
+        notificationPort.subscribe(listener),
     },
     getMyUsage: {
       invoke: async (): Promise<PortalUsageSummary> => ({
@@ -1207,6 +1418,70 @@ export const ipcBridge = {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         }),
+    },
+    listAuditEvents: {
+      invoke: async (query?: PortalAuditQuery) =>
+        requestJson<{ success: boolean; events: PortalAuditEvent[] }>(
+          `/api/portal/admin/audit${auditQuerySuffix(query)}`,
+        ),
+    },
+    exportAuditEvents: {
+      invoke: async (query?: PortalAuditQuery) => {
+        const response = await requestRaw(
+          `/api/portal/admin/audit/export${auditQuerySuffix(query)}`,
+        );
+        const blob = await response.blob();
+        const filename = `audit-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+        downloadBlob(blob, filename);
+        return { success: true, filename };
+      },
+    },
+    listMigrations: {
+      invoke: async (query?: PortalMigrationQuery) =>
+        requestJson<{
+          success: boolean;
+          items: PortalMigrationItem[];
+          unreachable_sids: string[];
+        }>(`/api/portal/admin/migrations${migrationQuerySuffix(query)}`),
+    },
+    retryMigration: {
+      invoke: async (input: { id: string }) =>
+        requestJson<{ success: boolean; job: PortalMigrationJob }>(
+          `/api/portal/admin/migrations/${encodeURIComponent(input.id)}/retry`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          },
+        ),
+    },
+    resolveMigration: {
+      invoke: async (input: { id: string }) =>
+        requestJson<{ success: boolean; item: PortalMigrationItem }>(
+          `/api/portal/admin/migrations/${encodeURIComponent(input.id)}/resolve`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          },
+        ),
+    },
+    reauthorizeMigration: {
+      invoke: async (input: { id: string }) =>
+        requestJson<{ success: boolean }>(
+          `/api/portal/admin/migrations/${encodeURIComponent(input.id)}/reauthorize`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          },
+        ),
+    },
+    getMigrationJob: {
+      invoke: async (input: { id: string }) =>
+        requestJson<{ success: boolean; job: PortalMigrationJob }>(
+          `/api/portal/admin/migration-jobs?id=${encodeURIComponent(input.id)}`,
+        ),
     },
     listSkillMarket: {
       invoke: async () =>
@@ -1386,8 +1661,21 @@ export const ipcBridge = {
         ),
     },
     createSharedInviteLink: {
-      invoke: async () => {
-        throw new Error("shared_invite_links_not_available");
+      invoke: async (input: { project_id: string; single_use?: boolean }) => {
+        const result = await requestJson<{ link: SharedInviteLinkResponse }>(
+          `/api/portal/shared-projects/${encodeURIComponent(input.project_id)}/invite-links`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ singleUse: input.single_use ?? false }),
+          },
+        );
+        return {
+          token: result.link.token,
+          project_id: result.link.projectId,
+          single_use: result.link.singleUse,
+          expires_at: result.link.expiresAt,
+        };
       },
     },
     updateProfile: {
@@ -1417,6 +1705,19 @@ export const ipcBridge = {
           { method: "POST" },
         );
         return { success: true };
+      },
+    },
+    acceptSharedInviteLink: {
+      invoke: async (input: { token: string }) => {
+        const result = await requestJson<{ project: SharedProjectResponse }>(
+          "/api/portal/shared-invite-links/accept",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ token: input.token }),
+          },
+        );
+        return { success: true, project_id: result.project.id };
       },
     },
     declineSharedInvite: {
@@ -1746,22 +2047,7 @@ export const ipcBridge = {
       },
     },
   },
-  team: new Proxy(
-    {
-      get: { invoke: async () => null },
-      list: { invoke: async () => [] },
-    },
-    {
-      get: (target, key) => {
-        if (key in target) return target[key as keyof typeof target];
-        return {
-          invoke: async () => undefined,
-          on: () => () => undefined,
-          emit: () => undefined,
-        };
-      },
-    },
-  ),
+  team: teamBridge,
   task: {
     stopAll: { invoke: async () => ({ success: false }) },
   },

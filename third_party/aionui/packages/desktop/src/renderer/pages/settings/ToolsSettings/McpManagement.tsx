@@ -145,16 +145,7 @@ const McpManagement: React.FC<McpManagementProps> = ({ message }) => {
                   >
                     {t('settings.mcpImportFromJSON')}
                   </Menu.Item>
-                  <Menu.Item
-                    key='oneclick'
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setImportMode('oneclick');
-                      showAddMcpModal();
-                    }}
-                  >
-                    {t('settings.mcpOneKeyImport')}
-                  </Menu.Item>
+                  {/* WorkAgent3: the one-click CLI scan entry is removed — the browser host has no local CLI config source (getAgentMcpConfigs reports unavailable). */}
                 </Menu>
               }
             >

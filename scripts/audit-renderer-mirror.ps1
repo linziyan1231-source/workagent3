@@ -10,12 +10,26 @@ $ErrorActionPreference = 'Stop'
 $allowedDeltas = @(
     'components/base/AionModal.tsx',
     'components/layout/PortalNotificationHost.tsx',
+    'components/layout/Router.tsx',
+    'components/layout/Titlebar/SharedInviteNotifications.tsx',
+    'components/settings/SettingsModal/contents/SystemModalContent/index.tsx',
+    'components/settings/SettingsModal/contents/ToolsModalContent.tsx',
+    'main.tsx',
+    'pages/admin/AuditPanel.tsx',
+    'pages/admin/MigrationPanel.tsx',
     'pages/admin/index.tsx',
     'pages/admin/types.ts',
     'pages/conversation/Messages/MessageList.tsx',
     'pages/guid/components/GuidActionRow.tsx',
+    'pages/settings/ToolsSettings/McpManagement.tsx',
+    'services/i18n/i18n-keys.d.ts',
+    'services/i18n/locales/en-US/common.json',
     'services/i18n/locales/en-US/settings.json',
-    'services/i18n/locales/zh-CN/settings.json'
+    'services/i18n/locales/en-US/team.json',
+    'services/i18n/locales/zh-CN/common.json',
+    'services/i18n/locales/zh-CN/settings.json',
+    'services/i18n/locales/zh-CN/team.json',
+    'utils/model/modelPlatforms.ts'
 )
 
 function Resolve-Tree([string]$Path) {

@@ -37,3 +37,17 @@ export interface EmployeeLifecycleForm {
   activeProcesses?: number;
   confirmation?: string;
 }
+
+export interface AuditFilterForm {
+  actor: string;
+  action: string;
+  target: string;
+  from: string;
+  to: string;
+  limit: number;
+}
+
+export interface MigrationFilterForm {
+  sid: string;
+  status: '' | 'needs_auth' | 'needs_review';
+}

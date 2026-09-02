@@ -1,6 +1,7 @@
 import { Button, Empty, Progress, Spin, Tag } from "@arco-design/web-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { GatewayUsage } from "@workagent/contracts";
 import { quotaPort, type ModelQuotaUsage } from "./quotaPort.js";
 
 const percentFor = (entry: ModelQuotaUsage) => {
@@ -17,6 +18,7 @@ const percentFor = (entry: ModelQuotaUsage) => {
 export default function QuotaSettingsContent() {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<ModelQuotaUsage[]>([]);
+  const [gateway, setGateway] = useState<GatewayUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
@@ -24,7 +26,12 @@ export default function QuotaSettingsContent() {
     setLoading(true);
     setFailed(false);
     try {
-      setEntries(await quotaPort.list());
+      const [models, gatewayUsage] = await Promise.all([
+        quotaPort.list(),
+        quotaPort.gatewayUsage(),
+      ]);
+      setEntries(models);
+      setGateway(gatewayUsage);
     } catch {
       setFailed(true);
     } finally {
@@ -67,7 +74,7 @@ export default function QuotaSettingsContent() {
             defaultValue: "Unable to load usage.",
           })}
         />
-      ) : entries.length === 0 ? (
+      ) : entries.length === 0 && gateway === null ? (
         <Empty
           description={t("settings.usageNoModels", {
             defaultValue: "No models have been assigned.",
@@ -75,6 +82,58 @@ export default function QuotaSettingsContent() {
         />
       ) : (
         <div className="flex flex-col gap-12px pb-16px">
+          {gateway !== null && (
+            <section className="rounded-12px border border-border-2 bg-fill-1 p-16px">
+              <div className="mb-12px flex items-start justify-between gap-12px">
+                <div className="min-w-0">
+                  <div className="truncate text-14px font-600 text-t-primary">
+                    {t("settings.gatewayUsage", {
+                      defaultValue: "Gateway usage (authoritative)",
+                    })}
+                  </div>
+                  <div className="mt-2px truncate text-12px text-t-tertiary">
+                    {t("settings.gatewayUsageDescription", {
+                      defaultValue:
+                        "Real tokens recorded by the model gateway for your account.",
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-24px text-12px text-t-secondary">
+                <span>
+                  {t("settings.gatewayUsageDaily", {
+                    defaultValue: "Today ({{period}}): {{value}} tokens",
+                    period: gateway.dailyPeriodKey,
+                    value: gateway.dailyTokens.toLocaleString(),
+                  })}
+                </span>
+                <span>
+                  {t("settings.gatewayUsageWeekly", {
+                    defaultValue: "This week ({{period}}): {{value}} tokens",
+                    period: gateway.weeklyPeriodKey,
+                    value: gateway.weeklyTokens.toLocaleString(),
+                  })}
+                </span>
+              </div>
+              {gateway.models.length > 0 && (
+                <div className="mt-8px flex flex-col gap-4px text-12px text-t-tertiary">
+                  {gateway.models.map((model) => (
+                    <div key={model.model} className="flex justify-between">
+                      <span className="truncate">{model.model}</span>
+                      <span>
+                        {t("settings.gatewayUsageModelTokens", {
+                          defaultValue:
+                            "{{tokens}} tokens · {{requests}} requests today",
+                          tokens: model.totalTokens.toLocaleString(),
+                          requests: model.requests.toLocaleString(),
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
           {entries.map((entry) => {
             const usage = entry.usage;
             const used = usage ? usage.consumedUnits + usage.reservedUnits : 0;

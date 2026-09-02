@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Message, Popover, Spin } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ipcBridge } from '@/common';
 import type { PortalSharedInvite } from '@/common/adapter/ipcBridge';
 import { emitter } from '@/renderer/utils/emitter';
@@ -28,6 +28,7 @@ type Props = { enabled: boolean; iconSize: number; mobile?: boolean };
 const EnabledSharedInviteNotifications: React.FC<Omit<Props, 'enabled'>> = ({ iconSize, mobile }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [invites, setInvites] = useState<PortalSharedInvite[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -57,6 +58,17 @@ const EnabledSharedInviteNotifications: React.FC<Omit<Props, 'enabled'>> = ({ ic
       window.removeEventListener('focus', handleFocus);
     };
   }, [refresh]);
+
+  // Deep-link entry: a shared_invite notification links to
+  // `/guid?open=shared-invites`; open the popover once and consume the param.
+  useEffect(() => {
+    if (searchParams.get('open') !== 'shared-invites') return;
+    setOpen(true);
+    void refresh();
+    const next = new URLSearchParams(searchParams);
+    next.delete('open');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, refresh]);
 
   const accept = async (invite: PortalSharedInvite) => {
     setLoading(true);

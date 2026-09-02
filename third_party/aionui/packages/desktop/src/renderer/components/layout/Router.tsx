@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Message } from '@arco-design/web-react';
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import AppLoader from '@renderer/components/layout/AppLoader';
 import { useAuth } from '@renderer/hooks/context/AuthContext';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
@@ -69,9 +70,20 @@ const SharedInviteLinkRoute: React.FC = () => {
         Message.success(t('team.create.inviteLinkAccepted', { defaultValue: 'Joined shared project' }));
         void navigate('/guid', { replace: true });
       },
-      () => {
+      (error: unknown) => {
+        const code = isBackendHttpError(error) ? error.code : '';
+        const key =
+          code === 'shared_invite_expired'
+            ? 'team.create.inviteLinkExpired'
+            : code === 'shared_invite_link_revoked'
+              ? 'team.create.inviteLinkRevoked'
+              : code === 'shared_invite_link_exhausted'
+                ? 'team.create.inviteLinkExhausted'
+                : code === 'shared_invite_link_not_found'
+                  ? 'team.create.inviteLinkInvalid'
+                  : 'team.create.inviteLinkAcceptFailed';
         Message.error(
-          t('team.create.inviteLinkAcceptFailed', {
+          t(key, {
             defaultValue: 'This invite link is invalid, expired, or already used by you',
           })
         );

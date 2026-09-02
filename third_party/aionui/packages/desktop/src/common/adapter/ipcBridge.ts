@@ -100,6 +100,7 @@ import {
   httpPut,
   httpRequest,
   isBackendHttpError,
+  notificationFeedEmitter,
   stubProvider,
   withResponseMap,
   wsEmitter,
@@ -1134,8 +1135,10 @@ export type PortalUsageSummary = {
 
 export type PortalNotification = {
   id: string;
+  kind?: string;
   title?: string;
   message: string;
+  deep_link?: string;
   published_at?: string;
 };
 
@@ -1181,6 +1184,88 @@ export type PortalManagedUsersUsageResponse = {
   users: PortalManagedUserUsage[];
 };
 
+export type PortalAuditEvent = {
+  id: string;
+  actor: string;
+  target: string;
+  action: string;
+  result: 'success' | 'failure' | 'denied';
+  correlation_id: string;
+  occurred_at: string;
+  metadata?: Record<string, string>;
+};
+
+export type PortalAuditQuery = {
+  actor?: string;
+  action?: string;
+  target?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+};
+
+export type PortalAuditEventsResponse = {
+  success: boolean;
+  events: PortalAuditEvent[];
+};
+
+export type PortalMigrationItem = {
+  id: string;
+  sid: string;
+  username: string;
+  source_id: string;
+  target_id?: string;
+  kind: string;
+  status: 'needs_auth' | 'needs_review';
+  reason?: string;
+};
+
+export type PortalMigrationQuery = {
+  sid?: string;
+  status?: 'needs_auth' | 'needs_review';
+};
+
+export type PortalMigrationListResponse = {
+  success: boolean;
+  items: PortalMigrationItem[];
+  unreachable_sids: string[];
+};
+
+export type PortalMigrationJob = {
+  id: string;
+  status: 'running' | 'succeeded' | 'failed';
+  percent: number;
+  step: string;
+  error_code?: string;
+  error_message?: string;
+  item?: PortalMigrationItem;
+};
+
+export type PortalMigrationJobResponse = {
+  success: boolean;
+  job: PortalMigrationJob;
+};
+
+const portalMigrationQuerySuffix = (query?: PortalMigrationQuery): string => {
+  const params = new URLSearchParams();
+  if (query?.sid) params.set('sid', query.sid);
+  if (query?.status) params.set('status', query.status);
+  const text = params.toString();
+  return text ? `?${text}` : '';
+};
+
+const portalAuditQuerySuffix = (query?: PortalAuditQuery): string => {
+  const params = new URLSearchParams();
+  if (query?.actor) params.set('actor', query.actor);
+  if (query?.action) params.set('action', query.action);
+  if (query?.target) params.set('target', query.target);
+  if (query?.from) params.set('from', query.from);
+  if (query?.to) params.set('to', query.to);
+  if (query?.limit !== undefined) params.set('limit', String(query.limit));
+  const text = params.toString();
+  return text ? `?${text}` : '';
+};
+
 export type PortalProfile = {
   id: string;
   username: string;
@@ -1211,6 +1296,10 @@ export type PortalProvisionJob = {
 export const portal = {
   getMyUsage: httpGet<PortalUsageSummary, void>('/api/portal/me/usage'),
   getNotifications: httpGet<PortalNotificationFeed, void>('/api/portal/me/notifications'),
+  acknowledgeNotification: httpPost<{ success: boolean }, { id: string }>(
+    (params) => `/api/portal/me/notifications/${encodeURIComponent(params.id)}/acknowledge`
+  ),
+  notificationsStream: notificationFeedEmitter<PortalNotificationFeed>(),
   getProfile: httpGet<{ success: boolean; profile: PortalProfile }, void>('/api/portal/me/profile'),
   updateProfile: httpPatch<
     { success: boolean; profile: PortalProfile },
@@ -1312,6 +1401,30 @@ export const portal = {
     { success: boolean; kimi_datasource: PortalKimiDatasourceGrant },
     { username: string; enabled: boolean; allowed_sources: string[]; daily_limit: number; monthly_limit: number }
   >('/api/portal/admin/users/kimi-datasource'),
+  listAuditEvents: httpGet<PortalAuditEventsResponse, PortalAuditQuery>(
+    (params) => `/api/portal/admin/audit${portalAuditQuerySuffix(params)}`
+  ),
+  exportAuditEvents: httpGet<PortalAuditEvent[], PortalAuditQuery>(
+    (params) => `/api/portal/admin/audit/export${portalAuditQuerySuffix(params)}`
+  ),
+  listMigrations: httpGet<PortalMigrationListResponse, PortalMigrationQuery>(
+    (params) => `/api/portal/admin/migrations${portalMigrationQuerySuffix(params)}`
+  ),
+  retryMigration: httpPost<{ success: boolean; job: PortalMigrationJob }, { id: string }>(
+    (params) => `/api/portal/admin/migrations/${encodeURIComponent(params.id)}/retry`,
+    () => ({})
+  ),
+  resolveMigration: httpPost<{ success: boolean; item: PortalMigrationItem }, { id: string }>(
+    (params) => `/api/portal/admin/migrations/${encodeURIComponent(params.id)}/resolve`,
+    () => ({})
+  ),
+  reauthorizeMigration: httpPost<{ success: boolean }, { id: string }>(
+    (params) => `/api/portal/admin/migrations/${encodeURIComponent(params.id)}/reauthorize`,
+    () => ({})
+  ),
+  getMigrationJob: httpGet<PortalMigrationJobResponse, { id: string }>(
+    (params) => `/api/portal/admin/migration-jobs?id=${encodeURIComponent(params.id)}`
+  ),
 };
 
 // ---------------------------------------------------------------------------

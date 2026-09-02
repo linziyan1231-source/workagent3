@@ -72,4 +72,37 @@ describe("Quota HTTP port", () => {
     );
     await expect(quotaPort.usage("codex-native")).resolves.toBeNull();
   });
+
+  it("loads authoritative gateway usage and tolerates an unwired quota module", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              dailyPeriodKey: "2026-09-02",
+              dailyTokens: 77,
+              weeklyPeriodKey: "2026-W36",
+              weeklyTokens: 130,
+              models: [{ model: "gpt-5.6-sol", totalTokens: 77, requests: 2 }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const usage = await quotaPort.gatewayUsage();
+    expect(usage?.dailyTokens).toBe(77);
+    expect(usage?.models[0]?.requests).toBe(2);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "quota_unavailable" }), {
+            status: 503,
+          }),
+      ),
+    );
+    await expect(quotaPort.gatewayUsage()).resolves.toBeNull();
+  });
 });

@@ -24,6 +24,8 @@ import { ipcBridge } from '@/common';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import type { PortalSkillMarketEntry } from '@/common/adapter/ipcBridge';
 import { useAuth } from '@renderer/hooks/context/AuthContext';
+import AuditPanel from './AuditPanel';
+import MigrationPanel from './MigrationPanel';
 import type {
   AddManagedUserForm,
   CreationJob,
@@ -735,6 +737,10 @@ const AdminAccountsPage: React.FC = () => {
             tableLayoutFixed
           />
         </Card>
+
+        <AuditPanel />
+
+        <MigrationPanel />
 
         <Card bordered={false} className='rounded-16px mt-20px'>
           <div className='mb-12px flex items-center justify-between gap-12px'>

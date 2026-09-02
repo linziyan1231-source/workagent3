@@ -132,9 +132,6 @@
       "@renderer/pages/conversation/runtime/useConversationRuntimeView": [
         "src/shared/aion-adapter/messageRuntime.ts"
       ],
-      "@renderer/hooks/file/useAutoPreviewOfficeFiles": [
-        "src/shared/aion-adapter/autoPreviewOfficeFiles.ts"
-      ],
       "@renderer/services/FileService": [
         "src/shared/aion-adapter/fileService.ts"
       ],

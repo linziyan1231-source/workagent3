@@ -8,6 +8,7 @@ import type {
 import { automationPort } from "../../features/automation/automationPort.js";
 import { presetPort } from "../../features/presets/presetPort.js";
 import { workspacePort } from "../../features/workspace/workspacePort.js";
+import { runtimeWorkspaceId } from "./common.js";
 
 export type RendererCronSchedule =
   | { kind: "at"; atMs: number; description: string }
@@ -274,10 +275,14 @@ const resolvePreset = async (config?: RendererCronAgentConfig) => {
 
 const resolveWorkspaceId = async (configured?: string) => {
   const workspaces = await workspacePort.list();
-  const selected = configured
+  // The renderer workspace picker returns pseudo-paths
+  // (workagent-workspace:<id>\<name>); reduce them to the workspace id before
+  // matching (same rule as teamAdapter).
+  const configuredId = configured ? runtimeWorkspaceId(configured) : undefined;
+  const selected = configuredId
     ? workspaces.find(
         (workspace) =>
-          workspace.id === configured || workspace.name === configured,
+          workspace.id === configuredId || workspace.name === configuredId,
       )
     : undefined;
   const workspace =
