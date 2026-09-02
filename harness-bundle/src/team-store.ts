@@ -557,6 +557,7 @@ export class TeamOrchestrator {
   #ticking = false;
   #recovered = false;
   #recovering: Promise<void> | undefined;
+  #wake: (() => void) | undefined;
   constructor(
     readonly store: TeamStore,
     readonly runner: TeamRunnerPort,
@@ -572,8 +573,8 @@ export class TeamOrchestrator {
     if (this.#ticking) return;
     this.#ticking = true;
     try {
+      const pending = new Set<Promise<void>>();
       for (;;) {
-        const executions: Promise<void>[] = [];
         for (const queued of this.store.claimQueued()) {
           let begun;
           try {
@@ -581,12 +582,25 @@ export class TeamOrchestrator {
           } catch {
             continue;
           }
-          executions.push(this.#execute(begun));
+          const execution = this.#execute(begun);
+          pending.add(execution);
+          void execution.then(
+            () => pending.delete(execution),
+            () => pending.delete(execution),
+          );
         }
-        if (executions.length === 0) return;
-        await Promise.all(executions);
+        if (pending.size === 0) return;
+        // Wait for any in-flight execution to settle, or for cancel() to wake
+        // the loop. A cancelled execution may outlive its task in the engine,
+        // so the queue must not stay blocked behind it.
+        const woke = new Promise<void>((resolve) => {
+          this.#wake = resolve;
+        });
+        await Promise.race([...pending, woke]);
+        this.#wake = undefined;
       }
     } finally {
+      this.#wake = undefined;
       this.#ticking = false;
     }
   }
@@ -661,7 +675,13 @@ export class TeamOrchestrator {
   }
   async cancel(teamId: string, taskId: string): Promise<TeamTask> {
     const task = this.store.cancelTask(teamId, taskId);
-    await this.runner.cancelTeamTask?.(taskId);
+    try {
+      await this.runner.cancelTeamTask?.(taskId);
+    } finally {
+      // The cancelled member is idle in the store even if the engine turn is
+      // still settling, so wake the scheduling loop to claim queued work.
+      this.#wake?.();
+    }
     return task;
   }
 }

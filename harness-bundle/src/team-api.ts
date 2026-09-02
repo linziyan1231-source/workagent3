@@ -292,21 +292,32 @@ export const createTeamHandler =
       }
       return method(response, "GET");
     } catch (error) {
-      const code = error instanceof Error ? error.message : "invalid_request";
+      // Validation failures keep the stable client-facing code; every other
+      // failure propagates its real code/message so the actual cause (for
+      // example an engine that failed to start) is visible upstream.
+      const code =
+        error instanceof Error &&
+        !(error instanceof SyntaxError) &&
+        error.name !== "ZodError"
+          ? error.message
+          : "invalid_request";
       const status = code.endsWith("_not_found")
         ? 404
         : code.includes("conflict") ||
             code.includes("busy") ||
             code.includes("cancellable") ||
             code.includes("active") ||
-            code.includes("cannot")
+            code.includes("cannot") ||
+            code.startsWith("credential_needs_auth:")
           ? 409
           : code === "request_too_large"
             ? 413
-            : 400;
-      json(response, status, {
-        error: code.startsWith("team_") ? code : "invalid_request",
-      });
+            : code.startsWith("engine_")
+              ? 503
+              : 400;
+      if (status >= 500)
+        console.error("workagent-team-api: request failed", error);
+      json(response, status, { error: code });
     }
   };
 const method = (response: ServerResponse, allow: string): void => {

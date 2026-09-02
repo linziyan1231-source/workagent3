@@ -189,7 +189,7 @@ it("opens the lead session when a team is created and rolls back on failure", as
   }
 
   const failing = await serve(store, async () => {
-    throw new Error("engine_start_failed");
+    throw new Error("engine_start_failed:spawn kimi ENOENT");
   });
   try {
     const failed = await call(
@@ -203,7 +203,12 @@ it("opens the lead session when a team is created and rolls back on failure", as
         lead: { name: "Lead", engine: "codex", presetId: "preset-1" },
       },
     );
-    expect(failed.status).toBe(400);
+    expect(failed.status).toBe(503);
+    // The real engine failure code must reach the caller instead of being
+    // masked as invalid_request.
+    expect(JSON.parse(failed.body)).toEqual({
+      error: "engine_start_failed:spawn kimi ENOENT",
+    });
     expect(store.list().every((team) => team.name !== "Doomed")).toBe(true);
 
     const launch = store.list().find((team) => team.name === "Launch")!;
@@ -214,12 +219,61 @@ it("opens the lead session when a team is created and rolls back on failure", as
       "runtime-token",
       { name: "Ghost", engine: "codex", presetId: "preset-1" },
     );
-    expect(memberFailed.status).toBe(400);
+    expect(memberFailed.status).toBe(503);
     expect(
       store.get(launch.id)!.members.every((member) => member.name !== "Ghost"),
     ).toBe(true);
   } finally {
     await close(failing.server);
+  }
+});
+
+it("propagates credential and store error codes with their HTTP semantics", async () => {
+  const home = mkdtempSync(join(tmpdir(), "workagent-team-api-"));
+  roots.push(home);
+  const store = new TeamStore(home);
+  const team = store.create({
+    name: "Launch",
+    workspaceId: "workspace-1",
+    lead: { name: "Lead", engine: "codex", presetId: "preset-1" },
+  });
+  const { server, port } = await serve(store, async () => {
+    throw new Error("credential_needs_auth:kimi");
+  });
+  try {
+    const denied = await call(
+      port,
+      "POST",
+      `/v1/teams/${team.id}/members`,
+      "runtime-token",
+      { name: "Reviewer", engine: "kimi", presetId: "builtin-kimi" },
+    );
+    expect(denied.status).toBe(409);
+    expect(JSON.parse(denied.body)).toEqual({
+      error: "credential_needs_auth:kimi",
+    });
+
+    const missing = await call(
+      port,
+      "GET",
+      "/v1/teams/team-missing",
+      "runtime-token",
+    );
+    expect(missing.status).toBe(404);
+    expect(JSON.parse(missing.body)).toEqual({ error: "team_not_found" });
+
+    // Malformed payloads keep the stable validation code.
+    const invalid = await call(
+      port,
+      "POST",
+      `/v1/teams/${team.id}/members`,
+      "runtime-token",
+      { name: "Bad", engine: "not-an-engine", presetId: "builtin-kimi" },
+    );
+    expect(invalid.status).toBe(400);
+    expect(JSON.parse(invalid.body)).toEqual({ error: "invalid_request" });
+  } finally {
+    await close(server);
   }
 });
 

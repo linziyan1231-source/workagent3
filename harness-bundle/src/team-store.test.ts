@@ -225,6 +225,55 @@ describe("TeamStore", () => {
     expect(store.task(queued.id)?.status).toBe("cancelled");
   });
 
+  it("schedules the next queued task in the same tick after cancelling an in-flight task", async () => {
+    const store = new TeamStore(root());
+    const team = createTeam(store);
+    const releases = new Map<
+      string,
+      (result: { sessionId: string; result?: string }) => void
+    >();
+    const executeTeamTask = vi.fn(
+      (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
+        new Promise<{ sessionId: string; result?: string }>((resolve) => {
+          releases.set(request.taskId, resolve);
+        }),
+    );
+    // The engine acknowledges the cancel but the in-flight execution settles
+    // late; the scheduler must not stay blocked behind it.
+    const cancelTeamTask = vi.fn(async () => undefined);
+    const orchestrator = new TeamOrchestrator(store, {
+      executeTeamTask,
+      cancelTeamTask,
+    });
+    const first = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Draft",
+      input: "Draft launch",
+    });
+    const second = store.queueTask(team.id, {
+      memberId: team.members[0]!.id,
+      title: "Revise",
+      input: "Apply review",
+    });
+    const tick = orchestrator.tick();
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(1));
+    expect(store.task(first.id)?.status).toBe("running");
+    expect(store.task(second.id)?.status).toBe("queued");
+
+    await orchestrator.cancel(team.id, first.id);
+
+    await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(2));
+    expect(cancelTeamTask).toHaveBeenCalledWith(first.id);
+    expect(store.task(first.id)?.status).toBe("cancelled");
+    expect(store.task(second.id)?.status).toBe("running");
+
+    releases.get(second.id)?.({ sessionId: "session-2", result: "revised" });
+    releases.get(first.id)?.({ sessionId: "session-1" });
+    await tick;
+    expect(store.task(first.id)?.status).toBe("cancelled");
+    expect(store.task(second.id)?.status).toBe("succeeded");
+  });
+
   it("runs separate members in parallel and drains tasks queued while active", async () => {
     const store = new TeamStore(root());
     let team = createTeam(store);

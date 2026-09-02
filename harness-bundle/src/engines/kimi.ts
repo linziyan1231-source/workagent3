@@ -155,6 +155,15 @@ export class KimiBridge implements EngineBridge {
     });
     this.#child = child;
     child.stderr.resume();
+    // Wait for the spawn to succeed before wiring the connection: a failed
+    // spawn rejects here with the real cause instead of escaping as an
+    // uncaught child error event or surfacing as an opaque stream error.
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => resolve());
+      child.once("error", (error: Error) =>
+        reject(new Error(`engine_start_failed:${error.message}`)),
+      );
+    });
     const client = new KimiClient(this.#sessions);
     const connection = new ClientSideConnection(
       () => client,
@@ -163,16 +172,36 @@ export class KimiBridge implements EngineBridge {
         Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       ),
     );
+    // An instant exit during the handshake rejects with the exit status
+    // instead of a generic connection-closed error.
+    const startupFailure = new Promise<never>((_resolve, reject) => {
+      child.once("exit", (code) =>
+        reject(
+          new Error(
+            `engine_start_failed:kimi acp exited with ${code ?? "no status"}`,
+          ),
+        ),
+      );
+    });
     child.once("exit", () => {
       this.#child = undefined;
       this.#connection = undefined;
       this.#starting = undefined;
     });
-    await connection.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {},
-      clientInfo: { name: "WorkAgent", version: "0.1.0" },
-    });
+    try {
+      await Promise.race([
+        connection.initialize({
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: {},
+          clientInfo: { name: "WorkAgent", version: "0.1.0" },
+        }),
+        startupFailure,
+      ]);
+    } catch (error) {
+      // Do not leak a process that never completed the handshake.
+      child.kill();
+      throw error;
+    }
     this.#connection = connection;
     return connection;
   }
