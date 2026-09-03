@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
@@ -187,6 +188,12 @@ func TestEmployeeTaskStateQueriesRealScheduledTask(t *testing.T) {
 	if state != "Ready" && state != "Disabled" {
 		t.Fatalf("real task state = %q", state)
 	}
+	// A missing task must fail loudly rather than report a bogus state:
+	// COM method errors are only statement-terminating in PowerShell, so
+	// without an explicit catch a null task would map to state "Unknown".
+	if _, err := employeeTaskState(context.Background(), name+"-missing"); err == nil {
+		t.Fatal("state query of a missing task was accepted")
+	}
 }
 
 func TestStartScheduledTaskStartsRealTask(t *testing.T) {
@@ -216,5 +223,64 @@ func TestStartScheduledTaskStartsRealTask(t *testing.T) {
 	}
 	if output, err := exec.Command("schtasks", "/end", "/tn", name).CombinedOutput(); err != nil {
 		t.Fatalf("final stop: %v: %s", err, output)
+	}
+}
+
+func TestStopInstalledRuntimeStopsRealTask(t *testing.T) {
+	// End-to-end through the production StopInstalledRuntime (COM API): a
+	// running task must be stopped, and stopping a missing task must error
+	// (the lifecycle flows rely on that to detect a broken install).
+	suffix := fmt.Sprintf("%d", os.Getpid())
+	name := "WorkAgent3-StopTest-" + suffix
+	create := exec.Command("schtasks", "/create", "/tn", name, "/tr", `C:\Windows\System32\cmd.exe /c ping -n 20 127.0.0.1`, "/sc", "once", "/st", "00:00", "/f")
+	if output, err := create.CombinedOutput(); err != nil {
+		t.Skipf("scheduled task creation requires elevation: %v: %s", err, output)
+	}
+	defer exec.Command("schtasks", "/delete", "/tn", name, "/f").Run()
+	platform := &WindowsPlatform{}
+	if err := startScheduledTask(context.Background(), name, startEmployeeTask, employeeTaskState); err != nil {
+		t.Fatalf("start real task: %v", err)
+	}
+	if err := platform.StopInstalledRuntime(context.Background(), "StopTest-"+suffix); err != nil {
+		t.Fatalf("stop real task: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		state, err := employeeTaskState(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state != "Running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task still Running after StopInstalledRuntime")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if err := platform.StopInstalledRuntime(context.Background(), "StopTest-missing-"+suffix); err == nil {
+		t.Fatal("stopping a missing task was accepted")
+	}
+}
+
+func TestRemoveInstalledRuntimeDeletesRealTaskIdempotently(t *testing.T) {
+	// End-to-end through the production RemoveInstalledRuntime (COM API):
+	// deleting an existing task must remove it, and deleting a missing task
+	// must succeed (remove flows are invoked on partially installed runtimes).
+	suffix := fmt.Sprintf("%d", os.Getpid())
+	name := "WorkAgent3-RemoveTest-" + suffix
+	create := exec.Command("schtasks", "/create", "/tn", name, "/tr", "cmd.exe /c exit", "/sc", "once", "/st", "00:00", "/f")
+	if output, err := create.CombinedOutput(); err != nil {
+		t.Skipf("scheduled task creation requires elevation: %v: %s", err, output)
+	}
+	platform := &WindowsPlatform{}
+	if err := platform.RemoveInstalledRuntime(context.Background(), "RemoveTest-"+suffix); err != nil {
+		t.Fatalf("remove real task: %v", err)
+	}
+	if _, err := employeeTaskState(context.Background(), name); err == nil {
+		t.Fatal("task still exists after RemoveInstalledRuntime")
+	}
+	if err := platform.RemoveInstalledRuntime(context.Background(), "RemoveTest-"+suffix); err != nil {
+		t.Fatalf("repeated remove of a missing task: %v", err)
 	}
 }

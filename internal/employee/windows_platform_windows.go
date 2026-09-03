@@ -181,8 +181,21 @@ func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) er
 	return waitForRuntimeLease(ctx, p.config.PortalURL, spec.SID, spec.RegistrationCredential, 45*time.Second)
 }
 
+// StopInstalledRuntime and RemoveInstalledRuntime use the Task Scheduler
+// COM API for the same reason as employeeTaskState: the ScheduledTasks
+// module's Get-ScheduledTask -TaskName query breaks with HRESULT
+// 0x80070057 on machines hosting a task the CIM provider cannot parse,
+// which would make employee disable/remove fail on such machines.
 func (p *WindowsPlatform) StopInstalledRuntime(ctx context.Context, sid string) error {
-	return runPowerShell(ctx, `$task=Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop; if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction Stop }`, map[string]string{"WA3_TASK": taskName(sid)}, nil)
+	// A missing task must be an explicit failure. COM method errors in
+	// PowerShell are only statement-terminating, so an uncaught GetTask
+	// failure would leave $task null and silently continue; catch and exit
+	// non-zero instead.
+	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
+		`$service=New-Object -ComObject 'Schedule.Service'; $service.Connect(); ` +
+		`try { $task=$service.GetFolder('\').GetTask($env:WA3_TASK) } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }; ` +
+		`if ([int]$task.State -eq 4) { $task.Stop(0) }`
+	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
 }
 
 func (p *WindowsPlatform) StartInstalledRuntime(ctx context.Context, sid string) error {
@@ -229,7 +242,14 @@ func (p *WindowsPlatform) UpdateInstalledLimits(_ context.Context, sid string, l
 }
 
 func (p *WindowsPlatform) RemoveInstalledRuntime(ctx context.Context, sid string) error {
-	script := `if (Get-ScheduledTask -TaskName $env:WA3_TASK -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $env:WA3_TASK -Confirm:$false -ErrorAction Stop }`
+	// powershell.exe -EncodedCommand exits 1 when any error record was
+	// written, even a caught one, so the idempotent "task already gone"
+	// path must exit 0 explicitly.
+	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
+		`$service=New-Object -ComObject 'Schedule.Service'; $service.Connect(); ` +
+		`$folder=$service.GetFolder('\'); ` +
+		`try { $folder.GetTask($env:WA3_TASK) | Out-Null } catch { exit 0 }; ` +
+		`$folder.DeleteTask($env:WA3_TASK, 0)`
 	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
 }
 
@@ -418,9 +438,13 @@ const powerShellResultMarker = "WA3-RESULT:"
 // on machines hosting a task the CIM provider cannot parse, while the COM
 // API (which schtasks itself uses) stays reliable.
 var employeeTaskState = func(ctx context.Context, name string) (string, error) {
+	// Catch GetTask failures explicitly: COM method errors are only
+	// statement-terminating in PowerShell, so without the catch a missing
+	// task would leave $task null, map [int]$null.State to 0, and report a
+	// bogus "Unknown" state with exit code 0.
 	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
 		`$service=New-Object -ComObject 'Schedule.Service'; $service.Connect(); ` +
-		`$task=$service.GetFolder('\').GetTask($env:WA3_TASK); ` +
+		`try { $task=$service.GetFolder('\').GetTask($env:WA3_TASK) } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }; ` +
 		`$names=@{0='Unknown';1='Disabled';2='Queued';3='Ready';4='Running'}; $state=$names[[int]$task.State]; ` +
 		`if ($null -eq $state) { $state='Unknown' }; [Console]::WriteLine('` + powerShellResultMarker + `' + $state)`
 	return runPowerShellQuery(ctx, script, map[string]string{"WA3_TASK": name})
