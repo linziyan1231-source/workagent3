@@ -23,18 +23,24 @@ export const runtimeMcpTransportSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("stdio"),
     command: z.string().min(1),
-    args: z.array(z.string()),
-    environmentCredentialIds: z.record(z.string().min(1), z.string().min(1)),
+    args: z.array(z.string()).default([]),
+    environmentCredentialIds: z
+      .record(z.string().min(1), z.string().min(1))
+      .default({}),
   }),
   z.object({
     kind: z.literal("http"),
     url: z.url(),
-    headerCredentialIds: z.record(z.string().min(1), z.string().min(1)),
+    headerCredentialIds: z
+      .record(z.string().min(1), z.string().min(1))
+      .default({}),
   }),
   z.object({
     kind: z.literal("sse"),
     url: z.url(),
-    headerCredentialIds: z.record(z.string().min(1), z.string().min(1)),
+    headerCredentialIds: z
+      .record(z.string().min(1), z.string().min(1))
+      .default({}),
   }),
 ]);
 

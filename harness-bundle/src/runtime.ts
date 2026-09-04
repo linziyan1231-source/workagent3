@@ -77,9 +77,13 @@ export const searchRuntimeMessages = (
   keyword: string,
   page: number,
   pageSize: number,
+  sessionId?: string,
 ) => {
   const normalizedKeyword = keyword.toLocaleLowerCase();
   const matches = items
+    .filter(
+      ({ session }) => sessionId === undefined || session.id === sessionId,
+    )
     .filter(({ message }) =>
       message.text.toLocaleLowerCase().includes(normalizedKeyword),
     )
@@ -102,13 +106,14 @@ export const planMessageFork = (
   messages: readonly StoredMessage[],
   messageId: string,
   editing: boolean,
+  requireNativeTurn = true,
 ) => {
   const selectedIndex = messages.findIndex(
     (message) => message.id === messageId && message.role === "user",
   );
   if (selectedIndex === -1) throw new Error("fork_message_not_found");
   const selected = messages[selectedIndex]!;
-  if (selected.nativeTurnId === undefined)
+  if (requireNativeTurn && selected.nativeTurnId === undefined)
     throw new Error("message_turn_unavailable");
   const previousUser = messages
     .slice(0, selectedIndex)
@@ -728,6 +733,7 @@ export class RuntimeController
       const keyword = (url.searchParams.get("keyword") ?? "").trim();
       const page = Number(url.searchParams.get("page") ?? "0");
       const pageSize = Number(url.searchParams.get("page_size") ?? "20");
+      const sessionId = url.searchParams.get("session_id")?.trim() || undefined;
       if (
         keyword === "" ||
         keyword.length > 200 ||
@@ -759,7 +765,7 @@ export class RuntimeController
       writeJson(
         response,
         200,
-        searchRuntimeMessages(items, keyword, page, pageSize),
+        searchRuntimeMessages(items, keyword, page, pageSize, sessionId),
       );
       return;
     }
@@ -1467,13 +1473,12 @@ export class RuntimeController
     messageId: string,
     replacementContent?: string,
   ): Promise<RuntimeSession> {
-    if (source.engine === "harness")
-      throw new Error("engine_capability_unsupported:harness:fork");
     const messages = this.#messages.list(sourceId);
     const plan = planMessageFork(
       messages,
       messageId,
       replacementContent !== undefined,
+      source.engine !== "harness",
     );
     if (
       source.engine === "kimi" &&
@@ -1482,9 +1487,8 @@ export class RuntimeController
     )
       throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
 
-    const bridge = this.#bridges.get(source.engine);
-    if (bridge === undefined) throw new Error("engine_unavailable");
     const mcpServers = this.#resolvedMcpServers(source.preset);
+    const resolvedSkills = this.#resolvedSkills(source.preset);
     const workspace = this.#engineWorkspace(source);
     const options = {
       mcpServers,
@@ -1518,41 +1522,65 @@ export class RuntimeController
     };
     const onEvent = (event: BridgeEvent) =>
       this.#publish(record, this.#nativeEvent(publicId, record, event));
-    record.native =
-      replacementContent !== undefined && plan.previousTurnId === undefined
-        ? await bridge.create(workspace, onEvent, options)
-        : await bridge.fork(
-            source.nativeId,
-            workspace,
-            onEvent,
-            options,
-            source.engine === "codex"
-              ? replacementContent === undefined
-                ? plan.selectedTurnId
-                : plan.previousTurnId
-              : undefined,
-          );
-    record.nativeId = record.native.nativeId;
+    if (source.engine === "harness") {
+      record.handle = await this.#createHarness(
+        publicId,
+        workspace,
+        mcpServers,
+        resolvedSkills,
+      );
+    } else {
+      const bridge = this.#bridges.get(source.engine);
+      if (bridge === undefined) throw new Error("engine_unavailable");
+      record.native =
+        replacementContent !== undefined && plan.previousTurnId === undefined
+          ? await bridge.create(workspace, onEvent, options)
+          : await bridge.fork(
+              source.nativeId,
+              workspace,
+              onEvent,
+              options,
+              source.engine === "codex"
+                ? replacementContent === undefined
+                  ? plan.selectedTurnId
+                  : plan.previousTurnId
+                : undefined,
+            );
+      record.nativeId = record.native.nativeId;
+    }
     this.#sessions.set(publicId, record);
     try {
       for (const message of plan.copiedMessages)
         this.#messages.append({ ...message, sessionId: publicId });
       if (replacementContent !== undefined) {
-        const turnId = await record.native.send(replacementContent);
+        let turnId: string | undefined;
+        if (record.handle !== undefined) {
+          record.handle.agent.followup(
+            createUserMessage({
+              content: [{ type: "text", text: replacementContent }],
+              source: { kind: "user" },
+            }),
+          );
+        } else {
+          turnId = await record.native!.send(replacementContent);
+        }
         this.#messages.append({
           id: `message-${randomUUID()}`,
           sessionId: publicId,
           role: "user",
           text: replacementContent,
           createdAt: new Date().toISOString(),
-          nativeTurnId: turnId,
+          ...(turnId === undefined ? {} : { nativeTurnId: turnId }),
         });
       }
       this.#persist(publicId, record);
     } catch (error) {
       this.#sessions.delete(publicId);
       this.#messages.delete(publicId);
-      await record.native.close().catch(() => undefined);
+      if (record.handle !== undefined)
+        await record.handle.dispose().catch(() => undefined);
+      if (record.native !== undefined)
+        await record.native.close().catch(() => undefined);
       throw error;
     }
     return {

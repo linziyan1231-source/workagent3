@@ -27,4 +27,13 @@ describe("Workspace content response", () => {
       "content-type": "application/octet-stream",
     });
   });
+
+  it("serves raster image previews inline with their real media type", () => {
+    expect(workspaceContentHeaders("images/chart.png", 42, true)).toMatchObject(
+      {
+        "content-disposition": "inline; filename*=UTF-8''chart.png",
+        "content-type": "image/png",
+      },
+    );
+  });
 });

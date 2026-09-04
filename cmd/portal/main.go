@@ -51,7 +51,7 @@ func run() error {
 	auditPath := flag.String("audit-db", "", "Audit SQLite path (defaults beside Portal database)")
 	auditRetentionDays := flag.Int("audit-retention-days", 180, "Days to keep audit events before pruning (0 disables retention cleanup)")
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
-	assistantResources := flag.String("assistant-resources", filepath.Join("third_party", "aionui", "resources", "puxin-builtin-assistants"), "latest WorkAgent2 builtin assistant resource root")
+	assistantResources := flag.String("assistant-resources", filepath.Join("release", "assistant-resources"), "managed builtin assistant resource root")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
 	harnessModel := flag.String("harness-model", os.Getenv("WORKAGENT_HARNESS_MODEL"), "configured Codex model displayed for the managed Harness provider")
 	flag.Parse()

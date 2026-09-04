@@ -22,6 +22,31 @@ func TestSecurityPolicyAllowsRendererStylesButNotInlineScripts(t *testing.T) {
 	}
 }
 
+func TestSecurityPolicyAllowsDshBootstrapOnlyForAuthenticatedDshDocument(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	server, _ := New(data, StaticRouter{}, false)
+
+	dshRequest := httptest.NewRequest(http.MethodGet, "/?frontend=dsh", nil)
+	dshRequest.AddCookie(&http.Cookie{Name: server.cookieName(), Value: "session"})
+	dsh := httptest.NewRecorder()
+	server.Handler().ServeHTTP(dsh, dshRequest)
+	dshPolicy := dsh.Header().Get("Content-Security-Policy")
+	for _, allowance := range []string{"script-src 'self' 'unsafe-inline' 'unsafe-eval'", "font-src 'self' data:", "worker-src 'self' blob:"} {
+		if !strings.Contains(dshPolicy, allowance) {
+			t.Fatalf("dsh CSP missing %q: %s", allowance, dshPolicy)
+		}
+	}
+
+	legacyRequest := httptest.NewRequest(http.MethodGet, "/?frontend=legacy", nil)
+	legacyRequest.AddCookie(&http.Cookie{Name: server.cookieName(), Value: "session"})
+	legacy := httptest.NewRecorder()
+	server.Handler().ServeHTTP(legacy, legacyRequest)
+	if policy := legacy.Header().Get("Content-Security-Policy"); strings.Contains(policy, "'unsafe-eval'") || strings.Contains(policy, "script-src 'self' 'unsafe-inline'") {
+		t.Fatalf("legacy CSP was relaxed: %s", policy)
+	}
+}
+
 func TestSecurityPolicyAllowsOnlyExplicitWorkspaceContentPreviewToFrame(t *testing.T) {
 	data, _ := store.Open(":memory:")
 	defer data.Close()

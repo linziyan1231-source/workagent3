@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"workagent3/internal/auth"
 	"workagent3/internal/runtimeapi"
@@ -204,5 +205,69 @@ func TestRuntimeRequiresAuthentication(t *testing.T) {
 	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/runtime/v1/sessions", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d", response.Code)
+	}
+}
+
+func TestAuthenticatedWebSurfaceAndDshAPIUseSIDRuntime(t *testing.T) {
+	runtime := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer runtime-token" || request.Header.Get("Cookie") != "" {
+			t.Fatalf("unsafe runtime headers: auth=%q cookie=%q", request.Header.Get("Authorization"), request.Header.Get("Cookie"))
+		}
+		writer.Header().Set("Content-Type", "text/html")
+		_, _ = writer.Write([]byte("dsh-boot:" + request.URL.Path))
+	}))
+	defer runtime.Close()
+	target, _ := url.Parse(runtime.URL)
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	hash, _ := auth.HashPassword([]byte("correct horse battery staple"))
+	user, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", hash)
+	server, _ := New(data, StaticRouter{user.SID: {BaseURL: target, Token: "runtime-token"}}, false)
+	legacy := SPAHandler(fstest.MapFS{"index.html": {Data: []byte("portal-login")}})
+	handler := server.HandlerWithWeb(legacy)
+
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/", nil))
+	if body := unauthenticated.Body.String(); !strings.Contains(body, "portal-login") {
+		t.Fatalf("unauthenticated root did not render login: %s", body)
+	}
+
+	login := httptest.NewRequest(http.MethodPost, "http://portal.test/api/auth/login", strings.NewReader(`{"username":"alice","password":"correct horse battery staple"}`))
+	login.Header.Set("Origin", "http://portal.test")
+	loginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(loginResponse, login)
+	for _, path := range []string{"/", "/assets/client.js", "/plugins/workagent/client.js", "/api/session.search"} {
+		request := httptest.NewRequest(http.MethodGet, "http://portal.test"+path, nil)
+		request.AddCookie(loginResponse.Result().Cookies()[0])
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "dsh-boot:"+path) {
+			t.Fatalf("dsh route %s returned %d: %s", path, response.Code, response.Body.String())
+		}
+	}
+	legacyRequest := httptest.NewRequest(http.MethodGet, "http://portal.test/?frontend=legacy", nil)
+	legacyRequest.AddCookie(loginResponse.Result().Cookies()[0])
+	legacyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(legacyResponse, legacyRequest)
+	if !strings.Contains(legacyResponse.Body.String(), "portal-login") {
+		t.Fatalf("legacy fallback did not render Portal client: %s", legacyResponse.Body.String())
+	}
+	if cookies := legacyResponse.Result().Cookies(); len(cookies) == 0 || cookies[0].Name != frontendCookie || cookies[0].Value != "legacy" {
+		t.Fatalf("legacy fallback cookie missing: %#v", cookies)
+	}
+	dshRequest := httptest.NewRequest(http.MethodGet, "http://portal.test/?frontend=dsh", nil)
+	dshRequest.AddCookie(loginResponse.Result().Cookies()[0])
+	dshRequest.AddCookie(&http.Cookie{Name: frontendCookie, Value: "legacy"})
+	dshResponse := httptest.NewRecorder()
+	handler.ServeHTTP(dshResponse, dshRequest)
+	if dshResponse.Code != http.StatusOK || !strings.Contains(dshResponse.Body.String(), "dsh-boot:/") {
+		t.Fatalf("explicit dsh switch did not render runtime client: %d %s", dshResponse.Code, dshResponse.Body.String())
+	}
+	var deleted bool
+	for _, cookie := range dshResponse.Result().Cookies() {
+		deleted = deleted || cookie.Name == frontendCookie && cookie.MaxAge < 0
+	}
+	if !deleted {
+		t.Fatalf("explicit dsh switch did not delete legacy cookie: %#v", dshResponse.Result().Cookies())
 	}
 }

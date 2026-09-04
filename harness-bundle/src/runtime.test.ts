@@ -94,6 +94,16 @@ describe("native conversation branching", () => {
       ),
     ).toThrow("message_turn_unavailable");
   });
+
+  it("allows Harness branches without native turn identifiers", () => {
+    const legacy = messages.map(
+      ({ nativeTurnId: _nativeTurnId, ...message }) => message,
+    );
+    expect(planMessageFork(legacy, "message-2", true, false)).toMatchObject({
+      hasLaterUser: false,
+      copiedMessages: legacy.slice(0, 2),
+    });
+  });
 });
 
 describe("terminal turn normalization", () => {
@@ -257,5 +267,35 @@ describe("persisted message search", () => {
     expect(
       searchRuntimeMessages(items, "revenue", 1, 1).items[0]!.message.id,
     ).toBe("message-1");
+  });
+
+  it("filters by session before pagination", () => {
+    const other = { ...session, id: "session-2", title: "Other" };
+    const items = [
+      {
+        session,
+        message: {
+          id: "wanted",
+          sessionId: session.id,
+          role: "user" as const,
+          text: "needle",
+          createdAt: "2026-08-30T10:00:00.000Z",
+        },
+      },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        session: other,
+        message: {
+          id: `newer-${index}`,
+          sessionId: other.id,
+          role: "user" as const,
+          text: "needle",
+          createdAt: `2026-08-31T10:${String(index).padStart(2, "0")}:00.000Z`,
+        },
+      })),
+    ];
+
+    const result = searchRuntimeMessages(items, "needle", 0, 20, session.id);
+    expect(result).toMatchObject({ total: 1, hasMore: false });
+    expect(result.items[0]!.message.id).toBe("wanted");
   });
 });

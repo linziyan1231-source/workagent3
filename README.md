@@ -1,6 +1,6 @@
 # WorkAgent3
 
-WorkAgent3 is a Web-only, SID-isolated office agent platform. The implementation follows [plan.md](./plan.md): Go owns the Windows platform and Portal, while TypeScript owns the browser client, shared contracts, and DeepSeek Harness plugins.
+WorkAgent3 is a Web-only, SID-isolated office agent platform. The implementation follows [plan.md](./plan.md): Go owns the Windows platform and Portal, while TypeScript owns the official DeepSeek Harness Web client composition, WorkAgent slot plugins, and shared contracts.
 
 ## Prerequisites
 
@@ -24,8 +24,10 @@ pnpm build
 & scripts/go.ps1 @('build', '-o', 'bin/portal.exe', './cmd/portal')
 ```
 
-The Portal serves `apps/web/dist` and defaults to secure cookies. For a local
-HTTP-only development run, pass `-secure-cookie=false`. The managed Harness
+After authentication, Portal serves the SID-private official dsh Web client and
+keeps `apps/web/dist` for login, administration, OAuth, and the temporary
+`?frontend=legacy` rollback landing page. Portal defaults to secure cookies. For
+a local HTTP-only development run, pass `-secure-cookie=false`. The managed Harness
 provider model must be declared with `-harness-model` (or
 `WORKAGENT_HARNESS_MODEL`) set to the configured Codex model — the same value
 as `modelGateway.codexModel` in the employee-manager configuration (see

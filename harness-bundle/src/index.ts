@@ -4,6 +4,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-agent";
 import type {} from "@deepseek-ai/dsh-agent-default-model";
 import type {} from "@deepseek-ai/dsh-host-webserver";
+import type {} from "@deepseek-ai/dsh-web-app";
 import type {} from "@deepseek-ai/dsh-session";
 import { RuntimeController } from "./runtime.js";
 import { WorkspaceController } from "./workspace-api.js";

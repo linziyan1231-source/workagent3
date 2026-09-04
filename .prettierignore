@@ -9,3 +9,4 @@ coverage/
 third_party/
 # Copied managed release payloads retain their canonical package formatting.
 release/managed-skills/
+release/assistant-resources/

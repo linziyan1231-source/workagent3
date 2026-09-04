@@ -6,7 +6,12 @@ import { WorkspaceStore } from "./workspace-store.js";
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const INLINE_PREVIEW_MEDIA_TYPES: Record<string, string> = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
   pdf: "application/pdf",
+  png: "image/png",
+  webp: "image/webp",
 };
 
 export const workspaceContentHeaders = (

@@ -6,6 +6,7 @@ import {
   credentialStatusSchema,
   presetBindingSchema,
   runtimeMcpMutationSchema,
+  runtimeMcpTransportSchema,
   skillCatalogEntrySchema,
   skillMcpInventorySchema,
   validateModuleGraph,
@@ -51,6 +52,30 @@ describe("credential contract", () => {
 });
 
 describe("runtime capability contracts", () => {
+  it("normalizes transport fields omitted by Go JSON encoding", () => {
+    expect(
+      runtimeMcpTransportSchema.parse({
+        kind: "stdio",
+        command: "server",
+      }),
+    ).toEqual({
+      kind: "stdio",
+      command: "server",
+      args: [],
+      environmentCredentialIds: {},
+    });
+    expect(
+      runtimeMcpTransportSchema.parse({
+        kind: "http",
+        url: "https://example.com/mcp",
+      }),
+    ).toEqual({
+      kind: "http",
+      url: "https://example.com/mcp",
+      headerCredentialIds: {},
+    });
+  });
+
   it("keeps skill locations tenant-relative", () => {
     const skill = {
       id: "skill-1",

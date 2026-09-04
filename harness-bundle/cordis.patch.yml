@@ -26,13 +26,24 @@
 - id: credentials
   name: "@deepseek-ai/dsh-credentials-local"
   disabled: true
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: !!js Number(process.env.WORKAGENT_RUNTIME_PORT)
+- id: web-runtime
+  config:
+    openBrowser: false
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: ["127.0.0.1", "localhost"]
+- id: ui-brand-official
+  disabled: true
+- id: ui-settings-models
+  disabled: true
 - insert:
+    - id: workagent-client
+      name: "@workagent/dsh-client"
     - id: workagent-credentials
       name: "@workagent/harness-bundle/dist/credential-provider.js"
-    - id: workagent-runtime-host
-      name: "@deepseek-ai/dsh-host-webserver"
-      config:
-        host: 127.0.0.1
-        port: !!js Number(process.env.WORKAGENT_RUNTIME_PORT)
     - id: workagent-runtime-api
       name: "@workagent/harness-bundle"

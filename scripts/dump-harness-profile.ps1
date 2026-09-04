@@ -12,12 +12,14 @@ $profileHome = if ([string]::IsNullOrWhiteSpace($DestinationHome)) {
 $profileDirectory = Join-Path $profileHome 'profiles\workagent'
 $bundleDirectory = Join-Path $profileHome 'harness-bundle'
 $contractsDirectory = Join-Path $profileHome 'contracts'
+$clientDirectory = Join-Path $profileHome 'dsh-client-workagent'
 $profileNodeModules = Join-Path $profileDirectory 'node_modules'
 $profileLockfile = Join-Path $profileDirectory 'pnpm-lock.yaml'
 
 New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $bundleDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $contractsDirectory | Out-Null
+New-Item -ItemType Directory -Force -Path $clientDirectory | Out-Null
 if (Test-Path -LiteralPath $profileNodeModules) {
     Remove-Item -LiteralPath $profileNodeModules -Recurse -Force
 }
@@ -32,6 +34,10 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'harness-bundle\cordis.patch.y
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'harness-bundle\dist') -Destination $bundleDirectory -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\contracts\package.json') -Destination $contractsDirectory -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\contracts\dist') -Destination $contractsDirectory -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\dsh-client-workagent\package.json') -Destination $clientDirectory -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\dsh-client-workagent\index.js') -Destination $clientDirectory -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\dsh-client-workagent\client.js') -Destination $clientDirectory -Force
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packages\dsh-client-workagent\tokens.css') -Destination $clientDirectory -Force
 
 $contractsArchive = (& pnpm --dir $contractsDirectory pack --pack-destination $profileHome | Select-Object -Last 1).Trim()
 if ($LASTEXITCODE -ne 0 -or $contractsArchive -eq '') {
@@ -52,9 +58,14 @@ $packageArchive = (& pnpm --dir $bundleDirectory pack --pack-destination $profil
 if ($LASTEXITCODE -ne 0 -or $packageArchive -eq '') {
     throw 'Failed to pack the WorkAgent Harness bundle'
 }
+$clientArchive = (& pnpm --dir $clientDirectory pack --pack-destination $profileHome | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0 -or $clientArchive -eq '') {
+    throw 'Failed to pack the WorkAgent dsh client'
+}
 $profileManifestPath = Join-Path $profileDirectory 'package.json'
 $profileManifest = Get-Content -Raw -LiteralPath $profileManifestPath | ConvertFrom-Json
 $profileManifest.dependencies.'@workagent/harness-bundle' = 'file:../../' + (Split-Path -Leaf $packageArchive)
+$profileManifest.dependencies.'@workagent/dsh-client' = 'file:../../' + (Split-Path -Leaf $clientArchive)
 $profileManifest.dependencies | Add-Member -NotePropertyName '@workagent/contracts' -NotePropertyValue ('file:../../' + (Split-Path -Leaf $contractsArchive)) -Force
 $profileManifestJson = $profileManifest | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText(

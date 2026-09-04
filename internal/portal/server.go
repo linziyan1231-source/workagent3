@@ -218,7 +218,11 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
 	mux.HandleFunc("GET /api/stt/stream", s.requireUser(s.speech))
 	mux.HandleFunc("/api/runtime/", s.requireUser(s.proxyRuntime))
-	mux.Handle("/", web)
+	// The official Harness client owns its own /api RPC namespace. Portal's
+	// explicit APIs above remain authoritative; unmatched /api requests are
+	// forwarded to the SID-private runtime with the internal bearer injected.
+	mux.HandleFunc("/api/", s.requireUser(s.proxyDsh))
+	mux.Handle("/", s.webSurface(web))
 	return s.securityHeaders(s.correlatedAudit(s.sameOriginWrites(mux)))
 }
 
@@ -725,6 +729,14 @@ func writeSpeechQuotaError(writer http.ResponseWriter, err error) {
 }
 
 func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request, user store.User) {
+	s.proxyRuntimePath(writer, request, user, "/api/runtime/")
+}
+
+func (s *Server) proxyDsh(writer http.ResponseWriter, request *http.Request, user store.User) {
+	s.proxyRuntimePath(writer, request, user, "")
+}
+
+func (s *Server) proxyRuntimePath(writer http.ResponseWriter, request *http.Request, user store.User, stripPrefix string) {
 	endpoint, err := s.runtimes.Resolve(request.Context(), user.SID)
 	if err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "runtime_unavailable")
@@ -734,7 +746,9 @@ func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request,
 	original := proxy.Director
 	proxy.Director = func(outgoing *http.Request) {
 		original(outgoing)
-		outgoing.URL.Path = "/" + strings.TrimPrefix(request.URL.Path, "/api/runtime/")
+		if stripPrefix != "" {
+			outgoing.URL.Path = "/" + strings.TrimPrefix(request.URL.Path, stripPrefix)
+		}
 		outgoing.Header.Del("Cookie")
 		outgoing.Header.Set("Authorization", "Bearer "+endpoint.Token)
 		outgoing.Header.Set("X-Forwarded-Host", request.Host)
@@ -750,6 +764,48 @@ func (s *Server) proxyRuntime(writer http.ResponseWriter, request *http.Request,
 	proxy.ServeHTTP(writer, request)
 }
 
+const frontendCookie = "workagent_frontend"
+
+// webSurface keeps the login, password, administrator and OAuth pages on the
+// Portal client, while an authenticated employee gets the official dsh SPA.
+// A cookie-backed query switch is intentionally retained for one release so
+// all of the old client's absolute asset URLs continue to resolve together.
+func (s *Server) webSurface(legacy http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		variant := request.URL.Query().Get("frontend")
+		if variant == "legacy" || variant == "dsh" {
+			value, maxAge := variant, 30*24*60*60
+			if variant == "dsh" {
+				value, maxAge = "", -1
+			}
+			http.SetCookie(writer, &http.Cookie{Name: frontendCookie, Value: value, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+		}
+		if variant == "legacy" || strings.HasPrefix(request.URL.Path, "/admin/") || request.URL.Path == "/oauth/mcp/callback" {
+			if variant == "" {
+				http.SetCookie(writer, &http.Cookie{Name: frontendCookie, Value: "legacy", Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, MaxAge: 30 * 24 * 60 * 60})
+			}
+			legacy.ServeHTTP(writer, request)
+			return
+		}
+		if cookie, err := request.Cookie(frontendCookie); err == nil && cookie.Value == "legacy" && variant != "dsh" {
+			legacy.ServeHTTP(writer, request)
+			return
+		}
+		cookie, err := request.Cookie(s.cookieName())
+		if err != nil {
+			legacy.ServeHTTP(writer, request)
+			return
+		}
+		user, err := s.store.UserBySession(request.Context(), cookie.Value, s.now())
+		if err != nil {
+			legacy.ServeHTTP(writer, request)
+			return
+		}
+		markAudit(request, user.Username, false)
+		s.proxyDsh(writer, request, user)
+	})
+}
+
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		frameAncestors := "'none'"
@@ -761,11 +817,37 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		if request.Method == http.MethodGet && (workspacePDFPreview || officePreview) {
 			frameAncestors = "'self'"
 		}
-		writer.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors "+frameAncestors+"; base-uri 'none'")
+		policy := "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors " + frameAncestors + "; base-uri 'none'"
+		if s.dshDocument(request) {
+			// The official dsh client bootstraps its module loader inline and its
+			// runtime compiles bundled client modules with Function. Keep these
+			// allowances scoped to authenticated dsh documents; Portal-owned login,
+			// administrator, OAuth and legacy pages retain the stricter policy.
+			policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'"
+		}
+		writer.Header().Set("Content-Security-Policy", policy)
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func (s *Server) dshDocument(request *http.Request) bool {
+	if request.Method != http.MethodGet || request.URL.Path != "/" {
+		return false
+	}
+	if _, err := request.Cookie(s.cookieName()); err != nil {
+		return false
+	}
+	variant := request.URL.Query().Get("frontend")
+	if variant == "legacy" {
+		return false
+	}
+	if variant == "dsh" {
+		return true
+	}
+	cookie, err := request.Cookie(frontendCookie)
+	return err != nil || cookie.Value != "legacy"
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
