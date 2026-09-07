@@ -6,7 +6,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { presetBindingSchema, type PresetBinding } from "@workagent/contracts";
+import {
+  presetBindingSchema,
+  sessionLastTurnSchema,
+  type PresetBinding,
+  type RuntimeSession,
+} from "@workagent/contracts";
+
+export type QueuedInput = {
+  messageId: string;
+  content: string;
+  displayContent?: string;
+  error?: string;
+};
 
 export type StoredSession = {
   id: string;
@@ -19,8 +31,16 @@ export type StoredSession = {
   workspacePath?: string;
   internal?: boolean;
   modelId?: string;
-  thinkingEffort?: "low" | "medium" | "high";
+  thinkingEffort?: string;
+  permissionMode?: "read_only" | "workspace_write" | "full_access";
   preset?: PresetBinding;
+  lastTurn?: RuntimeSession["lastTurn"];
+  parentSessionId?: string;
+  branchKind?: "fork" | "edit" | "side_chat";
+  anchorMessageId?: string;
+  contextMode?: "native" | "transcript";
+  pendingContext?: string;
+  queue?: QueuedInput[];
 };
 
 const valid = (value: unknown): value is StoredSession => {
@@ -36,15 +56,41 @@ const valid = (value: unknown): value is StoredSession => {
     typeof item.title === "string" &&
     typeof item.createdAt === "string" &&
     typeof item.updatedAt === "string" &&
+    (item.queue === undefined ||
+      (Array.isArray(item.queue) &&
+        item.queue.every(
+          (row) =>
+            row &&
+            typeof row.messageId === "string" &&
+            typeof row.content === "string" &&
+            (row.displayContent === undefined ||
+              typeof row.displayContent === "string") &&
+            (row.error === undefined || typeof row.error === "string"),
+        ))) &&
+    (item.parentSessionId === undefined ||
+      typeof item.parentSessionId === "string") &&
+    (item.anchorMessageId === undefined ||
+      typeof item.anchorMessageId === "string") &&
+    (item.pendingContext === undefined ||
+      typeof item.pendingContext === "string") &&
+    (item.contextMode === undefined ||
+      item.contextMode === "native" ||
+      item.contextMode === "transcript") &&
+    (item.branchKind === undefined ||
+      ["fork", "edit", "side_chat"].includes(String(item.branchKind))) &&
+    (item.lastTurn === undefined ||
+      sessionLastTurnSchema.safeParse(item.lastTurn).success) &&
     (item.workspaceId === undefined || typeof item.workspaceId === "string") &&
     (item.workspacePath === undefined ||
       typeof item.workspacePath === "string") &&
     (item.internal === undefined || typeof item.internal === "boolean") &&
     (item.modelId === undefined || typeof item.modelId === "string") &&
     (item.thinkingEffort === undefined ||
-      item.thinkingEffort === "low" ||
-      item.thinkingEffort === "medium" ||
-      item.thinkingEffort === "high") &&
+      typeof item.thinkingEffort === "string") &&
+    (item.permissionMode === undefined ||
+      item.permissionMode === "read_only" ||
+      item.permissionMode === "workspace_write" ||
+      item.permissionMode === "full_access") &&
     (item.preset === undefined ||
       presetBindingSchema.safeParse(item.preset).success)
   );

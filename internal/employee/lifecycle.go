@@ -209,6 +209,23 @@ func (l Lifecycle) ResetPortalPassword(ctx context.Context, username string, pas
 	return nil
 }
 
+// Restart keeps the task definition and both passwords unchanged. Admission
+// stays closed if the runtime does not recover its registration.
+func (l Lifecycle) Restart(ctx context.Context, username string) error {
+	user, err := l.Users.UserByUsername(ctx, username)
+	if err != nil {
+		return err
+	}
+	if user.Disabled || user.Offboarded {
+		return errors.New("restart requires an enabled employee")
+	}
+	if _, err := l.SetEnabled(ctx, username, false); err != nil {
+		return err
+	}
+	_, err = l.SetEnabled(ctx, username, true)
+	return err
+}
+
 func (l Lifecycle) SetPortalAdmin(ctx context.Context, username string, admin bool) (store.User, error) {
 	if l.Users == nil {
 		return store.User{}, errors.New("employee lifecycle user store is required")
@@ -338,12 +355,17 @@ func (l Lifecycle) Repair(ctx context.Context, username string, windowsPassword 
 	if !ok || l.Users == nil {
 		return store.User{}, errors.New("employee repair dependencies are required")
 	}
-	if len(windowsPassword) == 0 {
-		return store.User{}, errors.New("Windows password is required for repair")
-	}
 	user, err := l.Users.UserByUsername(ctx, username)
 	if err != nil {
 		return store.User{}, err
+	}
+	if preflight, ok := platform.(interface{ CheckManagedCredential(store.User) error }); ok {
+		if len(windowsPassword) > 0 {
+			return store.User{}, errors.New("Windows passwords are managed by the service")
+		}
+		if err := preflight.CheckManagedCredential(user); err != nil {
+			return store.User{}, err
+		}
 	}
 	if !user.Disabled {
 		if err := l.Users.SetUserEnabled(ctx, username, false); err != nil {
@@ -401,15 +423,20 @@ func (l Lifecycle) RenameWindowsAccount(ctx context.Context, username, newWindow
 	if err := winutil.ValidateLocalUsername(newWindowsUsername); err != nil {
 		return store.User{}, err
 	}
-	if len(windowsPassword) == 0 {
-		return store.User{}, errors.New("Windows password is required for rename")
-	}
 	user, err := l.Users.UserByUsername(ctx, username)
 	if err != nil {
 		return store.User{}, err
 	}
 	if user.Admin || user.Offboarded {
 		return store.User{}, errors.New("active managed employee is required for Windows rename")
+	}
+	if preflight, ok := platform.(interface{ CheckManagedCredential(store.User) error }); ok {
+		if len(windowsPassword) > 0 {
+			return store.User{}, errors.New("Windows passwords are managed by the service")
+		}
+		if err := preflight.CheckManagedCredential(user); err != nil {
+			return store.User{}, err
+		}
 	}
 	wasEnabled := !user.Disabled
 	if wasEnabled {

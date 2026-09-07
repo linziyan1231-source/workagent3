@@ -23,40 +23,25 @@ try {
   if (!login.ok()) throw new Error(`legacy login returned ${login.status()}`);
 
   await page.goto(`${baseURL}/?frontend=legacy`);
-  await page.getByText("Puxin AI", { exact: true }).waitFor();
-  await page.waitForTimeout(2_000);
-  for (let index = 0; index < 10; index += 1) {
-    const modal = page.locator(".arco-modal-wrapper:visible").last();
-    if ((await modal.count()) === 0) break;
-    const dismiss = modal
-      .getByRole("button", { name: /确定|confirm|ok/i })
-      .last();
-    if ((await dismiss.count()) === 0)
-      throw new Error("visible legacy modal has no dismiss action");
-    await dismiss.click({ force: true });
-    await page.waitForTimeout(100);
-  }
-  const marker = uniqueName("legacy-message");
-  await page
-    .locator('[data-testid="preset-pill-builtin-general"]')
-    .getAttribute("data-assistant-selected")
-    .then((selected) => {
-      if (selected !== "true")
-        throw new Error("General preset is not selected");
-    });
-  const composer = page.getByPlaceholder(/发消息|send a message/i);
-  await composer.fill(`Reply exactly with ${marker}`);
-  const send = page.locator('[data-testid="guid-send-btn"]');
-  await page.waitForFunction(
-    () => !document.querySelector('[data-testid="guid-send-btn"]')?.disabled,
+  await page.getByRole("heading", { name: "WorkAgent has moved" }).waitFor();
+  const fallbackCookie = (await page.context().cookies()).find(
+    (cookie) => cookie.name === "workagent_frontend",
   );
-  await send.click();
-  await page.waitForFunction(
-    (value) => document.body.innerText.split(value).length >= 3,
-    marker,
-    { timeout: 120_000 },
-  );
-
+  if (fallbackCookie?.value !== "legacy")
+    throw new Error("Portal fallback preference was not persisted");
+  await page.reload();
+  await page.getByRole("heading", { name: "WorkAgent has moved" }).waitFor();
+  await page.getByRole("link", { name: "Continue to WorkAgent" }).click();
+  await page.getByText("WorkAgent", { exact: true }).waitFor();
+  if (
+    (await page.context().cookies()).some(
+      (cookie) =>
+        cookie.name === "workagent_frontend" && cookie.value === "legacy",
+    )
+  )
+    throw new Error("DSH selection did not clear the fallback preference");
+  await page.goto(baseURL);
+  await page.getByRole("checkbox", { name: "团队模式" }).waitFor();
   await page.goto(`${baseURL}/?frontend=dsh`);
   await page.getByText("WorkAgent", { exact: true }).waitFor();
 } finally {

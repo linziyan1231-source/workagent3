@@ -21,6 +21,7 @@ import (
 	"workagent3/internal/chatforward"
 	"workagent3/internal/collaboration"
 	"workagent3/internal/imdelivery"
+	"workagent3/internal/marketplace"
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/nativeauth"
 	"workagent3/internal/notifications"
@@ -106,6 +107,7 @@ func run() error {
 		return err
 	}
 	defer quotas.Close()
+	quotas.UseGatewayAccounting()
 	clientSettings, err := settings.Open(*settingsPath)
 	if err != nil {
 		return err
@@ -116,6 +118,11 @@ func run() error {
 		return err
 	}
 	defer market.Close()
+	sharedMarket, err := marketplace.Open(*skillMarketPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer sharedMarket.Close()
 	sharedProjects, err := collaboration.Open(*collaborationPath)
 	if err != nil {
 		return err
@@ -192,7 +199,7 @@ func run() error {
 	}
 	modules := portal.Modules{
 		ModelAccess: models, Quota: quotas, SpeechQuota: quotas, SharedRunQuota: quotas, Speech: speechProxy,
-		Settings: clientSettings, SkillMarket: market,
+		Settings: clientSettings, SkillMarket: market, Marketplace: sharedMarket,
 		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles, SharedTurns: sharedTurns,
 		Notifications: notificationStore, Audit: auditStore,
 	}

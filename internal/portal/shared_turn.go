@@ -74,7 +74,7 @@ func (s *Server) maybeStartSharedAI(ctx context.Context, message collaboration.M
 		PayerSID: run.PayerSID,
 	}
 	if s.modules.SharedRunQuota != nil {
-		if err := s.modules.SharedRunQuota.ReserveSharedRun(ctx, run.PayerSID, run.ID, conversation.ModelID, estimatedSharedTurnUnits(request.Context)); err != nil {
+		if err := s.modules.SharedRunQuota.ReserveSharedRun(ctx, run.PayerSID, run.ID, conversation.ModelID, conversation.AssistantBackend, estimatedSharedTurnUnits(request.Context)); err != nil {
 			s.finishSharedAIRun(run, SharedTurnResult{}, err)
 			s.publishNotification(ctx, contracts.NotificationInput{
 				TargetSID: run.PayerSID, Kind: "shared_quota", Title: "Shared AI run not started",

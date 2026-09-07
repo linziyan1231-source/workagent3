@@ -9,30 +9,44 @@ describe("WorkAgent dsh client composition", () => {
   it("uses only official slot extension points", () => {
     expect(client).toContain('ctx.slots.inject("settings.section"');
     expect(client).toContain('ctx.slots.inject("sidebar.footer.action"');
-    expect(client).toContain(
-      'ctx.slots.inject("conversation.session.header.utilities"',
-    );
+    expect(client).toContain('ctx.slots.inject("conversation.hero.brand.mark"');
+    expect(client).toContain('ctx.slots.inject("conversation.hero.workspace"');
+    expect(client).toContain('ctx.slots.inject("sidebar.workspaces"');
     expect(client).not.toContain("Harness Key");
   });
 
-  it("routes assistants to the real preset editor and supports message forks", () => {
+  it("routes assistants to the real preset editor", () => {
+    expect(client).toContain('assistants: ["助手", navigate("assistants")]');
+    expect(client).not.toContain('location.assign("/chatgpt/")');
     expect(client).toContain(
-      'assistants: ["Assistants", navigate("assistants")]',
+      'localStorage.setItem(AGENT_PICK_KEY, "builtin-general")',
     );
-    expect(client).toContain("/fork");
-    expect(client).toContain("replacementContent");
+  });
+
+  it("uses the WorkAgent visual language for shell actions and agents", () => {
+    expect(client).toContain("workagent-brand-mark");
+    expect(client).toContain("h(Icon, { name: kind })");
+    expect(client).toContain('name: "notifications"');
+    expect(client).toContain("workagent-agent-strip");
+    expect(client).toContain("h(EngineMark, { engine: preset.engine })");
+    expect(client).toContain("workagent-hero-composer");
+    expect(client).not.toContain('preset.engine !== "harness"');
+    expect(client).not.toContain("wide ? label : label.slice(0, 1)");
+    expect(client).toContain("workagentHomeNavigation");
+    expect(client).toContain(
+      'className: "workagent-button workagent-overlay-back"',
+    );
   });
 
   it.each([
-    "MCP servers",
-    "Skills",
-    "Engines",
-    "Extensions",
-    "Presets",
-    "Models",
-    "Scheduled tasks",
-    "Teams",
-    "Notifications",
+    "MCP 服务",
+    "技能",
+    "引擎",
+    "助手",
+    "模型",
+    "定时任务",
+    "团队",
+    "通知",
   ])("registers %s", (name) => {
     expect(client).toContain(name);
   });
@@ -40,6 +54,32 @@ describe("WorkAgent dsh client composition", () => {
 
 describe("WorkAgent dsh host composition", () => {
   const host = readFileSync(new URL("./index.js", import.meta.url), "utf8");
+  it("serves the isolated document renderer and its pinned browser dependencies", async () => {
+    const routes = [];
+    applyHost({
+      effect: (callback) => callback(),
+      webServer: { register: (value) => routes.push(value) },
+    });
+    for (const name of [
+      "document-preview.html",
+      "docx-preview.js",
+      "jszip.js",
+    ]) {
+      const route = routes.find((value) => value.path.endsWith(`/${name}`));
+      let body;
+      await route.handler(
+        { method: "GET" },
+        {
+          writeHead: (status) => expect(status).toBe(200),
+          end: (data) => (body = data.toString()),
+        },
+      );
+      expect(body.length).toBeGreaterThan(1000);
+      if (name === "docx-preview.js") expect(body).toContain("factory");
+      if (name === "document-preview.html")
+        expect(body).toContain("renderAltChunks: false");
+    }
+  });
 
   it("exports package metadata for DSH client discovery", () => {
     const require = createRequire(import.meta.url);

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
+  />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #e9ebee;
+      color: #222;
+      font:
+        13px Arial,
+        "Microsoft YaHei",
+        sans-serif;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      min-height: 38px;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+    }
+    select {
+      font: inherit;
+      padding: 3px;
+    }
+    #pages {
+      padding: 12px;
+      overflow: auto;
+    }
+    .page {
+      margin: 0 auto 12px;
+      background: white;
+      box-shadow: 0 1px 5px #0002;
+    }
+    .page > section {
+      transform-origin: top left;
+      margin: 0 !important;
+    }
+    .docx {
+      font-size: 11pt;
+    }
+    #status {
+      padding: 16px;
+    }
+  </style>
+  <nav>
+    <label
+      >缩放
+      <select id="zoom">
+        <option value="fit">适合宽度</option>
+        <option value="0.75">75%</option>
+        <option value="1">100%</option>
+        <option value="1.25">125%</option>
+        <option value="1.5">150%</option>
+        <option value="2">200%</option>
+      </select></label
+    ><span id="count"></span>
+  </nav>
+  <div id="status" role="status">正在排版文档…</div>
+  <div id="pages"></div>
+  <script>
+    __JSZIP_SOURCE__;
+  </script>
+  <script>
+    __DOCX_SOURCE__;
+  </script>
+  <script>
+    const pages = document.getElementById("pages");
+    const zoom = document.getElementById("zoom");
+    let sizes = [];
+    function fit() {
+      for (const { section, wrapper, width, height } of sizes) {
+        const scale =
+          zoom.value === "fit"
+            ? Math.min(1, (document.documentElement.clientWidth - 24) / width)
+            : Number(zoom.value);
+        section.style.transform = `scale(${scale})`;
+        wrapper.style.width = `${width * scale}px`;
+        wrapper.style.height = `${height * scale}px`;
+      }
+    }
+    zoom.addEventListener("change", fit);
+    new ResizeObserver(fit).observe(document.documentElement);
+    window.addEventListener("message", async (event) => {
+      if (event.source !== parent || event.data?.type !== "workagent:document")
+        return;
+      try {
+        await docx.renderAsync(event.data.data, pages, pages, {
+          inWrapper: false,
+          useBase64URL: true,
+          renderAltChunks: false,
+          ignoreLastRenderedPageBreak: false,
+        });
+        await document.fonts.ready;
+        sizes = [...pages.querySelectorAll("section.docx")].map((section) => {
+          // Generated documents may omit section properties and default styles.
+          if (!section.style.width) section.style.width = "794px";
+          if (!section.style.minHeight) section.style.minHeight = "1123px";
+          for (const side of ["Top", "Right", "Bottom", "Left"]) {
+            if (!section.style[`padding${side}`])
+              section.style[`padding${side}`] = "72px";
+          }
+          const width = section.offsetWidth;
+          const height = Math.max(section.offsetHeight, section.scrollHeight);
+          const wrapper = document.createElement("div");
+          wrapper.className = "page";
+          section.before(wrapper);
+          wrapper.append(section);
+          return { section, wrapper, width, height };
+        });
+        document.getElementById("status").hidden = true;
+        document.getElementById("count").textContent = `${sizes.length} 页`;
+        fit();
+        parent.postMessage({ type: "workagent:document-ready" }, "*");
+      } catch {
+        document.getElementById("status").textContent =
+          "文档无法预览，请检查文件是否完整或下载后查看。";
+        parent.postMessage({ type: "workagent:document-error" }, "*");
+      }
+    });
+  </script>
+</html>

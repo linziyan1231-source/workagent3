@@ -50,6 +50,7 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
     const units = estimatedAutomationUnits(request.definition.input);
     await this.quota.reserve({
       runId: request.automationRunId,
+      engine: request.definition.engine,
       modelId,
       estimatedUnits: units,
     });
@@ -84,6 +85,7 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
     const units = estimatedAutomationUnits(request.definition.input);
     const reservation = await this.quota.reserve({
       runId: request.automationRunId,
+      engine: request.definition.engine,
       modelId,
       estimatedUnits: units,
     });
@@ -113,6 +115,7 @@ export class QuotaTeamRunner implements TeamRunnerPort {
     const units = estimatedAutomationUnits(request.input);
     await this.quota.reserve({
       runId: request.taskId,
+      engine: request.engine,
       modelId,
       estimatedUnits: units,
     });
@@ -140,6 +143,7 @@ export class QuotaTeamRunner implements TeamRunnerPort {
     const units = estimatedAutomationUnits(request.input);
     const reservation = await this.quota.reserve({
       runId: request.taskId,
+      engine: request.engine,
       modelId,
       estimatedUnits: units,
     });
@@ -224,6 +228,7 @@ export class QuotaSharedTurnRunner implements SharedTurnRunnerPort {
     };
     await this.quota.reserve({
       runId: entry.runId,
+      engine: request.engine,
       modelId: entry.modelId,
       estimatedUnits: entry.estimatedUnits,
       payerSid: entry.payerSid,

@@ -37,6 +37,7 @@ func TestManagerConfigKeepsLifecycleActionsOnThePrivilegedBoundary(t *testing.T)
 	root := t.TempDir()
 	path := filepath.Join(root, "manager.json")
 	payload := managerConfig{
+		CredentialRoot: filepath.Join(root, "credentials"), LauncherExecutable: filepath.Join(root, "bootstrap", "launcher.exe"), LaunchManifestRoot: filepath.Join(root, "launch"),
 		DatabasePath: filepath.Join(root, "portal.db"), DataRootBase: filepath.Join(root, "users"),
 		UserHostExecutable: filepath.Join(root, "userhost"), HarnessCommand: filepath.Join(root, "node"),
 		HarnessEntrypoint: "dist/index.js", Profile: "workagent",

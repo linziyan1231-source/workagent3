@@ -223,7 +223,7 @@ func TestReserveForSIDPinsReservationToFrozenPayer(t *testing.T) {
 	if _, err := store.ReserveForSID(t.Context(), "S-1-5-21-1000", ReserveRequest{RunID: "run-shared-2", SID: payer, ModelID: "gpt-5", EstimatedUnits: 1}); err == nil {
 		t.Fatal("mismatched SID pin was accepted")
 	}
-	if err := store.ReserveSharedRun(t.Context(), payer, "run-shared-3", "gpt-5", 1024); err != nil {
+	if err := store.ReserveSharedRun(t.Context(), payer, "run-shared-3", "gpt-5", "harness", 1024); err != nil {
 		t.Fatalf("shared run reserve = %v", err)
 	}
 	usage, err := store.Usage(t.Context(), payer, "gpt-5", store.now())

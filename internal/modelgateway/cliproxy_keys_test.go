@@ -299,8 +299,12 @@ func TestProvisionAuditsProvisionThenRotate(t *testing.T) {
 	sink := &recordingSink{}
 	client := newPluginClient(t, server)
 	client.SetAudit(sink, "employee-manager")
-	if _, err := client.Provision(t.Context(), "alice", testSID); err != nil {
+	bundle, err := client.Provision(t.Context(), "alice", testSID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Join(bundle.KimiModels, ",") != strings.Join(client.config.KimiModels, ",") {
+		t.Fatal("authorized Kimi roster was lost during bootstrap provisioning")
 	}
 	if _, err := client.Provision(t.Context(), "alice", testSID); err != nil {
 		t.Fatal(err)

@@ -39,6 +39,28 @@ const safeSessionId = (sessionId: string): string => {
 export class MessageStore {
   readonly #root: string;
   readonly #seen = new Map<string, Set<string>>();
+  readonly #projections = new Map<
+    string,
+    {
+      list(): StoredMessage[];
+      append(message: StoredMessage): void;
+      delete(): void;
+    }
+  >();
+
+  /** Adopt a canonical message log; the original JSONL becomes a read-only migration backup. */
+  project(
+    sessionId: string,
+    projection: {
+      list(): StoredMessage[];
+      append(message: StoredMessage): void;
+      delete(): void;
+    },
+  ): void {
+    safeSessionId(sessionId);
+    this.#projections.set(sessionId, projection);
+    this.#seen.delete(sessionId);
+  }
 
   constructor(dshHome: string) {
     this.#root = join(dshHome, "workagent", "personal-work", "messages");
@@ -46,6 +68,8 @@ export class MessageStore {
   }
 
   list(sessionId: string): StoredMessage[] {
+    const projection = this.#projections.get(sessionId);
+    if (projection) return projection.list();
     const path = this.#path(sessionId);
     if (!existsSync(path)) {
       this.#seen.set(sessionId, new Set());
@@ -66,6 +90,11 @@ export class MessageStore {
 
   append(message: StoredMessage): void {
     safeSessionId(message.sessionId);
+    const projection = this.#projections.get(message.sessionId);
+    if (projection) {
+      projection.append(message);
+      return;
+    }
     const seen = this.#seen.get(message.sessionId);
     const ids =
       seen ?? new Set(this.list(message.sessionId).map((item) => item.id));
@@ -81,6 +110,8 @@ export class MessageStore {
   }
 
   delete(sessionId: string): void {
+    this.#projections.get(sessionId)?.delete();
+    this.#projections.delete(sessionId);
     const path = this.#path(sessionId);
     this.#seen.delete(sessionId);
     if (!existsSync(path)) return;

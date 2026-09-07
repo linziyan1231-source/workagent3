@@ -7,6 +7,7 @@ import type {} from "@deepseek-ai/dsh-host-webserver";
 import type {} from "@deepseek-ai/dsh-web-app";
 import type {} from "@deepseek-ai/dsh-session";
 import { RuntimeController } from "./runtime.js";
+import type {} from "./native-session-persistence.js";
 import { WorkspaceController } from "./workspace-api.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -48,6 +49,7 @@ export const inject = [
   "llm",
   "sessions",
   "webServer",
+  "workagentNativeLog",
 ];
 
 const json = (
@@ -209,8 +211,12 @@ export function apply(ctx: Context): void {
     mcp,
     skills,
     credentials,
+    undefined,
+    ctx.workagentNativeLog,
   );
   runtime.mount();
+  ctx.provide("workagentSessions", runtime.nativeSessionPort);
+  ctx.provide("workagentChannels", runtime.channelService());
   const platformQuota = PlatformQuotaClient.fromEnvironment();
   // Fail-closed run entries: without the platform quota channel no run can be
   // reserved or settled, so automation, team, and shared runs refuse to start

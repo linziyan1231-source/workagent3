@@ -225,7 +225,7 @@ func (c *Client) Provision(ctx context.Context, username, sid string) (nativeaut
 		}
 		plain[desired[index].key.ID] = result.PlainKey
 	}
-	bundle := nativeauth.Bundle{FormatVersion: 1, BaseURL: c.config.BaseURL, CodexAPIKey: plain[prefix+"-chatgpt"], KimiAPIKey: plain[prefix+"-kimi"], CodexModel: c.config.CodexModel, KimiModel: c.config.KimiModel}
+	bundle := nativeauth.Bundle{FormatVersion: 1, BaseURL: c.config.BaseURL, CodexAPIKey: plain[prefix+"-chatgpt"], KimiAPIKey: plain[prefix+"-kimi"], CodexModel: c.config.CodexModel, KimiModel: c.config.KimiModel, KimiModels: c.config.KimiModels}
 	if err := bundle.Validate(); err != nil {
 		return nativeauth.Bundle{}, err
 	}

@@ -1,4 +1,13 @@
+import {
+  nativeJson,
+  NativeApprovalWaits,
+  type EngineSessionOptions,
+  type JsonValue,
+} from "./types.js";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import {
@@ -10,6 +19,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
   type McpServer,
+  type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import { nativeEngineEnvironment } from "./environment.js";
 import type {
@@ -18,6 +28,182 @@ import type {
   EngineBridge,
   NativeEngineStatus,
 } from "./types.js";
+
+const kimiModel = (modelId: string | undefined): string | undefined =>
+  modelId === "kimi-native" ? undefined : modelId;
+
+function configSelect(
+  config: SessionConfigOption[] | undefined,
+  category: string,
+) {
+  const item = config?.find(
+    (option) => option.category === category || option.id === category,
+  );
+  if (!item || item.type !== "select") return undefined;
+  return {
+    id: item.id,
+    currentValue: item.currentValue,
+    options: item.options.flatMap((option) =>
+      "options" in option ? option.options : [option],
+    ),
+  };
+}
+
+export function kimiModelOptions(
+  models:
+    | {
+        currentModelId: string;
+        availableModels: Array<{ modelId: string; name: string }>;
+      }
+    | null
+    | undefined,
+  configOptions?: SessionConfigOption[],
+): import("./types.js").EngineModel[] {
+  const modelOption = configSelect(configOptions, "model");
+  if (modelOption) {
+    const thought = configSelect(configOptions, "thought_level");
+    return modelOption.options.map((model) => ({
+      id: model.value,
+      name: model.name,
+      isDefault: model.value === modelOption.currentValue,
+      reasoning: (thought?.options ?? []).map((option) => ({
+        id: option.value,
+        name: option.name,
+      })),
+      ...(thought ? { defaultReasoning: thought.currentValue } : {}),
+    }));
+  }
+  const result = new Map<string, import("./types.js").EngineModel>();
+  for (const model of models?.availableModels ?? []) {
+    const thinking = model.modelId.endsWith(",thinking");
+    const id = thinking ? model.modelId.slice(0, -9) : model.modelId;
+    const row = result.get(id) ?? {
+      id,
+      name: model.name.replace(/ \(thinking\)$/, ""),
+      isDefault: false,
+      reasoning: [],
+    };
+    row.reasoning.push({
+      id: thinking ? "thinking" : "off",
+      name: thinking ? "开启思考" : "关闭思考",
+    });
+    if (model.modelId === models?.currentModelId) {
+      row.isDefault = true;
+      row.defaultReasoning = thinking ? "thinking" : "off";
+    }
+    result.set(id, row);
+  }
+  return [...result.values()];
+}
+
+export async function kimiSessionModelOptions(
+  connection: ClientSideConnection,
+  sessionId: string,
+  models: Parameters<typeof kimiModelOptions>[0],
+  configOptions?: SessionConfigOption[],
+) {
+  const result = kimiModelOptions(models, configOptions);
+  const selector = configSelect(configOptions, "model");
+  if (!selector || result.length < 2) return result;
+  // Thinking options belong to the selected model, not the whole engine.
+  for (const model of result) {
+    if (model.isDefault) continue;
+    const selected = await connection.setSessionConfigOption({
+      sessionId,
+      configId: selector.id,
+      value: model.id,
+    });
+    const capabilities = kimiModelOptions(
+      undefined,
+      selected.configOptions,
+    ).find((row) => row.id === model.id)!;
+    model.reasoning = capabilities.reasoning;
+    if (capabilities.defaultReasoning === undefined)
+      delete model.defaultReasoning;
+    else model.defaultReasoning = capabilities.defaultReasoning;
+  }
+  return result;
+}
+
+export const applyKimiOptions = async (
+  connection: ClientSideConnection,
+  sessionId: string,
+  options: import("./types.js").EngineSessionOptions | undefined,
+  modes:
+    | {
+        availableModes: Array<{ id: string; name: string }>;
+        currentModeId: string;
+      }
+    | null
+    | undefined,
+  configOptions?: SessionConfigOption[],
+): Promise<void> => {
+  if (configSelect(configOptions, "model")) {
+    for (const [category, value] of [
+      ["model", kimiModel(options?.modelId)],
+      ["thought_level", options?.thinkingEffort],
+      [
+        "mode",
+        options?.permissionMode &&
+          {
+            read_only: "plan",
+            workspace_write: "auto",
+            full_access: "yolo",
+          }[options.permissionMode],
+      ],
+    ] as const) {
+      const option = configSelect(configOptions, category);
+      if (option && value !== undefined && value !== option.currentValue) {
+        try {
+          const result = await connection.setSessionConfigOption({
+            sessionId,
+            configId: option.id,
+            value,
+          });
+          configOptions = result.configOptions;
+        } catch (error) {
+          // Kimi 0.41 can advertise "default" after restoring a persisted
+          // plan session. Reapplying plan then reports this already-set state.
+          const details = (error as { data?: { details?: unknown } })?.data
+            ?.details;
+          if (
+            category !== "mode" ||
+            value !== "plan" ||
+            details !== "Already in plan mode"
+          )
+            throw error;
+        }
+      }
+    }
+    return;
+  }
+  const selected = kimiModel(options?.modelId);
+  const modelId =
+    selected && options?.thinkingEffort === "thinking"
+      ? `${selected},thinking`
+      : selected;
+  if (modelId !== undefined)
+    await connection.unstable_setSessionModel({ sessionId, modelId });
+  if (
+    options?.permissionMode === undefined ||
+    modes === undefined ||
+    modes === null
+  )
+    return;
+  const terms = {
+    read_only: ["plan", "read", "ask", "default"],
+    workspace_write: ["acceptedit", "edit", "agent", "auto", "yolo"],
+    full_access: ["yolonosandbox", "nosandbox", "bypass", "full"],
+  }[options.permissionMode];
+  const target = modes.availableModes.find((mode) => {
+    const value = `${mode.id} ${mode.name}`
+      .toLowerCase()
+      .replace(/[^a-z]/g, "");
+    return terms.some((term) => value.includes(term));
+  });
+  if (target !== undefined && target.id !== modes.currentModeId)
+    await connection.setSessionMode({ sessionId, modeId: target.id });
+};
 
 // ACP agents report in-agent session failures as JSON-RPC RequestError
 // values with generic messages ("Internal error"); re-code them so callers
@@ -47,6 +233,28 @@ export class KimiBridge implements EngineBridge {
     this.#binary = binary;
   }
 
+  async listModels(): Promise<import("./types.js").EngineModel[]> {
+    // A dedicated ACP process isolates the discovery session from active tasks.
+    const probe = new KimiBridge(this.#binary);
+    const workspace = await mkdtemp(join(tmpdir(), "workagent-models-"));
+    try {
+      const connection = await probe.#connect();
+      const session = await connection.newSession({
+        cwd: workspace,
+        mcpServers: [],
+      });
+      return await kimiSessionModelOptions(
+        connection,
+        session.sessionId,
+        session.models,
+        session.configOptions,
+      );
+    } finally {
+      await probe.close();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }
+
   async create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
@@ -59,16 +267,22 @@ export class KimiBridge implements EngineBridge {
         cwd: workspace,
         mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
-      if (options?.modelId !== undefined)
-        await connection.unstable_setSessionModel({
-          sessionId: result.sessionId,
-          modelId: options.modelId,
-        });
+      await applyKimiOptions(
+        connection,
+        result.sessionId,
+        options,
+        result.modes,
+        result.configOptions,
+      );
     } catch (error) {
       throw kimiSessionFailure("new", error);
     }
-    const session = new KimiSession(connection, result.sessionId, onEvent, () =>
-      this.#sessions.delete(result.sessionId),
+    const session = new KimiSession(
+      connection,
+      result.sessionId,
+      onEvent,
+      () => this.#sessions.delete(result.sessionId),
+      options,
     );
     this.#sessions.set(result.sessionId, session);
     return session;
@@ -82,22 +296,30 @@ export class KimiBridge implements EngineBridge {
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
     try {
-      await connection.unstable_resumeSession({
+      const result = await connection.unstable_resumeSession({
         sessionId: nativeId,
         cwd: workspace,
         mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
-      if (options?.modelId !== undefined)
-        await connection.unstable_setSessionModel({
-          sessionId: nativeId,
-          modelId: options.modelId,
-        });
+      await applyKimiOptions(
+        connection,
+        nativeId,
+        options,
+        result.modes,
+        result.configOptions,
+      );
     } catch (error) {
       throw kimiSessionFailure("resume", error);
     }
-    const session = new KimiSession(connection, nativeId, onEvent, () => {
-      this.#sessions.delete(nativeId);
-    });
+    const session = new KimiSession(
+      connection,
+      nativeId,
+      onEvent,
+      () => {
+        this.#sessions.delete(nativeId);
+      },
+      options,
+    );
     this.#sessions.set(nativeId, session);
     return session;
   }
@@ -119,16 +341,22 @@ export class KimiBridge implements EngineBridge {
         cwd: workspace,
         mcpServers: projectMcpServers(options?.mcpServers ?? []),
       });
-      if (options?.modelId !== undefined)
-        await connection.unstable_setSessionModel({
-          sessionId: result.sessionId,
-          modelId: options.modelId,
-        });
+      await applyKimiOptions(
+        connection,
+        result.sessionId,
+        options,
+        result.modes,
+        result.configOptions,
+      );
     } catch (error) {
       throw kimiSessionFailure("fork", error);
     }
-    const session = new KimiSession(connection, result.sessionId, onEvent, () =>
-      this.#sessions.delete(result.sessionId),
+    const session = new KimiSession(
+      connection,
+      result.sessionId,
+      onEvent,
+      () => this.#sessions.delete(result.sessionId),
+      options,
     );
     this.#sessions.set(result.sessionId, session);
     return session;
@@ -159,6 +387,7 @@ export class KimiBridge implements EngineBridge {
   }
 
   async close(): Promise<void> {
+    for (const session of this.#sessions.values()) session.disconnected();
     this.#child?.kill();
     this.#child = undefined;
     this.#connection = undefined;
@@ -202,6 +431,13 @@ export class KimiBridge implements EngineBridge {
         Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       ),
     );
+    connection.signal.addEventListener(
+      "abort",
+      () => {
+        for (const session of this.#sessions.values()) session.disconnected();
+      },
+      { once: true },
+    );
     // An instant exit during the handshake rejects with the exit status
     // instead of a generic connection-closed error.
     const startupFailure = new Promise<never>((_resolve, reject) => {
@@ -214,6 +450,8 @@ export class KimiBridge implements EngineBridge {
       );
     });
     child.once("exit", () => {
+      for (const session of this.#sessions.values()) session.disconnected();
+      this.#sessions.clear();
       this.#child = undefined;
       this.#connection = undefined;
       this.#starting = undefined;
@@ -273,10 +511,13 @@ class KimiClient implements Client {
   }
 
   async requestPermission(
-    _params: RequestPermissionRequest,
+    params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
-    // Approval bridging is added as a separate capability; fail closed until then.
-    return { outcome: { outcome: "cancelled" } };
+    return (
+      this.#sessions.get(params.sessionId)?.requestPermission(params) ?? {
+        outcome: { outcome: "cancelled" },
+      }
+    );
   }
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
@@ -291,15 +532,22 @@ export class KimiSession implements BridgeSession {
   readonly #closed: () => void;
   #activeTurn: string | undefined;
   #assistantText = "";
+  #completion: Promise<void> | undefined;
+  #steering = false;
+  readonly #approvals: NativeApprovalWaits;
+  #approvalEnabled = false;
+  readonly #tools = new Map<string, Record<string, unknown>>();
 
   constructor(
     connection: ClientSideConnection,
     nativeId: string,
     emit: (event: BridgeEvent) => void,
     closed: () => void,
+    options?: Pick<EngineSessionOptions, "requestApproval">,
   ) {
     this.#connection = connection;
     this.nativeId = nativeId;
+    this.#approvals = new NativeApprovalWaits(options?.requestApproval);
     this.#emit = emit;
     this.#closed = closed;
   }
@@ -309,15 +557,20 @@ export class KimiSession implements BridgeSession {
       throw new Error("Kimi already has an active turn");
     const turnId = `turn-${randomUUID()}`;
     this.#activeTurn = turnId;
+    this.#approvalEnabled = true;
     this.#assistantText = "";
+    this.#tools.clear();
     this.#emit({ type: "turn.started", turnId });
-    void this.#connection
+    this.#completion = this.#connection
       .prompt({
         sessionId: this.nativeId,
         prompt: [{ type: "text", text: content }],
       })
       .then((result) => {
-        if (this.#activeTurn === turnId) this.#activeTurn = undefined;
+        if (this.#activeTurn !== turnId) return;
+        this.#approvalEnabled = false;
+        this.#approvals.abort();
+        this.#activeTurn = undefined;
         if (result.stopReason === "cancelled") {
           this.#emit({ type: "turn.cancelled", turnId });
         } else if (result.stopReason === "end_turn") {
@@ -337,7 +590,10 @@ export class KimiSession implements BridgeSession {
         }
       })
       .catch((error: unknown) => {
-        if (this.#activeTurn === turnId) this.#activeTurn = undefined;
+        if (this.#activeTurn !== turnId) return;
+        this.#approvalEnabled = false;
+        this.#approvals.abort();
+        this.#activeTurn = undefined;
         this.#emit({
           type: "turn.failed",
           turnId,
@@ -349,13 +605,72 @@ export class KimiSession implements BridgeSession {
   }
 
   async cancel(): Promise<void> {
+    this.#approvalEnabled = false;
+    this.#approvals.abort();
     if (this.#activeTurn === undefined) return;
     await this.#connection.cancel({ sessionId: this.nativeId });
+  }
+
+  async steer(content: string): Promise<string> {
+    if (this.#activeTurn === undefined) throw new Error("no_active_turn");
+    if (this.#steering) throw new Error("session_input_pending");
+    this.#steering = true;
+    try {
+      // ACP has no mid-prompt input. Wait for cancellation to settle before
+      // continuing the same native session with the user's revised direction.
+      const completion = this.#completion;
+      await this.cancel();
+      await completion;
+      return await this.send(content);
+    } finally {
+      this.#steering = false;
+    }
   }
 
   async close(): Promise<void> {
     await this.cancel();
     this.#closed();
+  }
+
+  disconnected(): void {
+    this.#approvalEnabled = false;
+    this.#approvals.abort();
+    const turnId = this.#activeTurn;
+    this.#activeTurn = undefined;
+    if (turnId)
+      this.#emit({
+        type: "turn.failed",
+        turnId,
+        code: "kimi_disconnected",
+        message: "Kimi process disconnected",
+      });
+  }
+
+  async requestPermission(
+    params: RequestPermissionRequest,
+  ): Promise<RequestPermissionResponse> {
+    const turnId = this.#activeTurn;
+    if (!this.#approvalEnabled || !turnId || params.sessionId !== this.nativeId)
+      return { outcome: { outcome: "cancelled" } };
+    const decision = await this.#approvals.request({
+      turnId,
+      tool: params.toolCall.title ?? params.toolCall.kind ?? "tool",
+      summary: params.toolCall.title ?? "Tool permission",
+      input: nativeJson(params.toolCall),
+      options: nativeJson(params.options) as JsonValue[],
+    });
+    const kinds =
+      decision === "allow"
+        ? ["allow_once", "allow_always"]
+        : decision === "reject"
+          ? ["reject_once", "reject_always"]
+          : [];
+    const option = kinds.flatMap((kind) =>
+      params.options.filter((option) => option.kind === kind),
+    )[0];
+    return option
+      ? { outcome: { outcome: "selected", optionId: option.optionId } }
+      : { outcome: { outcome: "cancelled" } };
   }
 
   update(params: SessionNotification): void {
@@ -374,25 +689,49 @@ export class KimiSession implements BridgeSession {
       });
       return;
     }
-    if (update.sessionUpdate === "tool_call") {
-      this.#emit({
-        type: "tool.started",
-        turnId,
-        toolCallId: update.toolCallId,
-        tool: update.title,
-      });
-      return;
-    }
     if (
-      update.sessionUpdate === "tool_call_update" &&
-      (update.status === "completed" || update.status === "failed")
+      update.sessionUpdate === "tool_call" ||
+      update.sessionUpdate === "tool_call_update"
     ) {
+      const previous = this.#tools.get(update.toolCallId) ?? {};
+      const detail = {
+        ...previous,
+        ...Object.fromEntries(
+          Object.entries(update).filter(([, value]) => value !== undefined),
+        ),
+      };
+      this.#tools.set(update.toolCallId, detail);
+      const completed =
+        update.status === "completed" || update.status === "failed";
       this.#emit({
-        type: "tool.completed",
+        type: completed
+          ? "tool.completed"
+          : update.sessionUpdate === "tool_call"
+            ? "tool.started"
+            : "tool.updated",
         turnId,
         toolCallId: update.toolCallId,
-        failed: update.status === "failed",
-      });
+        tool:
+          typeof detail.title === "string"
+            ? detail.title
+            : typeof detail.kind === "string"
+              ? detail.kind
+              : "tool",
+        ...(completed ? { failed: update.status === "failed" } : {}),
+        ...(detail.rawInput !== undefined
+          ? { input: nativeJson(detail.rawInput) }
+          : {}),
+        ...(detail.rawOutput !== undefined
+          ? { output: nativeJson(detail.rawOutput) }
+          : {}),
+        ...(detail.content !== undefined
+          ? { result: nativeJson(detail.content) }
+          : {}),
+        ...(detail.locations !== undefined
+          ? { locations: nativeJson(detail.locations) }
+          : {}),
+        raw: nativeJson(detail),
+      } as BridgeEvent);
     }
   }
 }

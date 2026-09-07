@@ -7,6 +7,7 @@ import {
   normalizeEvent,
   planMessageFork,
   searchRuntimeMessages,
+  sessionActivity,
 } from "./runtime.js";
 import type {
   AutomationDefinition,
@@ -18,6 +19,38 @@ const events = [
   { eventId: "session-with-hyphens-10" },
   { eventId: "session-with-hyphens-11" },
 ];
+
+describe("authoritative conversation activity", () => {
+  const event = (type: string, message?: string) => ({
+    type,
+    eventId: type,
+    sessionId: "session",
+    occurredAt: "2026-09-06T00:00:00Z",
+    ...(message ? { message } : {}),
+  });
+  it("reports retries and does not treat a completed assistant item as a completed turn", () => {
+    const history = [event("turn.started"), event("turn.retrying", "busy")];
+    expect(sessionActivity(history)).toEqual({
+      state: "retrying",
+      message: "busy",
+    });
+    expect(
+      sessionActivity([...history, event("assistant.completed")]).state,
+    ).toBe("retrying");
+    expect(sessionActivity([...history, event("turn.completed")])).toEqual({
+      state: "idle",
+    });
+  });
+  it("returns idle after a runtime restart or a failed turn", () => {
+    expect(sessionActivity([])).toEqual({ state: "idle" });
+    expect(
+      sessionActivity([
+        event("turn.started"),
+        event("turn.failed", "service unavailable"),
+      ]),
+    ).toEqual({ state: "idle", message: "service unavailable" });
+  });
+});
 
 describe("SSE event replay", () => {
   it("resumes after the exact event ID without lexical sequence ordering", () => {

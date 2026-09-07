@@ -7,6 +7,7 @@ import (
 
 	"workagent3/internal/auth"
 	"workagent3/internal/contracts"
+	"workagent3/internal/quota"
 	"workagent3/internal/store"
 )
 
@@ -16,14 +17,13 @@ type ProvisionJob = contracts.EmployeeProvisionJob
 type ManagedUserUsage = contracts.ManagedEmployeeUsage
 
 type EmployeeManagementPort interface {
+	StartMaintenance(context.Context, string, string, string) (ProvisionJob, error)
 	ListManagedUsers(context.Context) ([]ManagedUser, []string, error)
 	StartProvision(context.Context, string, []byte) (ProvisionJob, error)
 	ProvisionJob(context.Context, string) (ProvisionJob, error)
 	ManagedUsersUsage(context.Context) ([]ManagedUserUsage, error)
 	SetEnabled(context.Context, string, bool) error
 	ResetPassword(context.Context, string, []byte) error
-	Repair(context.Context, string, []byte) error
-	RenameWindowsAccount(context.Context, string, string, []byte) error
 	SetLimits(context.Context, string, contracts.EmployeeResourceLimits) error
 	OffboardRetain(context.Context, string) error
 	DeleteRetainedEmployee(context.Context, string, string) error
@@ -51,7 +51,24 @@ func (s *Server) adminUsers(writer http.ResponseWriter, request *http.Request, _
 			writeError(writer, http.StatusBadGateway, "employee_manager_failed")
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"success": true, "users": users, "kimi_datasource_sources": sources})
+		type overview struct {
+			ManagedUser
+			Budgets          []quota.ManagedBudget `json:"budgets"`
+			QuotaUnavailable bool                  `json:"quota_unavailable,omitempty"`
+		}
+		rows := make([]overview, 0, len(users))
+		management, available := s.modules.Quota.(QuotaManagementPort)
+		for _, user := range users {
+			row := overview{ManagedUser: user, Budgets: []quota.ManagedBudget{}}
+			if available {
+				row.Budgets, err = management.ManagedBudgets(request.Context(), user.WindowsSID, s.now())
+				row.QuotaUnavailable = err != nil
+			} else {
+				row.QuotaUnavailable = true
+			}
+			rows = append(rows, row)
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"success": true, "users": rows, "kimi_datasource_sources": sources})
 		return
 	}
 	var input struct {
@@ -110,6 +127,19 @@ func (s *Server) adminUserAction(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	var err error
+	if action := request.PathValue("action"); action == "repair" || action == "restart" || action == "rename-windows" {
+		if input.WindowsPassword != "" || (action == "rename-windows" && strings.TrimSpace(input.NewWindowsUsername) == "") {
+			writeError(writer, http.StatusBadRequest, "invalid_employee_action")
+			return
+		}
+		job, err := s.modules.EmployeeManagement.StartMaintenance(request.Context(), action, input.Username, input.NewWindowsUsername)
+		if err != nil {
+			writeError(writer, http.StatusBadGateway, "employee_manager_failed")
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"success": true, "job": job})
+		return
+	}
 	switch request.PathValue("action") {
 	case "disable":
 		err = s.modules.EmployeeManagement.SetEnabled(request.Context(), input.Username, false)
@@ -124,24 +154,6 @@ func (s *Server) adminUserAction(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		err = s.modules.EmployeeManagement.ResetPassword(request.Context(), input.Username, password)
-	case "repair":
-		password := []byte(input.WindowsPassword)
-		input.WindowsPassword = ""
-		defer zeroBytes(password)
-		if len(password) == 0 {
-			writeError(writer, http.StatusBadRequest, "invalid_windows_password")
-			return
-		}
-		err = s.modules.EmployeeManagement.Repair(request.Context(), input.Username, password)
-	case "rename-windows":
-		password := []byte(input.WindowsPassword)
-		input.WindowsPassword = ""
-		defer zeroBytes(password)
-		if strings.TrimSpace(input.NewWindowsUsername) == "" || len(password) == 0 {
-			writeError(writer, http.StatusBadRequest, "invalid_windows_account")
-			return
-		}
-		err = s.modules.EmployeeManagement.RenameWindowsAccount(request.Context(), input.Username, input.NewWindowsUsername, password)
 	case "set-limits":
 		err = s.modules.EmployeeManagement.SetLimits(request.Context(), input.Username, input.Limits)
 	case "offboard-retain":

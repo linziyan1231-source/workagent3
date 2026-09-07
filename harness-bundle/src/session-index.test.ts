@@ -23,12 +23,23 @@ describe("SID-private session index", () => {
       title: "New",
       createdAt: "2026-08-30T10:00:00.000Z",
       updatedAt: "2026-08-30T10:00:00.000Z",
+      lastTurn: {
+        id: "turn-done",
+        completedAt: "2026-08-30T10:00:00.000Z",
+        status: "completed",
+      },
     });
 
     expect(new SessionIndex(home).list().map((item) => item.id)).toEqual([
       "session-new",
       "session-old",
     ]);
+    expect(new SessionIndex(home).list()[0]?.lastTurn).toEqual({
+      id: "turn-done",
+      completedAt: "2026-08-30T10:00:00.000Z",
+      status: "completed",
+    });
+    expect(new SessionIndex(home).list()[1]?.lastTurn).toBeUndefined();
     expect(
       readFileSync(join(home, "workagent", "sessions.json"), "utf8"),
     ).not.toContain("password");

@@ -2,9 +2,46 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KimiBridge, KimiSession, kimiSessionFailure } from "./kimi.js";
+import {
+  KimiBridge,
+  KimiSession,
+  kimiSessionFailure,
+  applyKimiOptions,
+} from "./kimi.js";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
 const roots: string[] = [];
+it("waits for ACP cancellation before steering and rejects concurrent steering", async () => {
+  let finish!: (result: { stopReason: string }) => void;
+  const prompt = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValue({ stopReason: "end_turn" });
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const session = new KimiSession(
+    { prompt, cancel } as never,
+    "native-session",
+    () => {},
+    () => {},
+  );
+  await session.send("original");
+  const steered = session.steer("correction");
+  await expect(session.steer("duplicate")).rejects.toThrow(
+    "session_input_pending",
+  );
+  expect(prompt).toHaveBeenCalledTimes(1);
+  finish({ stopReason: "cancelled" });
+  await expect(steered).resolves.toMatch(/^turn-/);
+  expect(prompt).toHaveBeenLastCalledWith({
+    sessionId: "native-session",
+    prompt: [{ type: "text", text: "correction" }],
+  });
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   for (const value of roots.splice(0))
@@ -12,6 +49,108 @@ afterEach(() => {
 });
 
 describe("Kimi bridge startup", () => {
+  it("accepts Kimi's already-restored plan state but preserves other mode failures", async () => {
+    const configOptions: SessionConfigOption[] = [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        category: "model",
+        currentValue: "live",
+        options: [{ value: "live", name: "Live" }],
+      },
+      {
+        type: "select",
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        currentValue: "default",
+        options: [{ value: "plan", name: "Plan" }],
+      },
+    ];
+    const alreadySet = Object.assign(new Error("Internal error"), {
+      data: { details: "Already in plan mode" },
+    });
+    const connection = {
+      setSessionConfigOption: vi.fn().mockRejectedValue(alreadySet),
+    };
+    await expect(
+      applyKimiOptions(
+        connection as never,
+        "session-1",
+        { mcpServers: [], permissionMode: "read_only" },
+        undefined,
+        configOptions,
+      ),
+    ).resolves.toBeUndefined();
+    connection.setSessionConfigOption.mockRejectedValue(
+      new Error("mode failed"),
+    );
+    await expect(
+      applyKimiOptions(
+        connection as never,
+        "session-1",
+        { mcpServers: [], permissionMode: "read_only" },
+        undefined,
+        configOptions,
+      ),
+    ).rejects.toThrow("mode failed");
+  });
+
+  it("applies selected model and thinking level through current ACP configuration", async () => {
+    const configOptions: SessionConfigOption[] = [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        category: "model",
+        currentValue: "previous",
+        options: [{ value: "live", name: "Live" }],
+      },
+      {
+        type: "select",
+        id: "thinking",
+        name: "Thinking",
+        category: "thought_level",
+        currentValue: "low",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "max", name: "Max" },
+        ],
+      },
+      {
+        type: "select",
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        currentValue: "default",
+        options: [{ value: "plan", name: "Plan" }],
+      },
+    ];
+    const connection = {
+      setSessionConfigOption: vi.fn().mockResolvedValue({ configOptions }),
+    };
+    await applyKimiOptions(
+      connection as never,
+      "session-1",
+      {
+        modelId: "live",
+        thinkingEffort: "max",
+        permissionMode: "read_only",
+        mcpServers: [],
+      },
+      undefined,
+      configOptions,
+    );
+    expect(
+      connection.setSessionConfigOption.mock.calls.map(([request]) => request),
+    ).toEqual([
+      { sessionId: "session-1", configId: "model", value: "live" },
+      { sessionId: "session-1", configId: "thinking", value: "max" },
+      { sessionId: "session-1", configId: "mode", value: "plan" },
+    ]);
+  });
+
   it("rejects session creation with the real cause when the CLI cannot spawn", async () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-kimi-home-"));
     roots.push(home);

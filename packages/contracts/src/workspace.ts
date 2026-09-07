@@ -3,6 +3,8 @@ import { z } from "zod";
 export const workspaceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(120),
+  directory: z.string().min(1).max(120).optional(),
+  scope: z.enum(["personal", "team"]).default("personal"),
   createdAt: z.iso.datetime({ offset: true }),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;

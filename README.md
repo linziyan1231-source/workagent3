@@ -45,7 +45,46 @@ file must be a non-symlink regular file containing at least 32 bytes and must
 also be configured in ChatForward for delegated-request verification. Portal
 removes browser credentials and sends only a short-lived signed user ID.
 
-The external IM Gateway is a separate process:
+The DSH Web **Settings → 消息渠道** page uses the pinned community plugin
+`@michengai/dsh-im-connect@0.1.30` for WeChat, WeCom, Feishu/Lark, DingTalk,
+QQ, and Telegram. Add an account in that page and complete its QR login or bot
+credential setup. The Chinese account settings select Harness provider models
+or native Codex/Kimi models. Native conversations use the existing WorkAgent
+runtime, including model/permission selection, quota admission, persisted
+history, and restart recovery. The complete
+WorkAgent profile includes the plugin and its native account-management UI;
+no separate IM Gateway process is needed for this page.
+
+Each employee owns their channel state under their SID-private `DSH_HOME`.
+An isolated Cordis credentials realm gives the channel plugin the official
+durable local credential provider, while managed model credentials continue
+to use the memory-only Broker projection. The plugin's credentials therefore
+survive runtime restarts without persisting managed model keys. Private-chat
+access defaults to approved users. Run `node scripts/smoke-dsh-channel-profile.mjs`
+after `pnpm profile:dump` to verify persistence and credential isolation, and
+`node scripts/smoke-dsh-channels.mjs` with the usual smoke credentials for the
+authenticated settings checks.
+`scripts/smoke-dsh-channel-routing.mjs` checks the four adapter routes,
+authorization, deduplication, engine switching and persisted channel mappings.
+`scripts/smoke-dsh-channel-models.mjs` verifies the advertised Codex/Kimi models
+with real authenticated browser turns, without messaging external contacts.
+
+**Settings → 消息提醒** enables optional task-completion pushes. Choose a
+connected account's existing chat and the externally reachable WorkAgent
+origin, then save. Reminders default to off and are stored per employee on the
+server. Successful webpage conversations and scheduled tasks send their final
+reply, links to current registered artifacts or workspace files linked in the
+reply, and a conversation link. Downloads require the same employee login;
+input attachments and files outside the workspace are not added as artifacts.
+IM-originated conversations retain their own replies without duplicate pushes.
+The durable delivery log shows failures and supports retrying unsent parts.
+WeCom uses its SDK's proactive message method; DingTalk uses the existing card
+client so reminders do not depend on a recent incoming-message webhook.
+Run `scripts/smoke-dsh-completion-notifications.mjs` for authenticated settings
+checks with reminders disabled; tests never message real external recipients.
+
+The older external IM Gateway remains a separate optional process for its
+existing `/api/channels/` integration:
 
 ```powershell
 $env:WORKAGENT_IM_DELIVERY_TOKEN = '<shared machine token, at least 32 bytes>'

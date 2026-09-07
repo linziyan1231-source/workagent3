@@ -210,6 +210,9 @@ func TestRuntimeRequiresAuthentication(t *testing.T) {
 
 func TestAuthenticatedWebSurfaceAndDshAPIUseSIDRuntime(t *testing.T) {
 	runtime := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/" && (request.Header.Get("If-Modified-Since") != "" || request.Header.Get("If-None-Match") != "") {
+			t.Error("login document cache validators leaked into DSH")
+		}
 		if request.Header.Get("Authorization") != "Bearer runtime-token" || request.Header.Get("Cookie") != "" {
 			t.Fatalf("unsafe runtime headers: auth=%q cookie=%q", request.Header.Get("Authorization"), request.Header.Get("Cookie"))
 		}
@@ -230,6 +233,9 @@ func TestAuthenticatedWebSurfaceAndDshAPIUseSIDRuntime(t *testing.T) {
 	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/", nil))
 	if body := unauthenticated.Body.String(); !strings.Contains(body, "portal-login") {
 		t.Fatalf("unauthenticated root did not render login: %s", body)
+	}
+	if unauthenticated.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("login document can be cached across authentication")
 	}
 
 	login := httptest.NewRequest(http.MethodPost, "http://portal.test/api/auth/login", strings.NewReader(`{"username":"alice","password":"correct horse battery staple"}`))
@@ -256,12 +262,17 @@ func TestAuthenticatedWebSurfaceAndDshAPIUseSIDRuntime(t *testing.T) {
 		t.Fatalf("legacy fallback cookie missing: %#v", cookies)
 	}
 	dshRequest := httptest.NewRequest(http.MethodGet, "http://portal.test/?frontend=dsh", nil)
+	dshRequest.Header.Set("If-Modified-Since", "Sun, 06 Sep 2026 02:01:06 GMT")
+	dshRequest.Header.Set("If-None-Match", `"portal-login"`)
 	dshRequest.AddCookie(loginResponse.Result().Cookies()[0])
 	dshRequest.AddCookie(&http.Cookie{Name: frontendCookie, Value: "legacy"})
 	dshResponse := httptest.NewRecorder()
 	handler.ServeHTTP(dshResponse, dshRequest)
 	if dshResponse.Code != http.StatusOK || !strings.Contains(dshResponse.Body.String(), "dsh-boot:/") {
 		t.Fatalf("explicit dsh switch did not render runtime client: %d %s", dshResponse.Code, dshResponse.Body.String())
+	}
+	if dshResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("DSH document can be cached across authentication")
 	}
 	var deleted bool
 	for _, cookie := range dshResponse.Result().Cookies() {

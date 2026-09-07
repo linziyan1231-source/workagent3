@@ -41,7 +41,9 @@ for (const file of files.filter(
 }
 
 const client = await readFile(new URL("client.js", pluginRoot), "utf8");
-if (/harness\s*key|type\s*[:=]\s*["']password["']/i.test(client)) {
+// MCP marketplace installs can request the receiving user's connection secrets.
+// Harness credentials remain centrally managed and must not have a user input.
+if (/harness\s*key/i.test(client)) {
   throw new Error("WorkAgent dsh client must not expose a Harness key input");
 }
 if (/AionUi/i.test(client)) {

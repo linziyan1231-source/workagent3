@@ -6,8 +6,11 @@
     "@deepseek-ai/dsh": "0.1.1-rc.2",
     "@deepseek-ai/dsh-base": "0.1.1-rc.2",
     "@deepseek-ai/dsh-web-app": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-credentials-local": "0.1.1-rc.2",
+    "@michengai/dsh-im-connect": "0.1.30",
     "@workagent/harness-bundle": "file:../../harness-bundle",
-    "@workagent/dsh-client": "file:../../packages/dsh-client-workagent"
+    "@workagent/dsh-client": "file:../../packages/dsh-client-workagent",
+    "@workagent/dsh-appearance": "file:../../packages/dsh-client-appearance"
   },
   "dsh": {
     "profile": {

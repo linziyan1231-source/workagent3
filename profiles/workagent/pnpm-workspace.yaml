@@ -1,6 +1,16 @@
+nodeLinker: hoisted
+
+# Share the exact Cordis runtime used by the native adapters and locked DSH tests.
+overrides:
+  "@deepseek-ai/cordis": 4.0.1
+
 allowBuilds:
   "@deepseek-ai/dsh-subprocess-local": true
   "@google/genai": true
   koffi: true
   node-pty: true
   protobufjs: true
+
+patchedDependencies:
+  "@michengai/dsh-im-connect@0.1.30": patches/@michengai__dsh-im-connect@0.1.30.patch
+  "@deepseek-ai/dsh-host-webserver@0.1.1-rc.2": patches/@deepseek-ai__dsh-host-webserver@0.1.1-rc.2.patch

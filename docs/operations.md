@@ -27,8 +27,9 @@ employee-manager.exe -config E:\WorkAgent3\employee-manager.json -action revoke-
 ```
 
 `add` and `reset-password` wait for a new Portal password on standard input;
-`repair` and `rename-windows` wait for the managed Windows account password on
-standard input.
+`repair`, `restart` and `rename-windows` use service-managed Windows credentials
+and do not accept a Windows password. See [Windows credential maintenance](employee-windows-credentials.md)
+for migration, rotation and recovery backups.
 Use the deployment secret-input mechanism so the value is not retained in
 PowerShell history. `disable` atomically revokes active browser sessions before
 stopping the employee's scheduled UserHost. If the stop fails, the account
@@ -169,7 +170,7 @@ native Codex/Kimi authentication. Ordinary `enable` cannot reopen an offboarded
 employee. Permanent data deletion is a separate high-risk workflow and is not
 implied by this command.
 
-`repair` rotates the managed Windows password, verifies that the account still
+`repair` preserves the managed Windows password, verifies that the account still
 maps to the original SID, recreates its Profile/private roots, reprojects the
 released Harness Profile, rebuilds the scheduled UserHost task, and waits for a
 healthy authenticated Runtime lease. Only then does it clear retained-offboard
@@ -178,7 +179,7 @@ or any SID mismatch fails closed.
 
 `rename-windows` preserves the Portal username and SID. It freezes Portal
 access, renames only the managed local Windows account, verifies the new name
-resolves to the original SID, rebuilds the SID task with the supplied Windows
+resolves to the original SID, rebuilds the SID task with the retained Windows
 credential, and commits the new canonical Windows name only after the Runtime
 is healthy. A partial attempt is safe to repeat with the same target name.
 

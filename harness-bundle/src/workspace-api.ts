@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { pipeline } from "node:stream/promises";
 import type { Context } from "@deepseek-ai/cordis";
 import { authorized } from "./index.js";
-import { WorkspaceStore } from "./workspace-store.js";
-
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+import { MAX_UPLOAD_BYTES, WorkspaceStore } from "./workspace-store.js";
 
 const INLINE_PREVIEW_MEDIA_TYPES: Record<string, string> = {
   gif: "image/gif",
@@ -75,14 +74,23 @@ const objectBody = async (
   return parsed as Record<string, unknown>;
 };
 
+const uploadBody = (request: IncomingMessage) => {
+  if (Number(request.headers["content-length"]) > MAX_UPLOAD_BYTES)
+    throw new Error("request_too_large");
+  // Keep the response socket open so an over-limit chunked upload gets a 413.
+  return request.iterator({ destroyOnReturn: false });
+};
+
 const errorStatus = (error: unknown): [number, string] => {
   const code =
     error instanceof Error ? error.message : "workspace_operation_failed";
   if (code === "workspace_not_found" || code === "file_not_found")
     return [404, code];
   if (code === "request_too_large") return [413, code];
-  if (code === "destination_exists") return [409, code];
+  if (code === "destination_exists" || code === "workspace_directory_exists")
+    return [409, code];
   if (
+    code === "invalid_workspace_name" ||
     code === "invalid_relative_path" ||
     code === "path_outside_workspace" ||
     code === "reparse_point_rejected" ||
@@ -141,6 +149,11 @@ export class WorkspaceController {
     try {
       await this.#route(request, response);
     } catch (error) {
+      if (response.destroyed) return;
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
       const [status, code] = errorStatus(error);
       json(response, status, { error: code });
     }
@@ -166,9 +179,49 @@ export class WorkspaceController {
           json(response, 400, { error: "invalid_workspace_name" });
           return;
         }
-        json(response, 201, this.#store.create(input.name.trim()));
+        if (
+          input.scope !== undefined &&
+          input.scope !== "personal" &&
+          input.scope !== "team"
+        ) {
+          json(response, 400, { error: "invalid_workspace_scope" });
+          return;
+        }
+        json(
+          response,
+          201,
+          this.#store.create(
+            input.name.trim(),
+            input.scope === "team" ? "team" : "personal",
+          ),
+        );
         return;
       }
+    }
+    const workspaceMatch = /^\/v1\/workspaces\/([^/]+)$/.exec(url.pathname);
+    if (workspaceMatch !== null) {
+      const id = decodeURIComponent(workspaceMatch[1] ?? "");
+      if (request.method === "PATCH") {
+        const input = await objectBody(request);
+        if (
+          typeof input.name !== "string" ||
+          input.name.trim() === "" ||
+          input.name.length > 120
+        ) {
+          json(response, 400, { error: "invalid_workspace_name" });
+          return;
+        }
+        json(response, 200, this.#store.rename(id, input.name.trim()));
+        return;
+      }
+      if (request.method === "DELETE") {
+        this.#store.remove(id);
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      json(response, 405, { error: "method_not_allowed" });
+      return;
     }
     const match =
       /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move|assets|attachments)$/.exec(
@@ -187,23 +240,28 @@ export class WorkspaceController {
       return;
     }
     if (action === "content" && request.method === "GET") {
-      const content = this.#store.read(id, path);
+      const content = await this.#store.readStream(id, path);
       response.writeHead(
         200,
         workspaceContentHeaders(
           path,
-          content.length,
+          content.size,
           url.searchParams.get("preview") === "1",
         ),
       );
-      response.end(content);
+      await pipeline(content.stream, response);
       return;
     }
     if (action === "content" && request.method === "PUT") {
       json(
         response,
         200,
-        this.#store.write(id, path, await body(request, MAX_UPLOAD_BYTES)),
+        await this.#store.writeStream(
+          id,
+          path,
+          uploadBody(request),
+          url.searchParams.get("overwrite") !== "0",
+        ),
       );
       return;
     }
@@ -251,12 +309,12 @@ export class WorkspaceController {
       json(
         response,
         201,
-        this.#store.addAttachment(
+        await this.#store.addAttachmentStream(
           id,
           sessionId,
           name,
           request.headers["content-type"] ?? "application/octet-stream",
-          await body(request, MAX_UPLOAD_BYTES),
+          uploadBody(request),
         ),
       );
       return;

@@ -51,11 +51,13 @@ type usageQueueRecord struct {
 // material. There must be exactly one drainer per deployment (the Employee
 // Manager).
 type UsageDrainer struct {
-	client  *Client
-	sink    UsageSink
-	raw     []usageQueueRecord
-	pending []contracts.GatewayUsageRecord
-	skipped int
+	client    *Client
+	sink      UsageSink
+	raw       []usageQueueRecord
+	pending   []contracts.GatewayUsageRecord
+	skipped   int
+	started   time.Time
+	batchSize int
 }
 
 func (c *Client) NewUsageDrainer(sink UsageSink) (*UsageDrainer, error) {
@@ -71,11 +73,13 @@ func (c *Client) NewUsageDrainer(sink UsageSink) (*UsageDrainer, error) {
 // unusable (missing request ID or timestamp).
 func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err error) {
 	if len(d.pending) == 0 && len(d.raw) == 0 {
+		d.started = time.Now()
 		raw, err := d.client.popUsage(ctx, UsageDrainBatch)
 		if err != nil {
 			return 0, 0, err
 		}
 		d.raw = raw
+		d.batchSize = len(raw)
 		d.skipped = 0
 	}
 	for len(d.raw) > 0 {
@@ -96,6 +100,13 @@ func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err e
 		}
 		d.pending = d.pending[1:]
 		persisted++
+	}
+	if checkpoint, ok := d.sink.(interface {
+		MarkGatewayDrained(context.Context, time.Time) error
+	}); ok && d.batchSize < UsageDrainBatch {
+		if err := checkpoint.MarkGatewayDrained(ctx, d.started); err != nil {
+			return persisted, d.skipped, err
+		}
 	}
 	return persisted, d.skipped, nil
 }

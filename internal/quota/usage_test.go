@@ -141,13 +141,13 @@ func TestGatewayUsageSumsDailyAndWeeklyWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.DailyPeriodKey != "2026-09-02" || usage.DailyTokens != 10 {
+	if usage.DailyPeriodKey != "2026-09-02" || usage.DailyTokens != 110 {
 		t.Fatalf("daily = %s/%d", usage.DailyPeriodKey, usage.DailyTokens)
 	}
-	if usage.WeeklyTokens != 30 {
-		t.Fatalf("weekly = %d, want 30 (last week and failed excluded)", usage.WeeklyTokens)
+	if usage.WeeklyTokens != 130 {
+		t.Fatalf("weekly = %d, want 130 (last week excluded; failed requests retain reported tokens)", usage.WeeklyTokens)
 	}
-	if len(usage.Models) != 1 || usage.Models[0].Model != "gpt-5.6-sol" || usage.Models[0].TotalTokens != 10 {
+	if len(usage.Models) != 1 || usage.Models[0].Model != "gpt-5.6-sol" || usage.Models[0].TotalTokens != 110 {
 		t.Fatalf("models = %#v", usage.Models)
 	}
 }

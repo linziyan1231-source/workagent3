@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,42 @@ import { PresetStore } from "./preset-store.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 describe("SID-private preset store", () => {
+  it("defaults DSH off, migrates old defaults, and preserves explicit switches after restart", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const store = new PresetStore(home, new ModelAccessStore(home));
+    expect(store.get("builtin-general")?.enabled).toBe(false);
+    expect(store.get("builtin-codex")?.enabled).toBe(true);
+    expect(store.get("builtin-kimi")?.enabled).toBe(true);
+    // Previous releases stored all built-ins enabled and exposed no switch.
+    writeFileSync(
+      join(home, "workagent", "presets.json"),
+      JSON.stringify(
+        store.list().map((preset) => ({ ...preset, enabled: true })),
+      ),
+    );
+    const migrated = new PresetStore(home, new ModelAccessStore(home));
+    expect(() => migrated.resolve("builtin-general")).toThrow(
+      "preset_disabled",
+    );
+    migrated.update("builtin-general", { enabled: true });
+    const binding = migrated.resolve("builtin-codex");
+    migrated.update("builtin-codex", { enabled: false });
+    migrated.update("builtin-kimi", { enabled: false });
+    const reloaded = new PresetStore(home, new ModelAccessStore(home));
+    expect(reloaded.resolve("builtin-general").resolvedSnapshot.enabled).toBe(
+      true,
+    );
+    expect(() => reloaded.resolve("builtin-codex")).toThrow("preset_disabled");
+    expect(reloaded.get("builtin-kimi")?.enabled).toBe(false);
+    expect(binding.resolvedSnapshot.enabled).toBe(true);
+    expect(() =>
+      reloaded.update("builtin-codex", { enabled: true, name: "Changed" }),
+    ).toThrow("builtin_preset_immutable");
+    expect(() => reloaded.delete("builtin-codex")).toThrow(
+      "builtin_preset_immutable",
+    );
+  });
+
   it("imports a legacy Preset projection idempotently", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const store = new PresetStore(

@@ -1,6 +1,9 @@
 {
   "databasePath": "C:\\WorkAgent3\\portal\\data\\portal.db",
   "dataRootBase": "C:\\WorkAgent3\\employees",
+  "credentialRoot": "C:\\WorkAgent3\\service-data\\windows-credentials",
+  "launcherExecutable": "C:\\WorkAgent3\\bootstrap\\userhost-launcher.exe",
+  "launchManifestRoot": "C:\\WorkAgent3\\service-data\\employee-launch",
   "userHostExecutable": "C:\\WorkAgent3\\bin\\userhost.exe",
   "harnessCommand": "C:\\WorkAgent3\\bin\\dsh.exe",
   "harnessEntrypoint": "dist\\index.js",

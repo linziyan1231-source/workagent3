@@ -95,6 +95,11 @@ export const teamCreateSchema = z.object({
     name: z.string().trim().min(1).max(120),
     engine: engineIdSchema,
     presetId: z.string().min(1),
+    modelId: z.string().trim().min(1).max(200).optional(),
+    thinkingEffort: z.string().trim().min(1).max(80).optional(),
+    permissionMode: z
+      .enum(["read_only", "workspace_write", "full_access"])
+      .optional(),
   }),
 });
 export type TeamCreate = z.infer<typeof teamCreateSchema>;

@@ -1,14 +1,9 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { authPort, type AuthUser } from "../features/auth/authPort.js";
 import { OAuthCallbackPage } from "../features/mcp/OAuthCallbackPage.js";
-import { requestJson } from "../shared/api/http.js";
 
-type PortalUser = {
-  username: string;
-  windows_username: string;
-  enabled: boolean;
-  offboarded: boolean;
-};
+import { AdminPortal } from "../features/admin/AdminPortal.js";
+import { LoginPage } from "../features/auth/LoginPage.js";
 
 export function App() {
   if (window.location.pathname === "/oauth/mcp/callback")
@@ -30,9 +25,16 @@ function PortalShell() {
   if (user === undefined) return <main className="centered">Loading…</main>;
   if (user === null)
     return (
-      <Login onAuthenticated={(authenticated) => setUser(authenticated)} />
+      <LoginPage onAuthenticated={(authenticated) => setUser(authenticated)} />
     );
 
+  if (user.admin)
+    return (
+      <AdminPortal
+        username={user.username}
+        onLogout={() => authPort.logout().then(() => setUser(null))}
+      />
+    );
   return (
     <main className="shell">
       <header>
@@ -56,9 +58,7 @@ function PortalShell() {
         </nav>
       </header>
       {error ? <p role="alert">{error}</p> : null}
-      {user.admin ? (
-        <AdminUsers />
-      ) : (
+      {
         <section className="panel">
           <h1>WorkAgent has moved</h1>
           <p>The official DSH client is now the employee workspace.</p>
@@ -66,98 +66,7 @@ function PortalShell() {
             Continue to WorkAgent
           </a>
         </section>
-      )}
-    </main>
-  );
-}
-
-function Login({
-  onAuthenticated,
-}: {
-  onAuthenticated: (user: AuthUser) => void;
-}) {
-  const [error, setError] = useState("");
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    try {
-      const user = await authPort.login(
-        String(values.get("username") ?? ""),
-        String(values.get("password") ?? ""),
-      );
-      if (!user.admin) {
-        window.location.replace("/?frontend=dsh");
-        return;
       }
-      onAuthenticated(user);
-    } catch {
-      setError("Invalid username or password");
-    }
-  };
-  return (
-    <main className="centered">
-      <form className="panel login" onSubmit={(event) => void submit(event)}>
-        <h1>WorkAgent</h1>
-        <label>
-          Username
-          <input name="username" autoComplete="username" required />
-        </label>
-        <label>
-          Password
-          <input
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-          />
-        </label>
-        {error ? <p role="alert">{error}</p> : null}
-        <button className="primary" type="submit">
-          Sign in
-        </button>
-      </form>
     </main>
-  );
-}
-
-function AdminUsers() {
-  const [users, setUsers] = useState<PortalUser[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    void requestJson<PortalUser[] | { users: PortalUser[] }>(
-      "/api/portal/admin/users",
-    )
-      .then((value) => setUsers(Array.isArray(value) ? value : value.users))
-      .catch((reason) => setError(String(reason)));
-  }, []);
-  return (
-    <section className="panel">
-      <h1>Account management</h1>
-      {error ? <p role="alert">{error}</p> : null}
-      <table>
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Windows account</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((entry) => (
-            <tr key={entry.username}>
-              <td>{entry.username}</td>
-              <td>{entry.windows_username}</td>
-              <td>
-                {entry.offboarded
-                  ? "Offboarded"
-                  : entry.enabled
-                    ? "Enabled"
-                    : "Disabled"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
   );
 }

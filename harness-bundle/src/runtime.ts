@@ -1,11 +1,30 @@
 import { randomUUID } from "node:crypto";
+import {
+  CompletionNotifications,
+  type NotificationTransport,
+} from "./completion-notifications.js";
+import { mountCompletionNotifications } from "./completion-notifications-api.js";
+import { resolve as resolvePath } from "node:path";
+import {
+  channelEngine,
+  channelPermission,
+  channelModelCatalog,
+  channelEvent,
+  type ChannelConfig,
+  type ChannelEvent,
+} from "./channel-runtime.js";
+import { ConversationQuota, quotaMessage } from "./conversation-quota.js";
+import {
+  PlatformQuotaClient,
+  type AutomationQuotaPort,
+} from "./quota-client.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import {
   installModelSelection,
   type AgentHandle,
 } from "@deepseek-ai/dsh-agent";
-import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { createUserMessage, ReasoningEffortId } from "@deepseek-ai/dsh-llm";
 import { apply as installMcp } from "@deepseek-ai/dsh-mcp-client";
 import { apply as installSkillProvider } from "@deepseek-ai/dsh-skill-filesystem";
 import {
@@ -14,15 +33,21 @@ import {
   type SessionEvent,
 } from "@deepseek-ai/dsh-session";
 import { CodexBridge } from "./engines/codex.js";
+import { discoverModels } from "./model-discovery.js";
 import { KimiBridge } from "./engines/kimi.js";
 import type {
   BridgeEvent,
   BridgeSession,
   EngineBridge,
+  NativeApprovalRequest,
 } from "./engines/types.js";
 import { authorized } from "./index.js";
 import { ApprovalBridge } from "./approval-bridge.js";
-import { SessionIndex, type StoredSession } from "./session-index.js";
+import {
+  SessionIndex,
+  type StoredSession,
+  type QueuedInput,
+} from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { MessageStore, type StoredMessage } from "./message-store.js";
@@ -50,6 +75,12 @@ import type {
 } from "./team-store.js";
 import type { InboxExecution, InboxRunnerPort } from "./inbox-api.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
+import type { NativeSessionPort } from "./native-session-port.js";
+import type {} from "@deepseek-ai/dsh-session-title";
+import type {
+  NativeSessionLog,
+  NativeSessionEvent,
+} from "./native-session-log.js";
 import type { CredentialStatusStore } from "./model-access-store.js";
 
 export const automationTargetSessionId = (
@@ -109,7 +140,9 @@ export const planMessageFork = (
   requireNativeTurn = true,
 ) => {
   const selectedIndex = messages.findIndex(
-    (message) => message.id === messageId && message.role === "user",
+    (message) =>
+      message.id === messageId &&
+      (message.role === "user" || (!editing && message.role === "assistant")),
   );
   if (selectedIndex === -1) throw new Error("fork_message_not_found");
   const selected = messages[selectedIndex]!;
@@ -130,9 +163,11 @@ export const planMessageFork = (
       0,
       editing
         ? selectedIndex
-        : nextUserIndex === -1
-          ? messages.length
-          : nextUserIndex,
+        : selected.role === "assistant"
+          ? selectedIndex + 1
+          : nextUserIndex === -1
+            ? messages.length
+            : nextUserIndex,
     ),
   };
 };
@@ -141,6 +176,8 @@ type SessionRecord = {
   createdAt: string;
   engine: "harness" | "codex" | "kimi";
   events: PublicEvent[];
+  activity?: ReturnType<typeof sessionActivity>;
+  lastTurn?: RuntimeSession["lastTurn"];
   handle: AgentHandle | undefined;
   native: BridgeSession | undefined;
   nativeId: string;
@@ -152,15 +189,65 @@ type SessionRecord = {
   workspacePath?: string;
   internal?: boolean;
   modelId?: string;
-  thinkingEffort?: "low" | "medium" | "high";
+  thinkingEffort?: string;
+  permissionMode?: "read_only" | "workspace_write" | "full_access";
   preset: PresetBinding;
+  parentSessionId?: string;
+  branchKind?: "fork" | "edit" | "side_chat";
+  anchorMessageId?: string;
+  contextMode?: "native" | "transcript";
+  pendingContext?: string | undefined;
+  inputPending?: boolean;
+  queue?: QueuedInput[];
 };
+
+const branchMetadata = (record: SessionRecord) => ({
+  ...(record.parentSessionId
+    ? { parentSessionId: record.parentSessionId }
+    : {}),
+  ...(record.branchKind ? { branchKind: record.branchKind } : {}),
+  ...(record.anchorMessageId
+    ? { anchorMessageId: record.anchorMessageId }
+    : {}),
+  ...(record.contextMode ? { contextMode: record.contextMode } : {}),
+});
+
+export const branchTranscript = (messages: readonly StoredMessage[]) =>
+  messages.length === 0
+    ? undefined
+    : "以下 JSON 是此会话分支继承的历史对话，仅作为前文背景。不要重新执行历史请求；只处理随后给出的新消息。\n" +
+      JSON.stringify(
+        messages.map(({ role, text }) => ({ role, content: text })),
+      ) +
+      "\n以上是历史对话。下面是新消息：\n";
 
 type PublicEvent = Record<string, unknown> & {
   eventId: string;
   occurredAt: string;
   sessionId: string;
   type: string;
+};
+
+const activityEventTypes = new Set([
+  "turn.started",
+  "turn.retrying",
+  "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+]);
+export const sessionActivity = (events: readonly PublicEvent[]) => {
+  const event = events.findLast((event) => activityEventTypes.has(event.type));
+  return {
+    state:
+      event?.type === "turn.started"
+        ? "running"
+        : event?.type === "turn.retrying"
+          ? "retrying"
+          : "idle",
+    ...(event?.type === "turn.retrying" || event?.type === "turn.failed"
+      ? { message: event.message }
+      : {}),
+  };
 };
 
 export const eventsAfterLastId = <T extends { eventId: string }>(
@@ -294,6 +381,223 @@ export class RuntimeController
     InboxRunnerPort,
     TeamSessionPort
 {
+  /** Public DSH transport delegates to the same native admission/queue/fork implementation. */
+  readonly nativeSessionPort: NativeSessionPort = {
+    approvals: () => this.#approvals.pendingNative(),
+    respondApproval: (sessionId, approvalId, decision) =>
+      this.nativeSessionPort.owns(sessionId) &&
+      this.#approvals.respondNative(sessionId, approvalId, decision),
+    owns: (id) => {
+      const record = this.#sessions.get(id);
+      return !!record && record.engine !== "harness" && !record.internal;
+    },
+    list: () =>
+      [...this.#sessions]
+        .filter(([id]) => this.nativeSessionPort.owns(id))
+        .map(([id, record]) => ({
+          id,
+          engine: record.engine,
+          title: record.title,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          workspaceId: record.workspaceId,
+          workspacePath: this.#engineWorkspace(record),
+          preset: record.preset,
+          activity: {
+            state: (record.activity?.state ?? "idle") as
+              | "idle"
+              | "running"
+              | "retrying",
+            ...(typeof record.activity?.message === "string"
+              ? { message: record.activity.message }
+              : {}),
+          },
+          lastTurn: record.lastTurn,
+          ...branchMetadata(record),
+        })),
+    session: (id) =>
+      this.nativeSessionPort.owns(id)
+        ? this.#ctx.sessions?.get(SessionId(id))
+        : undefined,
+    messages: (id) => {
+      this.#nativeRecord(id);
+      return this.#messages.list(id);
+    },
+    queue: (id) => this.#nativeRecord(id).queue ?? [],
+    prompt: async (id, content, mode) => {
+      const record = this.#nativeRecord(id);
+      if (!content.trim()) throw new Error("content_required");
+      if (
+        record.inputPending &&
+        (!record.activity || record.activity.state === "idle")
+      )
+        throw new Error("session_input_pending");
+      const input = { messageId: `message-${randomUUID()}`, content };
+      if (
+        mode === "queue" &&
+        (record.inputPending ||
+          (record.activity && record.activity.state !== "idle"))
+      ) {
+        record.queue ??= [];
+        record.queue.push(input);
+        this.#queueChanged(id, record);
+      } else {
+        await this.#deliverInput(
+          id,
+          record,
+          input,
+          mode === "steer" &&
+            !!record.activity &&
+            record.activity.state !== "idle",
+        );
+      }
+    },
+    cancel: async (id) => {
+      const record = this.#nativeRecord(id);
+      if (record.activating) await record.activating;
+      await record.native?.cancel();
+    },
+    updateQueue: async (id, itemId, action) => {
+      const record = this.#nativeRecord(id);
+      const item = record.queue?.find((row) => row.messageId === itemId);
+      if (!item) throw new Error("queued_message_not_found");
+      if (record.inputPending) throw new Error("session_input_pending");
+      if (action.kind === "steer") {
+        await this.#deliverInput(id, record, item, true);
+        return;
+      }
+      if (action.kind === "edit") {
+        if (action.content.some((part) => part.type !== "text"))
+          throw new Error("text_input_only");
+        const content = action.content
+          .map((part) => (part.type === "text" ? part.text : ""))
+          .join("");
+        if (!content.trim()) throw new Error("content_required");
+        item.content = content;
+        delete item.displayContent;
+        delete item.error;
+      } else record.queue = record.queue!.filter((row) => row !== item);
+      this.#queueChanged(id, record);
+    },
+    fork: (id, messageId) =>
+      this.#forkSession(id, this.#nativeRecord(id), messageId),
+    rename: (id, title) => {
+      const record = this.#nativeRecord(id);
+      if (!title.trim() || title.length > 200) throw new Error("invalid_title");
+      record.title = title.trim();
+      record.updatedAt = new Date().toISOString();
+      this.#persist(id, record);
+      this.#nativeLog?.get(id)?.append("session/title", {
+        title: record.title,
+        messageSeqs: [],
+        source: { kind: "user" },
+      });
+      return record.title;
+    },
+    models: async (id) => {
+      const record = this.#nativeRecord(id);
+      const models = await this.#bridges
+        .get(record.engine as "codex" | "kimi")!
+        .listModels();
+      const model =
+        record.modelId &&
+        !["codex-native", "kimi-native"].includes(record.modelId)
+          ? record.modelId
+          : models.find((row) => row.isDefault)?.id;
+      if (!model) throw new Error("engine_model_unavailable");
+      return {
+        current: {
+          provider: record.engine,
+          model,
+          ...(record.thinkingEffort
+            ? { reasoningEffort: record.thinkingEffort }
+            : {}),
+        },
+        routable: true,
+        groups: [
+          {
+            id: record.engine,
+            name: record.engine === "codex" ? "Codex" : "Kimi",
+            models: models.map((row) => ({
+              id: row.id,
+              name: row.name,
+              ...(row.reasoning?.length
+                ? {
+                    reasoning: {
+                      efforts: row.reasoning,
+                      ...(row.defaultReasoning
+                        ? { defaultEffort: row.defaultReasoning }
+                        : {}),
+                    },
+                  }
+                : {}),
+            })),
+          },
+        ],
+        failures: [],
+      };
+    },
+    selectModel: async (id, selection) => {
+      const record = this.#nativeRecord(id);
+      if (
+        record.inputPending ||
+        (record.activity && record.activity.state !== "idle")
+      )
+        throw new Error("session_input_pending");
+      if (selection.provider !== record.engine)
+        throw new Error("engine_model_mismatch");
+      const models = await this.#bridges
+        .get(record.engine as "codex" | "kimi")!
+        .listModels();
+      const model = models.find((row) => row.id === selection.model);
+      if (this.#sessions.get(id) !== record)
+        throw new Error("session_not_found");
+      if (
+        !model ||
+        (selection.reasoningEffort !== undefined &&
+          !model.reasoning.some(
+            (effort) => effort.id === selection.reasoningEffort,
+          ))
+      )
+        throw new Error("engine_model_unavailable");
+      // Re-reserve after the async catalog read; another ingress may have started a turn.
+      if (
+        record.inputPending ||
+        (record.activity && record.activity.state !== "idle")
+      )
+        throw new Error("session_input_pending");
+      record.inputPending = true;
+      const previous = {
+        modelId: record.modelId,
+        thinkingEffort: record.thinkingEffort,
+      };
+      try {
+        await record.native?.close();
+        record.native = undefined;
+        if (this.#sessions.get(id) !== record)
+          throw new Error("session_not_found");
+        record.modelId = selection.model;
+        if (selection.reasoningEffort === undefined)
+          delete record.thinkingEffort;
+        else record.thinkingEffort = selection.reasoningEffort;
+        await this.#activate(id, record);
+        if (this.#sessions.get(id) !== record)
+          throw new Error("session_not_found");
+        this.#persist(id, record);
+        return { ...selection };
+      } catch (error) {
+        Object.assign(record, previous);
+        throw error;
+      } finally {
+        record.inputPending = false;
+      }
+    },
+  };
+
+  #nativeRecord(id: string): SessionRecord {
+    if (!this.nativeSessionPort.owns(id)) throw new Error("session_not_found");
+    return this.#sessions.get(id)!;
+  }
   readonly #ctx: Context;
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
@@ -317,6 +621,12 @@ export class RuntimeController
   readonly #mcp: McpCatalogStore;
   readonly #skills: SkillCatalogStore;
   readonly #credentials: CredentialStatusStore;
+  readonly #conversationQuota: ConversationQuota;
+  readonly #completionNotifications: CompletionNotifications;
+  readonly #nativeLog: NativeSessionLog | undefined;
+  readonly #approvals: ApprovalBridge;
+  readonly #nativeMetadata = new Map<string, string>();
+  readonly #nativeAttached = new Set<string>();
 
   constructor(
     ctx: Context,
@@ -326,38 +636,136 @@ export class RuntimeController
     mcp: McpCatalogStore,
     skills: SkillCatalogStore,
     credentials: CredentialStatusStore,
+    quota:
+      | AutomationQuotaPort
+      | undefined = PlatformQuotaClient.fromEnvironment(),
+    nativeLog?: NativeSessionLog,
   ) {
     this.#ctx = ctx;
     this.#token = token;
     const dshHome = process.env.DSH_HOME;
     if (dshHome === undefined)
       throw new Error("workagent-runtime-api: DSH_HOME is required");
+    this.#conversationQuota = new ConversationQuota(dshHome, quota);
     this.#index = new SessionIndex(dshHome);
     this.#messages = new MessageStore(dshHome);
+    this.#nativeLog = nativeLog;
     this.#workspaces = workspaces;
+    this.#completionNotifications = new CompletionNotifications(
+      dshHome,
+      workspaces,
+    );
+    mountCompletionNotifications(ctx, token, this.#completionNotifications);
     this.#presets = presets;
     this.#mcp = mcp;
     this.#skills = skills;
     this.#credentials = credentials;
-    const defaultWorkspace = workspaces.ensureDefault();
+    const storedSessions = this.#index.list();
+    const defaultWorkspaceId = storedSessions.some(
+      (session) => session.workspaceId === undefined,
+    )
+      ? workspaces.ensureDefault().id
+      : "default";
     this.#bridges.set("codex", new CodexBridge());
     this.#bridges.set("kimi", new KimiBridge());
-    for (const session of this.#index.list()) {
-      const record = this.#record(session, defaultWorkspace.id);
+    for (const session of storedSessions) {
+      const record = this.#record(session, defaultWorkspaceId);
       this.#sessions.set(session.id, record);
+      this.#openNativeLog(session.id, record);
       if (session.workspaceId === undefined || session.preset === undefined)
         this.#persist(session.id, record);
     }
-    new ApprovalBridge(ctx, token, dshHome, (sessionId, event) => {
-      const record = this.#sessions.get(sessionId);
-      if (record === undefined) return;
-      this.#publish(record, {
-        ...event,
-        eventId: `${sessionId}-interaction-${record.nextEventSequence++}`,
-        occurredAt: new Date().toISOString(),
-        sessionId,
-      });
+    this.#approvals = new ApprovalBridge(
+      ctx,
+      token,
+      dshHome,
+      (sessionId, event) => {
+        const record = this.#sessions.get(sessionId);
+        if (record === undefined) return;
+        this.#publish(record, {
+          ...event,
+          eventId: `${sessionId}-interaction-${record.nextEventSequence++}`,
+          occurredAt: new Date().toISOString(),
+          sessionId,
+        });
+      },
+    );
+  }
+
+  #openNativeLog(id: string, record: SessionRecord): void {
+    const log = this.#nativeLog;
+    if (
+      !log ||
+      record.engine === "harness" ||
+      record.internal ||
+      this.#nativeAttached.has(id)
+    )
+      return;
+    if (!log.get(id))
+      log.open(
+        {
+          id,
+          engine: record.engine,
+          workspacePath: this.#engineWorkspace(record),
+          createdAt: record.createdAt,
+          ...(record.parentSessionId
+            ? { parentSessionId: record.parentSessionId }
+            : {}),
+        },
+        this.#messages.list(id),
+      );
+    this.#messages.project(id, {
+      list: () => log.messages(id),
+      append: (message) => log.appendMessage(message),
+      delete: () => log.delete(id),
     });
+    this.#nativeAttached.add(id);
+    log.appendEvent(id, {
+      type: "session.capabilities",
+      engine: record.engine,
+      send: true,
+      cancel: true,
+      queue: "persistent-workagent",
+      resume: "native",
+      steer: record.engine === "codex" ? "native-turn" : "cancel-and-resubmit",
+      fork: record.engine === "codex" ? "native-or-transcript" : "transcript",
+      edit: "transcript-or-native-branch",
+      sideChat: "isolated-transcript",
+      modelSelection: "idle-native-resume",
+      approval: true,
+      modelSteps: false,
+      modelRequestInspection: false,
+      rawToolDetails: true,
+    });
+    this.#publishNativeMetadata(id, record);
+  }
+
+  #publishNativeMetadata(id: string, record: SessionRecord): void {
+    if (!this.#nativeLog?.get(id)) return;
+    const metadata = JSON.parse(
+      JSON.stringify({
+        type: "session.metadata",
+        id,
+        engine: record.engine,
+        title: record.title,
+        workspaceId: record.workspaceId,
+        workspacePath: this.#engineWorkspace(record),
+        modelId: record.modelId,
+        thinkingEffort: record.thinkingEffort,
+        permissionMode: record.permissionMode,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        preset: record.preset,
+        activity: record.activity ?? { state: "idle" },
+        lastTurn: record.lastTurn,
+        queue: record.queue ?? [],
+        ...branchMetadata(record),
+      }),
+    ) as NativeSessionEvent;
+    const encoded = JSON.stringify(metadata);
+    if (this.#nativeMetadata.get(id) === encoded) return;
+    this.#nativeLog.appendEvent(id, metadata);
+    this.#nativeMetadata.set(id, encoded);
   }
 
   workspaceForSession(sessionId: string): string | undefined {
@@ -407,6 +815,164 @@ export class RuntimeController
     return execution;
   }
 
+  channelService() {
+    return {
+      attachNotifications: (transport: NotificationTransport) =>
+        this.#completionNotifications.attach(transport),
+      handles: (provider?: string) => channelEngine(provider) !== undefined,
+      models: async () =>
+        channelModelCatalog(await discoverModels(this.#ctx, this.#bridges)),
+      listSessionIds: () =>
+        [...this.#sessions.keys()].filter((id) =>
+          id.startsWith("session-channel-"),
+        ),
+      open: (config: ChannelConfig, sessionId?: string, title?: string) =>
+        this.#openChannel(config, sessionId, title),
+    };
+  }
+
+  async #openChannel(
+    config: ChannelConfig,
+    sessionId?: string,
+    title?: string,
+  ) {
+    const engine = channelEngine(config.provider);
+    if (!engine) throw new Error("unsupported_channel_engine");
+    const permissionMode = channelPermission(config.permissionPreset);
+    const workspacePath = resolvePath(
+      config.cwd || this.#workspaces.engineRoot("default"),
+    );
+    const existing = sessionId ? this.#sessions.get(sessionId) : undefined;
+    if (
+      sessionId &&
+      (!existing ||
+        existing.engine !== engine ||
+        existing.modelId !== config.model ||
+        existing.thinkingEffort !== config.reasoningEffort ||
+        existing.permissionMode !== permissionMode ||
+        resolvePath(this.#engineWorkspace(existing)) !== workspacePath)
+    )
+      return undefined;
+    const credentialError = nativeCredentialError(
+      engine,
+      this.#credentials.statusFor(`${engine}-native`),
+    );
+    if (credentialError) throw new Error(credentialError);
+    const id = sessionId ?? `session-channel-${randomUUID()}`;
+    let record = existing;
+    if (!record) {
+      if (!config.model) throw new Error("channel_model_required");
+      const models = await this.#bridges.get(engine)!.listModels();
+      const model = models.find((row) => row.id === config.model);
+      if (
+        !model ||
+        (config.reasoningEffort &&
+          !model.reasoning.some(
+            (effort) => effort.id === config.reasoningEffort,
+          ))
+      )
+        throw new Error("channel_model_unavailable");
+      const now = new Date().toISOString();
+      record = {
+        engine,
+        events: [],
+        handle: undefined,
+        native: undefined,
+        activating: undefined,
+        nativeId: id,
+        nextEventSequence: 1,
+        title: title || "消息渠道会话",
+        createdAt: now,
+        updatedAt: now,
+        workspaceId:
+          this.#workspaces
+            .list()
+            .find(
+              (workspace) =>
+                resolvePath(this.#workspaces.engineRoot(workspace.id)) ===
+                workspacePath,
+            )?.id ?? "default",
+        workspacePath,
+        modelId: config.model,
+        permissionMode,
+        ...(config.reasoningEffort
+          ? { thinkingEffort: config.reasoningEffort }
+          : {}),
+        preset: this.#presets.resolve(`builtin-${engine}`),
+      };
+      this.#sessions.set(id, record);
+      try {
+        await this.#activate(id, record);
+      } catch (error) {
+        this.#sessions.delete(id);
+        throw error;
+      }
+      this.#persist(id, record);
+    } else await this.#activate(id, record);
+    const session = record;
+    return {
+      sessionId: id,
+      workagent: true,
+      followup: async (
+        message: {
+          id: string;
+          content: Array<{ type: string; text?: string }>;
+        },
+        onEvent: (event: ChannelEvent) => Promise<void>,
+      ) => {
+        let deliveries = Promise.resolve();
+        let finish!: () => void;
+        const terminal = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        const listener = (event: PublicEvent) => {
+          const mapped = channelEvent(event);
+          if (mapped) deliveries = deliveries.then(() => onEvent(mapped));
+          // Observe delivery failures immediately while the native turn continues.
+          void deliveries.catch(() => undefined);
+          if (
+            ["turn.completed", "turn.failed", "turn.cancelled"].includes(
+              event.type,
+            )
+          )
+            finish();
+        };
+        const listeners = this.#eventListeners.get(id) ?? new Set();
+        listeners.add(listener);
+        this.#eventListeners.set(id, listeners);
+        try {
+          await this.#deliverInput(
+            id,
+            session,
+            {
+              messageId: message.id,
+              content: message.content
+                .filter((block) => block.type === "text")
+                .map((block) => block.text ?? "")
+                .join("\n"),
+            },
+            false,
+          );
+          await terminal;
+          await deliveries;
+        } finally {
+          listeners.delete(listener);
+          if (!listeners.size) this.#eventListeners.delete(id);
+        }
+      },
+      dispose: async () => {
+        if (session.native) {
+          try {
+            await session.native.cancel();
+          } finally {
+            await session.native.close();
+            session.native = undefined;
+          }
+        }
+      },
+    };
+  }
+
   async openTeamSession(request: TeamSessionRequest): Promise<void> {
     const existing = this.#sessions.get(request.sessionId);
     if (existing !== undefined) {
@@ -436,6 +1002,13 @@ export class RuntimeController
       createdAt: now,
       updatedAt: now,
       workspaceId: workspace.id,
+      ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+      ...(request.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: request.thinkingEffort }),
+      ...(request.permissionMode === undefined
+        ? {}
+        : { permissionMode: request.permissionMode }),
       preset,
     };
     if (request.engine === "harness") {
@@ -444,6 +1017,7 @@ export class RuntimeController
         this.#workspaces.engineRoot(record.workspaceId),
         mcpServers,
         resolvedSkills,
+        record,
       );
     } else {
       const credentialError = nativeCredentialError(
@@ -460,7 +1034,20 @@ export class RuntimeController
             record,
             this.#nativeEvent(request.sessionId, record, event),
           ),
-        { mcpServers },
+        {
+          mcpServers,
+          requestApproval: (approval) =>
+            this.#approvals.requestNative(request.sessionId, approval),
+          ...(request.modelId === undefined
+            ? {}
+            : { modelId: request.modelId }),
+          ...(request.thinkingEffort === undefined
+            ? {}
+            : { thinkingEffort: request.thinkingEffort }),
+          ...(request.permissionMode === undefined
+            ? {}
+            : { permissionMode: request.permissionMode }),
+        },
       );
       record.nativeId = record.native.nativeId;
     }
@@ -514,7 +1101,7 @@ export class RuntimeController
       return { sessionId: request.sessionId };
     }
     const now = new Date().toISOString();
-    const workspaceId = this.#workspaces.ensureDefault().id;
+    const workspaceId = "default";
     const definition: AutomationExecution["definition"] = {
       id: `inbox-${request.sessionId}`,
       version: 1,
@@ -566,25 +1153,28 @@ export class RuntimeController
         ? request.input
         : `${request.input}\n\nWorkspace attachment paths:\n${attachmentPaths.map((path) => `- ${path}`).join("\n")}`;
     const terminal = this.#waitForTerminal(request.sessionId);
-    record.updatedAt = now;
-    if (record.handle !== undefined) {
-      record.handle.agent.followup(
-        createUserMessage({
-          content: [{ type: "text", text: runtimeInput }],
-          source: { kind: "user" },
-        }),
+    try {
+      await this.#deliverInput(
+        request.sessionId,
+        record,
+        { messageId, content: runtimeInput },
+        false,
       );
-    } else {
-      await record.native!.send(runtimeInput);
+    } catch (error) {
+      this.#publish(record, {
+        sessionId: request.sessionId,
+        type: "turn.failed",
+        turnId: request.receiptId,
+        eventId: `inbox-${request.receiptId}-failed`,
+        occurredAt: new Date().toISOString(),
+        message:
+          error instanceof Error
+            ? quotaMessage(error.message)
+            : "engine_turn_rejected",
+      });
+      await terminal.catch(() => undefined);
+      throw error;
     }
-    this.#messages.append({
-      id: messageId,
-      sessionId: request.sessionId,
-      role: "user",
-      text: runtimeInput,
-      createdAt: now,
-    });
-    this.#persist(request.sessionId, record);
     const completed = await terminal;
     return completed.result === undefined
       ? { sessionId: request.sessionId }
@@ -610,6 +1200,30 @@ export class RuntimeController
   }
 
   mount(): void {
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
+          kind: "exact",
+          path: "/v1/model-options",
+          handler: async (request, response) => {
+            if (!authorized(request, this.#token))
+              return writeJson(response, 401, {
+                error: "authentication_required",
+              });
+            if (request.method !== "GET") {
+              response.writeHead(405, { allow: "GET" });
+              response.end();
+              return;
+            }
+            writeJson(
+              response,
+              200,
+              await discoverModels(this.#ctx, this.#bridges),
+            );
+          },
+        }),
+      "workagent-runtime-api: live model discovery",
+    );
     this.#ctx.effect(
       () => () =>
         Promise.all(
@@ -647,6 +1261,9 @@ export class RuntimeController
     this.#ctx.effect(
       () =>
         this.#ctx.on("session/event", (session, event) => {
+          // Native logs are already produced by #publish; never feed them back
+          // into the native execution path or duplicate quota/notification work.
+          if (this.#nativeLog?.get(String(session.id)) === session) return;
           const normalized = normalizeEvent(session, event);
           if (normalized === undefined) return;
           const record = this.#sessions.get(String(session.id));
@@ -758,6 +1375,7 @@ export class RuntimeController
               updatedAt: record.updatedAt,
               workspaceId: record.workspaceId,
               preset: record.preset,
+              ...branchMetadata(record),
             },
             message,
           })),
@@ -781,8 +1399,18 @@ export class RuntimeController
             title: value.title,
             createdAt: value.createdAt,
             updatedAt: value.updatedAt,
+            activity: value.activity ?? { state: "idle" },
+            lastTurn: value.lastTurn,
             workspaceId: value.workspaceId,
+            ...(value.modelId === undefined ? {} : { modelId: value.modelId }),
+            ...(value.thinkingEffort === undefined
+              ? {}
+              : { thinkingEffort: value.thinkingEffort }),
+            ...(value.permissionMode === undefined
+              ? {}
+              : { permissionMode: value.permissionMode }),
             preset: value.preset,
+            ...branchMetadata(value),
           })),
       );
       return;
@@ -819,19 +1447,38 @@ export class RuntimeController
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           workspaceId: record.workspaceId,
+          ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+          ...(record.thinkingEffort === undefined
+            ? {}
+            : { thinkingEffort: record.thinkingEffort }),
+          ...(record.permissionMode === undefined
+            ? {}
+            : { permissionMode: record.permissionMode }),
           preset: record.preset,
+          ...branchMetadata(record),
         });
         return;
       }
       if (request.method === "GET") {
         writeJson(response, 200, {
           id,
+          activity: record.activity ?? { state: "idle" },
+          lastTurn: record.lastTurn,
+          ...(record.queue === undefined ? {} : { queue: record.queue }),
           engine: record.engine,
           title: record.title,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           workspaceId: record.workspaceId,
+          ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+          ...(record.thinkingEffort === undefined
+            ? {}
+            : { thinkingEffort: record.thinkingEffort }),
+          ...(record.permissionMode === undefined
+            ? {}
+            : { permissionMode: record.permissionMode }),
           preset: record.preset,
+          ...branchMetadata(record),
         });
         return;
       }
@@ -846,6 +1493,11 @@ export class RuntimeController
           return;
         }
         this.#sessions.delete(id);
+        void this.#conversationQuota
+          .releaseSession(id)
+          .catch((error) =>
+            console.error("conversation quota settlement failed", error),
+          );
         this.#index.delete(id);
         this.#messages.delete(id);
         for (const subscriber of this.#subscribers.get(id) ?? []) {
@@ -860,7 +1512,7 @@ export class RuntimeController
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|cancel|events|resume|messages|fork)$/.exec(
+      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|fork|side-chat)$/.exec(
         path,
       );
     if (match === null) {
@@ -873,12 +1525,18 @@ export class RuntimeController
       writeJson(response, 404, { error: "session_not_found" });
       return;
     }
-    if (match[2] === "fork" && request.method === "POST") {
+    if (
+      (match[2] === "fork" || match[2] === "side-chat") &&
+      request.method === "POST"
+    ) {
       const input = await readJson(request);
       if (
-        typeof input.messageId !== "string" ||
-        input.messageId.length === 0 ||
-        input.messageId.length > 200 ||
+        (input.messageId !== undefined &&
+          (typeof input.messageId !== "string" ||
+            input.messageId.length === 0 ||
+            input.messageId.length > 200)) ||
+        (input.replacementContent !== undefined &&
+          typeof input.messageId !== "string") ||
         (input.replacementContent !== undefined &&
           (typeof input.replacementContent !== "string" ||
             input.replacementContent.trim() === ""))
@@ -886,14 +1544,25 @@ export class RuntimeController
         writeJson(response, 400, { error: "invalid_fork_request" });
         return;
       }
+      if (record.inputPending) {
+        writeJson(response, 409, { error: "session_input_pending" });
+        return;
+      }
+      const editing = input.replacementContent !== undefined;
+      if (editing) record.inputPending = true;
       try {
         const forked = await this.#forkSession(
           id,
           record,
-          input.messageId,
+          typeof input.messageId === "string" ? input.messageId : undefined,
           typeof input.replacementContent === "string"
             ? input.replacementContent
             : undefined,
+          match[2] === "side-chat"
+            ? "side_chat"
+            : input.replacementContent === undefined
+              ? "fork"
+              : "edit",
         );
         writeJson(response, 201, forked);
       } catch (error) {
@@ -908,7 +1577,81 @@ export class RuntimeController
             : 503,
           { error: message },
         );
+      } finally {
+        if (editing) record.inputPending = false;
       }
+      return;
+    }
+    if (match[2] === "queue" && request.method === "GET") {
+      writeJson(response, 200, record.queue ?? []);
+      return;
+    }
+    if (match[2] === "queue" && request.method === "POST") {
+      const input = await readJson(request);
+      if (input.action !== undefined) {
+        const item = record.queue?.find(
+          (row) => row.messageId === input.messageId,
+        );
+        if (!item) {
+          writeJson(response, 404, { error: "queued_message_not_found" });
+          return;
+        }
+        if (!["steer", "send", "remove"].includes(String(input.action))) {
+          writeJson(response, 400, { error: "invalid_queue_action" });
+          return;
+        }
+        if (record.inputPending) {
+          writeJson(response, 409, { error: "session_input_pending" });
+          return;
+        }
+        if (input.action === "remove") {
+          record.queue = record.queue!.filter((row) => row !== item);
+          this.#queueChanged(id, record);
+        } else {
+          try {
+            await this.#deliverInput(
+              id,
+              record,
+              item,
+              input.action === "steer",
+            );
+          } catch (error) {
+            item.error =
+              error instanceof Error
+                ? quotaMessage(error.message)
+                : "engine_turn_rejected";
+            this.#queueChanged(id, record);
+            writeJson(response, 409, { error: item.error });
+            return;
+          }
+        }
+        writeJson(response, 200, record.queue ?? []);
+        return;
+      }
+      if (
+        typeof input.content !== "string" ||
+        !input.content.trim() ||
+        (input.messageId !== undefined &&
+          (typeof input.messageId !== "string" ||
+            !input.messageId ||
+            input.messageId.length > 200))
+      ) {
+        writeJson(response, 400, { error: "content_required" });
+        return;
+      }
+      const item: QueuedInput = {
+        messageId:
+          typeof input.messageId === "string"
+            ? input.messageId
+            : `message-${randomUUID()}`,
+        content: input.content,
+      };
+      record.queue ??= [];
+      if (!record.queue.some((row) => row.messageId === item.messageId))
+        record.queue.push(item);
+      this.#queueChanged(id, record);
+      void this.#drainQueue(id, record);
+      writeJson(response, 202, { accepted: true });
       return;
     }
     if (match[2] !== "events" && match[2] !== "messages") {
@@ -924,7 +1667,10 @@ export class RuntimeController
       writeJson(response, 200, this.#messages.list(id));
       return;
     }
-    if (match[2] === "turns" && request.method === "POST") {
+    if (
+      (match[2] === "turns" || match[2] === "steer") &&
+      request.method === "POST"
+    ) {
       const input = await readJson(request);
       if (
         typeof input.content !== "string" ||
@@ -940,38 +1686,29 @@ export class RuntimeController
         writeJson(response, 400, { error: "content_required" });
         return;
       }
-      record.updatedAt = new Date().toISOString();
-      let nativeTurnId: string | undefined;
-      if (record.handle !== undefined) {
-        record.handle.agent.followup(
-          createUserMessage({
-            content: [{ type: "text", text: input.content }],
-            source: { kind: "user" },
-          }),
+      try {
+        await this.#deliverInput(
+          id,
+          record,
+          {
+            messageId:
+              typeof input.messageId === "string"
+                ? input.messageId
+                : `message-${randomUUID()}`,
+            content: input.content,
+            ...(typeof input.displayContent === "string"
+              ? { displayContent: input.displayContent }
+              : {}),
+          },
+          match[2] === "steer",
         );
-      } else {
-        try {
-          nativeTurnId = await record.native!.send(input.content);
-        } catch {
-          writeJson(response, 409, { error: "engine_turn_rejected" });
-          return;
-        }
+      } catch (error) {
+        writeJson(response, 409, {
+          error:
+            error instanceof Error ? error.message : "engine_turn_rejected",
+        });
+        return;
       }
-      this.#messages.append({
-        id:
-          typeof input.messageId === "string"
-            ? input.messageId
-            : `message-${randomUUID()}`,
-        sessionId: id,
-        role: "user",
-        text:
-          typeof input.displayContent === "string"
-            ? input.displayContent
-            : input.content,
-        createdAt: new Date().toISOString(),
-        ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
-      });
-      this.#persist(id, record);
       writeJson(response, 202, { accepted: true });
       return;
     }
@@ -983,7 +1720,15 @@ export class RuntimeController
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         workspaceId: record.workspaceId,
+        ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+        ...(record.thinkingEffort === undefined
+          ? {}
+          : { thinkingEffort: record.thinkingEffort }),
+        ...(record.permissionMode === undefined
+          ? {}
+          : { permissionMode: record.permissionMode }),
         preset: record.preset,
+        ...branchMetadata(record),
       });
       return;
     }
@@ -1021,16 +1766,28 @@ export class RuntimeController
       typeof input.title !== "string" ||
       input.title.trim() === "" ||
       input.title.length > 200 ||
-      typeof input.workspace !== "string"
+      typeof input.workspace !== "string" ||
+      (input.modelId !== undefined &&
+        (typeof input.modelId !== "string" ||
+          input.modelId.trim() === "" ||
+          input.modelId.length > 200)) ||
+      (input.thinkingEffort !== undefined &&
+        (typeof input.thinkingEffort !== "string" ||
+          !input.thinkingEffort.trim() ||
+          input.thinkingEffort.length > 80)) ||
+      (input.permissionMode !== undefined &&
+        input.permissionMode !== "read_only" &&
+        input.permissionMode !== "workspace_write" &&
+        input.permissionMode !== "full_access")
     ) {
       writeJson(response, 400, { error: "invalid_session" });
       return;
     }
-    const workspace =
+    const workspaceId =
       input.workspace === "default"
-        ? this.#workspaces.ensureDefault()
-        : this.#workspaces.get(input.workspace);
-    if (workspace === undefined) {
+        ? "default"
+        : this.#workspaces.get(input.workspace)?.id;
+    if (workspaceId === undefined) {
       writeJson(response, 400, { error: "workspace_not_found" });
       return;
     }
@@ -1086,16 +1843,26 @@ export class RuntimeController
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
-      workspaceId: workspace.id,
+      workspaceId,
+      ...(typeof input.modelId !== "string"
+        ? {}
+        : { modelId: input.modelId.trim() }),
+      ...(input.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: input.thinkingEffort }),
+      ...(input.permissionMode === undefined
+        ? {}
+        : { permissionMode: input.permissionMode }),
       preset,
     };
     try {
       if (input.engine === "harness") {
         record.handle = await this.#createHarness(
           publicId,
-          this.#workspaces.engineRoot(record.workspaceId),
+          this.#engineWorkspace(record),
           mcpServers,
           resolvedSkills,
+          record,
         );
       } else {
         const credentialError = nativeCredentialError(
@@ -1112,11 +1879,24 @@ export class RuntimeController
           return;
         }
         record.native = await bridge.create(
-          this.#workspaces.engineRoot(record.workspaceId),
+          this.#engineWorkspace(record),
           (event) => {
             this.#publish(record, this.#nativeEvent(publicId, record, event));
           },
-          { mcpServers },
+          {
+            mcpServers,
+            requestApproval: (approval) =>
+              this.#approvals.requestNative(publicId, approval),
+            ...(record.modelId === undefined
+              ? {}
+              : { modelId: record.modelId }),
+            ...(record.thinkingEffort === undefined
+              ? {}
+              : { thinkingEffort: record.thinkingEffort }),
+            ...(record.permissionMode === undefined
+              ? {}
+              : { permissionMode: record.permissionMode }),
+          },
         );
         record.nativeId = record.native.nativeId;
       }
@@ -1132,7 +1912,14 @@ export class RuntimeController
       title: input.title.trim(),
       createdAt: now,
       updatedAt: now,
-      workspaceId: workspace.id,
+      workspaceId: record.workspaceId,
+      ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+      ...(record.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: record.thinkingEffort }),
+      ...(record.permissionMode === undefined
+        ? {}
+        : { permissionMode: record.permissionMode }),
       preset,
     });
   }
@@ -1248,6 +2035,7 @@ export class RuntimeController
           request.workspacePath,
           mcpServers,
           resolvedSkills,
+          record,
         );
       } else {
         const credentialError = nativeCredentialError(
@@ -1267,6 +2055,10 @@ export class RuntimeController
           {
             mcpServers,
             modelId: request.modelId,
+            requestApproval: (approval) =>
+              record!.internal
+                ? Promise.resolve("cancel")
+                : this.#approvals.requestNative(sessionId, approval),
             thinkingEffort: request.thinkingEffort,
           },
         );
@@ -1362,6 +2154,7 @@ export class RuntimeController
         this.#workspaces.engineRoot(record.workspaceId),
         mcpServers,
         resolvedSkills,
+        record,
       );
     } else {
       const bridge = this.#bridges.get(definition.engine);
@@ -1370,7 +2163,11 @@ export class RuntimeController
         this.#workspaces.engineRoot(record.workspaceId),
         (event) =>
           this.#publish(record, this.#nativeEvent(publicId, record, event)),
-        { mcpServers },
+        {
+          mcpServers,
+          requestApproval: (approval) =>
+            this.#approvals.requestNative(publicId, approval),
+        },
       );
       record.nativeId = record.native.nativeId;
     }
@@ -1470,32 +2267,69 @@ export class RuntimeController
   async #forkSession(
     sourceId: string,
     source: SessionRecord,
-    messageId: string,
+    messageId: string | undefined,
     replacementContent?: string,
+    kind: "fork" | "edit" | "side_chat" = "fork",
   ): Promise<RuntimeSession> {
     const messages = this.#messages.list(sourceId);
-    const plan = planMessageFork(
-      messages,
-      messageId,
-      replacementContent !== undefined,
-      source.engine !== "harness",
-    );
+    const plan =
+      messageId === undefined
+        ? {
+            copiedMessages: messages,
+            selectedTurnId: undefined,
+            previousTurnId: undefined,
+            hasLaterUser: false,
+          }
+        : planMessageFork(
+            messages,
+            messageId,
+            replacementContent !== undefined,
+            false,
+          );
     if (
-      source.engine === "kimi" &&
-      (plan.hasLaterUser ||
-        (replacementContent !== undefined && plan.previousTurnId !== undefined))
-    )
-      throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
+      replacementContent !== undefined &&
+      source.activity &&
+      source.activity.state !== "idle"
+    ) {
+      await this.#stopForEdit(sourceId, source);
+    }
+    // ACP cannot fork at historical turns. Transcript branches also preserve
+    // exact message boundaries when steering placed several inputs in one turn.
+    const nativeFork =
+      source.engine === "codex" &&
+      source.contextMode !== "transcript" &&
+      kind !== "side_chat" &&
+      source.activity?.state !== "running" &&
+      source.activity?.state !== "retrying" &&
+      (messageId === undefined || plan.selectedTurnId !== undefined) &&
+      !(
+        replacementContent !== undefined &&
+        plan.previousTurnId === plan.selectedTurnId
+      ) &&
+      !messages
+        .slice(plan.copiedMessages.length)
+        .some(
+          (message) =>
+            message.nativeTurnId ===
+            (replacementContent === undefined
+              ? plan.selectedTurnId
+              : plan.previousTurnId),
+        );
 
     const mcpServers = this.#resolvedMcpServers(source.preset);
     const resolvedSkills = this.#resolvedSkills(source.preset);
     const workspace = this.#engineWorkspace(source);
     const options = {
       mcpServers,
+      requestApproval: (approval: NativeApprovalRequest) =>
+        this.#approvals.requestNative(publicId, approval),
       ...(source.modelId === undefined ? {} : { modelId: source.modelId }),
       ...(source.thinkingEffort === undefined
         ? {}
         : { thinkingEffort: source.thinkingEffort }),
+      ...(source.permissionMode === undefined
+        ? {}
+        : { permissionMode: source.permissionMode }),
     };
     const publicId = `session-${randomUUID()}`;
     const now = new Date().toISOString();
@@ -1507,7 +2341,18 @@ export class RuntimeController
       native: undefined,
       nativeId: publicId,
       nextEventSequence: 1,
-      title: `${source.title} (Fork)`.slice(0, 200),
+      title:
+        `${source.title} · ${kind === "side_chat" ? "侧聊" : kind === "edit" ? "修订" : "分支"}`.slice(
+          0,
+          200,
+        ),
+      parentSessionId: sourceId,
+      branchKind: kind,
+      ...(messageId ? { anchorMessageId: messageId } : {}),
+      contextMode: nativeFork ? "native" : "transcript",
+      ...(nativeFork
+        ? {}
+        : { pendingContext: branchTranscript(plan.copiedMessages) }),
       createdAt: now,
       updatedAt: now,
       workspaceId: source.workspaceId,
@@ -1518,6 +2363,9 @@ export class RuntimeController
       ...(source.thinkingEffort === undefined
         ? {}
         : { thinkingEffort: source.thinkingEffort }),
+      ...(source.permissionMode === undefined
+        ? {}
+        : { permissionMode: source.permissionMode }),
       preset: source.preset,
     };
     const onEvent = (event: BridgeEvent) =>
@@ -1528,12 +2376,14 @@ export class RuntimeController
         workspace,
         mcpServers,
         resolvedSkills,
+        record,
       );
-    } else {
+    } else if (nativeFork || replacementContent !== undefined) {
       const bridge = this.#bridges.get(source.engine);
       if (bridge === undefined) throw new Error("engine_unavailable");
       record.native =
-        replacementContent !== undefined && plan.previousTurnId === undefined
+        !nativeFork ||
+        (replacementContent !== undefined && plan.previousTurnId === undefined)
           ? await bridge.create(workspace, onEvent, options)
           : await bridge.fork(
               source.nativeId,
@@ -1550,28 +2400,18 @@ export class RuntimeController
     }
     this.#sessions.set(publicId, record);
     try {
-      for (const message of plan.copiedMessages)
+      for (const message of kind === "side_chat" ? [] : plan.copiedMessages)
         this.#messages.append({ ...message, sessionId: publicId });
       if (replacementContent !== undefined) {
-        let turnId: string | undefined;
-        if (record.handle !== undefined) {
-          record.handle.agent.followup(
-            createUserMessage({
-              content: [{ type: "text", text: replacementContent }],
-              source: { kind: "user" },
-            }),
-          );
-        } else {
-          turnId = await record.native!.send(replacementContent);
-        }
-        this.#messages.append({
-          id: `message-${randomUUID()}`,
-          sessionId: publicId,
-          role: "user",
-          text: replacementContent,
-          createdAt: new Date().toISOString(),
-          ...(turnId === undefined ? {} : { nativeTurnId: turnId }),
-        });
+        await this.#deliverInput(
+          publicId,
+          record,
+          {
+            messageId: `message-${randomUUID()}`,
+            content: replacementContent,
+          },
+          false,
+        );
       }
       this.#persist(publicId, record);
     } catch (error) {
@@ -1591,18 +2431,264 @@ export class RuntimeController
       updatedAt: record.updatedAt,
       workspaceId: record.workspaceId,
       preset: record.preset,
+      ...branchMetadata(record),
     };
   }
 
+  async #stopForEdit(id: string, record: SessionRecord): Promise<void> {
+    const listeners = this.#eventListeners.get(id) ?? new Set();
+    this.#eventListeners.set(id, listeners);
+    let listener!: (event: PublicEvent) => void;
+    let timeout: ReturnType<typeof setTimeout>;
+    const stopped = new Promise<void>((resolve, reject) => {
+      listener = (event) => {
+        if (
+          ["turn.completed", "turn.cancelled", "turn.failed"].includes(
+            event.type,
+          )
+        )
+          resolve();
+      };
+      listeners.add(listener);
+      timeout = setTimeout(
+        () => reject(new Error("edit_stop_timeout")),
+        15_000,
+      );
+    });
+    try {
+      const cancel = record.handle
+        ? Promise.resolve(record.handle.agent.cancel({ kind: "user" }))
+        : record.native!.cancel();
+      await Promise.all([cancel, stopped]);
+    } finally {
+      clearTimeout(timeout!);
+      listeners.delete(listener);
+      if (listeners.size === 0) this.#eventListeners.delete(id);
+    }
+  }
+
+  #queueChanged(id: string, record: SessionRecord): void {
+    this.#persist(id, record);
+    this.#publish(record, {
+      type: "queue.changed",
+      sessionId: id,
+      eventId: `${id}-queue-${record.nextEventSequence++}`,
+      occurredAt: new Date().toISOString(),
+    });
+  }
+
+  async #drainQueue(id: string, record: SessionRecord): Promise<void> {
+    const item = record.queue?.[0];
+    if (
+      !item ||
+      item.error ||
+      record.inputPending ||
+      (record.activity && record.activity.state !== "idle") ||
+      this.#sessions.get(id) !== record
+    )
+      return;
+    try {
+      await this.#deliverInput(id, record, item, false);
+    } catch (error) {
+      item.error =
+        error instanceof Error
+          ? quotaMessage(error.message)
+          : "engine_turn_rejected";
+      this.#queueChanged(id, record);
+    }
+  }
+
+  async #deliverInput(
+    id: string,
+    record: SessionRecord,
+    input: QueuedInput,
+    steering: boolean,
+  ): Promise<void> {
+    const running = !!record.activity && record.activity.state !== "idle";
+    if (record.inputPending || (!steering && running))
+      throw new Error("session_input_pending");
+    if (steering && !running) throw new Error("no_active_turn");
+    record.inputPending = true;
+    let quotaRunId: string | undefined;
+    let completedBeforeAcknowledgement = false;
+    const previousActivity = record.activity;
+    const reservedActivity = { state: "running" };
+    if (!steering) record.activity = reservedActivity;
+    try {
+      await this.#activate(id, record);
+      let nativeTurnId: string | undefined;
+      const content = (record.pendingContext ?? "") + input.content;
+      let modelId = record.modelId;
+      if (record.engine === "harness")
+        modelId = String(this.#harnessSelection(record).model);
+      if (!modelId || ["codex-native", "kimi-native"].includes(modelId)) {
+        const models = await this.#bridges
+          .get(record.engine as "codex" | "kimi")!
+          .listModels();
+        modelId = models.find((model) => model.isDefault)?.id;
+      }
+      if (!modelId) throw new Error("quota_not_configured");
+      // Kimi presents a provider-qualified model ID, whereas the gateway
+      // records the model name accepted by its OpenAI-compatible endpoint.
+      if (record.engine === "kimi")
+        modelId = modelId.replace(/^kimi-code\//, "");
+      const activeTurn =
+        steering && record.engine !== "kimi"
+          ? record.events.findLast((event) => event.type === "turn.started")
+              ?.turnId
+          : undefined;
+      quotaRunId = await this.#conversationQuota.begin(
+        id,
+        modelId,
+        content,
+        typeof activeTurn === "string" ? activeTurn : undefined,
+        record.engine,
+      );
+      if (this.#sessions.get(id) !== record) {
+        await this.#conversationQuota.release(quotaRunId);
+        return;
+      }
+      if (record.handle) {
+        record.handle.agent[steering ? "steer" : "followup"](
+          createUserMessage({
+            content: [{ type: "text", text: content }],
+            source: { kind: "user" },
+          }),
+        );
+      } else {
+        nativeTurnId =
+          await record.native![steering ? "steer" : "send"](content);
+      }
+      if (this.#sessions.get(id) !== record) {
+        await this.#conversationQuota.release(quotaRunId);
+        return;
+      }
+      record.pendingContext = undefined;
+      record.updatedAt = new Date().toISOString();
+      this.#messages.append({
+        id: input.messageId,
+        sessionId: id,
+        role: "user",
+        text: input.displayContent ?? input.content,
+        createdAt: record.updatedAt,
+        ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
+      });
+      if (record.queue?.includes(input)) {
+        record.queue = record.queue.filter((row) => row !== input);
+        this.#queueChanged(id, record);
+      } else this.#persist(id, record);
+      this.#publish(record, {
+        type: "message.created",
+        sessionId: id,
+        eventId: `${id}-input-${record.nextEventSequence++}`,
+        occurredAt: record.updatedAt,
+      });
+      completedBeforeAcknowledgement =
+        nativeTurnId !== undefined &&
+        record.lastTurn?.id === nativeTurnId &&
+        record.lastTurn.status === "completed";
+    } catch (error) {
+      if (quotaRunId)
+        await this.#conversationQuota
+          .release(quotaRunId)
+          .catch((settlementError) =>
+            console.error(
+              "conversation quota settlement failed",
+              settlementError,
+            ),
+          );
+      if (record.activity === reservedActivity)
+        record.activity = previousActivity ?? { state: "idle" };
+      if (
+        error instanceof Error &&
+        (error.message.startsWith("quota_") ||
+          error.message.startsWith("platform_quota_"))
+      )
+        throw error;
+      throw new Error(
+        steering ? "engine_steer_rejected" : "engine_turn_rejected",
+      );
+    } finally {
+      record.inputPending = false;
+      if (completedBeforeAcknowledgement)
+        setTimeout(() => void this.#drainQueue(id, record), 0);
+    }
+  }
+
   #publish(record: SessionRecord, event: PublicEvent): void {
+    if (event.type === "turn.started" && typeof event.turnId === "string")
+      this.#conversationQuota.started(event.sessionId, event.turnId);
+    if (
+      ["turn.completed", "turn.failed", "turn.cancelled"].includes(
+        event.type,
+      ) &&
+      typeof event.turnId === "string"
+    ) {
+      void this.#conversationQuota
+        .ended(event.sessionId, event.turnId)
+        .catch((error) =>
+          console.error("conversation quota settlement failed", error),
+        );
+    }
+    // Late engine callbacks may settle quota, but cannot restore deleted data.
+    if (this.#sessions.get(event.sessionId) !== record) return;
+    this.#openNativeLog(event.sessionId, record);
+    if (this.#nativeLog?.get(event.sessionId)) {
+      this.#nativeLog.appendEvent(event.sessionId, event as NativeSessionEvent);
+    }
+    // Activity must outlive the bounded replay log during long streamed turns.
+    if (activityEventTypes.has(event.type))
+      record.activity = sessionActivity([event]);
+    if (
+      ["turn.completed", "turn.failed", "turn.cancelled"].includes(event.type)
+    ) {
+      record.lastTurn = {
+        id: typeof event.turnId === "string" ? event.turnId : event.eventId,
+        completedAt: event.occurredAt,
+        status: event.type.slice(5) as "completed" | "failed" | "cancelled",
+      };
+      record.updatedAt = event.occurredAt;
+      this.#persist(event.sessionId, record);
+    }
+    if (event.type === "turn.failed" && event.code === "codex_disconnected")
+      record.native = undefined;
+    if (event.type === "turn.completed")
+      setTimeout(() => void this.#drainQueue(event.sessionId, record), 0);
     record.events.push(event);
+    if (event.type === "turn.completed" && !record.internal) {
+      const turnStart = record.events.findLastIndex(
+        (row) => row.type === "turn.started",
+      );
+      const turnEvents = record.events.slice(Math.max(0, turnStart));
+      const reply = turnEvents.findLast(
+        (row) => row.type === "assistant.completed",
+      )?.content;
+      void this.#completionNotifications
+        .complete({
+          sessionId: event.sessionId,
+          turnId:
+            typeof event.turnId === "string" ? event.turnId : event.eventId,
+          title: record.title,
+          reply: typeof reply === "string" ? reply : "",
+          workspaceId: record.workspaceId,
+          startedAt: turnEvents[0]?.occurredAt ?? event.occurredAt,
+        })
+        .catch((error) =>
+          console.error("completion notification failed", error),
+        );
+    }
     if (record.events.length > 2_000) record.events.shift();
     if (
       event.type === "assistant.completed" &&
       typeof event.content === "string"
     ) {
       this.#messages.append({
-        id: typeof event.turnId === "string" ? event.turnId : event.eventId,
+        id:
+          typeof event.messageId === "string"
+            ? event.messageId
+            : typeof event.turnId === "string"
+              ? event.turnId
+              : event.eventId,
         sessionId: event.sessionId,
         role: "assistant",
         text: event.content,
@@ -1617,7 +2703,9 @@ export class RuntimeController
         id: `${typeof event.turnId === "string" ? event.turnId : event.eventId}-failed`,
         sessionId: event.sessionId,
         role: "assistant",
-        text: `I couldn't finish that request: ${event.message}`,
+        text: /high demand|overloaded|server.*busy/i.test(event.message)
+          ? "模型服务当前繁忙，本次请求未完成。请稍后重试，或在模型设置中选择其他模型。"
+          : `本次请求未完成：${event.message}`,
         createdAt: event.occurredAt,
       });
     }
@@ -1644,7 +2732,7 @@ export class RuntimeController
     const resolvedSkills = this.#resolvedSkills(record.preset);
     this.#validateSkillCompatibility(record.engine, resolvedSkills);
     if (record.engine === "harness") {
-      const selection = this.#ctx.agentDefaultModel.currentSelection();
+      const selection = this.#harnessSelection(record);
       try {
         record.handle = await this.#ctx.agents.resume({
           resumeSessionId: SessionId(record.nativeId),
@@ -1676,24 +2764,78 @@ export class RuntimeController
           this.#engineWorkspace(record),
           mcpServers,
           resolvedSkills,
+          record,
         );
       }
       return;
     }
     const bridge = this.#bridges.get(record.engine);
     if (bridge === undefined) throw new Error("engine unavailable");
-    record.native = await bridge.resume(
-      record.nativeId,
-      this.#engineWorkspace(record),
-      (event) => this.#publish(record, this.#nativeEvent(id, record, event)),
-      {
-        mcpServers,
-        ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
-        ...(record.thinkingEffort === undefined
-          ? {}
-          : { thinkingEffort: record.thinkingEffort }),
-      },
-    );
+    const onEvent = (event: BridgeEvent) =>
+      this.#publish(record, this.#nativeEvent(id, record, event));
+    const options = {
+      mcpServers,
+      requestApproval: (approval: NativeApprovalRequest) =>
+        // Internal shared tasks have no interactive approval surface.
+        record.internal
+          ? Promise.resolve("cancel" as const)
+          : this.#approvals.requestNative(id, approval),
+      ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
+      ...(record.thinkingEffort === undefined
+        ? {}
+        : { thinkingEffort: record.thinkingEffort }),
+      ...(record.permissionMode === undefined
+        ? {}
+        : { permissionMode: record.permissionMode }),
+    };
+    let resumed: BridgeSession;
+    try {
+      resumed =
+        record.nativeId === id
+          ? await bridge.create(this.#engineWorkspace(record), onEvent, options)
+          : await bridge.resume(
+              record.nativeId,
+              this.#engineWorkspace(record),
+              onEvent,
+              options,
+            );
+    } catch (error) {
+      const session = this.#nativeLog?.get(id);
+      // Codex does not persist an unused thread. After unsubscribe/restart,
+      // only a proven original blank session can acquire a replacement thread.
+      // Never replace a missing transcript or inherited fork context.
+      if (
+        record.engine !== "codex" ||
+        !(error instanceof Error) ||
+        error.message !== `no rollout found for thread id ${record.nativeId}` ||
+        !session ||
+        record.parentSessionId ||
+        session.header.parentSession ||
+        record.lastTurn ||
+        this.#messages.list(id).length > 0 ||
+        session.events.some(
+          (event) =>
+            event.type === "turn/start" ||
+            event.type === "user/message" ||
+            event.type === "workagent/native/message",
+        )
+      )
+        throw error;
+      if (this.#sessions.get(id) !== record)
+        throw new Error("session_not_found");
+      resumed = await bridge.create(
+        this.#engineWorkspace(record),
+        onEvent,
+        options,
+      );
+    }
+    if (this.#sessions.get(id) !== record) {
+      await resumed.close();
+      throw new Error("session_not_found");
+    }
+    record.native = resumed;
+    record.nativeId = record.native.nativeId;
+    this.#persist(id, record);
   }
 
   #resolvedMcpServers(binding: PresetBinding): readonly ResolvedMcpServer[] {
@@ -1778,6 +2920,9 @@ export class RuntimeController
   }
 
   #persist(id: string, record: SessionRecord): void {
+    // Pending inputs and queue failures may finish after deletion.
+    if (this.#sessions.get(id) !== record) return;
+    this.#openNativeLog(id, record);
     this.#index.set({
       id,
       nativeId: record.nativeId,
@@ -1794,8 +2939,18 @@ export class RuntimeController
       ...(record.thinkingEffort === undefined
         ? {}
         : { thinkingEffort: record.thinkingEffort }),
+      ...(record.permissionMode === undefined
+        ? {}
+        : { permissionMode: record.permissionMode }),
       preset: record.preset,
+      ...branchMetadata(record),
+      lastTurn: record.lastTurn,
+      ...(record.queue === undefined ? {} : { queue: record.queue }),
+      ...(record.pendingContext === undefined
+        ? {}
+        : { pendingContext: record.pendingContext }),
     });
+    this.#publishNativeMetadata(id, record);
   }
 
   #engineWorkspace(record: SessionRecord): string {
@@ -1809,8 +2964,9 @@ export class RuntimeController
     workspace: string,
     mcpServers: readonly ResolvedMcpServer[],
     skills: readonly ResolvedSkill[],
+    record: Pick<SessionRecord, "modelId" | "thinkingEffort">,
   ): Promise<AgentHandle> {
-    const selection = this.#ctx.agentDefaultModel.currentSelection();
+    const selection = this.#harnessSelection(record);
     return this.#ctx.agents.create({
       sessionId: SessionId(id),
       meta: { cwd: workspace },
@@ -1825,5 +2981,18 @@ export class RuntimeController
         this.#installHarnessSkills(agentContext, skills);
       },
     });
+  }
+
+  #harnessSelection(record: Pick<SessionRecord, "modelId" | "thinkingEffort">) {
+    const current = this.#ctx.agentDefaultModel.currentSelection();
+    return {
+      ...current,
+      ...(record.modelId && record.modelId !== "harness-default"
+        ? { model: record.modelId }
+        : {}),
+      ...(record.thinkingEffort
+        ? { reasoningEffort: ReasoningEffortId(record.thinkingEffort) }
+        : {}),
+    };
   }
 }

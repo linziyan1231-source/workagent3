@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium, request } from "playwright";
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,9 +15,9 @@ export function requireSmokeEnvironment() {
     );
 }
 
-export async function withPage(run) {
+export async function withPage(run, launchOptions = {}) {
   requireSmokeEnvironment();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage();
     await login(page);
@@ -60,8 +60,13 @@ export async function json(page, path, init = {}) {
 
 export async function openSettingsSection(page, name) {
   await page.getByRole("button", { name: /settings|设置/i }).click();
-  await page.getByRole("button", { name, exact: true }).click();
-  return page.locator(`[data-workagent-section="${name}"]`);
+  await page
+    .getByRole("dialog", { name: /settings|设置/i })
+    .getByRole("button", { name, exact: true })
+    .click();
+  return name === "消息渠道"
+    ? page.locator(".ima-account-page")
+    : page.locator(`[data-workagent-section="${name}"]`);
 }
 
 export const uniqueName = (prefix) => `${prefix}-${Date.now()}`;
@@ -101,7 +106,7 @@ export async function killSmokeProcess(pid) {
 }
 
 export async function restartSmokeRuntime(page) {
-  await json(page, "/api/portal/admin/users/set-limits", {
+  await adminJson(page, "/api/portal/admin/users/set-limits", {
     method: "POST",
     body: JSON.stringify({
       username: smokeUsername,
@@ -112,6 +117,32 @@ export async function restartSmokeRuntime(page) {
       },
     }),
   });
+}
+
+export async function adminJson(page, path, init = {}) {
+  const username = process.env.WORKAGENT_SMOKE_ADMIN_USERNAME;
+  const password = process.env.WORKAGENT_SMOKE_ADMIN_PASSWORD;
+  if (!username && !password) return json(page, path, init);
+  if (!username || !password)
+    throw new Error("Both WORKAGENT_SMOKE_ADMIN credentials are required");
+  const context = await request.newContext({ baseURL });
+  try {
+    const login = await context.post("/api/auth/login", {
+      data: { username, password },
+      headers: { Origin: new URL(baseURL).origin },
+    });
+    if (!login.ok()) throw new Error(`admin login returned ${login.status()}`);
+    const response = await context.fetch(path, {
+      method: init.method || "GET",
+      data: init.body === undefined ? undefined : JSON.parse(init.body),
+      headers: { Origin: new URL(baseURL).origin },
+    });
+    if (!response.ok())
+      throw new Error(`admin ${path} returned ${response.status()}`);
+    return response.status() === 204 ? undefined : response.json();
+  } finally {
+    await context.dispose();
+  }
 }
 
 export async function openDshAfterRestart(page, path) {

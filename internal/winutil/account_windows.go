@@ -41,8 +41,8 @@ type userInfo1 struct {
 type userInfo1003 struct{ Password *uint16 }
 type localGroupUsersInfo0 struct{ Name *uint16 }
 
-// EnsureLocalStandardAccount creates a local least-privilege account or
-// rotates the password of an existing standard account.
+// EnsureLocalStandardAccount creates or validates a managed standard account.
+// Existing account passwords are changed only by explicit maintenance.
 func EnsureLocalStandardAccount(username string, password []byte) (sid, canonical string, err error) {
 	if err := ValidateLocalUsername(username); err != nil {
 		return "", "", err
@@ -71,9 +71,6 @@ func EnsureLocalStandardAccount(username string, password []byte) (sid, canonica
 		} else if admin {
 			return "", "", errors.New("Windows UserHost account belongs to Administrators")
 		}
-		if err := setLocalPassword(username, password); err != nil {
-			return "", "", err
-		}
 		return sid, canonical, nil
 	}
 	name, err := windows.UTF16PtrFromString(username)
@@ -93,6 +90,17 @@ func EnsureLocalStandardAccount(username string, password []byte) (sid, canonica
 		return "", "", fmt.Errorf("create Windows standard account: Windows error %d (parameter %d)", status, parameterError)
 	}
 	return LookupAccount(computer + `\` + username)
+}
+
+func ResetManagedPassword(username, expectedSID string, password []byte) error {
+	sid, _, err := EnsureLocalStandardAccount(username, password)
+	if err != nil {
+		return err
+	}
+	if sid != expectedSID {
+		return errors.New("Windows account SID mismatch")
+	}
+	return setLocalPassword(username, password)
 }
 
 func localAccountState(username string) (exists bool, comment string, flags uint32, err error) {

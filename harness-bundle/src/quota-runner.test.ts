@@ -81,6 +81,7 @@ describe("QuotaAutomationRunner", () => {
     expect(order).toEqual(["reserve", "execute", "settle"]);
     expect(reserve).toHaveBeenCalledWith({
       runId: request.automationRunId,
+      engine: request.definition.engine,
       modelId: "codex-model-1",
       estimatedUnits: estimatedAutomationUnits(request.definition.input),
     });
@@ -176,6 +177,7 @@ describe("QuotaTeamRunner", () => {
     });
     expect(reserve).toHaveBeenCalledWith({
       runId: teamRequest.taskId,
+      engine: teamRequest.engine,
       modelId: "codex-model-1",
       estimatedUnits: estimatedAutomationUnits(teamRequest.input),
     });
@@ -219,6 +221,7 @@ describe("QuotaTeamRunner", () => {
 
     expect(reserve).toHaveBeenCalledWith({
       runId: teamRequest.taskId,
+      engine: teamRequest.engine,
       modelId: "codex-model-1",
       estimatedUnits: estimatedAutomationUnits(teamRequest.input),
     });
@@ -299,6 +302,7 @@ describe("QuotaSharedTurnRunner", () => {
     expect(order).toEqual(["reserve", "execute", "settle"]);
     expect(reserve).toHaveBeenCalledWith({
       runId: sharedRequest.runId,
+      engine: sharedRequest.engine,
       modelId: "gpt-5",
       estimatedUnits: sharedUnits,
       payerSid: sharedRequest.payerSid,

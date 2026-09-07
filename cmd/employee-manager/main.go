@@ -31,6 +31,9 @@ import (
 )
 
 type managerConfig struct {
+	CredentialRoot       string              `json:"credentialRoot,omitempty"`
+	LauncherExecutable   string              `json:"launcherExecutable,omitempty"`
+	LaunchManifestRoot   string              `json:"launchManifestRoot,omitempty"`
 	DatabasePath         string              `json:"databasePath"`
 	DataRootBase         string              `json:"dataRootBase"`
 	UserHostExecutable   string              `json:"userHostExecutable"`
@@ -74,9 +77,11 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "", "absolute Employee Manager configuration path")
-	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, reset-password, repair, rename-windows, set-limits, offboard-retain, offboard-delete, grant-admin, or revoke-admin")
+	action := flag.String("action", "add", "employee lifecycle action: add, enable, disable, restart, reset-password, repair, rename-windows, set-limits, offboard-retain, offboard-delete, grant-admin, revoke-admin; offline SYSTEM maintenance: adopt-windows-credential, rotate-windows-credential, backup-windows-credential, restore-windows-credential")
 	username := flag.String("username", "", "Windows and Portal username")
 	newWindowsUsername := flag.String("new-windows-username", "", "new local Windows username for rename-windows")
+	sourcePID := flag.Uint("source-process-id", 0, "existing employee process for one-time credential adoption")
+	recoveryFile := flag.String("recovery-file", "", "new encrypted Windows credential recovery file")
 	deleteConfirmation := flag.String("confirm-delete", "", "exact DELETE <username> confirmation for offboard-delete")
 	memoryBytes := flag.Uint64("memory-bytes", 0, "Job Object memory limit for set-limits")
 	cpuPercent := flag.Uint("cpu-percent", 0, "Job Object CPU percent for set-limits")
@@ -102,7 +107,7 @@ func run() error {
 		}
 	}
 	var password []byte
-	if *listen == "" && (*action == "add" || *action == "reset-password" || *action == "repair" || *action == "rename-windows") {
+	if *listen == "" && (*action == "add" || *action == "reset-password" || *action == "backup-windows-credential" || *action == "restore-windows-credential") {
 		password, err = io.ReadAll(io.LimitReader(os.Stdin, 257))
 		if err != nil {
 			return fmt.Errorf("read Portal password: %w", err)
@@ -178,6 +183,7 @@ func run() error {
 		harnessModel, modelGatewayBaseURL = config.ModelGateway.CodexModel, config.ModelGateway.BaseURL
 	}
 	platform, err := employee.NewWindowsPlatform(employee.WindowsPlatformConfig{
+		CredentialRoot: config.CredentialRoot, LauncherExecutable: config.LauncherExecutable, LaunchManifestRoot: config.LaunchManifestRoot,
 		DataRootBase: config.DataRootBase, UserHostExecutable: config.UserHostExecutable,
 		HarnessCommand: config.HarnessCommand, HarnessEntrypoint: config.HarnessEntrypoint,
 		CodexCommand: config.CodexCommand,
@@ -204,7 +210,16 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return serveManager(ctx, *listen, *tokenFile, &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore})
+		jobs, err := employeemanager.OpenJobStore(filepath.Join(filepath.Dir(config.DatabasePath), "employee-jobs.db"))
+		if err != nil {
+			return err
+		}
+		defer jobs.Close()
+		service := &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore, Jobs: jobs}
+		if err := service.RestoreJobs(); err != nil {
+			return err
+		}
+		return serveManager(ctx, *listen, *tokenFile, service)
 	}
 	var user store.User
 	switch *action {
@@ -224,6 +239,35 @@ func run() error {
 		user, err = lifecycle.OffboardRetain(ctx, *username)
 	case "repair":
 		user, err = lifecycle.Repair(ctx, *username, password)
+	case "restart":
+		err = lifecycle.Restart(ctx, *username)
+		if err == nil {
+			user, err = data.UserByUsername(ctx, *username)
+		}
+	case "adopt-windows-credential", "rotate-windows-credential":
+		user, err = data.UserByUsername(ctx, *username)
+		if err == nil {
+			err = platform.MaintainWindowsCredential(ctx, user, uint32(*sourcePID), *action == "adopt-windows-credential")
+		}
+	case "inspect-windows-credential":
+		user, err = data.UserByUsername(ctx, *username)
+		if err == nil {
+			var count int
+			count, err = platform.InspectWindowsCredentialMigration(ctx, user, uint32(*sourcePID))
+			if err == nil {
+				fmt.Printf("Credential migration preflight passed: %d broker records; no external encrypted material found\n", count)
+			}
+		}
+	case "backup-windows-credential":
+		user, err = data.UserByUsername(ctx, *username)
+		if err == nil {
+			err = platform.BackupWindowsCredential(user, password, *recoveryFile)
+		}
+	case "restore-windows-credential":
+		user, err = data.UserByUsername(ctx, *username)
+		if err == nil {
+			err = platform.RestoreWindowsCredential(user, password, *recoveryFile)
+		}
 	case "rename-windows":
 		user, err = lifecycle.RenameWindowsAccount(ctx, *username, *newWindowsUsername, password)
 	case "offboard-delete":
@@ -250,14 +294,20 @@ var currentProcessSID = winutil.CurrentSID
 // Employee Manager service, which runs as SYSTEM). The remaining actions
 // (reset-password, grant-admin, revoke-admin) never touch scheduled tasks.
 var taskControlActions = map[string]bool{
-	"add":             true,
-	"enable":          true,
-	"disable":         true,
-	"repair":          true,
-	"rename-windows":  true,
-	"set-limits":      true,
-	"offboard-retain": true,
-	"offboard-delete": true,
+	"inspect-windows-credential": true,
+	"restart":                    true,
+	"adopt-windows-credential":   true,
+	"rotate-windows-credential":  true,
+	"backup-windows-credential":  true,
+	"restore-windows-credential": true,
+	"add":                        true,
+	"enable":                     true,
+	"disable":                    true,
+	"repair":                     true,
+	"rename-windows":             true,
+	"set-limits":                 true,
+	"offboard-retain":            true,
+	"offboard-delete":            true,
 }
 
 // requireTaskControlIdentity fails fast — before any state is changed — when a
@@ -283,17 +333,22 @@ func requireTaskControlIdentity(action string) error {
 // vocabulary. CLI invocations are attributed to the subsystem itself; the
 // Portal-driven path records the acting administrator instead.
 var cliAuditActions = map[string]string{
-	"add":             audit.ActionEmployeeProvision,
-	"enable":          audit.ActionEmployeeEnable,
-	"disable":         audit.ActionEmployeeDisable,
-	"reset-password":  audit.ActionEmployeePasswordReset,
-	"set-limits":      audit.ActionEmployeeLimitsUpdate,
-	"offboard-retain": audit.ActionEmployeeOffboardRetain,
-	"repair":          audit.ActionEmployeeRepair,
-	"rename-windows":  audit.ActionEmployeeRename,
-	"offboard-delete": audit.ActionEmployeeOffboardDelete,
-	"grant-admin":     audit.ActionEmployeeAdminGrant,
-	"revoke-admin":    audit.ActionEmployeeAdminRevoke,
+	"restart":                    "employee.restart",
+	"adopt-windows-credential":   "employee.windows_credential.adopt",
+	"rotate-windows-credential":  "employee.windows_credential.rotate",
+	"backup-windows-credential":  "employee.windows_credential.backup",
+	"restore-windows-credential": "employee.windows_credential.restore",
+	"add":                        audit.ActionEmployeeProvision,
+	"enable":                     audit.ActionEmployeeEnable,
+	"disable":                    audit.ActionEmployeeDisable,
+	"reset-password":             audit.ActionEmployeePasswordReset,
+	"set-limits":                 audit.ActionEmployeeLimitsUpdate,
+	"offboard-retain":            audit.ActionEmployeeOffboardRetain,
+	"repair":                     audit.ActionEmployeeRepair,
+	"rename-windows":             audit.ActionEmployeeRename,
+	"offboard-delete":            audit.ActionEmployeeOffboardDelete,
+	"grant-admin":                audit.ActionEmployeeAdminGrant,
+	"revoke-admin":               audit.ActionEmployeeAdminRevoke,
 }
 
 // recordCLIAudit writes the terminal business audit event for a CLI lifecycle
@@ -308,7 +363,7 @@ func recordCLIAudit(ctx context.Context, sink audit.Sink, action, username strin
 
 // usageDrainInterval paces the gateway usage queue consumer. The queue retains
 // records only briefly upstream, so the interval stays well under a minute.
-const usageDrainInterval = 30 * time.Second
+const usageDrainInterval = time.Second
 
 // runUsageDrain is the single consumer of the gateway usage queue (the
 // endpoint pops records on read). It runs for the lifetime of the service
@@ -378,7 +433,7 @@ func loadManagerConfig(path string) (managerConfig, error) {
 	if err := decoder.Decode(&config); err != nil {
 		return managerConfig{}, fmt.Errorf("decode Employee Manager configuration: %w", err)
 	}
-	for _, path := range []string{config.DatabasePath, config.DataRootBase, config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.ManagedSkillsRoot} {
+	for _, path := range []string{config.DatabasePath, config.DataRootBase, config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.ManagedSkillsRoot, config.CredentialRoot, config.LauncherExecutable, config.LaunchManifestRoot} {
 		if !filepath.IsAbs(path) {
 			return managerConfig{}, errors.New("Employee Manager paths must be absolute")
 		}

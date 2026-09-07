@@ -22,6 +22,18 @@ type fakeEmployeeManagement struct {
 	actionValue     string
 }
 
+func (f *fakeEmployeeManagement) StartMaintenance(ctx context.Context, action, username, newName string) (ProvisionJob, error) {
+	switch action {
+	case "repair":
+		f.Repair(ctx, username, nil)
+	case "restart":
+		f.Restart(ctx, username)
+	case "rename-windows":
+		f.RenameWindowsAccount(ctx, username, newName, nil)
+	}
+	return ProvisionJob{ID: "maintenance-test", Username: username, Status: "running"}, nil
+}
+
 func TestAdministratorExtendedEmployeeActionsUsePort(t *testing.T) {
 	data, err := store.Open(":memory:")
 	if err != nil {
@@ -39,8 +51,9 @@ func TestAdministratorExtendedEmployeeActionsUsePort(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"repair", `{"username":"alice","windows_password":"secret"}`, "secret"},
-		{"rename-windows", `{"username":"alice","new_windows_username":"alice2","windows_password":"secret"}`, "alice2:secret"},
+		{"repair", `{"username":"alice"}`, ""},
+		{"restart", `{"username":"alice"}`, ""},
+		{"rename-windows", `{"username":"alice","new_windows_username":"alice2"}`, "alice2:"},
 		{"set-limits", `{"username":"alice","limits":{"memory_bytes":536870912,"cpu_percent":50,"active_processes":8}}`, "536870912"},
 		{"offboard-retain", `{"username":"alice"}`, ""},
 		{"offboard-delete", `{"username":"alice","confirmation":"DELETE alice"}`, "DELETE alice"},
@@ -56,6 +69,14 @@ func TestAdministratorExtendedEmployeeActionsUsePort(t *testing.T) {
 				t.Fatalf("action was not forwarded: status=%d port=%#v body=%s", response.Code, port, response.Body.String())
 			}
 		})
+	}
+	requestWithPassword := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/admin/users/repair", strings.NewReader(`{"username":"alice","windows_password":"must-not-reset"}`))
+	requestWithPassword.Header.Set("Origin", "http://portal.test")
+	requestWithPassword.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: "admin-session"})
+	rejected := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rejected, requestWithPassword)
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatal("repair accepted an explicit Windows password")
 	}
 
 	request := httptest.NewRequest(http.MethodPost, "http://portal.test/api/portal/admin/users/offboard-delete", strings.NewReader(`{"username":"alice","confirmation":"alice"}`))
@@ -85,6 +106,12 @@ func (*fakeEmployeeManagement) SetEnabled(context.Context, string, bool) error  
 func (*fakeEmployeeManagement) ResetPassword(context.Context, string, []byte) error { return nil }
 func (f *fakeEmployeeManagement) Repair(_ context.Context, username string, password []byte) error {
 	f.action, f.actionUsername, f.actionValue = "repair", username, string(password)
+	return nil
+}
+func (f *fakeEmployeeManagement) Restart(_ context.Context, username string) error {
+	f.action = "restart"
+	f.actionUsername = username
+	f.actionValue = ""
 	return nil
 }
 func (f *fakeEmployeeManagement) RenameWindowsAccount(_ context.Context, username, newWindowsUsername string, password []byte) error {

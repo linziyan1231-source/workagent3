@@ -101,8 +101,8 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 }
 
 // GatewayUsage sums the drained authoritative gateway records for one employee
-// over the current daily and weekly windows. Failed requests consumed no
-// upstream quota and are excluded.
+// over the current daily and weekly windows. Failed requests with reported
+// tokens still consumed quota; zero-token failures add no consumption.
 func (s *Store) GatewayUsage(ctx context.Context, sid string, at time.Time) (contracts.GatewayUsage, error) {
 	if err := validateSID(sid); err != nil {
 		return contracts.GatewayUsage{}, err
@@ -118,19 +118,19 @@ func (s *Store) GatewayUsage(ctx context.Context, sid string, at time.Time) (con
 	dayStart, _ := time.Parse("2006-01-02", usage.DailyPeriodKey)
 	weekStart := isoWeekStart(at)
 	if err := s.db.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(total_tokens), 0) FROM quota_gateway_usage
-WHERE sid = ? AND failed = 0 AND occurred_at >= ?`, sid, dayStart.Unix()).Scan(&usage.DailyTokens); err != nil {
+SELECT COALESCE(SUM(total_tokens), 0) FROM quota_gateway_usage g LEFT JOIN quota_reservations r ON r.run_id=g.matched_run_id
+WHERE COALESCE(r.sid,g.sid) = ? AND (failed = 0 OR total_tokens > 0) AND occurred_at >= ? AND occurred_at <= ?`, sid, dayStart.Unix(), at.Unix()).Scan(&usage.DailyTokens); err != nil {
 		return contracts.GatewayUsage{}, fmt.Errorf("sum daily gateway usage: %w", err)
 	}
 	if err := s.db.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(total_tokens), 0) FROM quota_gateway_usage
-WHERE sid = ? AND failed = 0 AND occurred_at >= ?`, sid, weekStart.Unix()).Scan(&usage.WeeklyTokens); err != nil {
+SELECT COALESCE(SUM(total_tokens), 0) FROM quota_gateway_usage g LEFT JOIN quota_reservations r ON r.run_id=g.matched_run_id
+WHERE COALESCE(r.sid,g.sid) = ? AND (failed = 0 OR total_tokens > 0) AND occurred_at >= ? AND occurred_at <= ?`, sid, weekStart.Unix(), at.Unix()).Scan(&usage.WeeklyTokens); err != nil {
 		return contracts.GatewayUsage{}, fmt.Errorf("sum weekly gateway usage: %w", err)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT model, COALESCE(SUM(total_tokens), 0), COUNT(*) FROM quota_gateway_usage
-WHERE sid = ? AND failed = 0 AND occurred_at >= ?
-GROUP BY model ORDER BY model`, sid, dayStart.Unix())
+SELECT model, COALESCE(SUM(total_tokens), 0), COUNT(*) FROM quota_gateway_usage g LEFT JOIN quota_reservations r ON r.run_id=g.matched_run_id
+WHERE COALESCE(r.sid,g.sid) = ? AND (failed = 0 OR total_tokens > 0) AND occurred_at >= ? AND occurred_at <= ?
+GROUP BY model ORDER BY model`, sid, dayStart.Unix(), at.Unix())
 	if err != nil {
 		return contracts.GatewayUsage{}, fmt.Errorf("group daily gateway usage: %w", err)
 	}
@@ -162,6 +162,13 @@ SELECT created_at FROM quota_reservations WHERE run_id = ?`, reservation.RunID).
 	candidates := s.modelCandidates(ctx, reservation.SID, reservation.ModelID)
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(candidates)), ", ")
 	arguments := []any{reservation.SID, time.Unix(createdAt, 0).Add(-gatewayMatchSkew).Unix(), s.now().Add(gatewayMatchSkew).Unix()}
+	if s.gatewayAccounting {
+		var owner string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT sid FROM quota_gateway_run_owners WHERE run_id=?),?)`, reservation.RunID, reservation.SID).Scan(&owner); err != nil {
+			return 0, false, err
+		}
+		arguments = []any{owner, createdAt, s.now().Unix()}
+	}
 	// The candidate list appears twice: once for model, once for alias.
 	for i := 0; i < 2; i++ {
 		for _, candidate := range candidates {

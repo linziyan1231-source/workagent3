@@ -20,6 +20,7 @@ type runtimeReserveInput struct {
 	SID            string `json:"sid"`
 	ModelID        string `json:"modelId"`
 	EstimatedUnits int64  `json:"estimatedUnits"`
+	Engine         string `json:"engine,omitempty"`
 	// PayerSID scopes a shared-run reservation to the frozen payer (the member
 	// who mentioned the assistant) while the caller authenticates as the
 	// runtime owner SID.
@@ -73,9 +74,13 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 				return
 			}
 			reservation, err := store.ReserveForSID(request.Context(), runtimePayer(input.SID, input.PayerSID), ReserveRequest{
-				RunID: input.RunID, SID: runtimePayer(input.SID, input.PayerSID), ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits,
+				RunID: input.RunID, SID: runtimePayer(input.SID, input.PayerSID), ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits, Engine: input.Engine,
 			})
 			if err != nil {
+				writeQuotaError(writer, err)
+				return
+			}
+			if _, err := store.db.ExecContext(request.Context(), `INSERT OR IGNORE INTO quota_gateway_run_owners(run_id,sid) VALUES(?,?)`, input.RunID, input.SID); err != nil {
 				writeQuotaError(writer, err)
 				return
 			}
@@ -109,6 +114,10 @@ func decodeRuntimeInput(request *http.Request, target any) bool {
 
 func writeQuotaError(writer http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrUsageStale):
+		writeRuntimeError(writer, http.StatusServiceUnavailable, "quota_usage_stale")
+	case errors.Is(err, ErrUsagePending):
+		writeRuntimeError(writer, http.StatusConflict, "quota_usage_pending")
 	case errors.Is(err, ErrExceeded):
 		writeRuntimeError(writer, http.StatusTooManyRequests, "quota_exceeded")
 	case errors.Is(err, ErrModelUnauthorized):

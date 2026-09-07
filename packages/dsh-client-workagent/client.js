@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const pluginScript = document.currentScript?.src;
     const apiRoot = "/api/runtime/v1";
+    const maxUploadBytes = 1024 * 1024 * 1024;
 
     async function request(path, init) {
       const response = await fetch(path, {
@@ -36,6 +37,88 @@ window.__ModuleLoader__.load({
         document.head.append(link);
       }
       document.title = "WorkAgent";
+      document.documentElement.lang = "zh-CN";
+      applyFontSize(readFontSize());
+      const localizeShell = () => {
+        if (!globalThis.document) return;
+        for (const button of document.querySelectorAll(".VOzbGW_navCell")) {
+          if (button.textContent.trim() === "General")
+            button.textContent = "通用设置";
+          if (["Plugins", "插件"].includes(button.textContent.trim()))
+            button.hidden = true;
+        }
+        const placeholders = {
+          选择一个工作区开始: "发消息，描述你想完成的任务…",
+        };
+        const labels = {
+          "New Session": "新建会话",
+          新会话: "新建会话",
+          Settings: "设置",
+          "Workspace Write": "项目内读写",
+          "Read Only": "只读",
+          "Read only": "只读",
+          "Full Access": "完全访问",
+          "Full access": "完全访问",
+          探索未至之境: "今天有什么安排？",
+          "Into the Unknown": "今天有什么安排？",
+        };
+        const brandButton = globalThis.document.querySelector(
+          ".hHd-Xa_brand[aria-label='新建会话']",
+        );
+        if (brandButton) {
+          brandButton.setAttribute("aria-label", "返回首页");
+          brandButton.setAttribute("title", "返回首页");
+        }
+        const bindHomeNavigation = (button) => {
+          if (!button || button.dataset.workagentHomeNavigation) return;
+          button.dataset.workagentHomeNavigation = "true";
+          button.addEventListener(
+            "click",
+            (event) => {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              location.assign("/?frontend=dsh");
+            },
+            true,
+          );
+        };
+        bindHomeNavigation(brandButton);
+        bindHomeNavigation(
+          globalThis.document.querySelector(".hHd-Xa_newSession"),
+        );
+        for (const field of globalThis.document.querySelectorAll(
+          "input, textarea",
+        )) {
+          const replacement = placeholders[field.placeholder];
+          if (replacement) field.placeholder = replacement;
+        }
+        for (const button of globalThis.document.querySelectorAll("button")) {
+          if (
+            ["Open Config", "打开配置文件"].includes(button.textContent.trim())
+          )
+            button.remove();
+        }
+        const walker = globalThis.document.createTreeWalker(
+          globalThis.document.body,
+          4,
+        );
+        let node;
+        while ((node = walker.nextNode())) {
+          const value = node.data.trim();
+          if (labels[value])
+            node.data = node.data.replace(value, labels[value]);
+        }
+      };
+      localizeShell();
+      if (!globalThis.__workagentLocalizationObserver) {
+        globalThis.__workagentLocalizationObserver = new MutationObserver(
+          localizeShell,
+        );
+        globalThis.__workagentLocalizationObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+        });
+      }
     }
 
     function useResource(endpoint, select = (value) => value) {
@@ -45,8 +128,10 @@ window.__ModuleLoader__.load({
         error: "",
       });
       const load = React.useCallback(
-        async (signal) => {
-          setState((value) => ({ ...value, loading: true, error: "" }));
+        async (signal, quiet = false) => {
+          if (!endpoint) return;
+          if (!quiet)
+            setState((value) => ({ ...value, loading: true, error: "" }));
           try {
             const value = await request(endpoint, { signal });
             if (signal?.aborted) return;
@@ -62,7 +147,11 @@ window.__ModuleLoader__.load({
             });
           } catch (error) {
             if (error.name !== "AbortError")
-              setState({ loading: false, rows: [], error: error.message });
+              setState((value) => ({
+                loading: false,
+                rows: quiet ? value.rows : [],
+                error: error.message,
+              }));
           }
         },
         [endpoint],
@@ -72,7 +161,15 @@ window.__ModuleLoader__.load({
         void load(controller.signal);
         return () => controller.abort();
       }, [load]);
-      return [state, () => load()];
+      const refresh = React.useCallback(() => load(undefined, true), [load]);
+      React.useEffect(() => {
+        if (endpoint !== `${apiRoot}/presets`) return;
+        const reload = () => void refresh();
+        window.addEventListener("workagent:presets-changed", reload);
+        return () =>
+          window.removeEventListener("workagent:presets-changed", reload);
+      }, [endpoint, refresh]);
+      return [state, refresh];
     }
 
     function Field({ label, children }) {
@@ -80,6 +177,18 @@ window.__ModuleLoader__.load({
     }
     function Input(props) {
       return h("input", { ...props });
+    }
+    function submitComposerOnEnter(event, submit) {
+      if (
+        event.key !== "Enter" ||
+        event.shiftKey ||
+        event.nativeEvent.isComposing ||
+        event.nativeEvent.keyCode === 229
+      )
+        return;
+      event.preventDefault();
+      if (submit) submit(event);
+      event.currentTarget.form?.requestSubmit();
     }
     function Select({ options, ...props }) {
       return h(
@@ -97,17 +206,448 @@ window.__ModuleLoader__.load({
         children,
       );
     }
+
+    const valueLabels = {
+      builtin: "系统内置",
+      user: "用户添加",
+      market: "技能市场",
+      ready: "可用",
+      healthy: "运行正常",
+      unknown: "未知状态",
+      disabled: "已停用",
+      unavailable: "不可用",
+      none: "无需授权",
+      needs_auth: "需要授权",
+      needs_review: "需要确认",
+      pending: "等待中",
+      queued: "排队中",
+      running: "运行中",
+      completed: "已完成",
+      failed: "失败",
+      cancelled: "已取消",
+      independent_sessions: "独立会话",
+      harness: "通用引擎",
+      codex: "Codex",
+      kimi: "Kimi",
+      "codex-native": "Codex 原生模型",
+      "harness-default": "通用默认模型",
+      "kimi-native": "Kimi 原生模型",
+      "team.updated": "团队已更新",
+      "member.added": "已添加成员",
+      "task.queued": "任务已排队",
+      "task.started": "任务已开始",
+      "task.completed": "任务已完成",
+      "task.failed": "任务失败",
+      "task.cancelled": "任务已取消",
+      "mail.received": "收到团队消息",
+    };
+    const displayValue = (value, fallback = "") =>
+      valueLabels[value] || value || fallback;
+    const displayModelName = (model) =>
+      valueLabels[model.id] || model.displayName || model.id;
+    const displayPresetName = (name) => (name === "General" ? "DSH" : name);
+    const displayWorkspaceName = (name) => {
+      if (name === "Personal workspace") return "个人项目";
+      const qa = /^QA wa3acc-([a-z])$/i.exec(name);
+      return qa ? `测试项目 ${qa[1].toUpperCase()}` : name;
+    };
+    const displaySessionTitle = (title) =>
+      title === "General" ? "通用会话" : title;
+    const plainSessionTitle = (value) =>
+      String(value).replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+    const friendlyError = (value) => {
+      const message = String(value || "");
+      if (/high demand|overloaded|server.*busy/i.test(message))
+        return "模型服务当前繁忙，请稍后重试，或在模型设置中选择其他模型。";
+      if (message.startsWith("credential_needs_auth:codex"))
+        return "Codex 尚未完成登录，请先在设置中连接 Codex。";
+      if (message.startsWith("credential_needs_auth:kimi"))
+        return "Kimi 尚未完成登录，请先在设置中连接 Kimi。";
+      const labels = {
+        session_close_failed: "对话暂时无法删除，请稍后重试。",
+        engine_unavailable: "所选助手当前不可用，请检查引擎设置。",
+        engine_start_failed: "助手启动失败，请检查引擎状态后重试。",
+        engine_turn_rejected: "助手没有接受这条消息，请稍后重试。",
+        quota_exceeded: "使用额度不足，请联系管理员调整额度，或等待下一周期。",
+        quota_usage_stale: "用量统计服务暂不可用，请稍后重试。",
+        quota_usage_pending: "上一轮用量正在结算，请稍后重试。",
+        quota_not_configured: "此模型尚未配置使用额度，请联系管理员。",
+        platform_quota_unconfigured: "额度服务尚未配置，请联系管理员。",
+        engine_steer_rejected:
+          "追加指令未被接受；任务可能已结束，请检查状态后重新发送。",
+        no_active_turn: "当前任务已结束，请直接发送消息。",
+        queued_message_not_found: "这条排队消息已发送或移除，请刷新列表。",
+        session_input_pending: "当前会话正在处理另一条指令，请稍候。",
+        edit_stop_timeout: "原任务仍在停止中，请等它结束后重试编辑。",
+        fork_message_not_found: "找不到这条消息，请刷新会话后重试。",
+        session_resume_failed: "恢复会话失败，请重新开始一个会话。",
+        workspace_not_found: "所选项目不存在，请重新选择。",
+        invalid_session: "会话参数无效，请重新选择助手和项目。",
+        content_required: "请输入要发送的内容。",
+        destination_exists: "同名文件已存在，请换一个名称。",
+        workspace_directory_exists:
+          "工作区中已存在同名文件夹，请换一个项目名称。",
+        invalid_workspace_name:
+          "项目名称不能包含路径或特殊字符，也不能使用系统保留名称。",
+        file_not_found: "文件已不存在，请刷新列表。",
+        invalid_relative_path: "文件名或路径无效。",
+        workspace_operation_failed: "文件操作失败，请刷新后重试。",
+        request_too_large: "文件过大，单个文件不能超过 1 GB。",
+        path_outside_workspace: "文件路径必须位于当前项目内。",
+        reparse_point_rejected: "无法操作链接到项目外的文件。",
+        im_gateway_unavailable: "消息渠道服务暂未启用。",
+        market_unavailable: "市场暂时不可用，请稍后重试。",
+        market_version_exists: "这个名称和版本已经发布，请填写新的版本号。",
+        market_credentials_required: "请填写所需的连接凭据。",
+        market_source_not_found: "所选内容已不存在，请重新选择。",
+        market_builtin_dependency_unavailable:
+          "当前账号缺少内置依赖，请联系管理员配置后重试。",
+        market_skill_dependency_missing: "助手引用的技能不存在，请先修复绑定。",
+        market_mcp_dependency_missing: "引用的 MCP 服务不存在，请先修复绑定。",
+        market_mcp_url_contains_credentials:
+          "服务地址含有密钥或密码，请先改为使用独立连接凭据。",
+        market_mcp_command_not_portable:
+          "MCP 使用了本机绝对路径，请先改成可在其他成员环境中运行的命令。",
+        market_publish_own_assistant_only: "请发布自己创建的助手。",
+        market_publish_own_skill_only:
+          "内置技能无需重复发布，可以作为助手依赖共享。",
+        market_skill_snapshot_unavailable:
+          "此技能的原发布包不可用，请重新获取后再发布。",
+        market_bundle_too_large: "包含的技能文件超过 50 MB，请缩小发布包。",
+        invalid_market_publish:
+          "请完整填写发布内容和三段式版本号，例如 1.0.0。",
+      };
+      if (message?.startsWith("market_runtime_"))
+        return "安装或发布未完成，请检查依赖配置后重试；已经完成的安装步骤会保留。";
+      if (message?.startsWith("invalid_mcp_binding:"))
+        return "绑定的 MCP 尚未就绪，请先测试连接或完成授权。";
+      if (message?.startsWith("invalid_skill_binding:"))
+        return "绑定的技能尚未就绪，请先启用技能并检查依赖。";
+      return labels[message] || message || "操作失败，请稍后重试。";
+    };
+
+    const iconPaths = {
+      assistants: [
+        "M15 14H33A7 7 0 0 1 40 21V33A7 7 0 0 1 33 40H15A7 7 0 0 1 8 33V21A7 7 0 0 1 15 14Z",
+        "M24 14V6H29",
+        "M17 23V25M31 23V25",
+        "M18 32Q24 37 30 32",
+        "M3 23V31M45 23V31",
+      ],
+      tasks: [
+        "M23.9998 44.3332C34.1251 44.3332 42.3332 36.1251 42.3332 25.9999C42.3332 15.8747 34.1251 7.66656 23.9998 7.66656C13.8746 7.66656 5.6665 15.8747 5.6665 25.9999C5.6665 36.1251 13.8746 44.3332 23.9998 44.3332Z",
+        "M23.76 15.35V26.36L31.53 34.13",
+        "M4 9L11 4",
+        "M44 9L37 4",
+      ],
+      chatgpt: [
+        "M4 6H44V36H29L24 41L19 36H4V6Z",
+        "M13 21H15",
+        "M23 21H25",
+        "M33 21H35",
+      ],
+      teams: [
+        "M18 26C23.5228 26 28 21.5228 28 16C28 10.4772 23.5228 6 18 6C12.4772 6 8 10.4772 8 16C8 21.5228 12.4772 26 18 26Z",
+        "M30 10C34.4183 10 38 13.5817 38 18C38 22.4183 34.4183 26 30 26",
+        "M2 42C2 34.268 8.26801 28 16 28H20C27.732 28 34 34.268 34 42",
+        "M32 29C39.732 29 46 35.268 46 43",
+      ],
+      notifications: [
+        "M8 19C8 10.1634 15.1634 3 24 3C32.8366 3 40 10.1634 40 19V31L44 38H4L8 31V19Z",
+        "M18 42H30",
+      ],
+      workspace: [
+        "M4 9V41L9 21H39.5V15C39.5 13.8954 38.6046 13 37.5 13H24L19 7H6C4.89543 7 4 7.89543 4 9Z",
+        "M40 41L44 21H8.8125L4 41H40Z",
+      ],
+      theme: [
+        "M42 29.5C39.5 39 30.9 44 21.5 42C10.9 39.8 4.1 29.4 6.3 18.8C8 10.7 14.6 4.5 22.6 3C17 9.8 17.9 19.8 24.8 25.5C29.7 29.5 36.2 30.7 42 29.5Z",
+      ],
+      logout: [
+        "M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z",
+        "M29.6567 18.3432L18.343 29.6569",
+        "M18.3433 18.3432L29.657 29.6569",
+      ],
+      harness: [
+        "M12 18H36V34H12V18Z",
+        "M18 25H20",
+        "M28 25H30",
+        "M24 18V11",
+        "M20 39H28",
+      ],
+      back: ["M30 10L16 24L30 38"],
+      close: ["M13 13L35 35", "M35 13L13 35"],
+      trash: [
+        "M8 12H40M18 12V6H30V12",
+        "M12 12L15 42H33L36 12",
+        "M20 20V33M28 20V33",
+      ],
+      search: [
+        "M21 8C13.8203 8 8 13.8203 8 21C8 28.1797 13.8203 34 21 34C28.1797 34 34 28.1797 34 21C34 13.8203 28.1797 8 21 8Z",
+        "M31 31L41 41",
+      ],
+      plus: ["M24 10V38", "M10 24H38"],
+      send: ["M12 24L24 12L36 24", "M24 13V39"],
+      chevronDown: ["M14 19L24 29L34 19"],
+      chevronRight: ["M19 14L29 24L19 34"],
+      check: ["M9 25L19 35L39 14"],
+      edit: ["M30 8L40 18L19 39L7 41L9 29Z", "M25 13L35 23"],
+      copy: ["M17 17H40V41H17Z", "M30 17V7H7V30H17"],
+      branch: [
+        "M12 16V32M12 26C12 20 36 28 36 16",
+        "M12 6A5 5 0 1 0 12 16A5 5 0 1 0 12 6",
+        "M12 32A5 5 0 1 0 12 42A5 5 0 1 0 12 32",
+        "M36 6A5 5 0 1 0 36 16A5 5 0 1 0 36 6",
+      ],
+      refresh: ["M39 17A17 17 0 1 0 40 30", "M39 6V18H27"],
+      file: ["M12 5H28L38 15V43H12Z", "M28 5V15H38", "M19 25H31M19 33H29"],
+      upload: ["M24 32V6M14 16L24 6L34 16", "M8 31V42H40V31"],
+      download: ["M24 6V32M14 22L24 32L34 22", "M8 35V42H40V35"],
+      more: ["M10 24H11M23 24H24M36 24H37"],
+      send: ["M24 39V9M10 23L24 9L38 23"],
+      stop: ["M13 13H35V35H13Z"],
+      steer: ["M10 39V29Q10 19 24 19H38M28 9L38 19L28 29"],
+      expand: ["M7 19V7H19M29 7H41V19M41 29V41H29M19 41H7V29"],
+    };
+
+    function Icon({ name, size = 18, className = "" }) {
+      return h(
+        "svg",
+        {
+          className: ["workagent-icon", className].filter(Boolean).join(" "),
+          width: size,
+          height: size,
+          viewBox: "0 0 48 48",
+          fill: "none",
+          stroke: "currentColor",
+          strokeWidth: 4,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          "aria-hidden": true,
+        },
+        ...(iconPaths[name] || iconPaths.harness).map((d, index) =>
+          h("path", { d, key: index }),
+        ),
+      );
+    }
+
+    function EngineMark({ engine }) {
+      return h(
+        "span",
+        {
+          className: `workagent-engine-mark is-${engine}`,
+          "aria-hidden": true,
+        },
+        engine === "codex"
+          ? h(
+              "svg",
+              { viewBox: "0 0 24 24", "aria-hidden": true },
+              h("circle", { cx: 12, cy: 12, r: 9 }),
+              h("path", { d: "M8 9l3 3-3 3M13 15h3" }),
+            )
+          : engine === "kimi"
+            ? h(
+                "svg",
+                { viewBox: "0 0 24 24", "aria-hidden": true },
+                h("path", { d: "M6 4v16M18 4l-8 8 8 8M11 4l7 7" }),
+              )
+            : h(
+                "svg",
+                {
+                  className: "workagent-deepseek-mark",
+                  viewBox: "0 0 50 50",
+                  "aria-hidden": true,
+                },
+                // DeepSeek mark from the bundled DSH frontend favicon.
+                h("path", {
+                  d: "M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z",
+                }),
+              ),
+      );
+    }
+
+    function renderInlineMarkdown(value, keyPrefix) {
+      const pattern =
+        /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
+      const result = [];
+      let cursor = 0;
+      let match;
+      while ((match = pattern.exec(value))) {
+        if (match.index > cursor) result.push(value.slice(cursor, match.index));
+        const token = match[0];
+        const key = `${keyPrefix}-${match.index}`;
+        if (token.startsWith("**"))
+          result.push(h("strong", { key }, token.slice(2, -2)));
+        else if (token.startsWith("`"))
+          result.push(h("code", { key }, token.slice(1, -1)));
+        else {
+          const parts = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.exec(token);
+          result.push(
+            h(
+              "a",
+              {
+                key,
+                href: parts[2],
+                target: "_blank",
+                rel: "noreferrer",
+              },
+              parts[1],
+            ),
+          );
+        }
+        cursor = match.index + token.length;
+      }
+      if (cursor < value.length) result.push(value.slice(cursor));
+      return result;
+    }
+
+    async function copyMessageText(text) {
+      if (navigator.clipboard && window.isSecureContext)
+        return navigator.clipboard.writeText(text);
+      const field = document.createElement("textarea");
+      field.value = text;
+      field.style.cssText = "position:fixed;left:-9999px;top:0";
+      const focused = document.activeElement;
+      document.body.append(field);
+      field.select();
+      const copied = document.execCommand("copy");
+      field.remove();
+      focused?.focus();
+      if (!copied) throw new Error("复制失败，请重试");
+    }
+    function MessageActions({ message, disabled, onEdit, onFork }) {
+      const [copyState, setCopyState] = React.useState("");
+      React.useEffect(() => {
+        if (!copyState) return;
+        const timer = setTimeout(() => setCopyState(""), 2000);
+        return () => clearTimeout(timer);
+      }, [copyState]);
+      const action = (name, icon, onClick, unavailable = false) =>
+        h(
+          Button,
+          {
+            className: "workagent-button workagent-message-action",
+            disabled: unavailable,
+            "aria-label": name,
+            "data-tooltip": name,
+            onClick,
+          },
+          h(Icon, { name: icon, size: 16 }),
+        );
+      return h(
+        "footer",
+        { className: "workagent-message-actions" },
+        onEdit ? action("编辑", "edit", onEdit, disabled) : null,
+        onFork ? action("分支", "branch", onFork, disabled) : null,
+        action(
+          copyState || "复制",
+          copyState === "已复制" ? "check" : "copy",
+          async () => {
+            try {
+              await copyMessageText(message.text);
+              setCopyState("已复制");
+            } catch {
+              setCopyState("复制失败，请重试");
+            }
+          },
+        ),
+        h(
+          "span",
+          { className: "workagent-sr-only", role: "status" },
+          copyState,
+        ),
+      );
+    }
+    function Markdown({ children }) {
+      const lines = String(children || "")
+        .replace(/\r\n/g, "\n")
+        .split("\n");
+      const blocks = [];
+      let code = null;
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line.startsWith("```")) {
+          if (code === null) code = [];
+          else {
+            blocks.push(
+              h(
+                "pre",
+                { key: `code-${index}` },
+                h("code", null, code.join("\n")),
+              ),
+            );
+            code = null;
+          }
+          continue;
+        }
+        if (code !== null) {
+          code.push(line);
+          continue;
+        }
+        if (!line.trim()) {
+          blocks.push(h("br", { key: `break-${index}` }));
+          continue;
+        }
+        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+        const item = /^\s*(?:[-*+]|(\d+)[.)])\s+(.+)$/.exec(line);
+        if (item) {
+          const ordered = item[1] !== undefined;
+          const items = [];
+          const start = index;
+          let current = item;
+          while (current && (current[1] !== undefined) === ordered) {
+            items.push(
+              h(
+                "li",
+                { key: `item-${index}` },
+                ...renderInlineMarkdown(current[2], index),
+              ),
+            );
+            current = /^\s*(?:[-*+]|(\d+)[.)])\s+(.+)$/.exec(
+              lines[index + 1] || "",
+            );
+            if (!current || (current[1] !== undefined) !== ordered) break;
+            index += 1;
+          }
+          blocks.push(
+            h(
+              ordered ? "ol" : "ul",
+              {
+                key: `list-${start}`,
+                ...(ordered ? { start: Number(item[1]) } : {}),
+              },
+              ...items,
+            ),
+          );
+          continue;
+        }
+        const tag = heading ? `h${heading[1].length + 2}` : "p";
+        const content = heading?.[2] || line;
+        blocks.push(
+          h(
+            tag,
+            { key: `line-${index}` },
+            ...renderInlineMarkdown(content, index),
+          ),
+        );
+      }
+      if (code !== null)
+        blocks.push(
+          h("pre", { key: "code-tail" }, h("code", null, code.join("\n"))),
+        );
+      return h("div", { className: "workagent-markdown" }, ...blocks);
+    }
     function Status({ state }) {
       if (state.loading)
-        return h("p", { className: "workagent-muted" }, "Loading…");
+        return h("p", { className: "workagent-muted" }, "加载中…");
       if (state.error)
         return h(
           "p",
           { role: "alert", className: "workagent-error" },
-          state.error,
+          friendlyError(state.error),
         );
       if (state.rows.length === 0)
-        return h("p", { className: "workagent-muted" }, "No entries");
+        return h("p", { className: "workagent-muted" }, "暂无数据");
       return null;
     }
     function Card({ title, detail, children, ...props }) {
@@ -136,13 +676,23 @@ window.__ModuleLoader__.load({
     }
     async function mutate(refresh, setError, path, method, value) {
       try {
+        setError("");
         await request(path, {
           method,
           body: value === undefined ? undefined : JSON.stringify(value),
         });
         await refresh();
+        if (
+          path === `${apiRoot}/presets` ||
+          path.startsWith(`${apiRoot}/presets/`)
+        )
+          window.dispatchEvent(
+            new window.CustomEvent("workagent:presets-changed"),
+          );
+        return true;
       } catch (error) {
         setError(error.message);
+        return false;
       }
     }
 
@@ -150,22 +700,29 @@ window.__ModuleLoader__.load({
       return h(
         "span",
         {
+          className: "workagent-brand-mark",
           style: {
             width: size,
             height: size,
-            display: "grid",
-            placeItems: "center",
-            borderRadius: "var(--dsw-radius)",
-            background: "var(--dsw-color-accent)",
-            color: "var(--dsw-color-panel)",
-            fontWeight: 700,
           },
         },
-        "W",
+        h(
+          "svg",
+          {
+            viewBox: "0 0 32 32",
+            width: size,
+            height: size,
+            "aria-hidden": true,
+          },
+          h("path", {
+            d: "M7.2 7.4 10.5 23h3.2L16 13.5 18.3 23h3.2l3.3-15.6h-3.3l-1.9 10-2.2-10h-2.8l-2.2 10-1.9-10Z",
+            fill: "currentColor",
+          }),
+        ),
       );
     }
     function BrandName() {
-      return h("strong", null, "WorkAgent");
+      return h("strong", { className: "workagent-brand-name" }, "WorkAgent");
     }
 
     function MCPSection() {
@@ -220,31 +777,31 @@ window.__ModuleLoader__.load({
       };
       return h(
         Section,
-        { title: "MCP servers" },
+        { title: "MCP 服务" },
         h(
           "form",
           { className: "workagent-form", onSubmit: submit },
           h(
             Field,
-            { label: "Name" },
+            { label: "名称" },
             h(Input, { name: "name", required: true }),
           ),
           h(
             Field,
-            { label: "Transport" },
+            { label: "连接方式" },
             h(Select, {
               value: transport,
               onChange: (e) => setTransport(e.target.value),
               options: [
                 ["http", "HTTP"],
                 ["sse", "SSE"],
-                ["stdio", "Command"],
+                ["stdio", "命令行"],
               ],
             }),
           ),
           h(
             Field,
-            { label: transport === "stdio" ? "Command" : "Endpoint" },
+            { label: transport === "stdio" ? "命令" : "服务地址" },
             h(Input, {
               name: "target",
               required: true,
@@ -254,7 +811,7 @@ window.__ModuleLoader__.load({
           h(
             "button",
             { className: "workagent-button", type: "submit" },
-            "Add server",
+            "添加服务",
           ),
         ),
         error
@@ -267,7 +824,7 @@ window.__ModuleLoader__.load({
             {
               key: row.id,
               title: row.name,
-              detail: `${row.health || "unknown"} · ${row.oauthState || "none"}`,
+              detail: `${displayValue(row.health, "未知状态")} · ${displayValue(row.oauthState, "无需授权")}`,
             },
             row.source === "user"
               ? h(
@@ -282,12 +839,25 @@ window.__ModuleLoader__.load({
                         { enabled: !row.enabled },
                       ),
                   },
-                  row.enabled ? "Disable" : "Enable",
+                  row.enabled ? "停用" : "启用",
                 )
               : null,
             row.oauthState === "needs_auth"
-              ? h(Button, { onClick: () => oauth(row) }, "Authorize")
+              ? h(Button, { onClick: () => oauth(row) }, "授权")
               : null,
+            h(
+              Button,
+              {
+                onClick: () =>
+                  mutate(
+                    refresh,
+                    setError,
+                    `${endpoint}/${encodeURIComponent(row.id)}/test`,
+                    "POST",
+                  ),
+              },
+              "测试连接",
+            ),
             row.source === "user"
               ? h(
                   Button,
@@ -300,7 +870,7 @@ window.__ModuleLoader__.load({
                         "DELETE",
                       ),
                   },
-                  "Delete",
+                  "删除",
                 )
               : null,
           ),
@@ -309,58 +879,18 @@ window.__ModuleLoader__.load({
     }
 
     function SkillsSection() {
-      const endpoint = `${apiRoot}/skills`;
+      const endpoint = apiRoot + "/skills";
       const [state, refresh] = useResource(endpoint);
-      const [market, reloadMarket] = useResource(
-        "/api/portal/skill-market",
-        (value) => value.skills || [],
-      );
-      const [selected, setSelected] = React.useState("");
       const [error, setError] = React.useState("");
-      const install = async () => {
-        if (!selected) return;
-        await mutate(
-          async () => {
-            await refresh();
-            await reloadMarket();
-          },
-          setError,
-          "/api/portal/skill-market/install",
-          "POST",
-          { id: selected },
-        );
-      };
       return h(
         Section,
-        { title: "Skills" },
-        h(
-          "div",
-          { className: "workagent-form" },
-          h(
-            Field,
-            { label: "Managed skill" },
-            h(Select, {
-              value: selected,
-              onChange: (e) => setSelected(e.target.value),
-              options: [
-                ["", "Choose a reviewed skill"],
-                ...market.rows.map((item) => [
-                  item.id,
-                  `${item.name} ${item.version || ""}`,
-                ]),
-              ],
-            }),
-          ),
-          h(Button, { onClick: install, disabled: !selected }, "Install"),
-        ),
+        { title: "技能" },
         h(
           "p",
           { className: "workagent-muted" },
-          `Import history: ${state.rows.filter((row) => row.source === "market" || row.source === "user").length} installed`,
+          "管理已安装的技能；更多能力可在市场中获取。",
         ),
-        error
-          ? h("p", { role: "alert", className: "workagent-error" }, error)
-          : null,
+        error ? h("p", { role: "alert" }, error) : null,
         h(Status, { state }),
         ...state.rows.map((row) =>
           h(
@@ -368,9 +898,14 @@ window.__ModuleLoader__.load({
             {
               key: row.id,
               title: row.name,
-              detail: `${row.source} · ${row.health || (row.enabled ? "ready" : "disabled")}`,
+              detail:
+                displayValue(row.source) +
+                " · " +
+                displayValue(
+                  row.health || (row.enabled ? "ready" : "disabled"),
+                ),
             },
-            row.source === "user" || row.source === "market"
+            ["user", "market"].includes(row.source)
               ? h(
                   Button,
                   {
@@ -378,12 +913,12 @@ window.__ModuleLoader__.load({
                       mutate(
                         refresh,
                         setError,
-                        `${endpoint}/${encodeURIComponent(row.id)}`,
+                        endpoint + "/" + encodeURIComponent(row.id),
                         "PATCH",
                         { enabled: !row.enabled },
                       ),
                   },
-                  row.enabled ? "Disable" : "Enable",
+                  row.enabled ? "停用" : "启用",
                 )
               : null,
           ),
@@ -391,6 +926,372 @@ window.__ModuleLoader__.load({
       );
     }
 
+    const marketKinds = { skill: "技能", mcp: "MCP", assistant: "助手" };
+    function MarketplaceSection() {
+      const endpoint = "/api/portal/marketplace";
+      const [state, refresh] = useResource(
+        endpoint,
+        (value) => value.entries || [],
+      );
+      const [legacy] = useResource(
+        "/api/portal/skill-market",
+        (value) => value.skills || [],
+      );
+      const [kind, setKind] = React.useState("all");
+      const [query, setQuery] = React.useState("");
+      const [publishing, setPublishing] = React.useState(false);
+      const [detail, setDetail] = React.useState(null);
+      const [busy, setBusy] = React.useState("");
+      const [error, setError] = React.useState("");
+      const [notice, setNotice] = React.useState("");
+      const get = async (row, credentials) => {
+        setBusy(row.id);
+        setError("");
+        setNotice("");
+        try {
+          if (!row.legacy && !credentials) {
+            const info = await request(
+              `${endpoint}?id=${encodeURIComponent(row.id)}`,
+            );
+            if (info.bundle.mcp.some((m) => m.credentialNames.length)) {
+              setDetail(info);
+              return;
+            }
+          }
+          const result = await request(
+            row.legacy
+              ? "/api/portal/skill-market/install"
+              : `${endpoint}/install`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                id: row.id,
+                ...(credentials ? { credentials } : {}),
+              }),
+            },
+          );
+          setDetail(null);
+          await refresh();
+          setNotice(
+            result?.installation?.needsSetup
+              ? "已获取，所需技能和 MCP 已一并安装。请先在 MCP 服务中完成连接测试或授权，再到助手中启用。"
+              : "已获取，所需技能和 MCP 已一并安装。",
+          );
+        } catch (cause) {
+          setError(friendlyError(cause.message));
+        } finally {
+          setBusy("");
+        }
+      };
+      const entries = [
+        ...state.rows,
+        ...legacy.rows.map((row) => ({
+          ...row,
+          kind: "skill",
+          publisher: row.publisher?.display_name || row.publisher?.username,
+          legacy: true,
+          skills: [],
+          mcp: [],
+        })),
+      ].filter(
+        (row) =>
+          (kind === "all" || row.kind === kind) &&
+          `${row.name} ${row.description} ${row.publisher}`
+            .toLowerCase()
+            .includes(query.toLowerCase()),
+      );
+      return h(
+        Section,
+        { title: "市场" },
+        h(
+          "div",
+          { className: "workagent-market-toolbar" },
+          h("input", {
+            type: "search",
+            "aria-label": "搜索市场",
+            placeholder: "搜索技能、MCP 或助手",
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+          }),
+          h(
+            Button,
+            { onClick: () => setPublishing(!publishing) },
+            publishing ? "收起发布" : "发布到市场",
+          ),
+        ),
+        h(
+          "nav",
+          { className: "workagent-tabs", "aria-label": "市场分类" },
+          ...[["all", "全部"], ...Object.entries(marketKinds)].map(
+            ([value, label]) =>
+              h(
+                Button,
+                {
+                  key: value,
+                  "aria-pressed": kind === value,
+                  onClick: () => setKind(value),
+                },
+                label,
+              ),
+          ),
+        ),
+        publishing
+          ? h(MarketPublishForm, {
+              onPublished: async () => {
+                setPublishing(false);
+                await refresh();
+                setNotice("已发布，其他成员现在可以获取。");
+              },
+            })
+          : null,
+        error
+          ? h("p", { role: "alert", className: "workagent-error" }, error)
+          : null,
+        notice ? h("p", { role: "status" }, notice) : null,
+        h(Status, { state }),
+        ...entries.map((row) =>
+          h(
+            Card,
+            {
+              key: row.id,
+              title: row.name,
+              detail: `${marketKinds[row.kind]} · ${row.version} · ${row.publisher || "共享市场"}`,
+            },
+            h("p", null, row.description),
+            row.skills?.length
+              ? h(
+                  "p",
+                  { className: "workagent-market-dependencies" },
+                  "包含技能：",
+                  row.skills.join("、"),
+                )
+              : null,
+            row.mcp?.length
+              ? h(
+                  "p",
+                  { className: "workagent-market-dependencies" },
+                  "包含 MCP：",
+                  row.mcp.join("、"),
+                )
+              : null,
+            h(
+              Button,
+              { disabled: !!busy, onClick: () => void get(row) },
+              busy === row.id
+                ? "正在获取…"
+                : row.installed
+                  ? "重新获取"
+                  : "获取",
+            ),
+            row.canDelete
+              ? h(
+                  Button,
+                  {
+                    disabled: !!busy,
+                    onClick: () =>
+                      mutate(
+                        refresh,
+                        setError,
+                        `${endpoint}?id=${encodeURIComponent(row.id)}`,
+                        "DELETE",
+                      ),
+                  },
+                  "下架",
+                )
+              : null,
+          ),
+        ),
+        !state.loading && !entries.length
+          ? h(
+              "p",
+              { className: "workagent-muted" },
+              "暂无匹配内容，可以发布自己的技能、MCP 或助手。",
+            )
+          : null,
+        detail
+          ? h(
+              "form",
+              {
+                className: "workagent-market-credentials",
+                onSubmit: (event) => {
+                  event.preventDefault();
+                  const values = new FormData(event.currentTarget);
+                  const credentials = {};
+                  for (const m of detail.bundle.mcp) {
+                    credentials[m.id] = {};
+                    for (const name of m.credentialNames)
+                      credentials[m.id][name] = String(
+                        values.get(`${m.id}:${name}`) || "",
+                      );
+                  }
+                  void get(detail.entry, credentials);
+                },
+              },
+              h("h3", null, `连接 ${detail.entry.name}`),
+              h("p", null, "填写你自己的连接凭据。发布者的密钥不会共享。"),
+              ...detail.bundle.mcp.flatMap((m) =>
+                m.credentialNames.map((name) =>
+                  h(
+                    Field,
+                    { key: `${m.id}:${name}`, label: `${m.name} · ${name}` },
+                    h(Input, {
+                      type: "password",
+                      autoComplete: "new-password",
+                      name: `${m.id}:${name}`,
+                      required: true,
+                    }),
+                  ),
+                ),
+              ),
+              h(
+                Button,
+                { type: "submit", disabled: !!busy },
+                busy ? "正在获取…" : "保存并获取",
+              ),
+              h(Button, { onClick: () => setDetail(null) }, "取消"),
+            )
+          : null,
+      );
+    }
+    function MarketPublishForm({ onPublished }) {
+      const [kind, setKind] = React.useState("skill");
+      const [sourceId, setSourceId] = React.useState("");
+      const [query, setQuery] = React.useState("");
+      const [error, setError] = React.useState("");
+      const [busy, setBusy] = React.useState(false);
+      const [skills] = useResource(`${apiRoot}/skills`);
+      const [mcp] = useResource(`${apiRoot}/mcp-servers`);
+      const [assistants] = useResource(`${apiRoot}/presets`);
+      const state = { skill: skills, mcp, assistant: assistants }[kind];
+      const options = state.rows.filter(
+        (row) =>
+          (row.source === "user" ||
+            (kind === "skill" && row.source === "market")) &&
+          `${row.name} ${row.id}`.toLowerCase().includes(query.toLowerCase()),
+      );
+      const selected = state.rows.find((row) => row.id === sourceId);
+      return h(
+        "form",
+        {
+          className: "workagent-market-publish",
+          onSubmit: async (event) => {
+            event.preventDefault();
+            setError("");
+            setBusy(true);
+            const values = new FormData(event.currentTarget);
+            try {
+              await request("/api/portal/marketplace", {
+                method: "POST",
+                body: JSON.stringify({
+                  kind,
+                  sourceId,
+                  name: String(values.get("name")),
+                  description: String(values.get("description")),
+                  version: String(values.get("version")),
+                }),
+              });
+              await onPublished();
+            } catch (cause) {
+              setError(friendlyError(cause.message));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+        h("h3", null, "发布到共享市场"),
+        h(
+          "p",
+          null,
+          "所选内容和助手绑定的技能、MCP 配置会随版本共享给其他成员。连接密钥由获取者自行填写。",
+        ),
+        h(
+          Field,
+          { label: "发布类型" },
+          h(Select, {
+            value: kind,
+            onChange: (e) => {
+              setKind(e.target.value);
+              setSourceId("");
+              setQuery("");
+            },
+            options: Object.entries(marketKinds),
+          }),
+        ),
+        h(
+          Field,
+          { label: "搜索已安装内容" },
+          h(Input, {
+            type: "search",
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+          }),
+        ),
+        h(
+          Field,
+          { label: "发布内容" },
+          h(Select, {
+            value: sourceId,
+            required: true,
+            onChange: (e) => setSourceId(e.target.value),
+            options: [
+              ["", "请选择"],
+              ...options.map((row) => [row.id, row.name]),
+            ],
+          }),
+        ),
+        selected
+          ? h(
+              "div",
+              { key: selected.id, className: "workagent-market-fields" },
+              h(
+                Field,
+                { label: "市场名称" },
+                h(Input, {
+                  name: "name",
+                  required: true,
+                  maxLength: 240,
+                  defaultValue: selected.name,
+                }),
+              ),
+              h(
+                Field,
+                { label: "版本" },
+                h(Input, {
+                  name: "version",
+                  required: true,
+                  pattern: "[0-9]+\\.[0-9]+\\.[0-9]+",
+                  defaultValue: "1.0.0",
+                }),
+              ),
+              h(
+                Field,
+                { label: "说明" },
+                h("textarea", {
+                  name: "description",
+                  required: true,
+                  maxLength: 4096,
+                  defaultValue: selected.description || "",
+                }),
+              ),
+              kind === "assistant"
+                ? h(
+                    "p",
+                    null,
+                    `将一并打包 ${selected.skillIds?.length || 0} 个技能及其依赖、${selected.mcpServerIds?.length || 0} 个直接绑定的 MCP。`,
+                  )
+                : null,
+            )
+          : null,
+        error
+          ? h("p", { role: "alert", className: "workagent-error" }, error)
+          : null,
+        h(
+          Button,
+          { type: "submit", disabled: busy || !selected },
+          busy ? "正在发布…" : "发布",
+        ),
+      );
+    }
     const defaultPreset = {
       enabled: true,
       description: "",
@@ -403,11 +1304,101 @@ window.__ModuleLoader__.load({
       toolAllowlist: [],
       approvalPolicy: "on_risk",
     };
+    function CapabilityPicker({ name, label, state, selected = [] }) {
+      const [ids, setIds] = React.useState(selected);
+      const [query, setQuery] = React.useState("");
+      const visible = state.rows.filter((row) =>
+        `${row.name} ${row.id}`.toLowerCase().includes(query.toLowerCase()),
+      );
+      return h(
+        "fieldset",
+        { className: "workagent-capability-picker" },
+        h("legend", null, label),
+        h("input", { type: "hidden", name, value: ids.join(",") }),
+        h(
+          "details",
+          null,
+          h(
+            "summary",
+            null,
+            ids.length ? `已选择 ${ids.length} 项` : `选择${label}`,
+          ),
+          h("input", {
+            type: "search",
+            "aria-label": `搜索${label}`,
+            placeholder: "按名称搜索",
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+          }),
+          state.loading
+            ? h("p", null, "正在加载…")
+            : state.error
+              ? h("p", { role: "alert" }, state.error)
+              : h(
+                  "div",
+                  { className: "workagent-capability-options" },
+                  ...visible.map((row) =>
+                    h(
+                      "label",
+                      { key: row.id },
+                      h("input", {
+                        type: "checkbox",
+                        checked: ids.includes(row.id),
+                        onChange: (e) =>
+                          setIds(
+                            e.target.checked
+                              ? [...ids, row.id]
+                              : ids.filter((id) => id !== row.id),
+                          ),
+                      }),
+                      h("span", null, row.name),
+                    ),
+                  ),
+                  !visible.length
+                    ? h("p", null, "没有匹配项，可先从市场获取。")
+                    : null,
+                ),
+        ),
+        ids.length
+          ? h(
+              "div",
+              { className: "workagent-capability-selected" },
+              ...ids.map((id) =>
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    key: id,
+                    "aria-label": `移除${state.rows.find((row) => row.id === id)?.name || id}`,
+                    onClick: () => setIds(ids.filter((value) => value !== id)),
+                  },
+                  `${state.rows.find((row) => row.id === id)?.name || id} ×`,
+                ),
+              ),
+            )
+          : null,
+      );
+    }
     function PresetsSection() {
       const endpoint = `${apiRoot}/presets`;
       const [state, refresh] = useResource(endpoint);
+      const [skills] = useResource(`${apiRoot}/skills`);
+      const [servers] = useResource(`${apiRoot}/mcp-servers`);
       const [editing, setEditing] = React.useState(null);
+      const [formVersion, setFormVersion] = React.useState(0);
       const [error, setError] = React.useState("");
+      const [pendingId, setPendingId] = React.useState(null);
+      const toggle = async (row) => {
+        setPendingId(row.id);
+        await mutate(
+          refresh,
+          setError,
+          `${endpoint}/${encodeURIComponent(row.id)}`,
+          "PATCH",
+          { enabled: !row.enabled },
+        );
+        setPendingId(null);
+      };
       const submit = async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -419,36 +1410,52 @@ window.__ModuleLoader__.load({
             .filter(Boolean);
         const body = {
           ...defaultPreset,
+          ...(editing
+            ? {
+                description: editing.description,
+                enabled: editing.enabled,
+                workspacePolicy: editing.workspacePolicy,
+                toolAllowlist: editing.toolAllowlist,
+                approvalPolicy: editing.approvalPolicy,
+              }
+            : {}),
           name: String(values.get("name")),
           engine: String(values.get("engine")),
-          modelId: String(values.get("modelId") || "") || null,
+          modelId:
+            editing?.engine === values.get("engine") ? editing.modelId : null,
           systemPrompt: String(values.get("systemPrompt") || ""),
           skillIds: csv("skillIds"),
           mcpServerIds: csv("mcpServerIds"),
         };
-        await mutate(
+        const saved = await mutate(
           refresh,
           setError,
           editing ? `${endpoint}/${encodeURIComponent(editing.id)}` : endpoint,
           editing ? "PATCH" : "POST",
           body,
         );
+        if (!saved) return;
         setEditing(null);
-        form.reset();
+        setFormVersion((version) => version + 1);
       };
       return h(
         Section,
-        { title: "Presets" },
+        { title: "助手" },
+        h(
+          "p",
+          { className: "workagent-muted" },
+          "在这里配置助手的引擎与能力；默认模型、思考强度和权限在「设置 → 模型」中调整。关闭助手后，已有对话仍可继续。",
+        ),
         h(
           "form",
           {
             className: "workagent-form",
             onSubmit: submit,
-            key: `preset-form-${editing?.id || "new"}`,
+            key: `preset-form-${editing?.id || "new"}-${formVersion}`,
           },
           h(
             Field,
-            { label: "Name" },
+            { label: "名称" },
             h(Input, {
               name: "name",
               required: true,
@@ -457,41 +1464,32 @@ window.__ModuleLoader__.load({
           ),
           h(
             Field,
-            { label: "Engine" },
+            { label: "引擎" },
             h(Select, {
               name: "engine",
               defaultValue: editing?.engine || "harness",
               options: [
-                ["harness", "Harness"],
+                ["harness", "通用引擎"],
                 ["codex", "Codex"],
                 ["kimi", "Kimi"],
               ],
             }),
           ),
+          h(CapabilityPicker, {
+            name: "skillIds",
+            label: "技能",
+            state: skills,
+            selected: editing?.skillIds,
+          }),
+          h(CapabilityPicker, {
+            name: "mcpServerIds",
+            label: "MCP 服务",
+            state: servers,
+            selected: editing?.mcpServerIds,
+          }),
           h(
             Field,
-            { label: "Model" },
-            h(Input, { name: "modelId", defaultValue: editing?.modelId || "" }),
-          ),
-          h(
-            Field,
-            { label: "Skill IDs (comma separated)" },
-            h(Input, {
-              name: "skillIds",
-              defaultValue: editing?.skillIds?.join(", ") || "",
-            }),
-          ),
-          h(
-            Field,
-            { label: "MCP IDs (comma separated)" },
-            h(Input, {
-              name: "mcpServerIds",
-              defaultValue: editing?.mcpServerIds?.join(", ") || "",
-            }),
-          ),
-          h(
-            Field,
-            { label: "System prompt" },
+            { label: "系统提示词" },
             h("textarea", {
               name: "systemPrompt",
               defaultValue: editing?.systemPrompt || "",
@@ -500,10 +1498,10 @@ window.__ModuleLoader__.load({
           h(
             "button",
             { className: "workagent-button", type: "submit" },
-            editing ? "Save preset" : "Create preset",
+            editing ? "保存助手" : "创建助手",
           ),
           editing
-            ? h(Button, { onClick: () => setEditing(null) }, "Cancel edit")
+            ? h(Button, { onClick: () => setEditing(null) }, "取消编辑")
             : null,
         ),
         error
@@ -512,28 +1510,68 @@ window.__ModuleLoader__.load({
         h(Status, { state }),
         ...state.rows.map((row) =>
           h(
-            Card,
+            "article",
             {
               key: row.id,
-              title: row.name,
-              detail: `${row.engine} · ${row.modelId || "default model"}`,
+              className: "workagent-card workagent-assistant-card",
             },
-            row.source === "user"
-              ? h(Button, { onClick: () => setEditing(row) }, "Edit")
-              : null,
+            h(
+              "div",
+              { className: "workagent-assistant-info" },
+              h("strong", null, displayPresetName(row.name)),
+              h(
+                "div",
+                { className: "workagent-muted" },
+                displayValue(row.engine),
+              ),
+            ),
+            h(
+              Button,
+              {
+                role: "switch",
+                "aria-label": `${displayPresetName(row.name)} 开关`,
+                "aria-checked": row.enabled,
+                disabled: pendingId !== null,
+                className: "workagent-assistant-switch",
+                title: row.enabled ? "关闭助手" : "开启助手",
+                onClick: () => toggle(row),
+              },
+              h("span", {
+                className: "workagent-switch-track",
+                "aria-hidden": true,
+              }),
+            ),
             row.source === "user"
               ? h(
-                  Button,
+                  "div",
                   {
-                    onClick: () =>
-                      mutate(
-                        refresh,
-                        setError,
-                        `${endpoint}/${encodeURIComponent(row.id)}`,
-                        "DELETE",
-                      ),
+                    className: "workagent-actions workagent-assistant-actions",
                   },
-                  "Delete",
+                  h(Button, { onClick: () => setEditing(row) }, "编辑"),
+                  h(
+                    Button,
+                    {
+                      disabled: pendingId !== null,
+                      onClick: async () => {
+                        if (
+                          !window.confirm(
+                            `确定删除助手“${displayPresetName(row.name)}”？此操作无法撤销。`,
+                          )
+                        )
+                          return;
+                        setPendingId(row.id);
+                        const deleted = await mutate(
+                          refresh,
+                          setError,
+                          `${endpoint}/${encodeURIComponent(row.id)}`,
+                          "DELETE",
+                        );
+                        setPendingId(null);
+                        if (deleted && editing?.id === row.id) setEditing(null);
+                      },
+                    },
+                    "删除",
+                  ),
                 )
               : null,
           ),
@@ -541,122 +1579,587 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function ModelsSection() {
-      const [state] = useResource(`${apiRoot}/models`);
+    const reasoningLabel = (option) => {
+      const label =
+        {
+          none: "不思考",
+          minimal: "最少",
+          low: "轻度",
+          medium: "标准",
+          high: "深入",
+          xhigh: "更深入",
+          max: "最高",
+          ultra: "极高",
+          off: "关闭思考",
+          thinking: "开启思考",
+          on: "开启思考",
+        }[option.id] ||
+        option.name ||
+        option.id;
+      return `${label}（${option.id}）`;
+    };
+
+    const MODEL_DEFAULTS_KEY = "workagent.model-defaults.v1";
+    const MODEL_DEFAULTS_EVENT = "workagent:model-defaults";
+    const permissionOptions = [
+      ["read_only", "只读"],
+      ["workspace_write", "项目内读写"],
+      ["full_access", "完全访问"],
+    ];
+    const readModelDefaults = () => localStorage.getItem(MODEL_DEFAULTS_KEY);
+    const subscribeModelDefaults = (listener) => {
+      const onStorage = (event) => {
+        if (event.key === MODEL_DEFAULTS_KEY || event.key === null) listener();
+      };
+      window.addEventListener("storage", onStorage);
+      window.addEventListener(MODEL_DEFAULTS_EVENT, listener);
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener(MODEL_DEFAULTS_EVENT, listener);
+      };
+    };
+    function parseModelDefaults(raw) {
+      try {
+        const value = JSON.parse(raw);
+        if (value && typeof value === "object" && !Array.isArray(value))
+          return value;
+      } catch {
+        /* A damaged browser preference falls back to the product defaults. */
+      }
+      return {};
+    }
+    function useModelDefaults() {
+      const raw = React.useSyncExternalStore(
+        subscribeModelDefaults,
+        readModelDefaults,
+      );
+      return [
+        parseModelDefaults(raw),
+        (key, value) => {
+          const saved = parseModelDefaults(readModelDefaults());
+          localStorage.setItem(
+            MODEL_DEFAULTS_KEY,
+            JSON.stringify({
+              ...saved,
+              [key]: { ...saved[key], ...value },
+            }),
+          );
+          window.dispatchEvent(new window.Event(MODEL_DEFAULTS_EVENT));
+        },
+        raw,
+      ];
+    }
+    function defaultEffort(engine, model) {
+      const options = model?.reasoning || [];
+      if (engine === "codex" && options.some((option) => option.id === "low"))
+        return "low";
+      if (engine === "kimi") {
+        const lowest = [
+          "off",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra",
+        ].find((id) => options.some((option) => option.id === id));
+        return lowest || options[0]?.id || "";
+      }
+      return (
+        options.find((option) => option.id === model?.defaultReasoning)?.id ||
+        options[0]?.id ||
+        ""
+      );
+    }
+    const modelDefaultsKey = (group, preset) =>
+      preset?.source === "user"
+        ? `assistant:${preset.id}:${preset.engine}`
+        : group?.engine;
+    function resolveModelDefaults(group, preferences, preset) {
+      const models = group?.models || [];
+      const saved = preferences[modelDefaultsKey(group, preset)];
+      const preferred =
+        group?.engine === "codex"
+          ? ["gpt-6-astra"]
+          : group?.engine === "kimi"
+            ? ["kimi-code/kimi-k3", "kimi-k3", "k3"]
+            : [];
+      const model =
+        models.find((model) => model.id === saved?.modelId) ||
+        models.find((model) => model.id === preset?.modelId) ||
+        models.find((model) => preferred.includes(model.id)) ||
+        models.find((model) => model.isDefault) ||
+        models[0];
+      return {
+        modelId: model?.id || "",
+        thinkingEffort:
+          model?.id === saved?.modelId &&
+          model?.reasoning.some((option) => option.id === saved.thinkingEffort)
+            ? saved.thinkingEffort
+            : defaultEffort(group?.engine, model),
+        permissionMode: permissionOptions.some(
+          ([id]) => id === saved?.permissionMode,
+        )
+          ? saved.permissionMode
+          : "workspace_write",
+      };
+    }
+
+    function ModelDefaultsFields({ group, preset, defaults, save }) {
+      const model = group.models.find((model) => model.id === defaults.modelId);
+      const name = preset
+        ? displayPresetName(preset.name)
+        : displayValue(group.engine);
+      const key = modelDefaultsKey(group, preset);
+      const field = (label, props) =>
+        h(
+          "label",
+          null,
+          h("span", null, label),
+          h(Select, { "aria-label": `${name} ${label}`, ...props }),
+        );
+      return h(
+        "div",
+        { className: "workagent-model-defaults" },
+        field("默认模型", {
+          value: defaults.modelId,
+          disabled: !group.models.length,
+          options: group.models.length
+            ? group.models.map((model) => [model.id, model.name])
+            : [["", "暂无可用模型"]],
+          onChange: (event) => {
+            const next = group.models.find(
+              (model) => model.id === event.target.value,
+            );
+            save(key, {
+              modelId: next.id,
+              thinkingEffort: defaultEffort(group.engine, next),
+            });
+          },
+        }),
+        field("默认思考强度", {
+          value: defaults.thinkingEffort,
+          disabled: !model?.reasoning.length,
+          options: model?.reasoning.length
+            ? model.reasoning.map((option) => [
+                option.id,
+                reasoningLabel(option),
+              ])
+            : [["", "未提供思考选项"]],
+          onChange: (event) =>
+            save(key, {
+              modelId: defaults.modelId,
+              thinkingEffort: event.target.value,
+            }),
+        }),
+        field("默认权限", {
+          value: defaults.permissionMode,
+          options: permissionOptions,
+          onChange: (event) =>
+            save(key, {
+              permissionMode: event.target.value,
+            }),
+        }),
+      );
+    }
+
+    const FONT_SIZE_KEY = "workagent.font-size";
+    const fontSizes = [
+      ["13", "紧凑"],
+      ["14", "标准"],
+      ["16", "大号"],
+      ["18", "特大"],
+    ];
+    function readFontSize() {
+      const value = localStorage.getItem(FONT_SIZE_KEY);
+      return fontSizes.some(([size]) => size === value) ? value : "13";
+    }
+    function applyFontSize(value) {
+      document.documentElement.style.setProperty(
+        "--workagent-font-scale",
+        String(Number(value) / 14),
+      );
+    }
+    function TypographySettings() {
+      const [size, setSize] = React.useState(readFontSize);
+      return h(
+        "section",
+        { className: "workagent-typography", "aria-label": "字体" },
+        h(
+          "div",
+          null,
+          h("strong", null, "字体大小"),
+          h("p", null, "调整界面和对话文字，自动保存。"),
+        ),
+        h(Select, {
+          "aria-label": "字体大小",
+          value: size,
+          options: fontSizes,
+          onChange: (event) => {
+            const value = event.target.value;
+            localStorage.setItem(FONT_SIZE_KEY, value);
+            applyFontSize(value);
+            setSize(value);
+          },
+        }),
+      );
+    }
+
+    function CompletionNotificationSettings() {
+      const endpoint = `${apiRoot}/completion-notifications`;
+      const [state, refresh] = useResource(endpoint);
+      const saved = state.rows[0];
+      const [draft, setDraft] = React.useState(null);
+      const [error, setError] = React.useState("");
+      const [saving, setSaving] = React.useState(false);
+      const [notice, setNotice] = React.useState("");
+      React.useEffect(() => {
+        if (saved)
+          setDraft({
+            enabled: saved.enabled,
+            targetId: saved.targetId,
+            baseURL: saved.baseURL || location.origin,
+          });
+      }, [saved]);
+      const update = (values) => {
+        setNotice("");
+        setDraft((current) => ({ ...current, ...values }));
+      };
+      const save = async (event) => {
+        event.preventDefault();
+        setSaving(true);
+        setError("");
+        try {
+          await request(endpoint, {
+            method: "PUT",
+            body: JSON.stringify(draft),
+          });
+          await refresh();
+          setNotice("提醒设置已保存");
+        } catch (error) {
+          setError(error.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+      const retry = async (id) => {
+        setSaving(true);
+        setError("");
+        try {
+          await request(`${endpoint}/retry`, {
+            method: "POST",
+            body: JSON.stringify({ id }),
+          });
+          await refresh();
+        } catch (error) {
+          setError(error.message);
+        } finally {
+          setSaving(false);
+        }
+      };
       return h(
         Section,
-        { title: "Models" },
+        { title: "消息提醒" },
         h(
           "p",
           { className: "workagent-muted" },
-          "Model credentials are managed centrally; this view never accepts keys.",
+          "开启后，网页对话和定时任务完成时，会把最终回复和产物下载链接推送到选定的 IM 聊天。渠道内的对话仍在原聊天回复，不重复提醒。",
         ),
         h(Status, { state }),
-        ...state.rows.map((row) =>
-          h(Card, {
-            key: row.id,
-            title: row.displayName || row.id,
-            detail: row.authorization?.authorized
-              ? `ready · ${row.health}`
-              : `needs_setup · ${row.authorization?.reason || "not authorized"}`,
-          }),
-        ),
-      );
-    }
-
-    function EnginesSection() {
-      const [status] = useResource("/api/system/capabilities", (value) => {
-        const capabilities = value.engines || {};
-        return ["harness", "codex", "kimi"].map((id) => ({
-          id,
-          capabilities: capabilities[id],
-          available: Boolean(capabilities[id]),
-        }));
-      });
-      return h(
-        Section,
-        { title: "Engines" },
-        h(Status, { state: status }),
-        h(
-          "div",
-          { className: "workagent-grid" },
-          ...status.rows.map((row) =>
+        draft &&
+          h(
+            "form",
+            {
+              className: "workagent-form workagent-completion-form",
+              onSubmit: save,
+            },
             h(
-              Card,
-              {
-                key: row.id,
-                title: row.id,
-                detail: row.available
-                  ? "ready"
-                  : "unavailable · credential_needs_auth or engine not configured",
-              },
-              row.capabilities
-                ? h(
-                    "span",
-                    null,
-                    Object.entries(row.capabilities)
-                      .filter(([, enabled]) => enabled)
-                      .map(([name]) => name)
-                      .join(" · "),
-                  )
-                : null,
+              "label",
+              { className: "workagent-inline" },
+              h("input", {
+                type: "checkbox",
+                role: "switch",
+                "aria-label": "任务完成提醒",
+                checked: draft.enabled,
+                onChange: (event) => update({ enabled: event.target.checked }),
+              }),
+              "任务完成提醒",
             ),
-          ),
-        ),
-      );
-    }
-
-    const extensionTabs = [
-      ["Message channels", "/api/channels/connectors", (value) => value],
-      ["Usage quota", "/api/quota/gateway-usage", (value) => [value]],
-      [
-        "Runtime components",
-        "/api/system/status",
-        (value) => value.components || [],
-      ],
-      [
-        "Data migration",
-        `${apiRoot}/migrations/skills-mcp`,
-        (value) => value.items || value,
-      ],
-    ];
-    function ExtensionsSection() {
-      const [tab, setTab] = React.useState(0);
-      const [label, endpoint, select] = extensionTabs[tab];
-      const [state] = useResource(endpoint, select);
-      return h(
-        Section,
-        { title: "Extensions" },
-        h(
-          "nav",
-          { className: "workagent-tabs", "aria-label": "Extension categories" },
-          ...extensionTabs.map(([name], index) =>
+            h(
+              Field,
+              { label: "接收聊天" },
+              h(
+                "select",
+                {
+                  "aria-label": "接收聊天",
+                  value: draft.targetId,
+                  onChange: (event) => update({ targetId: event.target.value }),
+                },
+                h("option", { value: "" }, "请选择接收聊天"),
+                ...(saved?.targets || []).map((target) =>
+                  h(
+                    "option",
+                    {
+                      key: target.id,
+                      value: target.id,
+                      disabled: !target.connected,
+                    },
+                    `${target.label}${target.connected ? "" : "（未连接）"}`,
+                  ),
+                ),
+                draft.targetId &&
+                  !(saved?.targets || []).some(
+                    (target) => target.id === draft.targetId,
+                  )
+                  ? h(
+                      "option",
+                      { value: draft.targetId },
+                      "原接收聊天已不可用，请重新选择",
+                    )
+                  : null,
+              ),
+            ),
+            !(saved?.targets || []).length &&
+              h(
+                "p",
+                { className: "workagent-muted" },
+                "请先在“消息渠道”连接账号，并在接收聊天中给机器人发送一条消息，再刷新聊天列表。",
+              ),
+            h(Button, { type: "button", onClick: refresh }, "刷新聊天列表"),
+            h(
+              Field,
+              { label: "WorkAgent 访问网址" },
+              h(Input, {
+                type: "url",
+                "aria-label": "WorkAgent 访问网址",
+                value: draft.baseURL,
+                placeholder: "https://workagent.example.com",
+                onChange: (event) => update({ baseURL: event.target.value }),
+              }),
+            ),
+            h(
+              "p",
+              { className: "workagent-muted" },
+              "填写接收者可访问的网址。产物链接需要登录当前 WorkAgent 账号后下载。",
+            ),
             h(
               Button,
-              {
-                key: name,
-                "aria-pressed": tab === index,
-                onClick: () => setTab(index),
-              },
-              name,
+              { type: "submit", disabled: saving },
+              saving ? "保存中…" : "保存提醒设置",
+            ),
+            error &&
+              h("p", { role: "alert", className: "workagent-error" }, error),
+            notice && h("p", { role: "status" }, notice),
+          ),
+        h("h3", null, "最近推送"),
+        h(Button, { type: "button", onClick: refresh }, "刷新推送记录"),
+        !(saved?.deliveries || []).length &&
+          h("p", { className: "workagent-muted" }, "暂无推送记录"),
+        ...(saved?.deliveries || []).map((delivery) =>
+          h(
+            "div",
+            { key: delivery.id, className: "workagent-card" },
+            h("strong", null, delivery.title),
+            h(
+              "p",
+              null,
+              `${delivery.targetLabel} · ${{ pending: "等待发送", sending: "发送中", sent: "已发送", failed: "发送失败", cancelled: "已取消" }[delivery.status]}`,
+            ),
+            delivery.error &&
+              h("p", { className: "workagent-error" }, delivery.error),
+            delivery.status === "failed" &&
+              h(
+                Button,
+                {
+                  disabled: saving || !draft?.enabled,
+                  onClick: () => retry(delivery.id),
+                },
+                "重试推送",
+              ),
+          ),
+        ),
+      );
+    }
+
+    function ModelsSection() {
+      const [state] = useResource(`${apiRoot}/model-options`);
+      const [presets] = useResource(`${apiRoot}/presets`);
+      const [preferences, save] = useModelDefaults();
+      const groups = [
+        ...presets.rows
+          .filter((preset) => preset.source === "user")
+          .map((preset) => ({
+            preset,
+            group: state.rows.find(
+              (group) => group.engine === preset.engine,
+            ) || { engine: preset.engine, state: "unavailable", models: [] },
+          })),
+        ...state.rows.map((group) => ({ group })),
+      ];
+      return h(
+        Section,
+        { title: "模型" },
+        h(
+          "div",
+          { className: "workagent-section-intro" },
+          h(
+            "p",
+            null,
+            "为各助手设置新对话的默认模型、思考强度和权限。更改自动保存在当前浏览器；输入框的临时选择不会修改默认值。模型列表每次打开网页时自动更新。",
+          ),
+        ),
+        h(Status, { state }),
+        presets.loading || presets.error ? h(Status, { state: presets }) : null,
+        ...groups.map(({ group, preset }) =>
+          h(
+            "section",
+            {
+              key: preset?.id || group.engine,
+              className: "workagent-model-group",
+              "data-preset-id": preset?.id,
+            },
+            h(
+              "header",
+              null,
+              h(EngineMark, { engine: group.engine }),
+              h(
+                "strong",
+                null,
+                preset
+                  ? displayPresetName(preset.name)
+                  : displayValue(group.engine),
+              ),
+              preset
+                ? h(
+                    "span",
+                    { className: "workagent-muted" },
+                    `${displayValue(group.engine)}${preset.enabled ? "" : " · 已关闭"}`,
+                  )
+                : null,
+              h(
+                "span",
+                { className: `workagent-status-pill is-${group.state}` },
+                group.state === "ready"
+                  ? `已获取 ${group.models.length} 个模型`
+                  : group.state === "empty"
+                    ? "暂无模型"
+                    : "暂时无法获取",
+              ),
+            ),
+            h(ModelDefaultsFields, {
+              group,
+              preset,
+              defaults: resolveModelDefaults(group, preferences, preset),
+              save,
+            }),
+            group.state !== "ready"
+              ? h(
+                  "p",
+                  { className: "workagent-muted" },
+                  "请检查助手的连接与授权后重新打开网页。",
+                )
+              : null,
+            ...(preset ? [] : group.models).map((model) =>
+              h(
+                "article",
+                { key: model.id, className: "workagent-model-row" },
+                h(
+                  "div",
+                  null,
+                  h("strong", null, model.name),
+                  model.id === resolveModelDefaults(group, preferences).modelId
+                    ? h("span", { className: "workagent-default-tag" }, "默认")
+                    : null,
+                  h("small", null, model.id),
+                ),
+                h(
+                  "div",
+                  { className: "workagent-reasoning-tags" },
+                  ...(model.reasoning.length
+                    ? model.reasoning.map((option) =>
+                        h("span", { key: option.id }, reasoningLabel(option)),
+                      )
+                    : [h("span", { key: "none" }, "未提供思考选项")]),
+                ),
+              ),
             ),
           ),
         ),
-        h("h3", null, `Current: ${label}`),
-        h(Status, { state }),
-        ...state.rows.map((row, index) =>
-          h(Card, {
-            key: row.id || row.model || index,
-            title: row.display_name || row.name || row.id || row.model || label,
-            detail:
-              row.status ||
-              (row.state?.running && "healthy") ||
-              row.disposition ||
-              (row.dailyTokens !== undefined
-                ? `Daily ${row.dailyTokens} · Weekly ${row.weeklyTokens}`
-                : "ready"),
-          }),
-        ),
+      );
+    }
+
+    function QuotaPanel() {
+      const [state, setState] = React.useState({
+        loading: true,
+        rows: [],
+        error: "",
+      });
+      React.useEffect(() => {
+        const controller = new AbortController();
+        const load = async () => {
+          try {
+            const models = await request(`${apiRoot}/models`, {
+              signal: controller.signal,
+            });
+            const rows = await Promise.all(
+              models.map(async (model) => {
+                const usage = await request(
+                  `/api/quota/usage?model_id=${encodeURIComponent(model.id)}`,
+                  { signal: controller.signal },
+                );
+                return { model, usage };
+              }),
+            );
+            if (!controller.signal.aborted)
+              setState({
+                loading: false,
+                rows,
+                error: "",
+              });
+          } catch (cause) {
+            if (cause.name !== "AbortError")
+              setState({ loading: false, rows: [], error: cause.message });
+          }
+        };
+        void load();
+        const timer = setInterval(load, 5000);
+        return () => {
+          clearInterval(timer);
+          controller.abort();
+        };
+      }, []);
+      return h(
+        "aside",
+        { className: "workagent-quota-panel", "aria-label": "使用额度" },
+        h("strong", null, "使用额度"),
+        state.loading
+          ? h("span", { className: "workagent-muted" }, "加载中…")
+          : state.rows.length === 0
+            ? h(
+                "span",
+                { className: "workagent-muted" },
+                state.error ? "额度暂不可用" : "暂无额度限制",
+              )
+            : state.rows.map(({ model, usage }) => {
+                const used = usage.consumedUnits + usage.reservedUnits;
+                const remaining = Math.max(usage.limitUnits - used, 0);
+                const percent = usage.limitUnits
+                  ? Math.round((remaining / usage.limitUnits) * 100)
+                  : 0;
+                return h(
+                  "div",
+                  { className: "workagent-quota-row", key: model.id },
+                  h("span", null, displayModelName(model)),
+                  h("strong", null, `${percent}%`),
+                  h(
+                    "span",
+                    { className: "workagent-quota-track", "aria-hidden": true },
+                    h("span", { style: { width: `${percent}%` } }),
+                  ),
+                );
+              }),
       );
     }
 
@@ -686,13 +2189,8 @@ window.__ModuleLoader__.load({
       };
       return h(
         Section,
-        { title: "Notifications" },
-        h(
-          "p",
-          null,
-          "Unread ",
-          h("span", { className: "workagent-badge" }, unread),
-        ),
+        { title: "通知" },
+        h("p", { className: "workagent-muted" }, `未读 ${unread} 条`),
         error
           ? h("p", { role: "alert", className: "workagent-error" }, error)
           : null,
@@ -704,7 +2202,7 @@ window.__ModuleLoader__.load({
             h(
               Button,
               { onClick: () => open(row) },
-              row.deep_link ? "Open and acknowledge" : "Acknowledge",
+              row.deep_link ? "打开并标记已读" : "标记已读",
             ),
           ),
         ),
@@ -714,8 +2212,11 @@ window.__ModuleLoader__.load({
     function AutomationsPage() {
       const endpoint = `${apiRoot}/automations`;
       const [state, refresh] = useResource(endpoint);
+      const [presets] = useResource(`${apiRoot}/presets`);
+      const [workspaces] = useResource(`${apiRoot}/workspaces`);
       const [runs, setRuns] = React.useState({});
       const [error, setError] = React.useState("");
+      const [saving, setSaving] = React.useState(false);
       const submit = async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -728,15 +2229,18 @@ window.__ModuleLoader__.load({
             everyMinutes: Number(values.get("minutes")),
           },
           presetId: String(values.get("presetId")),
-          engine: String(values.get("engine")),
+          engine: presets.rows.find((row) => row.id === values.get("presetId"))
+            .engine,
           workspaceId: String(values.get("workspaceId")),
           input: String(values.get("input")),
           notificationPolicy: "always",
           executionMode: "new_conversation",
           conversationId: null,
         };
-        await mutate(refresh, setError, endpoint, "POST", body);
-        form.reset();
+        setSaving(true);
+        const saved = await mutate(refresh, setError, endpoint, "POST", body);
+        setSaving(false);
+        if (saved) form.reset();
       };
       const history = async (id) => {
         try {
@@ -750,58 +2254,175 @@ window.__ModuleLoader__.load({
       };
       return h(
         Section,
-        { title: "Scheduled tasks" },
+        { title: "定时任务" },
+        h(
+          "header",
+          { className: "workagent-automation-intro" },
+          h(
+            "span",
+            { className: "workagent-automation-icon" },
+            h(Icon, { name: "tasks", size: 24 }),
+          ),
+          h(
+            "div",
+            null,
+            h("h3", null, "让日常工作，自动进行"),
+            h("p", null, "设定任务与执行频率，让助手按时为你完成。"),
+          ),
+        ),
         h(
           "form",
-          { className: "workagent-form", onSubmit: submit },
-          ...[
-            ["name", "Name"],
-            ["presetId", "Preset ID"],
-            ["workspaceId", "Workspace ID"],
-            ["input", "Input"],
-          ].map(([name, label]) =>
-            h(Field, { label, key: name }, h(Input, { name, required: true })),
+          {
+            className: "workagent-form workagent-automation-form",
+            onSubmit: submit,
+          },
+          h(
+            "div",
+            { className: "workagent-automation-form-heading" },
+            h("h3", null, "新建定时任务"),
+            h("p", null, "从一件需要定期完成的小事开始。"),
+          ),
+          h(
+            "label",
+            { className: "workagent-automation-wide" },
+            "任务名称",
+            h(Input, {
+              name: "name",
+              required: true,
+              maxLength: 200,
+              placeholder: "例如：每周项目进展汇总",
+            }),
           ),
           h(
             Field,
-            { label: "Engine" },
+            { label: "执行助手" },
             h(Select, {
-              name: "engine",
+              name: "presetId",
+              required: true,
+              defaultValue: "",
               options: [
-                ["harness", "Harness"],
-                ["codex", "Codex"],
-                ["kimi", "Kimi"],
+                ["", presets.loading ? "正在加载助手…" : "选择一个助手"],
+                ...presets.rows
+                  .filter((row) => row.enabled)
+                  .map((row) => [row.id, row.name]),
               ],
             }),
           ),
           h(
             Field,
-            { label: "Every minutes" },
-            h(Input, {
-              name: "minutes",
-              type: "number",
-              min: 1,
-              defaultValue: 60,
+            { label: "所属项目" },
+            h(Select, {
+              name: "workspaceId",
               required: true,
+              defaultValue: "",
+              options: [
+                ["", workspaces.loading ? "正在加载项目…" : "选择一个项目"],
+                ...workspaces.rows.map((row) => [row.id, row.name]),
+              ],
             }),
           ),
           h(
-            "button",
-            { type: "submit", className: "workagent-button" },
-            "Create task",
+            Field,
+            { label: "任务内容" },
+            h("textarea", {
+              name: "input",
+              required: true,
+              rows: 4,
+              placeholder:
+                "描述你希望助手定期完成的工作，例如：整理项目最新进展，列出已完成事项、待办与风险。",
+            }),
+          ),
+          h(
+            "div",
+            { className: "workagent-automation-schedule" },
+            h(
+              Field,
+              { label: "执行间隔（分钟）" },
+              h(Input, {
+                name: "minutes",
+                type: "number",
+                min: 1,
+                max: 525600,
+                defaultValue: 60,
+                required: true,
+              }),
+            ),
+            h(
+              "p",
+              null,
+              h(Icon, { name: "tasks", size: 16 }),
+              "按此间隔重复执行，结果将通过通知送达。",
+            ),
+          ),
+          presets.error || workspaces.error
+            ? h(
+                "p",
+                {
+                  role: "alert",
+                  className: "workagent-error workagent-automation-wide",
+                },
+                friendlyError(presets.error || workspaces.error),
+              )
+            : null,
+          h(
+            "footer",
+            { className: "workagent-automation-form-footer" },
+            h("span", null, "每次执行都会创建新对话"),
+            h(
+              "button",
+              {
+                type: "submit",
+                className: "workagent-button workagent-automation-create",
+                disabled: saving || presets.loading || workspaces.loading,
+              },
+              h(Icon, { name: "plus", size: 16 }),
+              saving ? "创建中…" : "创建任务",
+            ),
           ),
         ),
         error
           ? h("p", { role: "alert", className: "workagent-error" }, error)
           : null,
-        h(Status, { state }),
+        h(
+          "div",
+          { className: "workagent-automation-list-heading" },
+          h("h3", null, "我的任务", h("span", null, state.rows.length)),
+          h("span", null, "按计划执行，随时查看记录"),
+        ),
+        state.loading || state.error
+          ? h(Status, { state })
+          : state.rows.length === 0
+            ? h(
+                "div",
+                { className: "workagent-automation-empty" },
+                h(
+                  "span",
+                  { className: "workagent-automation-icon" },
+                  h(Icon, { name: "tasks", size: 24 }),
+                ),
+                h("h3", null, "还没有定时任务"),
+                h("p", null, "创建第一个任务，把重复的工作交给助手。"),
+              )
+            : null,
         ...state.rows.map((row) =>
           h(
             Card,
             {
               key: row.id,
-              title: row.name,
-              detail: row.nextRunAt || "No next run",
+              className: "workagent-automation-card",
+              title: h(
+                "span",
+                { className: "workagent-automation-card-title" },
+                row.name,
+                h(
+                  "span",
+                  { className: "workagent-automation-state" },
+                  row.enabled ? "已启用" : "已暂停",
+                ),
+              ),
+              detail: row.nextRunAt
+                ? `下次运行 · ${new Date(row.nextRunAt).toLocaleString()}`
+                : "暂无下次运行时间",
             },
             h(
               Button,
@@ -814,9 +2435,9 @@ window.__ModuleLoader__.load({
                     "POST",
                   ),
               },
-              "Run now",
+              "立即运行",
             ),
-            h(Button, { onClick: () => history(row.id) }, "Run history"),
+            h(Button, { onClick: () => history(row.id) }, "运行记录"),
             ...(runs[row.id] || []).map((run) =>
               h(
                 Button,
@@ -831,7 +2452,7 @@ window.__ModuleLoader__.load({
                       "POST",
                     ),
                 },
-                `${run.status}: cancel`,
+                `${displayValue(run.status)}：取消`,
               ),
             ),
             h(
@@ -845,7 +2466,7 @@ window.__ModuleLoader__.load({
                     "DELETE",
                   ),
               },
-              "Delete",
+              "删除",
             ),
           ),
         ),
@@ -986,25 +2607,25 @@ window.__ModuleLoader__.load({
         );
       return h(
         Section,
-        { title: "Teams" },
+        { title: "团队" },
         h(
           "form",
           { className: "workagent-form", onSubmit: submit },
           ...[
-            ["name", "Team name"],
-            ["workspaceId", "Workspace ID"],
-            ["lead", "Lead name"],
-            ["presetId", "Preset ID"],
+            ["name", "团队名称"],
+            ["workspaceId", "工作区 ID"],
+            ["lead", "负责人名称"],
+            ["presetId", "助手 ID"],
           ].map(([name, label]) =>
             h(Field, { label, key: name }, h(Input, { name, required: true })),
           ),
           h(
             Field,
-            { label: "Lead engine" },
+            { label: "负责人引擎" },
             h(Select, {
               name: "engine",
               options: [
-                ["harness", "Harness"],
+                ["harness", "通用引擎"],
                 ["codex", "Codex"],
                 ["kimi", "Kimi"],
               ],
@@ -1013,7 +2634,7 @@ window.__ModuleLoader__.load({
           h(
             "button",
             { type: "submit", className: "workagent-button" },
-            "Create team",
+            "创建团队",
           ),
         ),
         error
@@ -1026,27 +2647,23 @@ window.__ModuleLoader__.load({
             {
               key: `${team.id}-${teamIndex}`,
               title: team.name,
-              detail: `${team.members.length} members · ${team.sessionMode || "independent sessions"}`,
+              detail: `${team.members.length} 位成员 · ${displayValue(team.sessionMode, "独立会话")}`,
             },
             h(
               Button,
               { onClick: () => beginTeamAction("member", team) },
-              "Add member",
+              "添加成员",
             ),
             h(
               Button,
               { onClick: () => beginTeamAction("task", team) },
-              "Dispatch task",
+              "分派任务",
             ),
-            h(
-              Button,
-              { onClick: () => loadDetails(team) },
-              "Mailbox and events",
-            ),
+            h(Button, { onClick: () => loadDetails(team) }, "消息与动态"),
             h(
               Button,
               { onClick: () => beginTeamAction("mail", team) },
-              "Send team mail",
+              "发送团队消息",
             ),
             details[team.id]
               ? h(
@@ -1055,7 +2672,7 @@ window.__ModuleLoader__.load({
                   h(
                     "span",
                     null,
-                    `${details[team.id].tasks.length} tasks · ${details[team.id].messages.length} messages · ${details[team.id].events.length} events`,
+                    `${details[team.id].tasks.length} 个任务 · ${details[team.id].messages.length} 条消息 · ${details[team.id].events.length} 条动态`,
                   ),
                   ...details[team.id].tasks.map((taskEntry) =>
                     h(
@@ -1067,7 +2684,7 @@ window.__ModuleLoader__.load({
                         ),
                         onClick: () => cancelTask(team, taskEntry),
                       },
-                      `${taskEntry.title}: ${taskEntry.status}`,
+                      `${taskEntry.title}：${displayValue(taskEntry.status)}`,
                     ),
                   ),
                   ...details[team.id].messages.map((message) =>
@@ -1080,7 +2697,7 @@ window.__ModuleLoader__.load({
                         key: `event-${event.id}`,
                         className: "workagent-muted",
                       },
-                      event.type,
+                      displayValue(event.type),
                     ),
                   ),
                 )
@@ -1095,34 +2712,34 @@ window.__ModuleLoader__.load({
                 Field,
                 {
                   label: {
-                    member: "Member name",
-                    task: "Task title",
-                    mail: "Message to the team",
+                    member: "成员名称",
+                    task: "任务标题",
+                    mail: "发送给团队的消息",
                   }[teamAction.kind],
                 },
                 h(Input, {
-                  "aria-label": "Team action value",
+                  "aria-label": "团队操作内容",
                   value: teamActionValue,
                   onChange: (event) => setTeamActionValue(event.target.value),
                   required: true,
                 }),
               ),
-              h(Button, { type: "submit" }, "Confirm"),
-              h(Button, { onClick: () => setTeamAction(null) }, "Cancel"),
+              h(Button, { type: "submit" }, "确认"),
+              h(Button, { onClick: () => setTeamAction(null) }, "取消"),
               teamAction.kind === "member"
                 ? h(
                     React.Fragment,
                     null,
                     h(
                       Field,
-                      { label: "Member engine" },
+                      { label: "成员引擎" },
                       h(Select, {
-                        "aria-label": "Member engine",
+                        "aria-label": "成员引擎",
                         value: memberEngine,
                         onChange: (event) =>
                           setMemberEngine(event.target.value),
                         options: [
-                          ["harness", "Harness"],
+                          ["harness", "通用引擎"],
                           ["codex", "Codex"],
                           ["kimi", "Kimi"],
                         ],
@@ -1130,9 +2747,9 @@ window.__ModuleLoader__.load({
                     ),
                     h(
                       Field,
-                      { label: "Member preset ID" },
+                      { label: "成员助手 ID" },
                       h(Input, {
-                        "aria-label": "Member preset ID",
+                        "aria-label": "成员助手 ID",
                         value: memberPresetId,
                         onChange: (event) =>
                           setMemberPresetId(event.target.value),
@@ -1146,23 +2763,1239 @@ window.__ModuleLoader__.load({
       );
     }
 
+    const FILE_PROJECT_EVENT = "workagent:files-project";
+    const FILES_CHANGED_EVENT = "workagent:files-changed";
+    const fileParent = (path) => path.split("/").slice(0, -1).join("/");
+    const fileURL = (workspaceId, path, preview = false) =>
+      `${apiRoot}/workspaces/${encodeURIComponent(workspaceId)}/content?path=${encodeURIComponent(path)}${preview ? "&preview=1" : ""}`;
+    const fileSize = (size) =>
+      size < 1024
+        ? `${size} B`
+        : size < 1024 * 1024
+          ? `${(size / 1024).toFixed(1)} KB`
+          : `${(size / 1024 / 1024).toFixed(1)} MB`;
+    function FileIconButton({ name, label, ...props }) {
+      return h(
+        "button",
+        {
+          type: "button",
+          className: "workagent-file-icon-button",
+          title: label,
+          "aria-label": label,
+          ...props,
+        },
+        h(Icon, { name, size: 17 }),
+      );
+    }
+
+    function ResizeHandle({
+      orientation,
+      value,
+      onChange,
+      measure,
+      label,
+      min,
+      max,
+      className = "workagent-file-resizer",
+    }) {
+      const start = React.useRef(null);
+      const vertical = orientation === "vertical";
+      const finish = () => {
+        start.current = null;
+        document.body.classList.remove("workagent-resizing");
+      };
+      React.useEffect(
+        () => () => {
+          if (start.current) finish();
+        },
+        [],
+      );
+      const releasePointer = (event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId))
+          event.currentTarget.releasePointerCapture(event.pointerId);
+      };
+      return h("div", {
+        className: `${className} ${vertical ? "is-vertical" : "is-horizontal"}`,
+        role: "separator",
+        tabIndex: 0,
+        "aria-orientation": orientation,
+        "aria-label": label || (vertical ? "调整文件栏宽度" : "调整预览区高度"),
+        "aria-valuenow": Math.round(value),
+        "aria-valuemin": min,
+        "aria-valuemax": max,
+        onPointerDown: (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          start.current = measure(event);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          document.body.classList.add("workagent-resizing");
+        },
+        onPointerMove: (event) => {
+          if (start.current) onChange(start.current(event));
+        },
+        onLostPointerCapture: finish,
+        onPointerUp: releasePointer,
+        onPointerCancel: releasePointer,
+        onKeyDown: (event) => {
+          const direction = {
+            ArrowLeft: 1,
+            ArrowRight: -1,
+            ArrowUp: -1,
+            ArrowDown: 1,
+          }[event.key];
+          if (
+            direction &&
+            (vertical
+              ? event.key === "ArrowLeft" || event.key === "ArrowRight"
+              : event.key === "ArrowUp" || event.key === "ArrowDown")
+          ) {
+            event.preventDefault();
+            onChange(value + direction * (vertical ? 24 : 5));
+          }
+        },
+      });
+    }
+
+    let documentPreviewTemplate;
+    function loadDocumentPreview() {
+      if (!documentPreviewTemplate) {
+        const root = "/plugins/@workagent/dsh-client/";
+        documentPreviewTemplate = Promise.all([
+          request(`${root}document-preview.html`),
+          request(`${root}jszip.js`),
+          request(`${root}docx-preview.js`),
+        ])
+          .then(([html, zip, docx]) =>
+            html
+              .replace("__JSZIP_SOURCE__", () =>
+                zip.replace(/<\/script/gi, "<\\/script"),
+              )
+              .replace("__DOCX_SOURCE__", () =>
+                docx.replace(/<\/script/gi, "<\\/script"),
+              ),
+          )
+          .catch((error) => {
+            documentPreviewTemplate = null;
+            throw error;
+          });
+      }
+      return documentPreviewTemplate;
+    }
+
+    function WorkspaceFilePreview({
+      workspace,
+      entry,
+      revision,
+      onClose,
+      onDismiss,
+    }) {
+      const [state, setState] = React.useState({ loading: true });
+      const [source, setSource] = React.useState(false);
+      const [maximized, setMaximized] = React.useState(false);
+      const extension = entry.name.toLowerCase().split(".").pop();
+      React.useEffect(() => {
+        const controller = new AbortController();
+        let objectURL;
+        setState({ loading: true });
+        setSource(false);
+        const load = async () => {
+          try {
+            const inline = fileURL(workspace.id, entry.path, true);
+            if (extension === "pdf") {
+              const response = await fetch(inline, {
+                signal: controller.signal,
+              });
+              if (!response.ok) throw new Error("file_not_found");
+              await response.body?.cancel();
+              if (controller.signal.aborted) return;
+              setState({
+                media: "pdf",
+                url: `${inline}#navpanes=0&toolbar=1`,
+              });
+              return;
+            }
+            if (extension === "docx") {
+              if (entry.size > 25 * 1024 * 1024)
+                throw new Error("file_too_large");
+              const [response, template] = await Promise.all([
+                fetch(inline, { signal: controller.signal }),
+                loadDocumentPreview(),
+              ]);
+              if (!response.ok) throw new Error("file_not_found");
+              const data = await response.arrayBuffer();
+              if (!controller.signal.aborted)
+                setState({
+                  media: "docx",
+                  data,
+                  html: template,
+                });
+              return;
+            }
+            if (["xlsx", "pptx"].includes(extension)) {
+              const value = await request(`${apiRoot}/office-preview/convert`, {
+                method: "POST",
+                signal: controller.signal,
+                body: JSON.stringify({
+                  workspace: workspace.directory || workspace.id,
+                  path: entry.path,
+                }),
+              });
+              const url = `${apiRoot}/office-preview/content/${encodeURIComponent(value.hash)}.pdf`;
+              const response = await fetch(url, { signal: controller.signal });
+              if (
+                !response.ok ||
+                !response.headers
+                  .get("content-type")
+                  ?.includes("application/pdf")
+              )
+                throw new Error("office_preview_not_found");
+              await response.body?.cancel();
+              if (!controller.signal.aborted)
+                setState({
+                  media: "pdf",
+                  url: `${url}#view=FitH&navpanes=0&toolbar=1`,
+                });
+              return;
+            }
+            const images = {
+              png: "image/png",
+              jpg: "image/jpeg",
+              jpeg: "image/jpeg",
+              gif: "image/gif",
+              webp: "image/webp",
+              svg: "image/svg+xml",
+              bmp: "image/bmp",
+              avif: "image/avif",
+              ico: "image/x-icon",
+            };
+            const textFile =
+              [
+                "txt",
+                "md",
+                "markdown",
+                "csv",
+                "tsv",
+                "json",
+                "yaml",
+                "yml",
+                "log",
+                "js",
+                "ts",
+                "tsx",
+                "jsx",
+                "css",
+                "scss",
+                "html",
+                "htm",
+                "xml",
+                "py",
+                "go",
+                "rs",
+                "java",
+                "c",
+                "cpp",
+                "h",
+                "hpp",
+                "ps1",
+                "sh",
+                "bat",
+                "toml",
+                "ini",
+                "sql",
+                "diff",
+                "patch",
+                "env",
+              ].includes(extension) || !entry.name.includes(".");
+            if (!images[extension] && !textFile) {
+              setState({ media: "unsupported" });
+              return;
+            }
+            if (entry.size > (images[extension] ? 25 : 2) * 1024 * 1024) {
+              setState({ error: "文件较大，请下载后查看。" });
+              return;
+            }
+            const response = await fetch(inline, {
+              credentials: "same-origin",
+              signal: controller.signal,
+            });
+            if (!response.ok)
+              throw new Error(
+                response.status === 404
+                  ? "file_not_found"
+                  : "workspace_operation_failed",
+              );
+            if (images[extension]) {
+              const data = await response.arrayBuffer();
+              if (controller.signal.aborted) return;
+              objectURL = URL.createObjectURL(
+                new Blob([data], { type: images[extension] }),
+              );
+              setState({ media: "image", url: objectURL });
+            } else {
+              const text = await response.text();
+              if (!controller.signal.aborted)
+                setState({
+                  media: ["md", "markdown"].includes(extension)
+                    ? "markdown"
+                    : ["html", "htm"].includes(extension)
+                      ? "html"
+                      : "text",
+                  text,
+                });
+            }
+          } catch (error) {
+            if (!controller.signal.aborted)
+              setState({
+                error: ["docx", "xlsx", "pptx"].includes(extension)
+                  ? "文档转换暂不可用，可下载原文件查看。"
+                  : friendlyError(error.message),
+              });
+          }
+        };
+        void load();
+        return () => {
+          controller.abort();
+          if (objectURL) URL.revokeObjectURL(objectURL);
+        };
+      }, [workspace.id, entry.path, revision]);
+      const html = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">${state.text || ""}`;
+      return h(
+        "section",
+        {
+          className: `workagent-file-preview-pane${maximized ? " is-maximized" : ""}`,
+          "aria-label": "文件预览",
+          onKeyDown: (event) => {
+            if (event.key === "Escape" && maximized) {
+              event.stopPropagation();
+              setMaximized(false);
+            }
+          },
+        },
+        h(
+          "header",
+          null,
+          h(FileIconButton, {
+            name: "back",
+            label: "返回文件列表",
+            onClick: onClose,
+          }),
+          h("strong", { title: entry.path }, entry.name),
+          ["markdown", "html"].includes(state.media)
+            ? h(
+                "button",
+                { type: "button", onClick: () => setSource(!source) },
+                source ? "预览" : "源码",
+              )
+            : null,
+          h(FileIconButton, {
+            name: "expand",
+            label: maximized ? "还原文件预览" : "最大化文件预览",
+            onClick: () => setMaximized(!maximized),
+          }),
+          h(
+            "a",
+            {
+              href: fileURL(workspace.id, entry.path),
+              download: entry.name,
+              "aria-label": `下载 ${entry.name}`,
+              title: "下载原文件",
+            },
+            h(Icon, { name: "download", size: 17 }),
+          ),
+          h(FileIconButton, {
+            name: "close",
+            label: "关闭文件侧栏",
+            onClick: onDismiss,
+          }),
+        ),
+        h(
+          "div",
+          { className: "workagent-file-preview-body" },
+          state.loading
+            ? h("p", { role: "status" }, "正在加载预览…")
+            : state.error
+              ? h("p", { role: "alert" }, state.error)
+              : state.media === "docx"
+                ? h("iframe", {
+                    key: `${entry.path}:${revision}`,
+                    title: entry.name,
+                    sandbox: "allow-scripts",
+                    srcDoc: state.html,
+                    onLoad: (event) =>
+                      event.currentTarget.contentWindow.postMessage(
+                        { type: "workagent:document", data: state.data },
+                        "*",
+                      ),
+                  })
+                : state.media === "image"
+                  ? h("img", { src: state.url, alt: entry.name })
+                  : state.media === "pdf"
+                    ? h("iframe", { src: state.url, title: entry.name })
+                    : state.media === "html" && !source
+                      ? h("iframe", {
+                          srcDoc: html,
+                          sandbox: "",
+                          title: entry.name,
+                        })
+                      : state.media === "markdown" && !source
+                        ? h(Markdown, null, state.text)
+                        : state.text !== undefined
+                          ? h("pre", null, state.text)
+                          : h(
+                              "p",
+                              null,
+                              "此格式暂不支持在线预览，请下载后查看。",
+                            ),
+        ),
+      );
+    }
+
+    function WorkspaceFileManager({ workspace, onDismiss }) {
+      const root = `${apiRoot}/workspaces/${encodeURIComponent(workspace.id)}`;
+      const [tree, setTree] = React.useState({});
+      const [expanded, setExpanded] = React.useState(new Set([""]));
+      const [directory, setDirectory] = React.useState("");
+      const [selected, setSelected] = React.useState(null);
+      const [menu, setMenu] = React.useState(null);
+      const [action, setAction] = React.useState(null);
+      const [name, setName] = React.useState("");
+      const [busy, setBusy] = React.useState(false);
+      const [loading, setLoading] = React.useState(false);
+      const [error, setError] = React.useState("");
+      const [notice, setNotice] = React.useState("");
+      const [revision, setRevision] = React.useState(0);
+      const uploadInput = React.useRef(null);
+      const requests = React.useRef(new Map());
+      const live = React.useRef(true);
+      const expandedRef = React.useRef(expanded);
+      expandedRef.current = expanded;
+      const loadDirectory = React.useCallback(
+        async (path) => {
+          requests.current.get(path)?.abort();
+          const controller = new AbortController();
+          requests.current.set(path, controller);
+          try {
+            const entries = await request(
+              `${root}/files?path=${encodeURIComponent(path)}`,
+              { signal: controller.signal },
+            );
+            if (!controller.signal.aborted)
+              setTree((current) => ({ ...current, [path]: entries }));
+          } catch (reason) {
+            if (!controller.signal.aborted)
+              setError(friendlyError(reason.message));
+          } finally {
+            if (requests.current.get(path) === controller)
+              requests.current.delete(path);
+          }
+        },
+        [root],
+      );
+      const refresh = React.useCallback(async () => {
+        setLoading(true);
+        await Promise.all([...expandedRef.current].map(loadDirectory));
+        if (live.current) setLoading(false);
+      }, [loadDirectory]);
+      React.useEffect(() => {
+        live.current = true;
+        void refresh();
+        const update = () => {
+          void refresh();
+          setRevision((value) => value + 1);
+        };
+        window.addEventListener(SESSIONS_CHANGED_EVENT, update);
+        window.addEventListener(FILES_CHANGED_EVENT, update);
+        window.addEventListener("focus", update);
+        return () => {
+          live.current = false;
+          for (const controller of requests.current.values())
+            controller.abort();
+          window.removeEventListener(SESSIONS_CHANGED_EVENT, update);
+          window.removeEventListener(FILES_CHANGED_EVENT, update);
+          window.removeEventListener("focus", update);
+        };
+      }, [refresh]);
+      const beginAction = (kind, entry) => {
+        setMenu(null);
+        setError("");
+        setNotice("");
+        setAction({ kind, entry });
+        setName(
+          kind === "move" ? entry.path : kind === "rename" ? entry.name : "",
+        );
+      };
+      const mutate = async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        const value = name.trim();
+        if (
+          action.kind !== "delete" &&
+          (!value ||
+            (action.kind !== "move" && /[\\/:*?"<>|]/.test(value)) ||
+            value === "." ||
+            value === "..")
+        ) {
+          setError("请输入有效名称。");
+          return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+          if (action.kind === "delete") {
+            await request(fileURL(workspace.id, action.entry.path), {
+              method: "DELETE",
+            });
+          } else if (["rename", "move"].includes(action.kind)) {
+            const destination =
+              action.kind === "move"
+                ? value
+                : [fileParent(action.entry.path), value]
+                    .filter(Boolean)
+                    .join("/");
+            await request(`${root}/move`, {
+              method: "POST",
+              body: JSON.stringify({ source: action.entry.path, destination }),
+            });
+          } else {
+            const path = [directory, value].filter(Boolean).join("/");
+            if (action.kind === "folder")
+              await request(`${root}/directories`, {
+                method: "POST",
+                body: JSON.stringify({ path }),
+              });
+            else
+              await request(`${fileURL(workspace.id, path)}&overwrite=0`, {
+                method: "PUT",
+                body: "",
+                headers: { "Content-Type": "application/octet-stream" },
+              });
+          }
+          if (!live.current) return;
+          // Renaming/moving a directory invalidates all cached descendant paths.
+          const reset =
+            ["rename", "move", "delete"].includes(action.kind) &&
+            action.entry.kind === "directory";
+          if (reset) {
+            for (const controller of requests.current.values())
+              controller.abort();
+            setTree({});
+            expandedRef.current = new Set([""]);
+            setExpanded(expandedRef.current);
+            setDirectory("");
+          }
+          if (["rename", "move", "delete"].includes(action.kind))
+            setSelected(null);
+          setAction(null);
+          setNotice("已完成");
+          await refresh();
+        } catch (reason) {
+          if (live.current) setError(friendlyError(reason.message));
+        } finally {
+          if (live.current) setBusy(false);
+        }
+      };
+      const upload = async (files) => {
+        if (busy || !files.length) return;
+        setBusy(true);
+        setError("");
+        setNotice("");
+        let completed = 0;
+        const failures = [];
+        try {
+          for (const file of files) {
+            if (!live.current) break;
+            if (file.size > maxUploadBytes) {
+              failures.push(`${file.name}：超过 1 GB`);
+              continue;
+            }
+            try {
+              await request(
+                `${fileURL(workspace.id, [directory, file.name].filter(Boolean).join("/"))}&overwrite=0`,
+                {
+                  method: "PUT",
+                  body: file,
+                  headers: { "Content-Type": "application/octet-stream" },
+                },
+              );
+              completed += 1;
+            } catch (reason) {
+              failures.push(`${file.name}：${friendlyError(reason.message)}`);
+            }
+          }
+          if (live.current) {
+            setNotice(completed ? `已上传 ${completed} 个文件` : "");
+            setError(failures.join("；"));
+            await refresh();
+          }
+        } finally {
+          if (live.current) setBusy(false);
+        }
+      };
+      const openDirectory = (entry) => {
+        setDirectory(entry.path);
+        setMenu(null);
+        setExpanded((current) => {
+          const next = new Set(current);
+          if (next.has(entry.path)) next.delete(entry.path);
+          else next.add(entry.path);
+          return next;
+        });
+        if (!tree[entry.path]) void loadDirectory(entry.path);
+      };
+      const renderDirectory = (path, depth = 0) =>
+        h(
+          "ul",
+          { className: "workagent-file-tree-list", key: path },
+          ...(tree[path] || []).map((entry) =>
+            h(
+              "li",
+              { key: entry.path },
+              h(
+                "div",
+                {
+                  className: `workagent-file-tree-row${selected?.path === entry.path || directory === entry.path ? " is-selected" : ""}`,
+                  style: { "--file-depth": depth },
+                },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "workagent-file-tree-name",
+                    title: entry.path,
+                    "aria-expanded":
+                      entry.kind === "directory"
+                        ? expanded.has(entry.path)
+                        : undefined,
+                    onClick: () => {
+                      if (entry.kind === "directory") openDirectory(entry);
+                      else {
+                        setSelected(entry);
+                        setDirectory(fileParent(entry.path));
+                        setMenu(null);
+                      }
+                    },
+                  },
+                  h(Icon, {
+                    name:
+                      entry.kind === "directory"
+                        ? expanded.has(entry.path)
+                          ? "chevronDown"
+                          : "chevronRight"
+                        : "file",
+                    size: 16,
+                  }),
+                  h("span", null, entry.name),
+                ),
+                entry.kind === "file"
+                  ? h("small", null, fileSize(entry.size))
+                  : null,
+                h(FileIconButton, {
+                  name: "more",
+                  label: `操作 ${entry.name}`,
+                  "aria-expanded": menu?.path === entry.path,
+                  onClick: () =>
+                    setMenu(menu?.path === entry.path ? null : entry),
+                }),
+              ),
+              menu?.path === entry.path
+                ? h(
+                    "div",
+                    {
+                      className: "workagent-file-row-menu",
+                      "aria-label": `${entry.name} 的操作`,
+                    },
+                    entry.kind === "file"
+                      ? h(
+                          "a",
+                          {
+                            href: fileURL(workspace.id, entry.path),
+                            download: entry.name,
+                          },
+                          "下载",
+                        )
+                      : null,
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => beginAction("rename", entry),
+                      },
+                      "重命名",
+                    ),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => beginAction("move", entry),
+                      },
+                      "移动",
+                    ),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => beginAction("delete", entry),
+                      },
+                      "删除",
+                    ),
+                  )
+                : null,
+              entry.kind === "directory" && expanded.has(entry.path)
+                ? tree[entry.path]
+                  ? tree[entry.path].length
+                    ? renderDirectory(entry.path, depth + 1)
+                    : h(
+                        "p",
+                        { className: "workagent-file-tree-empty" },
+                        "空文件夹",
+                      )
+                  : h(
+                      "p",
+                      { className: "workagent-file-tree-empty" },
+                      "正在加载…",
+                    )
+                : null,
+            ),
+          ),
+        );
+      const actionLabel =
+        action &&
+        {
+          file: "新建文件",
+          folder: "新建文件夹",
+          rename: "重命名文件",
+          move: "移动文件",
+          delete: "删除文件",
+        }[action.kind];
+      return h(
+        "div",
+        {
+          className: `workagent-file-manager${selected ? " has-preview" : ""}`,
+          onDragOver: (event) => {
+            if (event.dataTransfer.types.includes("Files"))
+              event.preventDefault();
+          },
+          onDrop: (event) => {
+            if (!event.dataTransfer.files.length) return;
+            event.preventDefault();
+            void upload([...event.dataTransfer.files]);
+          },
+        },
+        h(
+          "div",
+          { className: "workagent-file-manager-content", hidden: !!selected },
+          h(
+            "div",
+            { className: "workagent-file-toolbar" },
+            h(FileIconButton, {
+              name: "upload",
+              label: "上传文件",
+              disabled: busy,
+              onClick: () => uploadInput.current.click(),
+            }),
+            h(FileIconButton, {
+              name: "file",
+              label: "新建文件",
+              disabled: busy,
+              onClick: () => beginAction("file"),
+            }),
+            h(FileIconButton, {
+              name: "plus",
+              label: "新建文件夹",
+              disabled: busy,
+              onClick: () => beginAction("folder"),
+            }),
+            h(
+              "span",
+              null,
+              busy ? "正在处理…" : "拖入文件上传 · 单个最大 1 GB",
+            ),
+            h(FileIconButton, {
+              name: "refresh",
+              label: "刷新文件",
+              disabled: loading,
+              onClick: () => {
+                setError("");
+                void refresh();
+                setRevision((value) => value + 1);
+              },
+            }),
+            h("input", {
+              ref: uploadInput,
+              hidden: true,
+              type: "file",
+              multiple: true,
+              "aria-label": "选择上传文件",
+              onChange: (event) => {
+                const files = [...event.target.files];
+                event.target.value = "";
+                void upload(files);
+              },
+            }),
+          ),
+          h(
+            "nav",
+            {
+              className: "workagent-file-breadcrumb",
+              "aria-label": "当前文件目录",
+            },
+            h(
+              "button",
+              { type: "button", onClick: () => setDirectory("") },
+              "根目录",
+            ),
+            ...directory
+              .split("/")
+              .filter(Boolean)
+              .map((part, index, parts) =>
+                h(
+                  "button",
+                  {
+                    key: index,
+                    type: "button",
+                    onClick: () =>
+                      setDirectory(parts.slice(0, index + 1).join("/")),
+                  },
+                  " / ",
+                  part,
+                ),
+              ),
+          ),
+          error
+            ? h(
+                "p",
+                { role: "alert", className: "workagent-file-notice is-error" },
+                error,
+              )
+            : null,
+          notice
+            ? h(
+                "p",
+                { role: "status", className: "workagent-file-notice" },
+                notice,
+              )
+            : null,
+          action
+            ? h(
+                "form",
+                {
+                  className: "workagent-file-action-form",
+                  onSubmit: mutate,
+                  "aria-label": actionLabel,
+                },
+                h("strong", null, actionLabel),
+                action.kind === "delete"
+                  ? h(
+                      "p",
+                      null,
+                      `确认删除“${action.entry.name}”${action.entry.kind === "directory" ? "及其内容" : ""}？`,
+                    )
+                  : h(Input, {
+                      autoFocus: true,
+                      "aria-label":
+                        action.kind === "move" ? "目标相对路径" : "文件名",
+                      placeholder:
+                        action.kind === "move"
+                          ? "例如：资料/报告.txt"
+                          : "输入名称",
+                      value: name,
+                      onChange: (event) => setName(event.target.value),
+                      required: true,
+                    }),
+                action.kind === "move"
+                  ? h(
+                      "small",
+                      null,
+                      "相对于项目根目录，包含文件名；可输入新的文件夹路径。",
+                    )
+                  : null,
+                h(
+                  "div",
+                  null,
+                  h(
+                    Button,
+                    { disabled: busy, onClick: () => setAction(null) },
+                    "取消",
+                  ),
+                  h(
+                    Button,
+                    { type: "submit", disabled: busy },
+                    busy
+                      ? "处理中…"
+                      : action.kind === "delete"
+                        ? "确认删除"
+                        : "保存",
+                  ),
+                ),
+              )
+            : null,
+          h(
+            "div",
+            { className: "workagent-file-tree", "aria-label": "项目文件树" },
+            tree[""]
+              ? tree[""].length
+                ? renderDirectory("")
+                : h(
+                    "div",
+                    { className: "workagent-file-panel-empty" },
+                    h(Icon, { name: "workspace", size: 32 }),
+                    h("strong", null, "此项目还没有文件"),
+                    h("p", null, "拖入文件，或让助手在项目中创建文件。"),
+                  )
+              : h("p", { role: "status" }, "正在加载文件…"),
+          ),
+        ),
+        selected
+          ? h(WorkspaceFilePreview, {
+              workspace,
+              entry: selected,
+              revision,
+              onClose: () => setSelected(null),
+              onDismiss,
+            })
+          : null,
+      );
+    }
+
+    function FileSidebarPanel({
+      workspaceId,
+      onProjectChange,
+      sessionLoading,
+      sessionError,
+    }) {
+      const [state, refresh] = useResource(`${apiRoot}/workspaces`);
+      const [open, setOpen] = React.useState(
+        () =>
+          localStorage.getItem("workagent.files.open") === "true" ||
+          (localStorage.getItem("workagent.files.open") === null &&
+            window.innerWidth >= 1100),
+      );
+      const [width, setWidth] = React.useState(
+        () => Number(localStorage.getItem("workagent.files.width")) || 440,
+      );
+      const resizeWidth = (value) => {
+        const next = Math.max(320, Math.min(window.innerWidth - 640, value));
+        setWidth(next);
+        localStorage.setItem("workagent.files.width", String(next));
+      };
+      React.useEffect(() => {
+        const update = () =>
+          document.body.style.setProperty(
+            "--workagent-files-width",
+            `${Math.max(320, Math.min(window.innerWidth - 640, width))}px`,
+          );
+        update();
+        window.addEventListener("resize", update);
+        return () => {
+          window.removeEventListener("resize", update);
+          document.body.style.removeProperty("--workagent-files-width");
+        };
+      }, [width]);
+      const toggle = (value) => {
+        setOpen(value);
+        localStorage.setItem("workagent.files.open", String(value));
+      };
+      const workspace =
+        workspaceId === "default"
+          ? {
+              id: "default",
+              name: "当前会话文件",
+              directory: ".workagent-unassigned",
+            }
+          : state.rows.find((row) => row.id === workspaceId);
+      React.useEffect(() => {
+        const update = () => void refresh();
+        window.addEventListener(PROJECTS_CHANGED_EVENT, update);
+        return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
+      }, [refresh]);
+      return h(
+        React.Fragment,
+        null,
+        h(
+          "div",
+          { className: "workagent-top-actions" },
+          h(TopNotificationButton),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "workagent-files-toggle",
+              "aria-label": open ? "收起文件侧栏" : "打开文件侧栏",
+              "aria-expanded": open,
+              "aria-controls": "workagent-files-panel",
+              title: "项目文件",
+              onClick: () => toggle(!open),
+            },
+            h(Icon, { name: "workspace", size: 19 }),
+          ),
+        ),
+        open
+          ? h("button", {
+              type: "button",
+              className: "workagent-files-backdrop",
+              "aria-label": "关闭文件侧栏遮罩",
+              onClick: () => toggle(false),
+            })
+          : null,
+        h(
+          "aside",
+          {
+            id: "workagent-files-panel",
+            hidden: !open,
+            className: "workagent-files-panel",
+            "aria-label": "项目文件侧栏",
+            onKeyDown: (event) => {
+              if (
+                event.key === "Escape" &&
+                !["INPUT", "TEXTAREA"].includes(event.target.tagName)
+              )
+                toggle(false);
+            },
+          },
+          h(ResizeHandle, {
+            orientation: "vertical",
+            value: width,
+            onChange: resizeWidth,
+            measure: (event) => {
+              const initial = event.clientX;
+              const actualWidth =
+                event.currentTarget.parentElement.getBoundingClientRect().width;
+              return (move) => actualWidth + initial - move.clientX;
+            },
+          }),
+          h(
+            "header",
+            { className: "workagent-files-panel-header" },
+            h("strong", null, "项目文件"),
+            h(FileIconButton, {
+              name: "expand",
+              label: width > 500 ? "缩小文件侧栏" : "放大文件侧栏",
+              onClick: () =>
+                resizeWidth(width > 500 ? 440 : window.innerWidth * 0.55),
+            }),
+            h(FileIconButton, {
+              name: "close",
+              label: "关闭文件侧栏",
+              onClick: () => toggle(false),
+            }),
+          ),
+          onProjectChange
+            ? h(
+                "select",
+                {
+                  className: "workagent-files-project",
+                  "aria-label": "文件侧栏项目",
+                  value: workspace?.id || "",
+                  onChange: (event) => onProjectChange(event.target.value),
+                },
+                h("option", { value: "" }, "选择项目"),
+                ...state.rows
+                  .filter((row) => row.scope !== "team")
+                  .map((row) =>
+                    h(
+                      "option",
+                      { key: row.id, value: row.id },
+                      displayWorkspaceName(row.name),
+                    ),
+                  ),
+              )
+            : h(
+                "div",
+                {
+                  className: "workagent-files-project",
+                  title: workspace?.name,
+                },
+                workspace
+                  ? displayWorkspaceName(workspace.name)
+                  : "当前会话项目",
+              ),
+          state.error || sessionError
+            ? h(
+                "p",
+                { role: "alert", className: "workagent-file-notice" },
+                friendlyError(state.error || sessionError),
+              )
+            : state.loading || sessionLoading
+              ? h("p", { role: "status" }, "正在加载项目…")
+              : workspace
+                ? h(WorkspaceFileManager, {
+                    key: workspace.id,
+                    workspace,
+                    onDismiss: () => toggle(false),
+                  })
+                : h(
+                    "div",
+                    { className: "workagent-file-panel-empty" },
+                    h(Icon, { name: "workspace", size: 32 }),
+                    h("strong", null, "选择项目后查看文件"),
+                    h(
+                      "p",
+                      null,
+                      "文件随项目保存。已有会话会自动显示所属项目。",
+                    ),
+                  ),
+        ),
+      );
+    }
+    function HomeFileSidebar() {
+      const [workspaceId, setWorkspaceId] = React.useState(
+        () =>
+          new URLSearchParams(location.search).get("project") ||
+          localStorage.getItem(WORKSPACE_PICK_KEY) ||
+          "",
+      );
+      React.useEffect(() => {
+        const update = (event) => setWorkspaceId(event.detail || "");
+        window.addEventListener(FILE_PROJECT_EVENT, update);
+        return () => window.removeEventListener(FILE_PROJECT_EVENT, update);
+      }, []);
+      return h(FileSidebarPanel, {
+        workspaceId,
+        onProjectChange: (id) => {
+          setWorkspaceId(id);
+          localStorage.setItem(WORKSPACE_PICK_KEY, id || "none");
+          window.dispatchEvent(
+            new window.CustomEvent(HERO_WORKSPACE_EVENT, {
+              detail: id || "none",
+            }),
+          );
+        },
+      });
+    }
+    function SessionFileSidebar({ sessionId }) {
+      const [state] = useResource(
+        `${apiRoot}/sessions/${encodeURIComponent(sessionId)}`,
+      );
+      return h(FileSidebarPanel, {
+        workspaceId: state.rows[0]?.workspaceId,
+        sessionLoading: state.loading,
+        sessionError: state.error,
+      });
+    }
+    function FileSidebar() {
+      const params = new URLSearchParams(location.search);
+      if (params.get("workagent"))
+        return h(
+          "div",
+          { className: "workagent-top-actions" },
+          h(TopNotificationButton),
+        );
+      const sessionId = params.get("session");
+      return sessionId
+        ? h(SessionFileSidebar, { key: sessionId, sessionId })
+        : h(HomeFileSidebar);
+    }
+
     function WorkspacesPage() {
       const endpoint = `${apiRoot}/workspaces`;
-      const [state] = useResource(endpoint);
+      const [state, refresh] = useResource(endpoint);
       const [selected, setSelected] = React.useState(null);
       const [files, setFiles] = React.useState([]);
       const [preview, setPreview] = React.useState(null);
       const [error, setError] = React.useState("");
-      const openWorkspace = async (workspace) => {
-        setSelected(workspace);
+      const [directory, setDirectory] = React.useState("");
+      const [loadingFiles, setLoadingFiles] = React.useState(false);
+      const [query, setQuery] = React.useState("");
+      const [fileAction, setFileAction] = React.useState(null);
+      const [fileName, setFileName] = React.useState("");
+      const [saving, setSaving] = React.useState(false);
+      const [creating, setCreating] = React.useState(false);
+      const [showCreate, setShowCreate] = React.useState(false);
+      const fileRequest = React.useRef(0);
+      const visibleProjects = state.rows.filter((workspace) =>
+        displayWorkspaceName(workspace.name)
+          .toLocaleLowerCase()
+          .includes(query.trim().toLocaleLowerCase()),
+      );
+      React.useEffect(() => {
+        const update = () => void refresh();
+        window.addEventListener(PROJECTS_CHANGED_EVENT, update);
+        return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
+      }, [refresh]);
+      const createProject = async (event) => {
+        event.preventDefault();
+        if (creating) return;
+        const form = event.currentTarget;
+        const values = new FormData(form);
+        const name = String(values.get("name") || "").trim();
+        if (!name) {
+          setError("请输入项目名称。");
+          return;
+        }
+        setCreating(true);
+        setError("");
         try {
-          setFiles(
-            await request(
-              `${endpoint}/${encodeURIComponent(workspace.id)}/files`,
-            ),
-          );
+          const project = await request(endpoint, {
+            method: "POST",
+            body: JSON.stringify({ name, scope: "personal" }),
+          });
+          await refresh();
+          announceProjectsChanged();
+          form.reset();
+          setShowCreate(false);
+          setQuery("");
+          await openWorkspace(project);
         } catch (reason) {
-          setError(reason.message);
+          setError(friendlyError(reason.message));
+        } finally {
+          setCreating(false);
+        }
+      };
+      const openWorkspace = async (workspace, path = "") => {
+        const revision = ++fileRequest.current;
+        setSelected(workspace);
+        setDirectory(path);
+        setPreview(null);
+        setFiles([]);
+        setError("");
+        setLoadingFiles(true);
+        try {
+          const entries = await request(
+            `${endpoint}/${encodeURIComponent(workspace.id)}/files${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+          );
+          if (revision === fileRequest.current) setFiles(entries);
+        } catch (reason) {
+          if (revision === fileRequest.current)
+            setError(friendlyError(reason.message));
+        } finally {
+          if (revision === fileRequest.current) setLoadingFiles(false);
+        }
+      };
+      const submitFileAction = async (event) => {
+        event.preventDefault();
+        if (saving) return;
+        const { kind, entry } = fileAction;
+        const name = fileName.trim();
+        if (
+          kind === "rename" &&
+          (!name || /[\\/:*?"<>|]/.test(name) || name === "." || name === "..")
+        ) {
+          setError("请输入有效文件名，不能包含路径分隔符。");
+          return;
+        }
+        setSaving(true);
+        setError("");
+        try {
+          const root = `${endpoint}/${encodeURIComponent(selected.id)}`;
+          if (kind === "delete")
+            await request(
+              `${root}/content?path=${encodeURIComponent(entry.path)}`,
+              { method: "DELETE" },
+            );
+          else
+            await request(`${root}/move`, {
+              method: "POST",
+              body: JSON.stringify({
+                source: entry.path,
+                destination: directory ? `${directory}/${name}` : name,
+              }),
+            });
+          setFileAction(null);
+          await openWorkspace(selected, directory);
+        } catch (reason) {
+          setError(friendlyError(reason.message));
+        } finally {
+          setSaving(false);
         }
       };
       const openFile = async (entry) => {
@@ -1174,7 +4007,30 @@ window.__ModuleLoader__.load({
             media: extension === "pdf" ? "pdf" : "image",
             name: entry.name,
           });
-        else {
+        else if (
+          [
+            "txt",
+            "md",
+            "csv",
+            "json",
+            "yaml",
+            "yml",
+            "log",
+            "js",
+            "ts",
+            "tsx",
+            "jsx",
+            "css",
+            "html",
+            "xml",
+            "py",
+            "go",
+            "ps1",
+            "toml",
+            "ini",
+            "svg",
+          ].includes(extension)
+        ) {
           try {
             setPreview({
               text: await request(path),
@@ -1184,40 +4040,387 @@ window.__ModuleLoader__.load({
           } catch (reason) {
             setError(reason.message);
           }
-        }
+        } else setPreview({ media: "unsupported", name: entry.name });
       };
       return h(
         Section,
-        { title: "Workspace files" },
+        { title: "项目" },
+        h(
+          "div",
+          { className: "workagent-project-intro" },
+          h(
+            "div",
+            null,
+            h("h2", null, "所有项目"),
+            h("p", null, "文件与对话，在这里井然有序。"),
+          ),
+          h(
+            "span",
+            { className: "workagent-project-count" },
+            `${state.rows.length} 个项目`,
+          ),
+        ),
+        h(
+          "div",
+          { className: "workagent-project-toolbar" },
+          h(
+            "div",
+            { className: "workagent-project-search" },
+            h(Icon, { name: "search", size: 18 }),
+            h(Input, {
+              "aria-label": "搜索项目",
+              placeholder: "搜索项目名称…",
+              value: query,
+              onChange: (event) => {
+                setQuery(event.target.value);
+                setPreview(null);
+              },
+            }),
+            query
+              ? h(
+                  Button,
+                  { "aria-label": "清除项目搜索", onClick: () => setQuery("") },
+                  h(Icon, { name: "close", size: 16 }),
+                )
+              : null,
+          ),
+          h(
+            Button,
+            {
+              className: "workagent-button workagent-project-new",
+              onClick: () => {
+                setError("");
+                setShowCreate(true);
+              },
+            },
+            h(Icon, { name: "plus", size: 16 }),
+            "新建项目",
+          ),
+        ),
+        showCreate
+          ? h(
+              "form",
+              {
+                className: "workagent-form workagent-project-create",
+                onSubmit: createProject,
+              },
+              h(
+                Field,
+                { label: "新项目名称" },
+                h(Input, {
+                  name: "name",
+                  autoFocus: true,
+                  required: true,
+                  maxLength: 120,
+                  placeholder: "给项目起个名字",
+                  onKeyDown: (event) => {
+                    if (event.key === "Escape" && !creating) {
+                      event.stopPropagation();
+                      setShowCreate(false);
+                    }
+                  },
+                }),
+              ),
+              h(
+                Button,
+                { disabled: creating, onClick: () => setShowCreate(false) },
+                "取消",
+              ),
+              h(
+                "button",
+                {
+                  className: "workagent-button workagent-project-new",
+                  type: "submit",
+                  disabled: creating,
+                },
+                creating ? "正在创建…" : "创建项目",
+              ),
+            )
+          : null,
         error
           ? h("p", { role: "alert", className: "workagent-error" }, error)
           : null,
-        h(Status, { state }),
+        state.loading || state.error
+          ? h(Status, { state })
+          : state.rows.length === 0
+            ? h(
+                "div",
+                { className: "workagent-project-empty" },
+                h(Icon, { name: "workspace", size: 36 }),
+                h("strong", null, "创建你的第一个项目"),
+                h("p", null, "给项目起个名字，将相关文件与对话放在一起。"),
+              )
+            : null,
+        !state.loading && state.rows.length > 0 && visibleProjects.length === 0
+          ? h(
+              "div",
+              { className: "workagent-project-empty" },
+              h(Icon, { name: "search", size: 28 }),
+              h("strong", null, "没有找到匹配的项目"),
+              h("p", null, "试试其他名称，或清除搜索查看所有项目。"),
+            )
+          : null,
         h(
           "div",
-          { className: "workagent-grid" },
-          ...state.rows.map((workspace) =>
+          { className: "workagent-grid workagent-workspace-grid" },
+          ...visibleProjects.map((workspace) =>
             h(
               Card,
-              { key: workspace.id, title: workspace.name },
-              h(Button, { onClick: () => openWorkspace(workspace) }, "Browse"),
+              {
+                key: workspace.id,
+                className: `workagent-workspace-card${selected?.id === workspace.id ? " is-selected" : ""}`,
+                title: h(
+                  "span",
+                  null,
+                  h(Icon, { name: "workspace", size: 18 }),
+                  displayWorkspaceName(workspace.name),
+                ),
+                detail:
+                  workspace.scope === "team" ? "团队共享项目" : "个人项目",
+              },
+              h(
+                Button,
+                { onClick: () => openWorkspace(workspace) },
+                "管理文件",
+                h(Icon, { name: "chevronRight", size: 14 }),
+              ),
+              h(
+                Button,
+                { onClick: () => startProjectConversation(workspace) },
+                h(Icon, { name: "plus", size: 14 }),
+                "新建会话",
+              ),
             ),
           ),
         ),
-        selected
+        selected &&
+          visibleProjects.some((workspace) => workspace.id === selected.id)
           ? h(
               "div",
-              { className: "workagent-stack" },
-              h("h3", null, selected.name),
-              ...files.map((entry) =>
+              { className: "workagent-file-browser", "aria-label": "项目文件" },
+              h(
+                "header",
+                null,
                 h(
-                  Card,
-                  { key: entry.path, title: entry.name, detail: entry.kind },
-                  entry.kind === "file"
-                    ? h(Button, { onClick: () => openFile(entry) }, "Preview")
-                    : null,
+                  "nav",
+                  { "aria-label": "文件路径" },
+                  h(
+                    Button,
+                    { onClick: () => openWorkspace(selected) },
+                    displayWorkspaceName(selected.name),
+                  ),
+                  ...directory
+                    .split("/")
+                    .filter(Boolean)
+                    .map((part, index, parts) =>
+                      h(
+                        Button,
+                        {
+                          key: index,
+                          onClick: () =>
+                            openWorkspace(
+                              selected,
+                              parts.slice(0, index + 1).join("/"),
+                            ),
+                        },
+                        h(Icon, { name: "chevronRight", size: 12 }),
+                        part,
+                      ),
+                    ),
+                ),
+                h(
+                  Button,
+                  {
+                    onClick: () => openWorkspace(selected, directory),
+                    disabled: loadingFiles,
+                  },
+                  "刷新",
                 ),
               ),
+              loadingFiles
+                ? h(
+                    "p",
+                    { role: "status", className: "workagent-file-empty" },
+                    "正在加载文件…",
+                  )
+                : files.length === 0
+                  ? h(
+                      "div",
+                      { className: "workagent-file-empty" },
+                      h(Icon, { name: "workspace", size: 32 }),
+                      h("strong", null, "此文件夹还没有文件"),
+                      h(
+                        "p",
+                        null,
+                        "在项目中开始对话，生成的文件会显示在这里。",
+                      ),
+                    )
+                  : null,
+              ...files
+                .slice()
+                .sort((a, b) =>
+                  a.kind === b.kind
+                    ? a.name.localeCompare(b.name, "zh-CN")
+                    : a.kind === "directory"
+                      ? -1
+                      : 1,
+                )
+                .map((entry) =>
+                  h(
+                    "div",
+                    {
+                      key: entry.path,
+                      className: "workagent-file-row",
+                    },
+                    h(Icon, {
+                      name: entry.kind === "file" ? "chat" : "workspace",
+                      size: 18,
+                    }),
+                    h(
+                      "button",
+                      {
+                        className: "workagent-file-name",
+                        onClick: () =>
+                          entry.kind === "file"
+                            ? openFile(entry)
+                            : openWorkspace(selected, entry.path),
+                      },
+                      entry.name,
+                    ),
+                    h(
+                      "span",
+                      { className: "workagent-file-kind" },
+                      entry.kind === "file" ? "文件" : "文件夹",
+                    ),
+                    h(
+                      "div",
+                      { className: "workagent-file-actions" },
+                      entry.kind === "file"
+                        ? h(
+                            Button,
+                            {
+                              onClick: () => openFile(entry),
+                              "aria-label": `预览 ${entry.name}`,
+                            },
+                            "预览",
+                          )
+                        : null,
+                      entry.kind === "file"
+                        ? h(
+                            "a",
+                            {
+                              className: "workagent-button",
+                              href: `${endpoint}/${encodeURIComponent(selected.id)}/content?path=${encodeURIComponent(entry.path)}`,
+                              download: entry.name,
+                              "aria-label": `下载 ${entry.name}`,
+                            },
+                            "下载",
+                          )
+                        : null,
+                      h(
+                        Button,
+                        {
+                          "aria-label": `重命名 ${entry.name}`,
+                          onClick: () => {
+                            setError("");
+                            setFileName(entry.name);
+                            setFileAction({ kind: "rename", entry });
+                          },
+                        },
+                        "重命名",
+                      ),
+                      h(
+                        Button,
+                        {
+                          "aria-label": `删除 ${entry.name}`,
+                          onClick: () => {
+                            setError("");
+                            setFileAction({ kind: "delete", entry });
+                          },
+                        },
+                        "删除",
+                      ),
+                    ),
+                  ),
+                ),
+            )
+          : null,
+        fileAction
+          ? h(
+              "div",
+              { className: "workagent-dialog-backdrop" },
+              h(
+                "form",
+                {
+                  className: "workagent-dialog",
+                  role: "dialog",
+                  "aria-modal": true,
+                  "aria-label":
+                    fileAction.kind === "rename" ? "重命名文件" : "删除文件",
+                  onSubmit: submitFileAction,
+                },
+                h(
+                  "h3",
+                  null,
+                  fileAction.kind === "rename" ? "重命名文件" : "删除文件",
+                ),
+                fileAction.kind === "rename"
+                  ? h(Input, {
+                      "aria-label": "文件名",
+                      value: fileName,
+                      autoFocus: true,
+                      required: true,
+                      onChange: (event) => setFileName(event.target.value),
+                    })
+                  : h(
+                      "p",
+                      null,
+                      `确定删除“${fileAction.entry.name}”${fileAction.entry.kind === "file" ? "" : "及其全部内容"}？此操作无法撤销。`,
+                    ),
+                error
+                  ? h(
+                      "p",
+                      { role: "alert", className: "workagent-error" },
+                      error,
+                    )
+                  : null,
+                h(
+                  "div",
+                  { className: "workagent-dialog-actions" },
+                  h(
+                    Button,
+                    {
+                      disabled: saving,
+                      onClick: () => {
+                        setFileAction(null);
+                        setError("");
+                      },
+                    },
+                    "取消",
+                  ),
+                  h(
+                    "button",
+                    {
+                      className: "workagent-button",
+                      type: "submit",
+                      disabled: saving,
+                    },
+                    saving
+                      ? "处理中…"
+                      : fileAction.kind === "rename"
+                        ? "保存"
+                        : "删除",
+                  ),
+                ),
+              ),
+            )
+          : null,
+        preview
+          ? h(
+              "div",
+              { className: "workagent-preview-heading" },
+              h("strong", null, preview.name),
+              h(Button, { onClick: () => setPreview(null) }, "关闭预览"),
             )
           : null,
         preview?.media === "image"
@@ -1235,32 +4438,24 @@ window.__ModuleLoader__.load({
               })
             : preview?.media === "text"
               ? h("pre", { className: "workagent-card" }, preview.text)
-              : null,
+              : preview?.media === "unsupported"
+                ? h(
+                    "p",
+                    { className: "workagent-card" },
+                    "此文件暂不支持预览，请下载后查看。",
+                  )
+                : null,
       );
     }
 
-    function ConversationUtilities({ sessionId, session }) {
-      const id = sessionId || session?.id;
-      const [query, setQuery] = React.useState("");
-      const [results, setResults] = React.useState([]);
-      const [error, setError] = React.useState("");
-      const [editing, setEditing] = React.useState(null);
-      const [replacement, setReplacement] = React.useState("");
-      const locateMessage = React.useCallback((messageId, content) => {
+    function ConversationMessageTarget({ sessionId }) {
+      const locateMessage = React.useCallback((messageId) => {
         const escaped = globalThis.CSS?.escape
           ? globalThis.CSS.escape(messageId)
           : messageId.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
         let target = document.querySelector(
           `[data-message-id="${escaped}"], #message-${escaped}`,
         );
-        if (!target && content) {
-          const candidates = document.querySelectorAll(
-            "[data-turn], [data-turn-tail], article, [role='article']",
-          );
-          target = [...candidates].find((node) =>
-            node.textContent?.includes(content),
-          );
-        }
         if (!target) return false;
         target.scrollIntoView({ behavior: "smooth", block: "center" });
         target.classList.add("workagent-message-highlight");
@@ -1273,137 +4468,2113 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const messageId = new URLSearchParams(location.search).get("message");
         if (!messageId) return;
-        const content = sessionStorage.getItem(
-          `workagent.message.${messageId}`,
-        );
         let attempts = 0;
         const timer = globalThis.setInterval(() => {
           attempts += 1;
-          if (locateMessage(messageId, content) || attempts >= 40)
+          if (locateMessage(messageId) || attempts >= 40)
             globalThis.clearInterval(timer);
         }, 100);
         return () => globalThis.clearInterval(timer);
-      }, [id, locateMessage]);
-      const search = async (event) => {
-        event.preventDefault();
-        try {
-          const value = await request(
-            `${apiRoot}/messages/search?keyword=${encodeURIComponent(query)}&session_id=${encodeURIComponent(id || "")}&page_size=20`,
+      }, [sessionId, locateMessage]);
+      return null;
+    }
+
+    const AGENT_PICK_KEY = "workagent.hero.agent";
+    const WORKSPACE_PICK_KEY = "workagent.hero.workspace";
+    const HERO_AGENT_EVENT = "workagent:hero-agent";
+    const HERO_WORKSPACE_EVENT = "workagent:hero-workspace";
+    const PROJECTS_CHANGED_EVENT = "workagent:projects-changed";
+    const SESSIONS_CHANGED_EVENT = "workagent:sessions-changed";
+    const SESSION_SEEN_PREFIX = "workagent.session-seen.";
+    function startProjectConversation(project) {
+      localStorage.setItem(WORKSPACE_PICK_KEY, project.id);
+      location.assign(
+        `/?frontend=dsh&project=${encodeURIComponent(project.id)}`,
+      );
+    }
+    const announceProjectsChanged = () =>
+      window.dispatchEvent(new window.Event(PROJECTS_CHANGED_EVENT));
+
+    // Draft choices live only in this composer. New conversations start from settings.
+    function useDraftOption(key, options, defaultId, revision) {
+      const [selection, setSelection] = React.useState({
+        revision,
+        values: {},
+      });
+      const saved =
+        selection.revision === revision ? selection.values[key] : undefined;
+      const value =
+        (
+          options.find((option) => option.id === saved) ||
+          options.find((option) => option.id === defaultId) ||
+          options[0]
+        )?.id || "";
+      return [
+        value,
+        (value) =>
+          setSelection((previous) => ({
+            revision,
+            values: {
+              ...(previous.revision === revision ? previous.values : {}),
+              [key]: value,
+            },
+          })),
+      ];
+    }
+
+    function TopNotificationButton() {
+      const [state] = useResource(
+        "/api/portal/me/notifications",
+        (value) => value.notifications || [],
+      );
+      const unread = state.rows.filter((row) => !row.read_at).length;
+      return h(
+        "button",
+        {
+          type: "button",
+          className: "workagent-top-notifications",
+          title: "通知",
+          "aria-label": unread ? `通知，${unread} 条未读` : "通知",
+          onClick: () => location.assign("/?workagent=notifications"),
+        },
+        h(Icon, { name: "notifications", size: 19 }),
+        unread ? h("span", { className: "workagent-badge" }, unread) : null,
+      );
+    }
+
+    function AgentPicker() {
+      const [state] = useResource(`${apiRoot}/presets`, (value) =>
+        (Array.isArray(value) ? value : []).filter((preset) => preset.enabled),
+      );
+      const [selected, setSelected] = React.useState(
+        () => localStorage.getItem(AGENT_PICK_KEY) || "builtin-general",
+      );
+      React.useEffect(() => {
+        if (state.loading || state.rows.length === 0) return;
+        if (state.rows.some((preset) => preset.id === selected)) return;
+        const fallback =
+          state.rows.find((preset) => preset.id === "builtin-general") ||
+          state.rows[0];
+        setSelected(fallback.id);
+        localStorage.setItem(AGENT_PICK_KEY, fallback.id);
+      }, [selected, state.loading, state.rows]);
+      const choose = (preset) => {
+        setSelected(preset.id);
+        localStorage.setItem(AGENT_PICK_KEY, preset.id);
+        window.dispatchEvent(
+          new window.CustomEvent(HERO_AGENT_EVENT, { detail: preset.id }),
+        );
+      };
+      if (state.loading || state.rows.length === 0) return null;
+      return h(
+        React.Fragment,
+        null,
+        h(
+          "div",
+          { className: "workagent-agents", role: "radiogroup" },
+          h(
+            "div",
+            { className: "workagent-agent-strip" },
+            ...state.rows.map((preset, index) => {
+              const displayName = displayPresetName(preset.name);
+              return h(
+                "button",
+                {
+                  key: preset.id,
+                  type: "button",
+                  role: "radio",
+                  "aria-checked": selected === preset.id,
+                  tabIndex: selected === preset.id ? 0 : -1,
+                  className: [
+                    "workagent-agent",
+                    selected === preset.id ? "is-active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  title: `切换到${displayName}`,
+                  onClick: () => choose(preset),
+                  onKeyDown: (event) => {
+                    if (!["ArrowLeft", "ArrowRight"].includes(event.key))
+                      return;
+                    event.preventDefault();
+                    const direction = event.key === "ArrowRight" ? 1 : -1;
+                    const nextIndex =
+                      (index + direction + state.rows.length) %
+                      state.rows.length;
+                    choose(state.rows[nextIndex]);
+                    event.currentTarget.parentElement?.children[
+                      nextIndex
+                    ]?.focus();
+                  },
+                },
+                preset.avatar
+                  ? h("img", {
+                      className: "workagent-agent-avatar",
+                      src: preset.avatar,
+                      alt: "",
+                    })
+                  : h(EngineMark, { engine: preset.engine }),
+                h("span", { className: "workagent-agent-name" }, displayName),
+              );
+            }),
+          ),
+        ),
+      );
+    }
+
+    function HeroWorkspaceComposer() {
+      const [workspaceState, reloadWorkspaces] = useResource(
+        `${apiRoot}/workspaces`,
+      );
+      const [presetState] = useResource(`${apiRoot}/presets`, (value) =>
+        (Array.isArray(value) ? value : []).filter((preset) => preset.enabled),
+      );
+      const [modelState] = useResource(`${apiRoot}/model-options`);
+      const [projectChoice, setProjectChoice] = React.useState(
+        () =>
+          new URLSearchParams(location.search).get("project") ||
+          localStorage.getItem(WORKSPACE_PICK_KEY) ||
+          "none",
+      );
+      const [presetId, setPresetId] = React.useState(
+        () => localStorage.getItem(AGENT_PICK_KEY) || "builtin-general",
+      );
+      const [teamMode, setTeamMode] = React.useState(false);
+      const [projectName, setProjectName] = React.useState("");
+      const [preferences, , defaultsRevision] = useModelDefaults();
+      const [message, setMessage] = React.useState("");
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState("");
+
+      React.useEffect(() => {
+        window.dispatchEvent(
+          new window.CustomEvent(FILE_PROJECT_EVENT, {
+            detail: ["none", "new"].includes(projectChoice)
+              ? ""
+              : projectChoice,
+          }),
+        );
+      }, [projectChoice]);
+
+      React.useEffect(() => {
+        const update = (event) => setPresetId(event.detail);
+        window.addEventListener(HERO_AGENT_EVENT, update);
+        return () => window.removeEventListener(HERO_AGENT_EVENT, update);
+      }, []);
+      React.useEffect(() => {
+        const update = (event) => {
+          setTeamMode(false);
+          setProjectChoice(event.detail);
+        };
+        window.addEventListener(HERO_WORKSPACE_EVENT, update);
+        return () => window.removeEventListener(HERO_WORKSPACE_EVENT, update);
+      }, []);
+      React.useEffect(() => {
+        const update = () => void reloadWorkspaces();
+        window.addEventListener(PROJECTS_CHANGED_EVENT, update);
+        return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
+      }, [reloadWorkspaces]);
+
+      const selectedPreset =
+        presetState.rows.find((preset) => preset.id === presetId) ||
+        presetState.rows.find((preset) => preset.id === "builtin-general") ||
+        presetState.rows[0];
+      const teamProjects = workspaceState.rows.filter(
+        (workspace) => workspace.scope === "team",
+      );
+      const availableProjects = teamMode ? teamProjects : workspaceState.rows;
+      const modelGroup = modelState.rows.find(
+        (group) => group.engine === selectedPreset?.engine,
+      );
+      const availableModels = modelGroup?.models || [];
+      const defaults = resolveModelDefaults(
+        modelGroup,
+        preferences,
+        selectedPreset,
+      );
+      const draftKey = `${selectedPreset?.id}:${selectedPreset?.engine}`;
+      const [modelId, setModelId] = useDraftOption(
+        draftKey,
+        availableModels,
+        defaults.modelId,
+        defaultsRevision,
+      );
+      const selectedModel = availableModels.find(
+        (model) => model.id === modelId,
+      );
+      const reasoningOptions = selectedModel?.reasoning || [];
+      const [thinkingEffort, setThinkingEffort] = useDraftOption(
+        `${draftKey}.${modelId}`,
+        reasoningOptions,
+        modelId === defaults.modelId
+          ? defaults.thinkingEffort
+          : defaultEffort(selectedPreset?.engine, selectedModel),
+        defaultsRevision,
+      );
+      const [permissionMode, setPermissionMode] = useDraftOption(
+        draftKey,
+        permissionOptions.map(([id]) => ({ id })),
+        defaults.permissionMode,
+        defaultsRevision,
+      );
+      React.useEffect(() => {
+        if (workspaceState.loading) return;
+        const valid = availableProjects.some(
+          (project) => project.id === projectChoice,
+        );
+        if (!valid && projectChoice !== "new" && projectChoice !== "none")
+          setProjectChoice(teamMode ? "new" : "none");
+        if (teamMode && projectChoice === "none") setProjectChoice("new");
+      }, [teamMode, workspaceState.loading, workspaceState.rows]);
+      const selectProject = (event) => {
+        const value = event.target.value;
+        setProjectChoice(value);
+        if (!teamMode && value !== "new" && value !== "none") {
+          localStorage.setItem(WORKSPACE_PICK_KEY, value);
+          window.dispatchEvent(
+            new window.CustomEvent(HERO_WORKSPACE_EVENT, { detail: value }),
           );
-          setResults(value.items || value.results || value);
-        } catch (reason) {
-          setError(reason.message);
         }
+        setError("");
       };
-      const beginEdit = (result) => {
-        setEditing(result);
-        setReplacement(result.message?.content || result.message?.text || "");
-      };
-      const edit = async (event) => {
+      const submit = async (event) => {
         event.preventDefault();
-        const replacementContent = replacement.trim();
-        if (!replacementContent || !id || !editing) return;
+        const content = message.trim();
+        if (!content || busy) return;
+        if (!selectedPreset) {
+          setError("请先选择一个助手。");
+          return;
+        }
+        if (modelState.loading || !selectedModel) {
+          setError("请先获取可用模型。");
+          return;
+        }
+        if (teamMode && projectChoice === "none") {
+          setError("团队模式必须选择或新建一个团队项目。");
+          return;
+        }
+        if (projectChoice === "new" && !projectName.trim()) {
+          setError("请输入新项目名称。");
+          return;
+        }
+        setBusy(true);
+        setError("");
         try {
-          const fork = await request(
-            `${apiRoot}/sessions/${encodeURIComponent(id)}/fork`,
+          let project = availableProjects.find(
+            (item) => item.id === projectChoice,
+          );
+          if (projectChoice === "new") {
+            project = await request(`${apiRoot}/workspaces`, {
+              method: "POST",
+              body: JSON.stringify({
+                name: projectName.trim(),
+                scope: teamMode ? "team" : "personal",
+              }),
+            });
+            await reloadWorkspaces();
+            announceProjectsChanged();
+          }
+          const common = {
+            ...(modelId ? { modelId } : {}),
+            ...(thinkingEffort ? { thinkingEffort } : {}),
+            permissionMode,
+          };
+          let session;
+          if (teamMode) {
+            const team = await request(`${apiRoot}/teams`, {
+              method: "POST",
+              body: JSON.stringify({
+                name: `${displayWorkspaceName(project.name)}团队`,
+                workspaceId: project.id,
+                lead: {
+                  name: displayPresetName(selectedPreset.name),
+                  engine: selectedPreset.engine,
+                  presetId: selectedPreset.id,
+                  ...common,
+                },
+              }),
+            });
+            session = { id: team.members[0].sessionId };
+          } else {
+            session = await request(`${apiRoot}/sessions`, {
+              method: "POST",
+              body: JSON.stringify({
+                engine: selectedPreset.engine,
+                title: plainSessionTitle(
+                  content.length > 28 ? `${content.slice(0, 28)}…` : content,
+                ),
+                workspace: project?.id || "default",
+                presetId: selectedPreset.id,
+                ...common,
+              }),
+            });
+          }
+          await request(
+            `${apiRoot}/sessions/${encodeURIComponent(session.id)}/turns`,
             {
               method: "POST",
               body: JSON.stringify({
-                messageId: editing.message.id,
-                replacementContent,
+                content,
+                messageId: `message-ui-${Date.now()}`,
               }),
             },
           );
-          location.assign(
-            `/?session=${encodeURIComponent(fork.id || fork.sessionId)}`,
-          );
-        } catch (reason) {
-          setError(reason.message);
+          location.assign(`/?session=${encodeURIComponent(session.id)}`);
+        } catch (cause) {
+          setBusy(false);
+          setError(friendlyError(cause.message));
         }
       };
-      const openResult = (result) => {
-        const targetSession = result.session?.id || id;
-        const messageId = result.message?.id;
-        const content = result.message?.content || result.message?.text || "";
-        if (messageId)
-          sessionStorage.setItem(`workagent.message.${messageId}`, content);
-        if (targetSession === id && locateMessage(messageId, content)) return;
-        location.assign(
-          `/?session=${encodeURIComponent(targetSession)}&message=${encodeURIComponent(messageId)}`,
+
+      return h(
+        "div",
+        { className: "workagent-hero-controls" },
+        h(
+          "form",
+          { className: "workagent-hero-composer", onSubmit: submit },
+          h("textarea", {
+            "aria-label": "输入消息",
+            value: message,
+            onChange: (event) => setMessage(event.target.value),
+            onKeyDown: submitComposerOnEnter,
+            placeholder: "发消息，描述你想完成的任务…",
+          }),
+          h(
+            "div",
+            { className: "workagent-hero-composer-bar" },
+            h(
+              "div",
+              { className: "workagent-composer-options" },
+              h(
+                "label",
+                { title: "模型" },
+                h(Select, {
+                  "aria-label": "模型",
+                  value: modelId,
+                  disabled: modelState.loading || !availableModels.length,
+                  onChange: (event) => setModelId(event.target.value),
+                  options: [
+                    ...(!availableModels.length
+                      ? [
+                          [
+                            "",
+                            modelState.loading
+                              ? "正在获取模型…"
+                              : "暂无可用模型",
+                          ],
+                        ]
+                      : []),
+                    ...availableModels.map((model) => [model.id, model.name]),
+                  ],
+                }),
+              ),
+              h(
+                "label",
+                { title: "思考级别" },
+                h(Select, {
+                  "aria-label": "思考级别",
+                  value: thinkingEffort,
+                  disabled: modelState.loading || !reasoningOptions.length,
+                  onChange: (event) => setThinkingEffort(event.target.value),
+                  options: reasoningOptions.length
+                    ? reasoningOptions.map((option) => [
+                        option.id,
+                        reasoningLabel(option),
+                      ])
+                    : [["", "未提供思考选项"]],
+                }),
+              ),
+              h(
+                "label",
+                { title: "权限" },
+                h(Select, {
+                  "aria-label": "权限",
+                  value: permissionMode,
+                  onChange: (event) => setPermissionMode(event.target.value),
+                  options: permissionOptions,
+                }),
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "submit",
+                className: "workagent-composer-send",
+                "aria-label": "发送消息",
+                disabled:
+                  busy ||
+                  !message.trim() ||
+                  !selectedPreset ||
+                  (projectChoice === "new" && !projectName.trim()),
+              },
+              h(Icon, { name: "send", size: 18 }),
+            ),
+          ),
+        ),
+        h(
+          "div",
+          { className: "workagent-project-row" },
+          h(
+            "label",
+            { className: "workagent-project-select" },
+            h(Icon, { name: "workspace", size: 16 }),
+            h(Select, {
+              "aria-label": teamMode ? "团队项目" : "个人项目",
+              value: projectChoice,
+              onChange: selectProject,
+              options: [
+                ...(teamMode ? [] : [["none", "不使用项目"]]),
+                ...availableProjects.map((project) => [
+                  project.id,
+                  displayWorkspaceName(project.name),
+                ]),
+                ["new", teamMode ? "新建团队项目…" : "新建个人项目…"],
+              ],
+            }),
+          ),
+          projectChoice === "new"
+            ? h(Input, {
+                className: "workagent-project-name",
+                "aria-label": "新项目名称",
+                value: projectName,
+                onChange: (event) => setProjectName(event.target.value),
+                placeholder: teamMode ? "团队项目名称" : "个人项目名称",
+              })
+            : null,
+          h(
+            "label",
+            { className: "workagent-team-toggle" },
+            h(Input, {
+              type: "checkbox",
+              checked: teamMode,
+              onChange: (event) => {
+                const enabled = event.target.checked;
+                setTeamMode(enabled);
+                setProjectChoice(enabled ? "new" : "none");
+                setProjectName("");
+                setError("");
+              },
+            }),
+            h("span", null, "团队模式"),
+          ),
+          error
+            ? h("span", { role: "alert", className: "workagent-error" }, error)
+            : h(
+                "span",
+                { className: "workagent-composer-hint" },
+                busy
+                  ? "正在创建会话…"
+                  : teamMode
+                    ? "团队项目会创建在共享范围"
+                    : "Enter 发送",
+              ),
+        ),
+      );
+    }
+
+    function SidebarSessions() {
+      const [workspaceState, reloadWorkspaces] = useResource(
+        `${apiRoot}/workspaces`,
+      );
+      const [sessionState, reloadSessions] = useResource(
+        `${apiRoot}/sessions`,
+        (value) =>
+          (Array.isArray(value) ? value : [])
+            .filter((session) => session.branchKind !== "side_chat")
+            .slice()
+            .sort((left, right) =>
+              right.updatedAt.localeCompare(left.updatedAt),
+            ),
+      );
+      const [teamState, reloadTeams] = useResource(`${apiRoot}/teams`);
+      const [query, setQuery] = React.useState("");
+      const [searching, setSearching] = React.useState(false);
+      const [collapsed, setCollapsed] = React.useState({});
+      const [sectionsCollapsed, setSectionsCollapsed] = React.useState(() => ({
+        projects:
+          localStorage.getItem("workagent.sidebar.projects-collapsed") ===
+          "true",
+        sessions:
+          localStorage.getItem("workagent.sidebar.sessions-collapsed") ===
+          "true",
+      }));
+      const sectionToggle = (section, label) =>
+        h(
+          "button",
+          {
+            type: "button",
+            className: "workagent-sidebar-section-toggle",
+            "aria-label": `${sectionsCollapsed[section] ? "展开" : "收起"}${label}`,
+            "aria-expanded": !sectionsCollapsed[section],
+            onClick: () => {
+              const next = !sectionsCollapsed[section];
+              localStorage.setItem(
+                `workagent.sidebar.${section}-collapsed`,
+                String(next),
+              );
+              setSectionsCollapsed((value) => ({ ...value, [section]: next }));
+              if (section === "projects" && next) {
+                setSearching(false);
+                setQuery("");
+              }
+            },
+          },
+          h(Icon, {
+            name: sectionsCollapsed[section] ? "chevronRight" : "chevronDown",
+            size: 13,
+          }),
+          h("span", null, label),
+        );
+      const [action, setAction] = React.useState(null);
+      const [actionValue, setActionValue] = React.useState("");
+      const [error, setError] = React.useState("");
+      const activeSession = new URLSearchParams(location.search).get("session");
+      const closeMobileSidebar = () =>
+        document
+          .querySelector('.hHd-Xa_toggle[aria-label="收起侧边栏"]')
+          ?.click();
+      React.useEffect(() => {
+        const closeOnEscape = (event) => {
+          if (
+            event.key === "Escape" &&
+            window.innerWidth <= 700 &&
+            !document.querySelector('[role="dialog"]')
+          )
+            closeMobileSidebar();
+        };
+        window.addEventListener("keydown", closeOnEscape);
+        return () => window.removeEventListener("keydown", closeOnEscape);
+      }, []);
+      const [, setSeenRevision] = React.useState(0);
+      const openedSession = React.useRef(null);
+      const markSeen = (session) => {
+        if (session.lastTurn)
+          localStorage.setItem(
+            SESSION_SEEN_PREFIX + session.id,
+            session.lastTurn.id,
+          );
+        setSeenRevision((value) => value + 1);
+      };
+      React.useEffect(() => {
+        const session = sessionState.rows.find(
+          (item) => item.id === activeSession,
+        );
+        if (!session || openedSession.current === activeSession) return;
+        openedSession.current = activeSession;
+        markSeen(session);
+      }, [sessionState.rows, activeSession]);
+      React.useEffect(() => {
+        let disposed = false;
+        let timer;
+        let pending = false;
+        let rerun = false;
+        const update = async () => {
+          clearTimeout(timer);
+          if (disposed) return;
+          if (pending) {
+            rerun = true;
+            return;
+          }
+          pending = true;
+          try {
+            if (!document.hidden) await reloadSessions();
+          } finally {
+            pending = false;
+            if (!disposed) {
+              timer = setTimeout(update, rerun ? 0 : 2500);
+              rerun = false;
+            }
+          }
+        };
+        const syncSeen = (event) => {
+          if (event.key === null || event.key?.startsWith(SESSION_SEEN_PREFIX))
+            setSeenRevision((value) => value + 1);
+        };
+        timer = setTimeout(update, 2500);
+        window.addEventListener(SESSIONS_CHANGED_EVENT, update);
+        window.addEventListener("focus", update);
+        window.addEventListener("storage", syncSeen);
+        document.addEventListener("visibilitychange", update);
+        return () => {
+          disposed = true;
+          clearTimeout(timer);
+          window.removeEventListener(SESSIONS_CHANGED_EVENT, update);
+          window.removeEventListener("focus", update);
+          window.removeEventListener("storage", syncSeen);
+          document.removeEventListener("visibilitychange", update);
+        };
+      }, [reloadSessions]);
+      React.useEffect(() => {
+        const update = () => void reloadWorkspaces();
+        window.addEventListener(PROJECTS_CHANGED_EVENT, update);
+        return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
+      }, [reloadWorkspaces]);
+      const sessions = sessionState.rows
+        .filter(
+          (session) =>
+            !/^Reply exactly with legacy-message-\d+$/i.test(session.title),
+        )
+        .filter((session) =>
+          displaySessionTitle(session.title)
+            .toLocaleLowerCase()
+            .includes(query.trim().toLocaleLowerCase()),
+        );
+      const selectProject = (project) => {
+        localStorage.setItem(WORKSPACE_PICK_KEY, project.id);
+        window.dispatchEvent(
+          new window.CustomEvent(HERO_WORKSPACE_EVENT, {
+            detail: project.id,
+          }),
+        );
+      };
+      const toggleSearch = () => {
+        if (searching) setQuery("");
+        setSearching(!searching);
+      };
+      const beginAction = (kind, target) => {
+        setAction({ kind, target });
+        setActionValue(
+          kind === "rename-project"
+            ? displayWorkspaceName(target.name)
+            : kind === "rename-session"
+              ? displaySessionTitle(target.title)
+              : "",
+        );
+        setError("");
+      };
+      const submitAction = async (event) => {
+        event.preventDefault();
+        if (!action) return;
+        try {
+          if (action.kind === "rename-project") {
+            await request(
+              `${apiRoot}/workspaces/${encodeURIComponent(action.target.id)}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ name: actionValue.trim() }),
+              },
+            );
+            await reloadWorkspaces();
+            announceProjectsChanged();
+          } else if (action.kind === "rename-session") {
+            await request(
+              `${apiRoot}/sessions/${encodeURIComponent(action.target.id)}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ title: actionValue.trim() }),
+              },
+            );
+            await reloadSessions();
+          } else if (action.kind === "delete-session") {
+            await request(
+              `${apiRoot}/sessions/${encodeURIComponent(action.target.id)}`,
+              { method: "DELETE" },
+            );
+            await reloadSessions();
+            if (activeSession === action.target.id)
+              location.assign("/?frontend=dsh");
+          } else if (action.kind === "delete-project") {
+            const relatedSessions = sessionState.rows.filter(
+              (session) => session.workspaceId === action.target.id,
+            );
+            const relatedTeams = teamState.rows.filter(
+              (team) => team.workspaceId === action.target.id,
+            );
+            await Promise.all(
+              relatedSessions.map((session) =>
+                request(
+                  `${apiRoot}/sessions/${encodeURIComponent(session.id)}`,
+                  { method: "DELETE" },
+                ),
+              ),
+            );
+            await Promise.all(
+              relatedTeams.map((team) =>
+                request(`${apiRoot}/teams/${encodeURIComponent(team.id)}`, {
+                  method: "DELETE",
+                }),
+              ),
+            );
+            await request(
+              `${apiRoot}/workspaces/${encodeURIComponent(action.target.id)}`,
+              { method: "DELETE" },
+            );
+            await Promise.all([
+              reloadWorkspaces(),
+              reloadSessions(),
+              reloadTeams(),
+            ]);
+            announceProjectsChanged();
+            if (relatedSessions.some((session) => session.id === activeSession))
+              location.assign("/?frontend=dsh");
+          }
+          setAction(null);
+        } catch (cause) {
+          setError(friendlyError(cause.message));
+        }
+      };
+      const projectRows = workspaceState.rows
+        .slice()
+        .sort((left, right) =>
+          left.scope === right.scope ? 0 : left.scope === "team" ? 1 : -1,
+        );
+      const projectIds = new Set(projectRows.map((project) => project.id));
+      const unassignedSessions = sessions.filter(
+        (session) => !projectIds.has(session.workspaceId),
+      );
+      const renderSession = (session) => {
+        const running = ["running", "retrying"].includes(
+          session.activity?.state,
+        );
+        const unread =
+          session.lastTurn &&
+          localStorage.getItem(SESSION_SEEN_PREFIX + session.id) !==
+            session.lastTurn.id;
+        const status = running
+          ? "正在运行"
+          : unread
+            ? session.lastTurn.status === "failed"
+              ? "运行失败，未读"
+              : session.lastTurn.status === "cancelled"
+                ? "已停止，未读"
+                : "已完成，未读"
+            : "";
+        return h(
+          "div",
+          { className: "workagent-sidebar-session", key: session.id },
+          h(
+            "button",
+            {
+              type: "button",
+              className:
+                session.id === activeSession ? "is-active is-main" : "is-main",
+              "aria-current": session.id === activeSession ? "page" : undefined,
+              onClick: () => {
+                markSeen(session);
+                if (session.id !== activeSession)
+                  location.assign(
+                    `/?session=${encodeURIComponent(session.id)}`,
+                  );
+              },
+            },
+            h(EngineMark, { engine: session.engine }),
+            h(
+              "span",
+              { className: "workagent-session-title" },
+              displaySessionTitle(session.title),
+            ),
+            status
+              ? h("span", {
+                  className: `workagent-session-status ${running ? "is-running" : "is-unread"}`,
+                  role: "img",
+                  "aria-label": status,
+                  title: status,
+                })
+              : null,
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "workagent-row-action",
+              "aria-label": `编辑对话 ${displaySessionTitle(session.title)}`,
+              title: "重命名或删除对话",
+              onClick: () => beginAction("rename-session", session),
+            },
+            "•••",
+          ),
         );
       };
       return h(
         "div",
-        { className: "workagent-search" },
+        { className: "workagent-sidebar-browser" },
+        h("button", {
+          type: "button",
+          className: "workagent-mobile-backdrop",
+          "aria-label": "收起导航菜单",
+          tabIndex: -1,
+          onClick: closeMobileSidebar,
+        }),
         h(
           "div",
-          { className: "workagent-actions" },
-          h(Button, { onClick: () => history.back() }, "Back"),
-          h(Button, { onClick: () => history.forward() }, "Forward"),
-          h(
-            Button,
-            {
-              onClick: () =>
-                location.assign(
-                  "mailto:support@workagent.invalid?subject=WorkAgent%20feedback",
+          { className: "workagent-sidebar-heading" },
+          sectionToggle("projects", "项目"),
+          sectionsCollapsed.projects
+            ? null
+            : h(
+                "div",
+                { className: "workagent-sidebar-heading-actions" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    "aria-label": searching ? "关闭搜索" : "搜索对话",
+                    title: searching ? "关闭搜索" : "搜索对话",
+                    "aria-pressed": searching,
+                    onClick: toggleSearch,
+                  },
+                  h(Icon, { name: searching ? "close" : "search", size: 15 }),
                 ),
-            },
-            "Feedback",
-          ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    "aria-label": "管理项目",
+                    title: "管理项目",
+                    onClick: () => location.assign("/?workagent=workspaces"),
+                  },
+                  h(Icon, { name: "plus", size: 15 }),
+                ),
+              ),
+        ),
+        searching
+          ? h(Input, {
+              className: "workagent-sidebar-search",
+              "aria-label": "搜索对话",
+              value: query,
+              onChange: (event) => setQuery(event.target.value),
+              placeholder: "搜索对话…",
+              autoFocus: true,
+            })
+          : null,
+        h(
+          "div",
+          { className: "workagent-sidebar-projects" },
+          workspaceState.loading && !sectionsCollapsed.projects
+            ? h("span", { className: "workagent-sidebar-empty" }, "加载中…")
+            : null,
+          ...(sectionsCollapsed.projects ? [] : projectRows).map((project) => {
+            const projectSessions = sessions.filter(
+              (session) => session.workspaceId === project.id,
+            );
+            const isCollapsed = Boolean(collapsed[project.id]);
+            return h(
+              "section",
+              { className: "workagent-sidebar-project", key: project.id },
+              h(
+                "div",
+                { className: "workagent-sidebar-project-row" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "is-main",
+                    "aria-expanded": !isCollapsed,
+                    onClick: () => {
+                      selectProject(project);
+                      setCollapsed((value) => ({
+                        ...value,
+                        [project.id]: !value[project.id],
+                      }));
+                    },
+                  },
+                  h(Icon, {
+                    name: isCollapsed ? "chevronRight" : "chevronDown",
+                    size: 13,
+                  }),
+                  h(Icon, { name: "workspace", size: 15 }),
+                  h("span", null, displayWorkspaceName(project.name)),
+                  project.scope === "team" ? h("small", null, "共享") : null,
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "workagent-row-action",
+                    "aria-label": `在 ${displayWorkspaceName(project.name)} 中新建会话`,
+                    title: "在此项目中新建会话",
+                    onClick: () => startProjectConversation(project),
+                  },
+                  h(Icon, { name: "plus", size: 14 }),
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "workagent-row-action",
+                    "aria-label": `编辑项目 ${displayWorkspaceName(project.name)}`,
+                    title: "重命名或删除项目",
+                    onClick: () => beginAction("rename-project", project),
+                  },
+                  "•••",
+                ),
+              ),
+              !isCollapsed
+                ? h(
+                    "div",
+                    { className: "workagent-sidebar-project-sessions" },
+                    projectSessions.length === 0
+                      ? h(
+                          "span",
+                          { className: "workagent-sidebar-empty" },
+                          query ? "没有匹配的对话" : "暂无对话",
+                        )
+                      : projectSessions.map(renderSession),
+                  )
+                : null,
+            );
+          }),
           h(
-            Button,
-            { onClick: () => location.assign("/?workagent=workspaces") },
-            "Workspace",
+            "section",
+            { className: "workagent-sidebar-unassigned" },
+            h(
+              "div",
+              { className: "workagent-sidebar-subheading" },
+              sectionToggle("sessions", "对话"),
+            ),
+            sectionsCollapsed.sessions
+              ? null
+              : h(
+                  "div",
+                  {
+                    className:
+                      "workagent-sidebar-project-sessions workagent-sidebar-standalone",
+                  },
+                  ...unassignedSessions.map(renderSession),
+                ),
           ),
+        ),
+        sessionState.loading && !sectionsCollapsed.sessions
+          ? h("span", { className: "workagent-sidebar-empty" }, "加载中…")
+          : null,
+        error
+          ? h("span", { role: "alert", className: "workagent-error" }, error)
+          : null,
+        action
+          ? h(
+              "div",
+              { className: "workagent-dialog-backdrop", role: "presentation" },
+              h(
+                "form",
+                {
+                  className: "workagent-dialog",
+                  role: "dialog",
+                  "aria-modal": true,
+                  "aria-label": action.kind.includes("delete")
+                    ? "确认删除"
+                    : "重命名",
+                  onSubmit: submitAction,
+                },
+                h(
+                  "strong",
+                  null,
+                  action.kind.startsWith("rename") ? "重命名" : "确认删除",
+                ),
+                action.kind.startsWith("rename")
+                  ? h(Input, {
+                      autoFocus: true,
+                      value: actionValue,
+                      onChange: (event) => setActionValue(event.target.value),
+                      required: true,
+                      maxLength: 120,
+                    })
+                  : h(
+                      "p",
+                      null,
+                      action.kind === "delete-project"
+                        ? "项目及其对话将移入可恢复的回收目录。"
+                        : "删除后，这个对话将不再显示。",
+                    ),
+                h(
+                  "div",
+                  { className: "workagent-actions" },
+                  h(
+                    Button,
+                    {
+                      type: "submit",
+                      disabled:
+                        action.kind.startsWith("rename") && !actionValue.trim(),
+                    },
+                    action.kind.startsWith("rename") ? "保存" : "删除",
+                  ),
+                  action.kind.startsWith("rename")
+                    ? h(
+                        Button,
+                        {
+                          className: "workagent-button is-danger",
+                          onClick: () =>
+                            beginAction(
+                              action.kind === "rename-project"
+                                ? "delete-project"
+                                : "delete-session",
+                              action.target,
+                            ),
+                        },
+                        "删除",
+                      )
+                    : null,
+                  h(Button, { onClick: () => setAction(null) }, "取消"),
+                ),
+              ),
+            )
+          : null,
+      );
+    }
+
+    let conversationSettings;
+    function useBusyEnter() {
+      return React.useSyncExternalStore(
+        (listener) => conversationSettings.subscribe(listener),
+        () =>
+          conversationSettings.getSnapshot().value?.busyEnter === "steer"
+            ? "steer"
+            : "queue",
+      );
+    }
+    function BusyEnterSettings() {
+      const behavior = useBusyEnter();
+      return h(
+        "div",
+        { className: "workagent-busy-setting" },
+        h(
+          "div",
+          null,
+          h("strong", null, "任务运行时的发送方式"),
+          h(
+            "p",
+            { className: "workagent-muted" },
+            "发送按钮和 Enter 使用此设置；Ctrl/Cmd + Enter 临时使用另一种方式。",
+          ),
+        ),
+        h(Select, {
+          "aria-label": "任务运行时的发送方式",
+          value: behavior,
+          onChange: (event) =>
+            conversationSettings.set("busyEnter", event.target.value),
+          options: [
+            ["queue", "排队发送"],
+            ["steer", "立即追加"],
+          ],
+        }),
+      );
+    }
+
+    const RuntimeServices = React.createContext(null);
+    const standardSessionApi = (ctx) => ctx.connection?.api?.sessions;
+    const hasStandardSessions = (ctx) =>
+      Boolean(ctx.sessions?.binding && standardSessionApi(ctx));
+    const rpcValue = (response) => {
+      const result = response.result ?? response;
+      if (!result.ok)
+        throw new Error(
+          result.error?.message ||
+            result.error?.code ||
+            "session_request_failed",
+        );
+      return result.value;
+    };
+    async function nativeSessionAction(ctx, sessionId, action, ...args) {
+      const session = ctx.sessions.binding(sessionId)?.session;
+      if (session) return rpcValue(await session[action](...args));
+      const api = standardSessionApi(ctx);
+      const payload =
+        action === "prompt"
+          ? { sessionId, content: args[0], mode: args[1] }
+          : action === "updateQueue"
+            ? { sessionId, itemId: args[0], action: args[1] }
+            : { sessionId };
+      return rpcValue(await api[action](payload));
+    }
+    function useNativeConversation(ctx, sessionId, enabled) {
+      const [state, setState] = React.useState({
+        value: undefined,
+        loading: true,
+        error: "",
+      });
+      const refresh = React.useRef(async () => {});
+      const reload = React.useCallback(() => refresh.current(), []);
+      React.useEffect(() => {
+        if (!enabled) return;
+        let disposed = false;
+        let revision = 0;
+        let generation = 0;
+        let requestController;
+        let binding;
+        let stopProjection = () => {};
+        const accept = (value) => {
+          if (disposed || !value) return;
+          revision += 1;
+          setState({ value, loading: false, error: "" });
+        };
+        const bind = () => {
+          const next = ctx.sessions.binding(sessionId);
+          if (!next || next === binding) return;
+          binding = next;
+          stopProjection();
+          const face = next.session.projections.faceOf("nativeSession");
+          stopProjection = face.subscribe(() => accept(face.getSnapshot()));
+        };
+        const load = async () => {
+          const currentGeneration = ++generation;
+          const before = revision;
+          requestController?.abort();
+          const controller = new AbortController();
+          requestController = controller;
+          try {
+            const value = rpcValue(
+              await standardSessionApi(ctx).history(
+                { sessionId },
+                controller.signal,
+              ),
+            ).projections?.values?.nativeSession;
+            if (
+              disposed ||
+              controller.signal.aborted ||
+              generation !== currentGeneration ||
+              revision !== before
+            )
+              return;
+            if (!value)
+              throw new Error("native_session_projection_unavailable");
+            accept(value);
+          } catch (error) {
+            if (
+              !disposed &&
+              !controller.signal.aborted &&
+              generation === currentGeneration
+            )
+              setState((current) => ({
+                ...current,
+                loading: false,
+                error: error.message,
+              }));
+          }
+        };
+        refresh.current = load;
+        bind();
+        const stopList = ctx.sessions.list.subscribe(bind);
+        const stopReset = ctx.on("connection/reset", () => {
+          bind();
+          void load();
+        });
+        void load();
+        return () => {
+          disposed = true;
+          requestController?.abort();
+          stopProjection();
+          stopList();
+          stopReset();
+          refresh.current = async () => {};
+        };
+      }, [sessionId, enabled]);
+      return { ...state, reload };
+    }
+
+    function RuntimeConversation({
+      sessionId,
+      side = false,
+      onSideChat,
+      sideHeader,
+    }) {
+      const busyEnter = useBusyEnter();
+      const submitGesture = React.useRef(false);
+      const id = encodeURIComponent(sessionId);
+      const [sessionState] = useResource(`${apiRoot}/sessions/${id}`);
+      const ctx = React.useContext(RuntimeServices);
+      const standard = hasStandardSessions(ctx);
+      const native =
+        standard && ["codex", "kimi"].includes(sessionState.rows[0]?.engine);
+      const legacy = !standard || sessionState.rows[0]?.engine === "harness";
+      const nativeState = useNativeConversation(ctx, sessionId, native);
+      const [legacyQueueState, reloadQueue] = useResource(
+        legacy ? `${apiRoot}/sessions/${id}/queue` : null,
+      );
+      const [legacyMessageState, reloadMessages] = useResource(
+        legacy ? `${apiRoot}/sessions/${id}/messages` : null,
+      );
+      const messageState = native
+        ? {
+            loading: nativeState.loading,
+            rows: nativeState.value?.messages ?? [],
+          }
+        : legacyMessageState;
+      const queueState = native
+        ? { rows: nativeState.value?.metadata?.queue ?? [] }
+        : legacyQueueState;
+      const [input, setInput] = React.useState("");
+      const [draft, setDraft] = React.useState("");
+      const [busy, setBusy] = React.useState(false);
+      const [progress, setProgress] = React.useState("");
+      const [error, setError] = React.useState("");
+      const [submitting, setSubmitting] = React.useState(false);
+      const [editing, setEditing] = React.useState(null);
+      const [editContent, setEditContent] = React.useState("");
+      const session = native
+        ? { ...sessionState.rows[0], ...nativeState.value?.metadata }
+        : sessionState.rows[0];
+      const activityRevision = React.useRef(0);
+      React.useEffect(() => {
+        if (!native) return;
+        const value = nativeState.value;
+        if (value) {
+          setBusy(value.activity.state !== "idle");
+          setDraft(value.draft || "");
+          setProgress(
+            value.activity.state === "retrying"
+              ? "模型服务暂不可用，正在自动重试…"
+              : value.activeTool
+                ? "正在执行工具…"
+                : value.progress || "",
+          );
+          if (value.activity.message)
+            setError(friendlyError(value.activity.message));
+          else if (value.lastEvent?.type === "turn.started") setError("");
+          if (
+            [
+              "turn.started",
+              "turn.retrying",
+              "turn.completed",
+              "turn.failed",
+              "turn.cancelled",
+              "session.metadata",
+            ].includes(value.lastEvent?.type)
+          )
+            window.dispatchEvent(new window.Event(SESSIONS_CHANGED_EVENT));
+        }
+        if (nativeState.error) setError(friendlyError(nativeState.error));
+      }, [native, nativeState.value, nativeState.error]);
+      const syncActivity = React.useCallback(async () => {
+        if (native) return nativeState.reload();
+        if (!legacy) return;
+        const revision = activityRevision.current;
+        try {
+          const current = await request(`${apiRoot}/sessions/${id}`);
+          if (revision !== activityRevision.current || !current.activity)
+            return;
+          void reloadQueue();
+          const active = current.activity.state !== "idle";
+          setBusy(active);
+          setProgress(
+            current.activity.state === "retrying"
+              ? "模型服务暂不可用，正在自动重试…"
+              : "",
+          );
+          if (!active) {
+            setDraft("");
+            if (current.activity.message)
+              setError(friendlyError(current.activity.message));
+            void reloadMessages();
+          }
+        } catch {
+          setProgress("连接中断，正在重新连接…");
+        }
+      }, [id, reloadMessages, native, legacy, nativeState.reload]);
+
+      React.useEffect(() => {
+        if (!busy || !legacy) return;
+        const timer = setInterval(() => void syncActivity(), 5000);
+        return () => clearInterval(timer);
+      }, [busy, syncActivity, legacy]);
+
+      React.useEffect(() => {
+        if (!legacy || typeof EventSource === "undefined") return undefined;
+        const stream = new EventSource(`${apiRoot}/sessions/${id}/events`);
+        stream.onopen = () => void syncActivity();
+        stream.onmessage = (event) => {
+          let value;
+          try {
+            value = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          activityRevision.current += 1;
+          if (
+            [
+              "turn.started",
+              "turn.retrying",
+              "turn.completed",
+              "turn.failed",
+              "turn.cancelled",
+            ].includes(value.type)
+          )
+            window.dispatchEvent(new window.Event(SESSIONS_CHANGED_EVENT));
+          if (value.type === "turn.started") {
+            setBusy(true);
+            setProgress("");
+            setError("");
+          }
+          if (value.type === "turn.retrying") {
+            setBusy(true);
+            setProgress(
+              /high demand|overloaded/i.test(value.message || "")
+                ? "模型服务繁忙，正在自动重试…"
+                : "模型连接暂时中断，正在自动重试…",
+            );
+          }
+          if (value.type === "assistant.delta") {
+            setProgress("");
+            setDraft((current) => current + (value.delta || ""));
+          }
+          if (value.type === "tool.started") setProgress("正在执行工具…");
+          if (value.type === "tool.completed") setProgress("");
+          if (value.type === "assistant.completed") {
+            setDraft("");
+            void reloadMessages();
+          }
+          if (value.type === "queue.changed") void reloadQueue();
+          if (value.type === "message.created") void reloadMessages();
+          if (value.type === "turn.completed") {
+            setBusy(false);
+            setDraft("");
+            setProgress("");
+            void reloadMessages();
+          }
+          if (value.type === "turn.failed") {
+            setBusy(false);
+            setDraft("");
+            setError(friendlyError(value.message));
+            void reloadMessages();
+          }
+          if (value.type === "turn.cancelled") {
+            setBusy(false);
+            setDraft("");
+          }
+        };
+        stream.onerror = () => {
+          setProgress("连接中断，正在重新连接…");
+          void syncActivity();
+        };
+        return () => stream.close();
+      }, [id, legacy]);
+
+      const send = async (event) => {
+        event.preventDefault();
+        const accelerated = submitGesture.current;
+        submitGesture.current = false;
+        const content = input.trim();
+        if (!content || submitting) return;
+        if (!side && /^\/?btw(?:\s|$)/i.test(content)) {
+          setSubmitting(true);
+          try {
+            await onSideChat(content.replace(/^\/?btw\s*/i, ""));
+            setInput("");
+          } catch (cause) {
+            setError(friendlyError(cause.message));
+          } finally {
+            setSubmitting(false);
+          }
+          return;
+        }
+        const behavior = accelerated
+          ? busyEnter === "queue"
+            ? "steer"
+            : "queue"
+          : busyEnter;
+        const queued = busy && behavior === "queue";
+        const steering = busy && !queued;
+        setSubmitting(true);
+        activityRevision.current += 1;
+        setBusy(true);
+        setProgress("");
+        if (!busy) setDraft("");
+        setError("");
+        setInput("");
+        try {
+          if (native)
+            await nativeSessionAction(
+              ctx,
+              sessionId,
+              "prompt",
+              [{ type: "text", text: content }],
+              steering ? "steer" : "queue",
+            );
+          else
+            await request(
+              `${apiRoot}/sessions/${id}/${queued ? "queue" : steering ? "steer" : "turns"}`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  content,
+                  messageId: `message-ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                }),
+              },
+            );
+          void reloadMessages();
+          void reloadQueue();
+        } catch (cause) {
+          setInput(content);
+          if (!busy) setBusy(false);
+          setError(friendlyError(cause.message));
+          void syncActivity();
+        } finally {
+          setSubmitting(false);
+        }
+      };
+      const updateQueue = async (messageId, action) => {
+        if (submitting) return;
+        setSubmitting(true);
+        setError("");
+        try {
+          if (native && action !== "send")
+            await nativeSessionAction(
+              ctx,
+              sessionId,
+              "updateQueue",
+              messageId,
+              { kind: action },
+            );
+          else
+            await request(`${apiRoot}/sessions/${id}/queue`, {
+              method: "POST",
+              body: JSON.stringify({ messageId, action }),
+            });
+          void reloadMessages();
+          void syncActivity();
+        } catch (cause) {
+          setError(friendlyError(cause.message));
+        } finally {
+          void reloadQueue();
+          setSubmitting(false);
+        }
+      };
+      const fork = async (messageId, replacementContent) => {
+        if (submitting) return;
+        setSubmitting(true);
+        setError("");
+        try {
+          const branch = await request(`${apiRoot}/sessions/${id}/fork`, {
+            method: "POST",
+            body: JSON.stringify({ messageId, replacementContent }),
+          });
+          location.assign(
+            `/?frontend=dsh&session=${encodeURIComponent(branch.id)}`,
+          );
+        } catch (cause) {
+          setError(friendlyError(cause.message));
+        } finally {
+          setSubmitting(false);
+        }
+      };
+      const cancel = async () => {
+        try {
+          if (native) await nativeSessionAction(ctx, sessionId, "cancel");
+          else
+            await request(`${apiRoot}/sessions/${id}/cancel`, {
+              method: "POST",
+            });
+          activityRevision.current += 1;
+          setProgress("正在停止…");
+          void syncActivity();
+        } catch (cause) {
+          setError(friendlyError(cause.message));
+        }
+      };
+
+      return h(
+        "section",
+        { className: `workagent-conversation${side ? " is-side-chat" : ""}` },
+        side
+          ? sideHeader
+          : h(
+              "header",
+              { className: "workagent-conversation-title" },
+              session ? h(EngineMark, { engine: session.engine }) : null,
+              h(
+                "div",
+                null,
+                h(
+                  "strong",
+                  null,
+                  session
+                    ? displaySessionTitle(session.title)
+                    : "正在加载会话…",
+                ),
+                session
+                  ? h(
+                      "span",
+                      null,
+                      `${displayPresetName(session.preset?.resolvedSnapshot?.name || session.preset?.presetId || session.engine)} · 当前会话`,
+                    )
+                  : null,
+              ),
+            ),
+        h(
+          "div",
+          { className: "workagent-message-list", "aria-live": "polite" },
+          h(ConversationMessageTarget, { sessionId }),
+          messageState.loading
+            ? h("p", { className: "workagent-muted" }, "正在加载消息…")
+            : messageState.rows.length === 0 && !draft
+              ? h(
+                  "div",
+                  { className: "workagent-conversation-empty" },
+                  side
+                    ? h(
+                        "div",
+                        { className: "workagent-side-empty-icon" },
+                        h(Icon, { name: "chatgpt", size: 24 }),
+                      )
+                    : null,
+                  h("strong", null, side ? "顺便问一句" : "从这里继续对话"),
+                  h(
+                    "span",
+                    null,
+                    side
+                      ? "另开一个话题，和主对话分开记录。"
+                      : "消息和回复会保存在当前对话中。",
+                  ),
+                )
+              : null,
+          ...messageState.rows.map((message) =>
+            h(
+              "article",
+              {
+                key: message.id,
+                className: `workagent-message is-${message.role}`,
+                "data-message-id": message.id,
+              },
+              message.role === "assistant"
+                ? h(EngineMark, { engine: session?.engine || "harness" })
+                : null,
+              h(Markdown, null, message.text),
+              h(MessageActions, {
+                message,
+                disabled: submitting,
+                onEdit:
+                  message.role === "user" && !side
+                    ? () => {
+                        setEditing(message.id);
+                        setEditContent(message.text);
+                      }
+                    : undefined,
+                onFork:
+                  message.role === "assistant" && !side
+                    ? () => void fork(message.id)
+                    : undefined,
+              }),
+              editing === message.id
+                ? h(
+                    "form",
+                    {
+                      className: "workagent-message-editor",
+                      onSubmit: (event) => {
+                        event.preventDefault();
+                        if (editContent.trim())
+                          void fork(message.id, editContent.trim());
+                      },
+                    },
+                    h("textarea", {
+                      "aria-label": "编辑消息",
+                      autoFocus: true,
+                      value: editContent,
+                      onChange: (event) => setEditContent(event.target.value),
+                      onKeyDown: submitComposerOnEnter,
+                    }),
+                    h(
+                      "small",
+                      null,
+                      `${busy ? "运行中的原任务会先停止。" : ""}从这条消息前重新继续，原会话保留。此操作不会回滚已修改的文件。`,
+                    ),
+                    h(
+                      "div",
+                      { className: "workagent-actions" },
+                      h(
+                        Button,
+                        {
+                          type: "submit",
+                          disabled: submitting || !editContent.trim(),
+                        },
+                        submitting ? "正在重发…" : "保存并重发",
+                      ),
+                      h(
+                        Button,
+                        {
+                          disabled: submitting,
+                          onClick: () => setEditing(null),
+                        },
+                        "取消编辑",
+                      ),
+                    ),
+                  )
+                : null,
+            ),
+          ),
+          draft
+            ? h(
+                "article",
+                { className: "workagent-message is-assistant is-streaming" },
+                h(EngineMark, { engine: session?.engine || "harness" }),
+                h(Markdown, null, draft),
+              )
+            : busy
+              ? h(
+                  "div",
+                  {
+                    className: "workagent-thinking",
+                    role: "status",
+                    "aria-live": "polite",
+                  },
+                  h("span", null),
+                  h("span", null),
+                  h("span", null),
+                  progress || "正在思考",
+                )
+              : null,
         ),
         h(
           "form",
-          { onSubmit: search },
-          h(Input, {
-            "aria-label": "Search messages",
-            value: query,
-            onChange: (e) => setQuery(e.target.value),
-            placeholder: "Search this conversation",
+          { className: "workagent-conversation-composer", onSubmit: send },
+          queueState.rows.length
+            ? h(
+                "div",
+                {
+                  className: "workagent-message-queue",
+                  "aria-label": "待发送消息",
+                },
+                h("small", null, `排队消息（${queueState.rows.length}）`),
+                ...queueState.rows.map((row) =>
+                  h(
+                    "div",
+                    {
+                      key: row.messageId,
+                      className: "workagent-queued-message",
+                    },
+                    h(
+                      "div",
+                      null,
+                      h("span", null, row.content),
+                      row.error
+                        ? h(
+                            "small",
+                            { className: "workagent-error" },
+                            friendlyError(row.error),
+                          )
+                        : null,
+                    ),
+                    h(
+                      Button,
+                      {
+                        className: "workagent-queue-icon",
+                        "aria-label": busy ? "立即追加" : "发送排队消息",
+                        title: busy ? "立即追加到当前任务" : "发送这条消息",
+                        disabled: submitting,
+                        onClick: () =>
+                          void updateQueue(
+                            row.messageId,
+                            busy ? "steer" : "send",
+                          ),
+                      },
+                      h(Icon, { name: busy ? "steer" : "send" }),
+                    ),
+                    h(
+                      Button,
+                      {
+                        className: "workagent-queue-icon",
+                        "aria-label": "移除排队消息",
+                        title: "移除排队消息",
+                        disabled: submitting,
+                        onClick: () =>
+                          void updateQueue(row.messageId, "remove"),
+                      },
+                      h(Icon, { name: "close" }),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+          h("textarea", {
+            "aria-label": side ? "侧聊消息" : "继续对话",
+            value: input,
+            onChange: (event) => setInput(event.target.value),
+            onKeyDown: (event) =>
+              submitComposerOnEnter(event, () => {
+                submitGesture.current = event.ctrlKey || event.metaKey;
+              }),
+            placeholder: busy
+              ? busyEnter === "queue"
+                ? "输入消息，当前任务完成后发送…"
+                : "输入补充指令，调整当前任务…"
+              : side
+                ? "顺便问一句…"
+                : "输入消息，或 /btw 发起侧聊；Shift + Enter 换行",
           }),
-        ),
-        error ? h("span", { className: "workagent-error" }, error) : null,
-        ...results.map((result) =>
           h(
-            Card,
-            {
-              key: result.message?.id,
-              "data-message-role": result.message?.role,
-              title:
-                result.message?.content ||
-                result.message?.text ||
-                "Search result",
-              detail: result.session?.title,
-            },
+            "div",
+            { className: "workagent-conversation-composer-bar" },
+            error
+              ? h(
+                  "span",
+                  { role: "alert", className: "workagent-error" },
+                  error,
+                )
+              : busy
+                ? h(
+                    "span",
+                    { className: "workagent-muted" },
+                    busyEnter === "queue"
+                      ? "消息将排队，当前任务完成后发送"
+                      : session?.engine === "kimi"
+                        ? "补充指令会停止当前生成，再继续执行"
+                        : "补充指令会送入当前任务",
+                  )
+                : null,
+            busy
+              ? h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "workagent-composer-icon",
+                    "aria-label": "停止",
+                    title: "停止当前任务",
+                    onClick: () => void cancel(),
+                  },
+                  h(Icon, { name: "stop", size: 20 }),
+                )
+              : null,
             h(
-              Button,
+              "button",
               {
-                onClick: () => openResult(result),
+                type: "submit",
+                className: "workagent-composer-icon",
+                "aria-label": "发送",
+                title: submitting
+                  ? "提交中…"
+                  : busy
+                    ? busyEnter === "queue"
+                      ? "排队发送"
+                      : "立即追加"
+                    : "发送",
+                disabled: !input.trim() || submitting,
               },
-              "Open result",
+              h(Icon, { name: "send", size: 20 }),
             ),
-            h(Button, { onClick: () => beginEdit(result) }, "Edit and resend"),
           ),
         ),
-        editing
+      );
+    }
+
+    function ConversationWorkspace({ sessionId }) {
+      const ctx = React.useContext(RuntimeServices);
+      const workspaceRef = React.useRef(null);
+      const [workspaceWidth, setWorkspaceWidth] = React.useState(0);
+      const [sideWidth, setSideWidth] = React.useState(
+        () => Number(localStorage.getItem("workagent.side-chat.width")) || null,
+      );
+      React.useLayoutEffect(() => {
+        const workspace = workspaceRef.current;
+        const measure = () =>
+          setWorkspaceWidth(workspace.getBoundingClientRect().width);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(workspace);
+        return () => observer.disconnect();
+      }, []);
+      // Reserve 360px for the main chat and 24px for the drag handle.
+      const sideMaxWidth = Math.max(320, workspaceWidth - 384);
+      const visibleSideWidth = Math.max(
+        320,
+        Math.min(
+          sideMaxWidth,
+          sideWidth ?? Math.min(520, workspaceWidth * 0.38),
+        ),
+      );
+      const resizeSideWidth = (value) => {
+        const next = Math.max(320, Math.min(sideMaxWidth, Math.round(value)));
+        setSideWidth(next);
+        localStorage.setItem("workagent.side-chat.width", String(next));
+      };
+      const [sideId, setSideId] = React.useState(() =>
+        localStorage.getItem(`workagent.side-chat.${sessionId}`),
+      );
+      const [opening, setOpening] = React.useState(false);
+      const [sideError, setSideError] = React.useState("");
+      const [deleteTarget, setDeleteTarget] = React.useState(null);
+      const [deleting, setDeleting] = React.useState(false);
+      const deletingRef = React.useRef(false);
+      const openingRef = React.useRef(false);
+      const [sideState, reloadSides] = useResource(
+        `${apiRoot}/sessions`,
+        (rows) =>
+          (Array.isArray(rows) ? rows : []).filter(
+            (row) =>
+              row.parentSessionId === sessionId &&
+              row.branchKind === "side_chat",
+          ),
+      );
+      React.useEffect(() => {
+        if (
+          !sideId ||
+          sideState.loading ||
+          sideState.error ||
+          opening ||
+          deleting
+        )
+          return;
+        if (!sideState.rows.some((row) => row.id === sideId)) {
+          setSideId(null);
+          localStorage.removeItem(`workagent.side-chat.${sessionId}`);
+        }
+      }, [sideId, sideState, opening, deleting, sessionId]);
+      const deleteSideChat = async (event) => {
+        event.preventDefault();
+        if (!deleteTarget || deletingRef.current) return;
+        deletingRef.current = true;
+        setDeleting(true);
+        setSideError("");
+        try {
+          await request(
+            `${apiRoot}/sessions/${encodeURIComponent(deleteTarget)}`,
+            { method: "DELETE" },
+          );
+          setSideId(null);
+          localStorage.removeItem(`workagent.side-chat.${sessionId}`);
+          setDeleteTarget(null);
+          await reloadSides();
+        } catch (error) {
+          setSideError(friendlyError(error.message));
+        } finally {
+          deletingRef.current = false;
+          setDeleting(false);
+        }
+      };
+      const openSideChat = async (content = "", fresh = false) => {
+        if (openingRef.current) throw new Error("正在打开侧聊，请稍候");
+        if (deletingRef.current || deleteTarget)
+          throw new Error("请先完成侧聊删除操作");
+        openingRef.current = true;
+        setOpening(true);
+        try {
+          let target = fresh ? undefined : sideId;
+          if (!target) {
+            const result = await request(
+              `${apiRoot}/sessions/${encodeURIComponent(sessionId)}/side-chat`,
+              {
+                method: "POST",
+                body: "{}",
+              },
+            );
+            target = result.id;
+            await reloadSides();
+          }
+          setSideId(target);
+          localStorage.setItem(`workagent.side-chat.${sessionId}`, target);
+          if (content) {
+            const current = await request(
+              `${apiRoot}/sessions/${encodeURIComponent(target)}`,
+            );
+            if (
+              hasStandardSessions(ctx) &&
+              ["codex", "kimi"].includes(current.engine)
+            )
+              await nativeSessionAction(
+                ctx,
+                target,
+                "prompt",
+                [{ type: "text", text: content }],
+                current.activity?.state === "running" ||
+                  current.activity?.state === "retrying"
+                  ? "steer"
+                  : "queue",
+              );
+            else
+              await request(
+                `${apiRoot}/sessions/${encodeURIComponent(target)}/${current.activity?.state === "running" || current.activity?.state === "retrying" ? "steer" : "turns"}`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({ content }),
+                },
+              );
+          }
+        } finally {
+          openingRef.current = false;
+          setOpening(false);
+        }
+      };
+      return h(
+        "div",
+        {
+          className: `workagent-conversation-workspace${sideId ? " has-side-chat" : ""}`,
+          ref: workspaceRef,
+          style: { "--workagent-side-chat-width": `${visibleSideWidth}px` },
+        },
+        h(RuntimeConversation, {
+          key: sessionId,
+          sessionId,
+          onSideChat: openSideChat,
+        }),
+        opening
           ? h(
-              "form",
-              { className: "workagent-form", onSubmit: edit },
+              "span",
+              { role: "status", className: "workagent-side-opening" },
+              "正在打开侧聊…",
+            )
+          : null,
+        sideId
+          ? h(ResizeHandle, {
+              orientation: "vertical",
+              label: "调整侧聊宽度",
+              className: "workagent-side-resizer",
+              value: visibleSideWidth,
+              min: 320,
+              max: Math.floor(sideMaxWidth),
+              onChange: resizeSideWidth,
+              measure: (event) => {
+                const initial = event.clientX;
+                const actualWidth =
+                  event.currentTarget.nextElementSibling.getBoundingClientRect()
+                    .width;
+                return (move) => actualWidth + initial - move.clientX;
+              },
+            })
+          : null,
+        sideId
+          ? h(
+              "aside",
+              { className: "workagent-side-chat", "aria-label": "侧聊 BTW" },
+              h(RuntimeConversation, {
+                key: sideId,
+                sessionId: sideId,
+                side: true,
+                sideHeader: h(
+                  "header",
+                  {
+                    className:
+                      "workagent-conversation-title workagent-side-header",
+                  },
+                  h(
+                    "div",
+                    { className: "workagent-side-toolbar" },
+                    h(
+                      "div",
+                      { className: "workagent-side-heading" },
+                      h("strong", null, "侧聊"),
+                      h("span", { className: "workagent-side-badge" }, "BTW"),
+                    ),
+                    h(
+                      "nav",
+                      {
+                        className: "workagent-side-actions",
+                        "aria-label": "侧聊操作",
+                      },
+                      h(
+                        Button,
+                        {
+                          className: "workagent-side-action",
+                          "aria-label": "新侧聊",
+                          title: "新建侧聊",
+                          disabled: opening || deleting,
+                          onClick: () => {
+                            setSideError("");
+                            void openSideChat("", true).catch((error) =>
+                              setSideError(friendlyError(error.message)),
+                            );
+                          },
+                        },
+                        h(Icon, { name: "plus", size: 17 }),
+                      ),
+                      h(
+                        Button,
+                        {
+                          className: "workagent-side-action is-delete",
+                          "aria-label": "删除侧聊",
+                          title: "删除侧聊",
+                          disabled: opening || deleting,
+                          onClick: () => {
+                            setSideError("");
+                            setDeleteTarget(sideId);
+                          },
+                        },
+                        h(Icon, { name: "trash", size: 17 }),
+                      ),
+                    ),
+                  ),
+                  sideState.rows.length > 1
+                    ? h(
+                        "div",
+                        { className: "workagent-side-picker" },
+                        h(Select, {
+                          "aria-label": "选择侧聊",
+                          disabled: opening || deleting,
+                          value: sideId,
+                          onChange: (event) => {
+                            setSideId(event.target.value);
+                            localStorage.setItem(
+                              `workagent.side-chat.${sessionId}`,
+                              event.target.value,
+                            );
+                          },
+                          options: sideState.rows.map((row, index) => [
+                            row.id,
+                            `${index + 1}. ${displaySessionTitle(row.title)}`,
+                          ]),
+                        }),
+                        h(Icon, { name: "chevronDown", size: 14 }),
+                      )
+                    : h(
+                        "span",
+                        { className: "workagent-side-caption" },
+                        "和主对话分开记录",
+                      ),
+                  sideError && !deleteTarget
+                    ? h(
+                        "span",
+                        { role: "alert", className: "workagent-error" },
+                        sideError,
+                      )
+                    : null,
+                ),
+              }),
+            )
+          : null,
+        deleteTarget
+          ? h(
+              "div",
+              { className: "workagent-dialog-backdrop", role: "presentation" },
               h(
-                Field,
-                { label: "Edit message" },
-                h("textarea", {
-                  "aria-label": "Edit message",
-                  value: replacement,
-                  onChange: (event) => setReplacement(event.target.value),
-                }),
+                "form",
+                {
+                  className: "workagent-dialog",
+                  role: "alertdialog",
+                  "aria-modal": true,
+                  "aria-label": "确认删除侧聊",
+                  onSubmit: deleteSideChat,
+                  onKeyDown: (event) => {
+                    if (event.key === "Escape" && !deleting) {
+                      event.preventDefault();
+                      setDeleteTarget(null);
+                      setSideError("");
+                    }
+                  },
+                },
+                h("strong", null, "删除这个侧聊？"),
+                h(
+                  "p",
+                  null,
+                  "侧聊及其消息将被删除，主对话不受影响。再次打开会创建新的侧聊。",
+                ),
+                sideError
+                  ? h(
+                      "p",
+                      { role: "alert", className: "workagent-error" },
+                      sideError,
+                    )
+                  : null,
+                h(
+                  "div",
+                  { className: "workagent-actions" },
+                  h(
+                    Button,
+                    {
+                      autoFocus: true,
+                      disabled: deleting,
+                      onClick: () => {
+                        setDeleteTarget(null);
+                        setSideError("");
+                      },
+                    },
+                    "取消",
+                  ),
+                  h(
+                    Button,
+                    {
+                      type: "submit",
+                      className: "workagent-button is-danger",
+                      disabled: deleting,
+                    },
+                    deleting ? "正在删除…" : "确认删除",
+                  ),
+                ),
               ),
-              h(Button, { type: "submit" }, "Resend"),
-              h(Button, { onClick: () => setEditing(null) }, "Cancel"),
             )
           : null,
       );
@@ -1412,9 +6583,9 @@ window.__ModuleLoader__.load({
     const pages = {
       assistants: PresetsSection,
       automations: AutomationsPage,
-      teams: TeamsPage,
       notifications: NotificationsPage,
       workspaces: WorkspacesPage,
+      marketplace: MarketplaceSection,
     };
     function WorkAgentOverlay() {
       const params = new URLSearchParams(location.search);
@@ -1422,7 +6593,14 @@ window.__ModuleLoader__.load({
       const sessionId = params.get("session");
       const Page = pages[target];
       if (!Page && !sessionId) return null;
-      const label = Page ? target : "message search";
+      const labels = {
+        assistants: "助手",
+        automations: "定时任务",
+        notifications: "通知",
+        workspaces: "项目",
+        marketplace: "市场",
+      };
+      const label = Page ? labels[target] : "会话";
       return h(
         "div",
         {
@@ -1431,28 +6609,28 @@ window.__ModuleLoader__.load({
           className: "workagent-overlay",
         },
         h(
-          "div",
-          { className: "workagent-actions" },
-          h(Button, { onClick: () => history.back() }, "Back"),
-          h(Button, { onClick: () => history.forward() }, "Forward"),
-          h(Button, { onClick: () => location.assign("/") }, "Close"),
-          h(
-            Button,
-            {
-              onClick: () =>
-                location.assign(
-                  "mailto:support@workagent.invalid?subject=WorkAgent%20feedback",
-                ),
-            },
-            "Feedback",
-          ),
-          h(
-            Button,
-            { onClick: () => location.assign("/?workagent=workspaces") },
-            "Workspace",
-          ),
+          "header",
+          { className: "workagent-overlay-header" },
+          Page
+            ? h(
+                Button,
+                {
+                  className: "workagent-button workagent-overlay-back",
+                  onClick: () => location.assign("/?frontend=dsh"),
+                },
+                h(Icon, { name: "back", size: 16 }),
+                "返回",
+              )
+            : null,
+          h("h1", null, label),
         ),
-        Page ? h(Page) : h(ConversationUtilities, { sessionId }),
+        h(
+          "main",
+          { className: "workagent-overlay-content" },
+          Page
+            ? h(Page)
+            : h(ConversationWorkspace, { key: sessionId, sessionId }),
+        ),
       );
     }
 
@@ -1467,11 +6645,13 @@ window.__ModuleLoader__.load({
         {
           type: "button",
           className: "workagent-footer",
-          title: "Notifications",
-          "aria-label": "Notifications",
+          "data-kind": "notifications",
+          title: "通知",
+          "aria-label": "通知",
           onClick: () => location.assign("/?workagent=notifications"),
         },
-        wide ? "Notifications" : "N",
+        h(Icon, { name: "notifications" }),
+        wide ? h("span", null, "通知") : null,
         unread > 0 ? h("span", { className: "workagent-badge" }, unread) : null,
       );
     }
@@ -1480,13 +6660,18 @@ window.__ModuleLoader__.load({
       if (kind === "notifications") return h(NotificationFooter, { wide });
       const navigate = (page) => () => location.assign(`/?workagent=${page}`);
       const actions = {
-        assistants: ["Assistants", navigate("assistants")],
-        tasks: ["Scheduled tasks", navigate("automations")],
-        chatgpt: ["ChatGPT", () => location.assign("/chatgpt/")],
-        teams: ["Teams", navigate("teams")],
-        workspace: ["Workspace", navigate("workspaces")],
+        assistants: ["助手", navigate("assistants")],
+        tasks: ["定时任务", navigate("automations")],
+        chatgpt: [
+          "聊天模式",
+          () => {
+            localStorage.setItem(AGENT_PICK_KEY, "builtin-general");
+            location.assign("/?frontend=dsh");
+          },
+        ],
+        workspace: ["项目", navigate("workspaces")],
         theme: [
-          "Theme",
+          "主题",
           () => {
             const current = theme.getTheme();
             const next =
@@ -1497,7 +6682,7 @@ window.__ModuleLoader__.load({
           },
         ],
         logout: [
-          "Log out",
+          "退出登录",
           async () => {
             await fetch("/api/auth/logout", { method: "POST" });
             location.assign("/");
@@ -1510,30 +6695,129 @@ window.__ModuleLoader__.load({
         {
           type: "button",
           className: "workagent-footer",
+          "data-kind": kind,
           title: label,
           "aria-label": label,
           onClick: action,
         },
-        wide ? label : label.slice(0, 1),
+        h(Icon, { name: kind }),
+        wide ? h("span", null, label) : null,
       );
     }
 
     const sections = [
-      ["workagent-mcp", 30, "MCP servers", MCPSection],
-      ["workagent-skills", 31, "Skills", SkillsSection],
-      ["workagent-engines", 32, "Engines", EnginesSection],
-      ["workagent-presets", 33, "Presets", PresetsSection],
-      ["workagent-models", 34, "Models", ModelsSection],
-      ["workagent-extensions", 35, "Extensions", ExtensionsSection],
+      ["workagent-mcp", 30, "MCP 服务", MCPSection],
+      ["workagent-skills", 31, "技能", SkillsSection],
+      ["workagent-market", 32, "市场", MarketplaceSection],
+      ["workagent-presets", 33, "助手", PresetsSection],
+      ["workagent-models", 34, "模型", ModelsSection],
+      [
+        "workagent-completion-notifications",
+        36,
+        "消息提醒",
+        CompletionNotificationSettings,
+      ],
     ];
-    const inject = ["slots", "theme"];
+    const inject = [
+      "slots",
+      "theme",
+      "locale",
+      "settingsScope",
+      "sessions",
+      "connection",
+    ];
     function apply(ctx) {
+      conversationSettings = ctx.settingsScope.bind({
+        namespace: "ui-conversation",
+      });
       installAssets();
+      ctx.slots.inject("settings.general.item", () =>
+        ctx.slots.register(
+          {
+            name: "settings.general.item",
+            id: "composer-enter",
+            order: 20,
+            priority: -10,
+          },
+          BusyEnterSettings,
+        ),
+      );
+      ctx.effect(() => {
+        // The upstream renderer rewrites the title when the selected session changes.
+        const updateTitle = () => {
+          if (document.title !== "WorkAgent") document.title = "WorkAgent";
+        };
+        const observer = new MutationObserver(updateTitle);
+        observer.observe(document.head, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+        updateTitle();
+        return () => observer.disconnect();
+      }, "workagent: browser title");
+      ctx.slots.inject("settings.general.item", () =>
+        ctx.slots.register(
+          {
+            name: "settings.general.item",
+            id: "permission",
+            order: -20,
+            priority: -10,
+          },
+          () => null,
+        ),
+      );
+      ctx.slots.inject("settings.general.item", () =>
+        ctx.slots.register(
+          {
+            name: "settings.general.item",
+            id: "workagent-typography",
+            order: 5,
+          },
+          TypographySettings,
+        ),
+      );
+      const localeScope = ctx.settingsScope.bind({ namespace: "locale" });
+      let localeWritePending = false;
+      const initializeLocale = () => {
+        const value = localeScope.getSnapshot().value;
+        if (value?.preference === "zh") localeWritePending = false;
+        else if (value !== undefined && !localeWritePending) {
+          localeWritePending = true;
+          ctx.locale.setLocale("zh");
+        }
+      };
+      ctx.effect(() => {
+        const unsubscribe = localeScope.subscribe(initializeLocale);
+        initializeLocale();
+        return unsubscribe;
+      }, "workagent: Chinese interface language");
+      ctx.slots.inject("settings.general.item", () =>
+        ctx.slots.register(
+          {
+            name: "settings.general.item",
+            id: "language",
+            order: 0,
+            priority: -10,
+          },
+          () => null,
+        ),
+      );
       ctx.slots.inject("sidebar.brand.mark", () =>
         ctx.slots.inject("sidebar.brand.name", function* () {
           yield ctx.slots.register({ name: "sidebar.brand.mark" }, BrandMark);
           yield ctx.slots.register({ name: "sidebar.brand.name" }, BrandName);
         }),
+      );
+      ctx.slots.inject("conversation.hero.brand.mark", () =>
+        ctx.slots.register(
+          {
+            name: "conversation.hero.brand.mark",
+            id: "workagent-hero-mark",
+            order: 10,
+          },
+          BrandMark,
+        ),
       );
       for (const [id, order, label, Component] of sections)
         ctx.slots.inject("settings.section", () =>
@@ -1542,12 +6826,16 @@ window.__ModuleLoader__.load({
             Component,
           ),
         );
+      ctx.slots.inject("settings.action", () =>
+        ctx.slots.register(
+          { name: "settings.action", id: "workagent-quota", order: 100 },
+          QuotaPanel,
+        ),
+      );
       for (const [order, kind] of [
         "assistants",
         "tasks",
         "chatgpt",
-        "teams",
-        "notifications",
         "workspace",
         "theme",
         "logout",
@@ -1562,20 +6850,53 @@ window.__ModuleLoader__.load({
             (props) => h(FooterAction, { ...props, kind, theme: ctx.theme }),
           ),
         );
-      ctx.slots.inject("conversation.session.header.utilities", () =>
+      ctx.slots.inject("conversation.hero.agentPreset", () =>
         ctx.slots.register(
           {
-            name: "conversation.session.header.utilities",
-            id: "workagent-message-search",
-            order: 80,
+            name: "conversation.hero.agentPreset",
+            id: "workagent-agent-picker",
+            order: 10,
           },
-          ConversationUtilities,
+          AgentPicker,
+        ),
+      );
+      ctx.slots.inject("conversation.hero.workspace", () =>
+        ctx.slots.register(
+          {
+            name: "conversation.hero.workspace",
+            id: "workagent-workspace-composer",
+            order: 20,
+            priority: -10,
+          },
+          HeroWorkspaceComposer,
+        ),
+      );
+      ctx.slots.inject("sidebar.workspaces", () =>
+        ctx.slots.register(
+          {
+            name: "sidebar.workspaces",
+            id: "workagent-sidebar-browser",
+            order: 20,
+            priority: -10,
+          },
+          SidebarSessions,
         ),
       );
       ctx.slots.inject("shell.overlay", () =>
         ctx.slots.register(
           { name: "shell.overlay", id: "workagent-page", order: 10 },
-          WorkAgentOverlay,
+          (props) =>
+            h(
+              RuntimeServices.Provider,
+              { value: ctx },
+              h(WorkAgentOverlay, props),
+            ),
+        ),
+      );
+      ctx.slots.inject("shell.overlay", () =>
+        ctx.slots.register(
+          { name: "shell.overlay", id: "workagent-files", order: 20 },
+          FileSidebar,
         ),
       );
     }

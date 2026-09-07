@@ -12,6 +12,9 @@ import (
 )
 
 type WindowsPlatformConfig struct {
+	CredentialRoot       string
+	LauncherExecutable   string
+	LaunchManifestRoot   string
 	DataRootBase         string
 	UserHostExecutable   string
 	HarnessCommand       string
@@ -32,6 +35,15 @@ type WindowsPlatformConfig struct {
 }
 
 type NativeModelProvisioner interface{}
+
+func (*WindowsPlatform) InspectWindowsCredentialMigration(context.Context, store.User, uint32) (int, error) {
+	return 0, errors.New("Windows required")
+}
+
+func (*WindowsPlatform) RestoreWindowsCredential(store.User, []byte, string) error {
+	return errors.New("Windows required")
+}
+
 type WindowsPlatform struct{}
 
 func NewWindowsPlatform(WindowsPlatformConfig) (*WindowsPlatform, error) {
@@ -40,6 +52,12 @@ func NewWindowsPlatform(WindowsPlatformConfig) (*WindowsPlatform, error) {
 
 func (*WindowsPlatform) EnsureAccount(context.Context, string, []byte) (Account, error) {
 	return Account{}, errors.New("employee provisioning is only available on Windows")
+}
+func (*WindowsPlatform) MaintainWindowsCredential(context.Context, store.User, uint32, bool) error {
+	return errors.New("Windows required")
+}
+func (*WindowsPlatform) BackupWindowsCredential(store.User, []byte, string) error {
+	return errors.New("Windows required")
 }
 
 func (*WindowsPlatform) EnsureProfile(context.Context, Account, string, []byte) error {

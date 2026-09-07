@@ -548,6 +548,9 @@ export type TeamSessionRequest = {
   engine: EngineId;
   presetId: string;
   workspaceId: string;
+  modelId?: string;
+  thinkingEffort?: string;
+  permissionMode?: "read_only" | "workspace_write" | "full_access";
 };
 export interface TeamSessionPort {
   openTeamSession(request: TeamSessionRequest): Promise<void>;

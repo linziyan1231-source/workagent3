@@ -92,9 +92,8 @@ export const createTeamHandler =
       if (path === "/v1/teams") {
         if (request.method === "GET") return json(response, 200, store.list());
         if (request.method === "POST") {
-          const team = store.create(
-            teamCreateSchema.parse(await body(request)),
-          );
+          const input = teamCreateSchema.parse(await body(request));
+          const team = store.create(input);
           const lead = team.members[0]!;
           try {
             await sessions.openTeamSession({
@@ -103,6 +102,15 @@ export const createTeamHandler =
               engine: lead.engine,
               presetId: lead.presetId,
               workspaceId: team.workspaceId,
+              ...(input.lead.modelId === undefined
+                ? {}
+                : { modelId: input.lead.modelId }),
+              ...(input.lead.thinkingEffort === undefined
+                ? {}
+                : { thinkingEffort: input.lead.thinkingEffort }),
+              ...(input.lead.permissionMode === undefined
+                ? {}
+                : { permissionMode: input.lead.permissionMode }),
             });
           } catch (error) {
             store.delete(team.id);

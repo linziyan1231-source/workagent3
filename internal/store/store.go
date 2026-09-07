@@ -51,7 +51,11 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
+	// Portal and Employee Manager share this database. Readers must not block
+	// provisioning writes, and short concurrent writes should wait for the lock.
 	_, err := s.db.ExecContext(ctx, `
+PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,

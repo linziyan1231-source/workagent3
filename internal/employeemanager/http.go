@@ -64,6 +64,15 @@ func Handler(service *Service, token string) http.Handler {
 		}
 		var result any = map[string]bool{"success": true}
 		var err error
+		if action := r.PathValue("action"); action == "repair" || action == "restart" || action == "rename-windows" {
+			if input.WindowsPassword != "" {
+				http.Error(w, "Windows credentials are managed by the service", http.StatusBadRequest)
+				return
+			}
+			job, err := service.StartMaintenance(r.Context(), action, input.Username, input.NewWindowsUsername)
+			respond(w, map[string]any{"job": job}, err)
+			return
+		}
 		switch r.PathValue("action") {
 		case "enable":
 			err = service.SetEnabled(r.Context(), input.Username, true)
@@ -78,16 +87,6 @@ func Handler(service *Service, token string) http.Handler {
 			err = service.SetLimits(r.Context(), input.Username, input.Limits)
 		case "offboard-retain":
 			err = service.OffboardRetain(r.Context(), input.Username)
-		case "repair":
-			password := []byte(input.WindowsPassword)
-			input.WindowsPassword = ""
-			defer zero(password)
-			err = service.Repair(r.Context(), input.Username, password)
-		case "rename-windows":
-			password := []byte(input.WindowsPassword)
-			input.WindowsPassword = ""
-			defer zero(password)
-			err = service.RenameWindowsAccount(r.Context(), input.Username, input.NewWindowsUsername, password)
 		case "offboard-delete":
 			err = service.DeleteRetainedEmployee(r.Context(), input.Username, input.Confirmation)
 		case "kimi-datasource":

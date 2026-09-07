@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { codexAccountStatus, projectCodexMcpServers } from "./codex.js";
+import {
+  codexAccountStatus,
+  codexPermissions,
+  projectCodexMcpServers,
+} from "./codex.js";
 
 describe("Codex account status", () => {
   it("requires native login only when the provider requires OpenAI auth", () => {
@@ -111,5 +115,22 @@ describe("Codex MCP projection", () => {
         },
       ]),
     ).toThrow("unsupported_mcp_transport:codex:sse:legacy");
+  });
+});
+
+describe("Codex permissions", () => {
+  it("maps the composer permission choices to native sandbox settings", () => {
+    expect(codexPermissions("read_only")).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+    });
+    expect(codexPermissions("workspace_write")).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+    });
+    expect(codexPermissions("full_access")).toEqual({
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+    });
   });
 });

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/contracts"
+	"workagent3/internal/marketplace"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/settings"
 	"workagent3/internal/store"
@@ -56,7 +58,7 @@ type SpeechQuotaPort interface {
 // SharedRunQuotaPort reserves shared AI run quota against the frozen payer SID
 // (the member who mentioned the assistant) before the owner Runtime starts.
 type SharedRunQuotaPort interface {
-	ReserveSharedRun(context.Context, string, string, string, int64) error
+	ReserveSharedRun(context.Context, string, string, string, string, int64) error
 	// ReleaseSharedRun settles the reservation with zero usage when the run
 	// never reached the owner Runtime, so the admission reservation cannot
 	// leak in the reserved state.
@@ -109,6 +111,7 @@ type Modules struct {
 	Speech             SpeechPort
 	Settings           SettingsPort
 	SkillMarket        SkillMarketPort
+	Marketplace        *marketplace.Store
 	Collaboration      CollaborationPort
 	SharedProjects     SharedProjectPlatformPort
 	SharedFiles        SharedFilePlatformPort
@@ -159,6 +162,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/admin/users", s.requireUser(s.requireAdmin(s.adminUsers)))
 	mux.HandleFunc("GET /api/portal/admin/user-jobs", s.requireUser(s.requireAdmin(s.adminUserJob)))
 	mux.HandleFunc("GET /api/portal/admin/users/usage", s.requireUser(s.requireAdmin(s.adminUsersUsage)))
+	mux.HandleFunc("GET /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
+	mux.HandleFunc("POST /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
 	mux.HandleFunc("POST /api/portal/admin/users/{action}", s.requireUser(s.requireAdmin(s.adminUserAction)))
 	mux.HandleFunc("POST /api/portal/admin/users/kimi-datasource", s.requireUser(s.requireAdmin(s.adminKimiDatasource)))
 	mux.HandleFunc("GET /api/portal/admin/audit", s.requireUser(s.adminAuditEvents))
@@ -183,6 +188,10 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("PUT /api/settings/client", s.requireUser(s.updateClientSettings))
 	mux.HandleFunc("GET /api/skill-market", s.requireUser(s.skillMarket))
 	mux.HandleFunc("GET /api/portal/skill-market", s.requireUser(s.skillMarket))
+	mux.HandleFunc("GET /api/portal/marketplace", s.requireUser(s.marketCatalog))
+	mux.HandleFunc("DELETE /api/portal/marketplace", s.requireUser(s.marketCatalog))
+	mux.HandleFunc("POST /api/portal/marketplace", s.requireUser(s.publishMarketEntry))
+	mux.HandleFunc("POST /api/portal/marketplace/install", s.requireUser(s.installMarketEntry))
 	mux.HandleFunc("POST /api/portal/skill-market", s.requireUser(s.publishMarketSkill))
 	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
 	mux.HandleFunc("DELETE /api/portal/skill-market", s.requireUser(s.deleteMarketSkill))
@@ -543,6 +552,7 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 	}
 	expires := s.now().Add(s.sessionLife)
 	if err := s.store.CreateSession(request.Context(), token, user.ID, expires); err != nil {
+		log.Printf("create Portal login session: %v", err)
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
 	}
@@ -743,9 +753,24 @@ func (s *Server) proxyRuntimePath(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	proxy := httputil.NewSingleHostReverseProxy(endpoint.BaseURL)
+	if stripPrefix == "" {
+		proxy.ModifyResponse = brandDshResponse
+	}
 	original := proxy.Director
 	proxy.Director = func(outgoing *http.Request) {
 		original(outgoing)
+		if stripPrefix == "" && dshBrandingDocument(outgoing.URL.Path) {
+			outgoing.Header.Set("Accept-Encoding", "identity")
+			outgoing.Header.Del("If-None-Match")
+			outgoing.Header.Del("If-Modified-Since")
+		}
+		// Browser Origin and ownership were validated before entering this
+		// proxy. Internal services trust the loopback authority of this hop;
+		// preserve the public authority separately for OAuth redirects below.
+		outgoing.Host = endpoint.BaseURL.Host
+		if outgoing.Header.Get("Origin") != "" {
+			outgoing.Header.Set("Origin", endpoint.BaseURL.Scheme+"://"+endpoint.BaseURL.Host)
+		}
 		if stripPrefix != "" {
 			outgoing.URL.Path = "/" + strings.TrimPrefix(request.URL.Path, stripPrefix)
 		}
@@ -772,6 +797,14 @@ const frontendCookie = "workagent_frontend"
 // all of the old client's absolute asset URLs continue to resolve together.
 func (s *Server) webSurface(legacy http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/" {
+			// The same URL serves login or DSH according to the session cookie.
+			// Never reuse one surface's document after login or logout.
+			writer.Header().Set("Cache-Control", "no-store")
+			request = request.Clone(request.Context())
+			request.Header.Del("If-Modified-Since")
+			request.Header.Del("If-None-Match")
+		}
 		variant := request.URL.Query().Get("frontend")
 		if variant == "legacy" || variant == "dsh" {
 			value, maxAge := variant, 30*24*60*60

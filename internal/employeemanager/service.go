@@ -23,6 +23,7 @@ type UserStore interface {
 }
 
 type Service struct {
+	Jobs        *JobStore
 	Provisioner *employee.Provisioner
 	Lifecycle   employee.Lifecycle
 	Users       UserStore
@@ -171,6 +172,11 @@ func (s *Service) OffboardRetain(ctx context.Context, username string) error {
 func (s *Service) Repair(ctx context.Context, username string, password []byte) error {
 	_, err := s.Lifecycle.Repair(ctx, username, password)
 	s.record(ctx, audit.ActionEmployeeRepair, username, err, nil)
+	return err
+}
+func (s *Service) Restart(ctx context.Context, username string) error {
+	err := s.Lifecycle.Restart(ctx, username)
+	s.record(ctx, "employee.restart", username, err, nil)
 	return err
 }
 

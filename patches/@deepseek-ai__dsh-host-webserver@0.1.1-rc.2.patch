@@ -1,0 +1,36 @@
+diff --git a/lib/index.js b/lib/index.js
+index 02d57d9e8ff17a44fc215ae84b6753c06160fa1f..dac701e5823375d10e045379805f78f27b61f532 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -97,7 +97,8 @@ var WebServer = class extends Service {
+ 	config;
+ 	static Config = z.object({
+ 		host: z.union([z.const("127.0.0.1"), z.const("0.0.0.0")]).required(),
+-		port: z.natural().max(65535).required()
++		port: z.natural().max(65535).required(),
++		requestTimeout: z.natural().default(300000)
+ 	});
+ 	exact = /* @__PURE__ */ new Map();
+ 	prefixes = /* @__PURE__ */ new Map();
+@@ -194,7 +195,7 @@ var WebServer = class extends Service {
+ 			}
+ 			await fallback(req, res);
+ 		};
+-		this.server = createServer((req, res) => {
++		this.server = createServer({ requestTimeout: this.config.requestTimeout }, (req, res) => {
+ 			handle(req, res).catch((err) => {
+ 				this.ctx.logger.warn(err instanceof Error ? err : new Error(String(err)));
+ 				if (res.headersSent) {
+diff --git a/lib/types/index.d.ts b/lib/types/index.d.ts
+index 60f5a7fbd725f3f5600b812c906f6529d44d2faf..f4eebb568b3d78d6bcc72290d449b3a367e8c9e5 100644
+--- a/lib/types/index.d.ts
++++ b/lib/types/index.d.ts
+@@ -52,6 +52,8 @@ export interface Config {
+     host: '127.0.0.1' | '0.0.0.0';
+     /** Listen port; zero requests an OS-assigned port. */
+     port: number;
++    /** Maximum time to receive a complete request, in milliseconds. */
++    requestTimeout?: number;
+ }
+ /**
+  * The browser HTTP carrier service. Activation listens immediately. Route

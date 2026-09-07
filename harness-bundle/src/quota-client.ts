@@ -69,8 +69,23 @@ export class PlatformQuotaClient implements AutomationQuotaPort {
       ...input,
       sid: this.#configuration.sid,
     });
-    const response = await this.#post("reserve", request);
-    return quotaReservationSchema.parse(await response.json());
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      try {
+        const response = await this.#post("reserve", request);
+        return quotaReservationSchema.parse(await response.json());
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !["quota_usage_pending", "quota_usage_stale"].includes(
+            error.message,
+          ) ||
+          Date.now() >= deadline
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
   }
 
   async settle(input: Omit<QuotaSettleRequest, "sid">): Promise<void> {
@@ -78,7 +93,21 @@ export class PlatformQuotaClient implements AutomationQuotaPort {
       ...input,
       sid: this.#configuration.sid,
     });
-    await this.#post("settle", request);
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      try {
+        await this.#post("settle", request);
+        return;
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          error.message !== "quota_usage_pending" ||
+          Date.now() >= deadline
+        )
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
   }
 
   async #post(action: "reserve" | "settle", body: unknown): Promise<Response> {

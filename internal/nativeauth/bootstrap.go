@@ -19,12 +19,13 @@ const bootstrapFileName = "native-model-bootstrap-v1.json"
 var apiKeyPattern = regexp.MustCompile(`^cpa_[A-Za-z0-9_-]{20,256}$`)
 
 type Bundle struct {
-	FormatVersion int    `json:"formatVersion"`
-	BaseURL       string `json:"baseUrl"`
-	CodexAPIKey   string `json:"codexApiKey"`
-	KimiAPIKey    string `json:"kimiApiKey"`
-	CodexModel    string `json:"codexModel"`
-	KimiModel     string `json:"kimiModel"`
+	FormatVersion int      `json:"formatVersion"`
+	BaseURL       string   `json:"baseUrl"`
+	CodexAPIKey   string   `json:"codexApiKey"`
+	KimiAPIKey    string   `json:"kimiApiKey"`
+	CodexModel    string   `json:"codexModel"`
+	KimiModel     string   `json:"kimiModel"`
+	KimiModels    []string `json:"kimiModels,omitempty"`
 }
 
 func (b Bundle) Validate() error {
@@ -36,6 +37,11 @@ func (b Bundle) Validate() error {
 	}
 	if !ValidModel(b.CodexModel) || !ValidModel(b.KimiModel) {
 		return errors.New("native model bootstrap contains an invalid model")
+	}
+	for _, model := range b.KimiModels {
+		if !ValidModel(model) {
+			return errors.New("native model bootstrap contains an invalid Kimi model")
+		}
 	}
 	return nil
 }
@@ -160,22 +166,44 @@ func Consume(dataRoot string) error {
 }
 
 func kimiConfiguration(bundle Bundle) string {
-	return "# CLIProxyAPI settings managed by WorkAgent3.\n" +
+	config := "# CLIProxyAPI settings managed by WorkAgent3.\n" +
 		"default_model = " + strconv.Quote("kimi-code/"+bundle.KimiModel) + "\n" +
 		"default_thinking = true\n" +
 		"default_yolo = true\n\n" +
 		"[providers.\"managed:kimi-code\"]\n" +
 		"type = \"kimi\"\n" +
 		"base_url = " + strconv.Quote(bundle.BaseURL) + "\n" +
-		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n\n" +
-		"[models.\"kimi-code/" + bundle.KimiModel + "\"]\n" +
-		"provider = \"managed:kimi-code\"\n" +
-		"model = " + strconv.Quote(bundle.KimiModel) + "\n" +
-		"max_context_size = 1048576\n" +
-		"capabilities = [\"thinking\"]\n" +
-		"display_name = \"Kimi\"\n" +
-		"support_efforts = [\"low\", \"high\", \"max\"]\n" +
-		"default_effort = \"low\"\n\n" +
+		"api_key = " + strconv.Quote(bundle.KimiAPIKey) + "\n\n"
+	models := append([]string{bundle.KimiModel}, bundle.KimiModels...)
+	seen := make(map[string]bool)
+	for _, model := range models {
+		if seen[model] {
+			continue
+		}
+		seen[model] = true
+		name, contextSize := model, 1048576
+		capabilities := "[\"thinking\"]"
+		efforts := ""
+		switch model {
+		case "kimi-for-coding", "kimi-for-coding-highspeed":
+			name, contextSize = "Kimi K2.7", 262144
+			if model == "kimi-for-coding-highspeed" {
+				name += " Fast"
+			}
+			capabilities = "[\"thinking\", \"always_thinking\"]"
+		case "kimi-k3", "k3":
+			name = "Kimi K3"
+			capabilities = "[\"thinking\", \"always_thinking\"]"
+			efforts = "support_efforts = [\"low\", \"high\", \"max\"]\ndefault_effort = \"low\"\n"
+		}
+		config += "[models.\"kimi-code/" + model + "\"]\n" +
+			"provider = \"managed:kimi-code\"\n" +
+			"model = " + strconv.Quote(model) + "\n" +
+			"max_context_size = " + strconv.Itoa(contextSize) + "\n" +
+			"capabilities = " + capabilities + "\n" +
+			"display_name = " + strconv.Quote(name) + "\n" + efforts + "\n"
+	}
+	return config +
 		"[thinking]\n" +
 		"enabled = true\n\n" +
 		"[services.moonshot_search]\n" +

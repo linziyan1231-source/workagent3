@@ -26,18 +26,18 @@ await withPage(async (page) => {
   const presets = await json(page, "/api/runtime/v1/presets");
   const preset =
     presets.find((row) => row.enabled && row.engine === "harness") ||
-    presets[0];
+    presets.find((row) => row.enabled);
   if (!preset) throw new Error("automation smoke requires an enabled preset");
   const name = uniqueName("dsh-automation");
   let automation;
   try {
     await page.goto(`${baseURL}/?workagent=automations`);
-    const dialog = page.getByRole("dialog", { name: "automations" });
-    await dialog.getByLabel("Name").fill(name);
-    await dialog.getByLabel("Preset ID").fill(preset.id);
-    await dialog.getByLabel("Workspace ID").fill(workspace.id);
-    await dialog.getByLabel("Input").fill(`Reply with ${name}`);
-    await dialog.getByRole("button", { name: "Create task" }).click();
+    const dialog = page.getByRole("dialog", { name: "定时任务" });
+    await dialog.getByLabel("任务名称").fill(name);
+    await dialog.getByLabel("执行助手").selectOption(preset.id);
+    await dialog.getByLabel("所属项目").selectOption(workspace.id);
+    await dialog.getByLabel("任务内容").fill(`Reply with ${name}`);
+    await dialog.getByRole("button", { name: "创建任务" }).click();
     await dialog.getByText(name, { exact: true }).waitFor();
     automation = (await json(page, "/api/runtime/v1/automations")).find(
       (row) => row.name === name,
@@ -59,7 +59,7 @@ await withPage(async (page) => {
         }
       });
     }, name);
-    await card.getByRole("button", { name: "Run now" }).click();
+    await card.getByRole("button", { name: "立即运行" }).click();
 
     await page.waitForFunction(
       async (id) => {
@@ -82,11 +82,11 @@ await withPage(async (page) => {
     });
     await page.goto(`${baseURL}/?frontend=dsh`);
     const notificationButton = page.getByRole("button", {
-      name: "Notifications",
+      name: "通知",
     });
     await notificationButton.locator(".workagent-badge").waitFor();
     await notificationButton.click();
-    const notifications = page.getByRole("dialog", { name: "notifications" });
+    const notifications = page.getByRole("dialog", { name: "通知" });
     const noticeCard = notifications.locator("article", { hasText: name });
     await noticeCard.waitFor();
     const notices = await json(page, "/api/portal/me/notifications");
@@ -96,7 +96,7 @@ await withPage(async (page) => {
     if (!notice) throw new Error("automation did not deliver a notification");
     await noticeCard
       .getByRole("button", {
-        name: notice.deep_link ? "Open and acknowledge" : "Acknowledge",
+        name: notice.deep_link ? "打开并标记已读" : "标记已读",
       })
       .click();
     await page.waitForFunction(async (id) => {
@@ -105,7 +105,10 @@ await withPage(async (page) => {
     }, notice.id);
 
     await page.goto(`${baseURL}/?workagent=automations`);
-    await page.getByText(name, { exact: true }).waitFor();
+    await page
+      .getByRole("dialog", { name: "定时任务" })
+      .getByText(name, { exact: true })
+      .waitFor();
     const second = await json(
       page,
       `/api/runtime/v1/automations/${encodeURIComponent(automation.id)}/run`,

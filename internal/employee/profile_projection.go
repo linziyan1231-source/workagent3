@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // projectHarnessProfile installs the immutable, release-owned Harness profile
@@ -65,7 +66,12 @@ func projectHarnessProfile(source, destination string) error {
 
 func copyProfileTree(source, destination string) error {
 	type profileLink struct{ relative, target string }
+	type profileFile struct {
+		source, target, relative string
+		mode                     fs.FileMode
+	}
 	var links []profileLink
+	var files []profileFile
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -102,13 +108,47 @@ func copyProfileTree(source, destination string) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("Harness profile contains unsupported file %s", relative)
 		}
-		if err := copyProfileFile(path, target, info.Mode().Perm()); err != nil {
-			return fmt.Errorf("copy Harness profile file %s: %w", relative, err)
-		}
+		files = append(files, profileFile{path, target, relative, info.Mode().Perm()})
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	// Package profiles contain tens of thousands of small files. Bound parallel
+	// copies to avoid serial filesystem latency exhausting the provisioning job.
+	jobs := make(chan profileFile)
+	failed := make(chan struct{})
+	var workers sync.WaitGroup
+	var firstError sync.Once
+	var copyErr error
+	for range 32 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for file := range jobs {
+				if err := copyProfileFile(file.source, file.target, file.mode); err != nil {
+					firstError.Do(func() {
+						copyErr = fmt.Errorf("copy Harness profile file %s: %w", file.relative, err)
+						close(failed)
+					})
+					return
+				}
+			}
+		}()
+	}
+enqueue:
+	for _, file := range files {
+		select {
+		case jobs <- file:
+		case <-failed:
+			break enqueue
+		}
+	}
+	close(jobs)
+	// All writers must finish before creating links or removing failed staging.
+	workers.Wait()
+	if copyErr != nil {
+		return copyErr
 	}
 	// Windows decides whether a symlink targets a file or directory when the
 	// link is created. Create links only after every target has been copied.
@@ -146,9 +186,8 @@ func copyProfileFile(source, destination string, mode fs.FileMode) error {
 		output.Close()
 		return err
 	}
-	if err := output.Sync(); err != nil {
-		output.Close()
-		return err
-	}
+	// This is a rebuildable copy of the immutable release. Closing each file
+	// before the staging-directory swap is sufficient; flushing every package
+	// file individually makes large profiles exceed the provisioning deadline.
 	return output.Close()
 }

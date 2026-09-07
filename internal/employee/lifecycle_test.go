@@ -252,6 +252,40 @@ func TestRepairRestoresRetainedEmployeeOnlyAfterRuntimeHealth(t *testing.T) {
 	}
 }
 
+type missingCredentialPlatform struct{ lifecyclePlatform }
+
+func (*missingCredentialPlatform) CheckManagedCredential(store.User) error {
+	return errors.New("managed credential unavailable")
+}
+
+func TestRepairMissingCredentialDoesNotStopEmployee(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "unchanged-password-hash")
+	platform := &missingCredentialPlatform{}
+	if _, err := (Lifecycle{Platform: platform, Users: data}).Repair(t.Context(), "alice", nil); err == nil {
+		t.Fatal("missing credential accepted")
+	}
+	after, _ := data.UserByUsername(t.Context(), "alice")
+	if after.Disabled || after.PasswordHash != user.PasswordHash || platform.repairs != 0 || platform.stops != 0 {
+		t.Fatal("credential preflight mutated employee")
+	}
+}
+
+func TestRestartUsesExistingTaskWithoutRepairOrPasswordChange(t *testing.T) {
+	data, _ := store.Open(":memory:")
+	defer data.Close()
+	user, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-1000", "unchanged-password-hash")
+	platform := &lifecyclePlatform{}
+	if err := (Lifecycle{Platform: platform, Users: data}).Restart(t.Context(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := data.UserByUsername(t.Context(), "alice")
+	if after.Disabled || after.PasswordHash != user.PasswordHash || platform.repairs != 0 || platform.starts != 1 || platform.stops != 1 {
+		t.Fatal("restart did not preserve credential/task semantics")
+	}
+}
+
 func TestRepairFailureKeepsRetainedEmployeeClosed(t *testing.T) {
 	data, _ := store.Open(":memory:")
 	defer data.Close()

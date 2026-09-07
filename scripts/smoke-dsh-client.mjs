@@ -10,6 +10,7 @@ if (!baseURL || !username || !password) {
 }
 
 const browser = await chromium.launch();
+let restoreAssistant;
 try {
   const page = await browser.newPage();
   const anonymous = await page.request.get(`${baseURL}/api/session.search`);
@@ -20,6 +21,23 @@ try {
     headers: { Origin: new URL(baseURL).origin },
   });
   if (!login.ok()) throw new Error(`login returned ${login.status()}`);
+  const presetURL = `${baseURL}/api/runtime/v1/presets/builtin-general`;
+  const presetResponse = await page.request.get(presetURL);
+  if (!presetResponse.ok())
+    throw new Error("Could not read DSH assistant state");
+  const originalPreset = await presetResponse.json();
+  if (!originalPreset.enabled) {
+    const setEnabled = async (enabled) => {
+      const result = await page.request.patch(presetURL, {
+        data: { enabled },
+        headers: { Origin: new URL(baseURL).origin },
+      });
+      if (!result.ok())
+        throw new Error(`DSH switch returned ${result.status()}`);
+    };
+    restoreAssistant = () => setEnabled(false);
+    await setEnabled(true);
+  }
   const response = await page.goto(`${baseURL}/?frontend=dsh`);
   if (!response?.ok())
     throw new Error(`dsh SPA returned ${response?.status()}`);
@@ -27,7 +45,15 @@ try {
   const initialBackground = await page
     .locator("body")
     .evaluate((body) => getComputedStyle(body).backgroundColor);
-  await page.getByRole("button", { name: "Theme" }).click();
+  const initialWasDark = await page
+    .locator("body")
+    .evaluate((body) => body.hasAttribute("data-ds-dark-theme"));
+  await page.getByRole("button", { name: /Settings|设置/ }).click();
+  await page
+    .getByRole("button", {
+      name: initialWasDark ? "云瓷白" : "石墨黑",
+    })
+    .click();
   await page.waitForFunction(
     (before) => getComputedStyle(document.body).backgroundColor !== before,
     initialBackground,
@@ -115,52 +141,39 @@ try {
     );
     if (!search.items?.some((item) => item.session?.id === session.id))
       throw new Error("created session was not searchable");
-    return { firstDelta, sessionId: session.id, unique };
+    return {
+      firstDelta,
+      sessionId: session.id,
+      workspaceId: workspace.id,
+      messageId: search.items.find(
+        (item) =>
+          item.session?.id === session.id && item.message?.role === "user",
+      ).message.id,
+      unique,
+    };
   });
   if (!round.firstDelta) throw new Error("empty streaming delta");
   await page.goto(
-    `${baseURL}/?session=${encodeURIComponent(round.sessionId)}&frontend=dsh`,
+    `${baseURL}/?session=${encodeURIComponent(round.sessionId)}&message=${encodeURIComponent(round.messageId)}&frontend=dsh`,
   );
-  const search = page.getByLabel("Search messages");
-  await search.waitFor();
-  await search.fill(round.unique);
-  const [searchResponse] = await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes("/messages/search?") &&
-        response.request().method() === "GET",
-    ),
-    search.press("Enter"),
-  ]);
-  const searchPayload = await searchResponse.json();
-  if (
-    !searchPayload.items?.some((item) => item.session?.id === round.sessionId)
-  )
-    throw new Error(`search UI request missed ${round.sessionId}`);
-  const result = page.locator('.workagent-card[data-message-role="user"]', {
-    hasText: round.unique,
-  });
-  await result.getByRole("button", { name: "Open result" }).click();
   await page.locator(".workagent-message-highlight").waitFor();
-  await result.getByRole("button", { name: "Edit and resend" }).click();
+  await page.getByLabel("继续对话", { exact: true }).waitFor();
   const edited = `${round.unique}-edited`;
-  await page.getByLabel("Edit message").fill(edited);
-  const [forkResponse] = await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response
-          .url()
-          .includes(`/sessions/${encodeURIComponent(round.sessionId)}/fork`) &&
-        response.request().method() === "POST",
-    ),
-    page.getByRole("button", { name: "Resend", exact: true }).click(),
-  ]);
+  const forkResponse = await page.request.post(
+    `${baseURL}/api/runtime/v1/sessions/${encodeURIComponent(round.sessionId)}/fork`,
+    {
+      data: { messageId: round.messageId, replacementContent: edited },
+      headers: { Origin: new URL(baseURL).origin },
+    },
+  );
   if (!forkResponse.ok())
     throw new Error(
       `message fork failed: ${forkResponse.status()} ${await forkResponse.text()}`,
     );
-  await page.waitForURL(/\?session=/);
-  const forkSession = new URL(page.url()).searchParams.get("session");
+  const forkSession = (await forkResponse.json()).id;
+  await page.goto(
+    `${baseURL}/?session=${encodeURIComponent(forkSession)}&frontend=dsh`,
+  );
   await page.waitForFunction(
     async ({ forkSession, edited }) => {
       const response = await fetch(
@@ -175,6 +188,24 @@ try {
   console.log(
     `dsh client smoke passed (${initialBackground} -> ${restoredBackground})`,
   );
+  for (const path of [
+    `sessions/${encodeURIComponent(forkSession)}`,
+    `sessions/${encodeURIComponent(round.sessionId)}`,
+    `workspaces/${encodeURIComponent(round.workspaceId)}`,
+  ]) {
+    const removed = await page.request.delete(
+      `${baseURL}/api/runtime/v1/${path}`,
+      {
+        headers: { Origin: new URL(baseURL).origin },
+      },
+    );
+    if (!removed.ok())
+      throw new Error(`smoke cleanup returned ${removed.status()}`);
+  }
 } finally {
-  await browser.close();
+  try {
+    await restoreAssistant?.();
+  } finally {
+    await browser.close();
+  }
 }

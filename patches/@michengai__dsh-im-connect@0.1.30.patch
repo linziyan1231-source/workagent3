@@ -1,0 +1,261 @@
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -13,6 +13,7 @@
+     'agentDefaultModel',
+     'llm',
+     'permissionPresets',
++    'workagentChannels',
+ ];
+ export const Config = Schema.object({
+     stateDir: Schema.string().default(''),
+@@ -48,7 +49,15 @@
+     log(`[boot] ChannelManager 构造 ${Date.now() - applyStarted}ms`);
+     ctx.effect(() => {
+         manager.registerApi(ctx);
+-        void manager.initEnabled().finally(() => { void manager.attachMappedSessions(); });
++        let detachNotifications;
++        void manager.initEnabled().finally(() => {
++            void manager.attachMappedSessions();
++            if (!manager.disposed) detachNotifications = ctx.get('workagentChannels').attachNotifications({
++                targets: () => manager.notificationTargets(),
++                send: (targetId, text) => manager.sendNotification(targetId, text),
++            });
++        });
++        ctx.effect(() => () => detachNotifications?.(), 'im-connect.notifications');
+         log(`[boot] apply 完成 ${Date.now() - applyStarted}ms`);
+         return () => { manager.disposeApi(); void fileLog.flush(); };
+     }, 'im-connect.serve');
+--- a/lib/manager.js
++++ b/lib/manager.js
+@@ -710,6 +710,26 @@
+     permissionPresets() {
+         return this.ctx.permissionPresets;
+     }
++    notificationTargets() {
++        const targets = new Map();
++        for (const record of this.sessions.list()) {
++            const account = this.store.channels[record.channel];
++            if (!account) continue;
++            const id = JSON.stringify([record.channel, record.kind, record.chatId]);
++            const platform = this.platformOf(record.channel, account);
++            targets.set(id, { id, channelId: record.channel, chatId: record.chatId, kind: record.kind,
++                label: `${account.name || CHANNEL_META[platform].label} · ${record.kind === 'group' ? '群聊' : '私聊'} · ${record.title || record.chatId}`,
++                connected: this.running.has(record.channel) });
++        }
++        return [...targets.values()];
++    }
++    async sendNotification(targetId, text) {
++        const target = this.notificationTargets().find((row) => row.id === targetId);
++        const channel = target && this.running.get(target.channelId);
++        if (!channel) throw new Error('提醒渠道未连接');
++        if (channel.sendNotification) await channel.sendNotification(target.chatId, text, target.kind);
++        else await channel.send(target.chatId, text);
++    }
+     async listModelCatalog() {
+         const llm = this.ctx.get?.('llm');
+         const providers = llm?.listProviders?.() ?? [];
+@@ -744,6 +764,7 @@
+                 })),
+             });
+         }
++        out.push(...await this.ctx.get('workagentChannels').models());
+         return out;
+     }
+     async startOne(id) {
+--- a/lib/engine/router.js
++++ b/lib/engine/router.js
+@@ -135,7 +135,7 @@
+             const canListStored = typeof persistence?.list === "function";
+             if (!canListLive && !canListStored)
+                 return undefined;
+-            const ids = new Set();
++            const ids = new Set(this.ctx.get('workagentChannels').listSessionIds());
+             if (canListLive && live.list) {
+                 for (const session of live.list())
+                     ids.add(String(session.id));
+@@ -205,10 +205,11 @@
+     }
+     async create(channelId, kind, chatId, title, preferredSessionId) {
+         const key = sessionKeyOf(channelId, kind, chatId);
+-        const sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
++        let sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
+         let handle;
+         try {
+-            handle = await this.createHandle(sessionId, channelId);
++            handle = await this.createHandle(sessionId, channelId, title);
++            sessionId = handle.sessionId ?? sessionId;
+         }
+         catch (error) {
+             if (!preferredSessionId || !isIdCollision(error))
+@@ -232,6 +233,17 @@
+         return binding;
+     }
+     async resume(record) {
++        const service = this.ctx.get('workagentChannels');
++        const config = this.resolveConfig(record.channel);
++        if (record.sessionId.startsWith('session-channel-')) {
++            if (!service.handles(config.provider)) return undefined;
++            const handle = await service.open(config, record.sessionId, record.title);
++            if (!handle) return undefined;
++            return { key: sessionKeyOf(record.channel, record.kind, record.chatId),
++                channelId: record.channel, kind: record.kind, chatId: record.chatId,
++                sessionId: record.sessionId, handle };
++        }
++        if (service.handles(config.provider)) return undefined;
+         const liveAgent = this.ctx.agents?.get?.(record.sessionId);
+         if (liveAgent) {
+             const binding = {
+@@ -267,7 +279,10 @@
+             return undefined;
+         }
+     }
+-    async createHandle(sessionId, channelId) {
++    async createHandle(sessionId, channelId, title) {
++        const service = this.ctx.get('workagentChannels');
++        const selection = this.resolveConfig(channelId);
++        if (service.handles(selection.provider)) return service.open(selection, undefined, title);
+         const agents = this.ctx.agents;
+         if (!agents?.create)
+             throw new Error('当前 Host 没有 agents 服务，无法创建 IM 会话');
+@@ -314,6 +329,7 @@
+         return norm(left) === norm(right);
+     }
+     async attachWorkspace(sessionId, channelId) {
++        if (sessionId.startsWith('session-channel-')) return;
+         let workspaces = [];
+         try {
+             workspaces = this.ctx.get?.('workspaceRegistry')?.list?.() ?? [];
+--- a/lib/engine/gateway.js
++++ b/lib/engine/gateway.js
+@@ -349,12 +349,12 @@
+             this.sessionActors.set(binding.sessionId, msg.userId);
+         this.streams.reset(`${channel.id}:${msg.chatId}`);
+         await channel.sendAction?.(msg.chatId, 'typing').catch(() => undefined);
+-        this.router.followup(binding, {
+-            id: crypto.randomUUID(),
+-            role: 'user',
+-            content,
+-            source: { kind: 'user' },
+-        });
++        const message = {
++            id: crypto.randomUUID(), role: 'user', content, source: { kind: 'user' },
++        };
++        if (binding.handle?.workagent) {
++            await binding.handle.followup(message, (event) => this.onSessionEvent({ id: binding.sessionId }, event));
++        } else this.router.followup(binding, message);
+         this.log(`[${channel.id}] 已注入 ${binding.sessionId}`);
+     }
+     async answerApproval(channelId, msg, allow) {
+--- a/lib/engine/session-id.js
++++ b/lib/engine/session-id.js
+@@ -12,7 +12,7 @@
+     return `${IM_SESSION_PREFIX}${channel}:${kind}:${stamp}:${chatId}`;
+ }
+ export function isImSessionId(sessionId) {
+-    return sessionId.startsWith(IM_SESSION_PREFIX);
++    return sessionId.startsWith(IM_SESSION_PREFIX) || sessionId.startsWith('session-channel-');
+ }
+ const CHANNEL_IDS = ['dingtalk', 'feishu', 'lark', 'weixin', 'wecom', 'qq', 'telegram'];
+ const STAMP_RE = /^\d{13,}$/;
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -18,7 +18,7 @@
+     const IM_LOCALE_NS = "im-connect";
+     const IM_LOCALES = {
+       zh: {
+-        "settings.label": "IM助理", "settings.title": "IM机器人", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
++        "settings.label": "IM助理", "settings.title": "消息渠道", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
+         "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
+         "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
+         "account.countZero": "0 个账号", "account.countOnline": "{online} / {total} 在线", "account.countOffline": "{total} / {total} 离线", "account.statusProcessing": "处理中…", "account.statusOnline": "在线", "account.statusOffline": "离线", "account.statusRunning": "运行正常", "account.statusNotConnected": "未连接", "account.receive": "接收消息", "account.receiveDescription": "关闭后保留账号配置，但不接收新消息", "account.removeConfirm": "确定移除这个账号？本机保存的配置和凭据将一并删除。",
+@@ -359,6 +359,13 @@
+     };
+     const openListedSession = (id, hostOpen) => {
+       if (!id) return;
++      if (String(id).startsWith("session-channel-")) {
++        const url = new URL(window.location.href);
++        url.searchParams.set("frontend", "dsh");
++        url.searchParams.set("session", id);
++        window.location.assign(url);
++        return;
++      }
+       if (String(id).startsWith("im:")) {
+         api("/sessions/ensure", {
+           method: "POST",
+@@ -2229,10 +2236,16 @@
+ 
+     function apply(ctx) {
+       ensureStyle();
+-      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, IM_LOCALES), "im-connect: dictionaries");
++      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, { ...IM_LOCALES, en: IM_LOCALES.zh }), "im-connect: dictionaries");
+       const t = ctx.locale.bind(IM_LOCALE_NS);
+-      const permissionT = ctx.locale.bind("permission.access");
+-      const modelT = ctx.locale.bind("model");
++      const permissionT = (key) => ({
++        "confirm.title": "启用完全访问", "confirm.description": "助手将能够访问工作区以外的文件并执行命令，请仅在信任此账号的使用者时启用。",
++        "confirm.acknowledge": "我了解并接受上述权限", "confirm.cancel": "取消", "confirm.enable": "启用完全访问",
++      })[key] || key;
++      const modelT = (key) => ({
++        "effort.providerDefault": "模型默认", "menu.model": "引擎与模型", "menu.effort": "思考强度",
++        "trigger.selectAria": "选择模型", "menu.aria": "模型设置", "empty.models": "暂无可用模型", "trigger.fallback": "选择模型",
++      })[key] || key;
+       const subscribeLocale = (listener) => ctx.locale.subscribe(listener);
+       const localeSnapshot = () => ctx.locale.getSnapshot();
+       function LocalizedChannelRail(props) {
+@@ -2253,9 +2266,9 @@
+       };
+       ctx.slots.inject("settings.section", () => ctx.slots.register({
+           name: "settings.section",
+-          id: "im-assistant",
+-          order: 28,
+-          label: () => t("settings.label"),
++          id: "workagent-channels",
++          order: 35,
++          label: "消息渠道",
+           icon: "chat",
+           locale: IM_LOCALE_NS,
+         inject: () => ({
+--- a/lib/channels/wecom.js
++++ b/lib/channels/wecom.js
+@@ -206,6 +206,10 @@
+             broker = undefined;
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text) {
++            if (!client) throw new Error('wecom: 尚未连接');
++            await client.sendMessage(chatId, { msgtype: 'markdown', markdown: { content: text } });
++        },
+         async send(chatId, text) {
+             if (!broker)
+                 throw new Error('wecom: 尚未连接');
+--- a/lib/channels/dingtalk.js
++++ b/lib/channels/dingtalk.js
+@@ -89,6 +89,11 @@
+             targets.clear();
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text, kind) {
++            const target = kind === 'group' ? { type: 'group', openConversationId: chatId } : { type: 'user', userId: chatId };
++            const card = await cards.create(target, text);
++            await cards.finish(card, text);
++        },
+         async send(chatId, text) {
+             const webhook = webhooks.get(chatId);
+             if (!webhook)
+--- a/lib/channels/feishu.js
++++ b/lib/channels/feishu.js
+@@ -78,6 +78,14 @@
+             ws = undefined;
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text) {
++            if (!client) throw new Error(`${id}: 尚未连接`);
++            const result = await client.im.message.create({
++                params: { receive_id_type: 'chat_id' },
++                data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) },
++            });
++            if (result.code) throw new Error(`${id}: 消息发送被拒绝`);
++        },
+         async send(chatId, text) {
+             if (!client)
+                 throw new Error(`${id}: 尚未连接`);

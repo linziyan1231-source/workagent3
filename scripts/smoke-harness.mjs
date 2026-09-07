@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const home =
   process.env.WORKAGENT_SMOKE_DSH_HOME ??
   fileURLToPath(new URL("../.cache/dsh-home", import.meta.url));
-const dsh = fileURLToPath(
+const dsh = process.env.WORKAGENT_SMOKE_DSH_BIN ?? fileURLToPath(
   new URL("../node_modules/@deepseek-ai/dsh/lib/bin.js", import.meta.url),
 );
 const token = "workagent-profile-smoke-token";

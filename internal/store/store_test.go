@@ -7,6 +7,43 @@ import (
 	"time"
 )
 
+func TestProvisionUserWhilePortalHoldsReadSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "portal.db")
+	portal, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer portal.Close()
+	manager, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	snapshot, err := portal.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Rollback()
+	var count int
+	if err := snapshot.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.CreateDisabledUser(ctx, "test", "S-1-5-21-1000", "hash"); err != nil {
+		t.Fatalf("Portal read snapshot blocked account provisioning: %v", err)
+	}
+	if err := snapshot.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("reader snapshot changed: count=%d err=%v", count, err)
+	}
+	if err := snapshot.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portal.UserByUsername(ctx, "test"); err != nil {
+		t.Fatalf("new account not visible after the reader completes: %v", err)
+	}
+}
+
 func TestSessionResolvesSIDBoundUser(t *testing.T) {
 	data, err := Open(":memory:")
 	if err != nil {

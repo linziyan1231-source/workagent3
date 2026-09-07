@@ -1,4 +1,5 @@
 import {
+  adminJson,
   baseURL,
   json,
   killSmokeProcess,
@@ -25,7 +26,7 @@ if (
 await withPage(async (page) => {
   const workspace = await json(page, "/api/runtime/v1/workspaces", {
     method: "POST",
-    body: JSON.stringify({ name: uniqueName("team-workspace") }),
+    body: JSON.stringify({ name: uniqueName("team-project"), scope: "team" }),
   });
   const presets = await json(page, "/api/runtime/v1/presets");
   const preset =
@@ -53,36 +54,67 @@ await withPage(async (page) => {
         approvalPolicy: "on_risk",
       }),
     });
-    await page.goto(`${baseURL}/?workagent=teams`);
-    const dialog = page.getByRole("dialog", { name: "teams" });
-    await dialog.getByLabel("Team name").fill(name);
-    await dialog.getByLabel("Workspace ID").fill(workspace.id);
-    await dialog.getByLabel("Lead name").fill("Harness lead");
-    await dialog.getByLabel("Preset ID").fill(preset.id);
-    await dialog.getByLabel("Lead engine").selectOption("harness");
-    await dialog.getByRole("button", { name: "Create team" }).click();
-    await dialog.getByText(name, { exact: true }).waitFor();
-    team = (await json(page, "/api/runtime/v1/teams")).find(
-      (row) => row.name === name,
+    await page.goto(`${baseURL}/?frontend=dsh`);
+    await page.getByRole("checkbox", { name: "团队模式" }).check();
+    await page
+      .getByRole("combobox", { name: "团队项目" })
+      .selectOption(workspace.id);
+    for (const label of ["模型", "思考级别", "权限"])
+      await page.getByRole("combobox", { name: label }).waitFor();
+    if (await page.getByLabel("Workspace ID").count())
+      throw new Error("team mode exposed an internal workspace ID field");
+
+    team = await json(page, "/api/runtime/v1/teams", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        workspaceId: workspace.id,
+        lead: {
+          name: "Harness lead",
+          engine: preset.engine,
+          presetId: preset.id,
+          modelId: "harness-default",
+          thinkingEffort: "high",
+          permissionMode: "workspace_write",
+        },
+      }),
+    });
+    team = await json(
+      page,
+      `/api/runtime/v1/teams/${encodeURIComponent(team.id)}/members`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Codex reviewer",
+          engine: "codex",
+          presetId: codexPreset.id,
+        }),
+      },
     );
-    if (!team) throw new Error("team was not persisted");
-    const card = dialog.locator("article", { hasText: name });
-    await card.getByRole("button", { name: "Add member" }).click();
-    await dialog.getByLabel("Team action value").fill("Codex reviewer");
-    await dialog.getByLabel("Member engine").selectOption("codex");
-    await dialog.getByLabel("Member preset ID").fill(codexPreset.id);
-    await dialog.getByRole("button", { name: "Confirm" }).click();
-    await page.waitForFunction(
-      async (id) =>
-        (await (await fetch("/api/runtime/v1/teams")).json()).find(
-          (row) => row.id === id,
-        )?.members.length >= 2,
-      team.id,
+    await json(
+      page,
+      `/api/runtime/v1/teams/${encodeURIComponent(team.id)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          fromMemberId: team.members[0].id,
+          toMemberId: team.members[1].id,
+          body: `Review ${name}`,
+        }),
+      },
     );
-    await card.getByRole("button", { name: "Dispatch task" }).click();
-    await dialog.getByLabel("Team action value").fill(`Investigate ${name}`);
-    await dialog.getByRole("button", { name: "Confirm" }).click();
-    await card.getByRole("button", { name: "Mailbox and events" }).click();
+    await json(
+      page,
+      `/api/runtime/v1/teams/${encodeURIComponent(team.id)}/tasks`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          memberId: team.members[0].id,
+          title: `Investigate ${name}`,
+          input: `Investigate ${name}`,
+        }),
+      },
+    );
     await page.waitForFunction(
       async (id) =>
         (
@@ -115,7 +147,7 @@ await withPage(async (page) => {
       `/api/runtime/v1/teams/${encodeURIComponent(team.id)}/tasks/${encodeURIComponent(cancellation.id)}/cancel`,
       { method: "POST" },
     );
-    const managedUsers = await json(page, "/api/portal/admin/users");
+    const managedUsers = await adminJson(page, "/api/portal/admin/users");
     const managedUser = managedUsers.users?.find(
       (entry) => entry.username === smokeUsername,
     );
@@ -155,11 +187,17 @@ await withPage(async (page) => {
       team.id,
       { timeout: 120_000, polling: 500 },
     );
-    await openDshAfterRestart(page, "/?workagent=teams&frontend=dsh");
+    await openDshAfterRestart(page, "/?frontend=dsh");
+    await page.getByRole("checkbox", { name: "团队模式" }).check();
     await page
-      .getByRole("dialog", { name: "teams" })
-      .getByText(name, { exact: true })
-      .waitFor();
+      .getByRole("combobox", { name: "团队项目" })
+      .selectOption(workspace.id);
+    if (
+      !(await json(page, "/api/runtime/v1/teams")).some(
+        (row) => row.id === team.id,
+      )
+    )
+      throw new Error("team was not recovered after restart");
   } finally {
     if (team)
       await json(page, `/api/runtime/v1/teams/${encodeURIComponent(team.id)}`, {

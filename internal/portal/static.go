@@ -19,10 +19,14 @@ func SPAHandler(web fs.FS) http.Handler {
 			asset = "index.html"
 		}
 		if info, err := fs.Stat(web, asset); err != nil || info.IsDir() {
+			writer.Header().Set("Cache-Control", "no-store")
 			clone := request.Clone(request.Context())
 			clone.URL.Path = "/"
 			files.ServeHTTP(writer, clone)
 			return
+		}
+		if asset == "index.html" {
+			writer.Header().Set("Cache-Control", "no-store")
 		}
 		files.ServeHTTP(writer, request)
 	})

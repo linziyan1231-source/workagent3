@@ -21,6 +21,14 @@ type EmployeeManagerClient struct {
 	client  *http.Client
 }
 
+func (c *EmployeeManagerClient) StartMaintenance(ctx context.Context, action, username, newName string) (ProvisionJob, error) {
+	var result struct {
+		Job ProvisionJob `json:"job"`
+	}
+	err := c.call(ctx, http.MethodPost, "/v1/users/"+action, map[string]string{"username": username, "new_windows_username": newName}, &result)
+	return result.Job, err
+}
+
 func NewEmployeeManagerClient(rawURL, token string) (*EmployeeManagerClient, error) {
 	endpoint, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || endpoint.Scheme != "http" || endpoint.Hostname() != "127.0.0.1" || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" {
@@ -116,12 +124,6 @@ func (c *EmployeeManagerClient) SetEnabled(ctx context.Context, username string,
 }
 func (c *EmployeeManagerClient) ResetPassword(ctx context.Context, username string, password []byte) error {
 	return c.call(ctx, http.MethodPost, "/v1/users/reset-password", map[string]string{"username": username, "portal_password": string(password)}, nil)
-}
-func (c *EmployeeManagerClient) Repair(ctx context.Context, username string, password []byte) error {
-	return c.call(ctx, http.MethodPost, "/v1/users/repair", map[string]string{"username": username, "windows_password": string(password)}, nil)
-}
-func (c *EmployeeManagerClient) RenameWindowsAccount(ctx context.Context, username, newWindowsUsername string, password []byte) error {
-	return c.call(ctx, http.MethodPost, "/v1/users/rename-windows", map[string]string{"username": username, "new_windows_username": newWindowsUsername, "windows_password": string(password)}, nil)
 }
 func (c *EmployeeManagerClient) SetLimits(ctx context.Context, username string, limits contracts.EmployeeResourceLimits) error {
 	return c.call(ctx, http.MethodPost, "/v1/users/set-limits", map[string]any{"username": username, "limits": limits}, nil)

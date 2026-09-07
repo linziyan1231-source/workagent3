@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ type ReserveRequest struct {
 	ModelID        string
 	EstimatedUnits int64
 	At             time.Time
+	Engine         string
 }
 
 type Reservation struct {
@@ -70,10 +72,11 @@ type SettleRequest struct {
 type Usage = contracts.QuotaUsage
 
 type Store struct {
-	db         *sql.DB
-	authorizer ModelAuthorizationPort
-	audit      audit.Sink
-	now        func() time.Time
+	db                *sql.DB
+	authorizer        ModelAuthorizationPort
+	audit             audit.Sink
+	now               func() time.Time
+	gatewayAccounting bool
 }
 
 // SetAudit wires the business audit sink for quota reserve/settle events. The
@@ -142,6 +145,15 @@ CREATE TABLE IF NOT EXISTS quota_reservations (
 );
 CREATE INDEX IF NOT EXISTS quota_reservations_window
 ON quota_reservations(sid, model_id, period, period_key, status);
+CREATE TABLE IF NOT EXISTS quota_overrides (
+  sid TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  period_key TEXT NOT NULL,
+  limit_units INTEGER NOT NULL CHECK (limit_units >= 0),
+  PRIMARY KEY (sid, model_id),
+  FOREIGN KEY (sid, model_id) REFERENCES quota_budgets(sid, model_id)
+);
 CREATE TABLE IF NOT EXISTS quota_gateway_keys (
   key_id TEXT PRIMARY KEY CHECK (key_id <> ''),
   sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
@@ -167,6 +179,9 @@ CREATE TABLE IF NOT EXISTS quota_gateway_usage (
 );
 CREATE INDEX IF NOT EXISTS quota_gateway_usage_match
 ON quota_gateway_usage(sid, failed, matched_run_id, occurred_at);
+CREATE TABLE IF NOT EXISTS quota_gateway_checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), through_ms INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS quota_gateway_holds (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), release_after_ms INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS quota_gateway_run_owners (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), sid TEXT NOT NULL);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate quota database: %w", err)
@@ -284,6 +299,13 @@ func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservatio
 	if request.At.IsZero() {
 		request.At = s.now()
 	}
+	var scopes []accountingScope
+	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID {
+		scopes, err = s.accountingScopes(ctx, request.SID)
+		if err != nil {
+			return Reservation{}, false, err
+		}
+	}
 
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -300,7 +322,7 @@ func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservatio
 		return existing, true, nil
 	}
 
-	period, limit, err := budgetFor(ctx, tx, request.SID, request.ModelID)
+	period, limit, err := budgetFor(ctx, tx, request.SID, request.ModelID, request.At)
 	if err != nil {
 		return Reservation{}, false, err
 	}
@@ -310,7 +332,41 @@ func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservatio
 		return Reservation{}, false, err
 	}
 	if usage.ConsumedUnits+usage.ReservedUnits+request.EstimatedUnits > limit {
-		return Reservation{}, false, ErrExceeded
+		if !s.gatewayAccounting || request.ModelID == SpeechTranscriptionModelID {
+			return Reservation{}, false, ErrExceeded
+		}
+	}
+	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID {
+		if err := ensureGatewayFresh(ctx, tx, request.SID, request.At); err != nil {
+			return Reservation{}, false, err
+		}
+		checked := false
+		for _, scope := range scopes {
+			if (scope.id == "harness-default" && request.Engine != "harness" && request.ModelID != "harness-default") || (scope.id == "codex-native" && (request.Engine == "harness" || request.ModelID == "harness-default")) {
+				continue
+			}
+			if scope.id != request.ModelID && !slices.Contains(scope.models, request.ModelID) {
+				continue
+			}
+			p, cap, err := budgetFor(ctx, tx, request.SID, scope.id, request.At)
+			if errors.Is(err, ErrBudgetNotConfigured) && scope.id != request.ModelID {
+				continue
+			}
+			if err != nil {
+				return Reservation{}, false, err
+			}
+			actual, err := gatewayUsageFor(ctx, tx, request.SID, scope, p, request.At, cap)
+			if err != nil {
+				return Reservation{}, false, err
+			}
+			if actual.ConsumedUnits+actual.ReservedUnits >= cap || actual.ConsumedUnits+actual.ReservedUnits+request.EstimatedUnits > cap {
+				return Reservation{}, false, ErrExceeded
+			}
+			checked = true
+		}
+		if !checked {
+			return Reservation{}, false, ErrBudgetNotConfigured
+		}
 	}
 	reservation := Reservation{
 		RunID: request.RunID, SID: request.SID, ModelID: request.ModelID,
@@ -370,9 +426,9 @@ func (s *Store) ReserveForSID(ctx context.Context, sid string, request ReserveRe
 // ReserveSharedRun exposes a narrow resource-specific Port to the Portal for
 // shared AI runs: the reservation is pinned to the frozen payer SID at
 // admission, before the owner Runtime starts the turn.
-func (s *Store) ReserveSharedRun(ctx context.Context, sid, runID, modelID string, estimatedUnits int64) error {
+func (s *Store) ReserveSharedRun(ctx context.Context, sid, runID, modelID, engine string, estimatedUnits int64) error {
 	_, err := s.ReserveForSID(ctx, sid, ReserveRequest{
-		RunID: runID, SID: sid, ModelID: modelID, EstimatedUnits: estimatedUnits,
+		RunID: runID, SID: sid, ModelID: modelID, EstimatedUnits: estimatedUnits, Engine: engine,
 	})
 	return err
 }
@@ -450,6 +506,10 @@ func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (
 		return ErrReservationNotFound
 	}
 	if reservation.Status == "settled" {
+		if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+			record = false
+			return nil
+		}
 		if reservation.ActualUnits != nil && *reservation.ActualUnits == request.ActualUnits {
 			record = false
 			return nil
@@ -458,7 +518,30 @@ func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (
 	}
 	actual := request.ActualUnits
 	var source string
-	if reservation.ModelID != SpeechTranscriptionModelID {
+	var gatewayOwner string
+	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT sid FROM quota_gateway_run_owners WHERE run_id=?),?)`, reservation.RunID, reservation.SID).Scan(&gatewayOwner); err != nil {
+			return err
+		}
+		if gatewayOwner != reservation.SID {
+			// Shared turns cannot move charges to the frozen payer until the
+			// owner's completed requests have reached the ledger.
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO quota_gateway_holds(run_id,release_after_ms) VALUES(?,?)`, reservation.RunID, s.now().UnixMilli()); err != nil {
+				return err
+			}
+			var ready bool
+			if err := tx.QueryRowContext(ctx, `SELECT release_after_ms <= COALESCE((SELECT through_ms FROM quota_gateway_checkpoint WHERE id=1),0) FROM quota_gateway_holds WHERE run_id=?`, reservation.RunID).Scan(&ready); err != nil {
+				return err
+			}
+			if !ready {
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				return ErrUsagePending
+			}
+		}
+	}
+	if reservation.ModelID != SpeechTranscriptionModelID && (!s.gatewayAccounting || gatewayOwner != reservation.SID) {
 		// Authoritative settlement prefers real tokens from the drained gateway
 		// usage detail (matched by SID + time window + model); without a match
 		// the caller's conservative estimate stands and is marked estimated.
@@ -484,6 +567,11 @@ WHERE run_id = ? AND status = 'reserved'`, actual, s.now().Unix(), sourceColumn,
 	if err != nil {
 		return fmt.Errorf("settle quota reservation: %w", err)
 	}
+	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO quota_gateway_holds(run_id,release_after_ms) VALUES(?,?)`, reservation.RunID, s.now().UnixMilli()); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit quota settlement: %w", err)
 	}
@@ -494,9 +582,21 @@ func (s *Store) Usage(ctx context.Context, sid, modelID string, at time.Time) (U
 	if at.IsZero() {
 		at = s.now()
 	}
-	period, limit, err := budgetFor(ctx, s.db, sid, modelID)
+	period, limit, err := budgetFor(ctx, s.db, sid, modelID, at)
 	if err != nil {
 		return Usage{}, err
+	}
+	if s.gatewayAccounting && modelID != SpeechTranscriptionModelID {
+		scopes, err := s.accountingScopes(ctx, sid)
+		if err != nil {
+			return Usage{}, err
+		}
+		for _, scope := range scopes {
+			if scope.id == modelID {
+				return gatewayUsageFor(ctx, s.db, sid, scope, period, at, limit)
+			}
+		}
+		return Usage{}, ErrModelUnauthorized
 	}
 	return usageFor(ctx, s.db, sid, modelID, period, periodKey(period, at), limit)
 }
@@ -505,12 +605,14 @@ type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func budgetFor(ctx context.Context, q queryer, sid, modelID string) (Period, int64, error) {
+func budgetFor(ctx context.Context, q queryer, sid, modelID string, at time.Time) (Period, int64, error) {
 	var period Period
 	var limit int64
 	err := q.QueryRowContext(ctx, `
-SELECT period, limit_units FROM quota_budgets WHERE sid = ? AND model_id = ?
-ORDER BY CASE period WHEN 'daily' THEN 0 ELSE 1 END LIMIT 1`, sid, modelID).Scan(&period, &limit)
+SELECT b.period, COALESCE(o.limit_units, b.limit_units) FROM quota_budgets b
+LEFT JOIN quota_overrides o ON o.sid=b.sid AND o.model_id=b.model_id AND o.period=b.period
+ AND o.period_key=CASE b.period WHEN 'daily' THEN ? ELSE ? END
+WHERE b.sid = ? AND b.model_id = ?`, periodKey(Daily, at), periodKey(Weekly, at), sid, modelID).Scan(&period, &limit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", 0, ErrBudgetNotConfigured
 	}
@@ -569,6 +671,9 @@ func validateSID(sid string) error {
 }
 
 func validateReserve(request ReserveRequest) error {
+	if request.Engine != "" && request.Engine != "codex" && request.Engine != "kimi" && request.Engine != "harness" {
+		return errors.New("invalid quota engine")
+	}
 	if strings.TrimSpace(request.RunID) == "" {
 		return errors.New("quota run ID is required")
 	}

@@ -26,10 +26,15 @@
 - id: credentials
   name: "@deepseek-ai/dsh-credentials-local"
   disabled: true
+- id: session-persistence-jsonl
+  disabled: true
+- id: api-gateway
+  disabled: true
 - id: webserver
   config:
     host: 127.0.0.1
     port: !!js Number(process.env.WORKAGENT_RUNTIME_PORT)
+    requestTimeout: 3600000
 - id: web-runtime
   config:
     openBrowser: false
@@ -40,9 +45,35 @@
   disabled: true
 - id: ui-settings-models
   disabled: true
+# The stock hero "mode" dropdown (标准模式) is replaced by the WorkAgent agent
+# picker, which the workagent-client plugin registers into the same
+# conversation.hero.agentPreset slot. Host-side preset resolution stays in the
+# agent-presets module, so session creation keeps working with the default.
+- id: ui-agent-preset
+  disabled: true
 - insert:
+    - id: workagent-session-persistence
+      name: "@workagent/harness-bundle/dist/native-session-persistence.js"
+      config:
+        root: !!js dshHomePath('sessions')
+    - id: workagent-session-api
+      name: "@workagent/harness-bundle/dist/native-session-api.js"
+    # Keep channel credentials durable within the employee's private DSH_HOME.
+    # The isolated native provider cannot receive managed model credentials.
+    - id: workagent-channels
+      name: cordis:group
+      group: true
+      isolate:
+        credentials: true
+      config:
+        - id: channel-credentials
+          name: "@deepseek-ai/dsh-credentials-local"
+        - id: im-connect
+          name: "@michengai/dsh-im-connect"
     - id: workagent-client
       name: "@workagent/dsh-client"
+    - id: workagent-appearance
+      name: "@workagent/dsh-appearance"
     - id: workagent-credentials
       name: "@workagent/harness-bundle/dist/credential-provider.js"
     - id: workagent-runtime-api

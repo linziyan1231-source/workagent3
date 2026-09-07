@@ -30,7 +30,7 @@ const builtin = (
     engine === "harness" ? "General" : engine === "codex" ? "Codex" : "Kimi",
   description: `General-purpose ${engine} assistant`,
   avatar: null,
-  enabled: true,
+  enabled: engine !== "harness",
   engine,
   modelId: engine === "harness" ? "harness-default" : `${engine}-native`,
   systemPrompt: "",
@@ -45,6 +45,8 @@ const builtin = (
 
 export class PresetStore {
   readonly #path: string;
+  readonly #builtinSettingsPath: string;
+  readonly #builtinEnabled: Record<string, boolean>;
   readonly #models: ModelAccessStore;
   readonly #skills: SkillCatalogStore | undefined;
   readonly #mcp: McpCatalogStore | undefined;
@@ -57,6 +59,14 @@ export class PresetStore {
     mcp?: McpCatalogStore,
   ) {
     this.#path = join(dshHome, "workagent", "presets.json");
+    this.#builtinSettingsPath = join(
+      dshHome,
+      "workagent",
+      "builtin-assistants.json",
+    );
+    this.#builtinEnabled = existsSync(this.#builtinSettingsPath)
+      ? JSON.parse(readFileSync(this.#builtinSettingsPath, "utf8"))
+      : {};
     this.#models = models;
     this.#skills = skills;
     this.#mcp = mcp;
@@ -74,6 +84,7 @@ export class PresetStore {
     const now = new Date().toISOString();
     for (const engine of ["harness", "codex", "kimi"] as const) {
       const initial = builtin(now, engine);
+      initial.enabled = this.#builtinEnabled[initial.id] ?? initial.enabled;
       const versions = this.#versions.get(initial.id);
       if (versions === undefined) {
         this.#versions.set(initial.id, [initial]);
@@ -135,15 +146,34 @@ export class PresetStore {
   }
 
   update(id: string, input: unknown): PresetDefinition {
-    const current = this.#userPreset(id);
+    const current = this.get(id);
+    if (current === undefined) throw new Error("preset_not_found");
     const value = presetMutationSchema.partial().parse(input);
+    if (
+      current.source === "builtin" &&
+      (value.enabled === undefined ||
+        Object.keys(value).some((key) => key !== "enabled"))
+    )
+      throw new Error("builtin_preset_immutable");
     const next = presetDefinitionSchema.parse({
       ...current,
       ...value,
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     });
-    this.#validate(next);
+    const disabling =
+      value.enabled === false && Object.keys(value).length === 1;
+    if (!disabling) this.#validate(next);
+    if (current.source === "builtin") {
+      this.#builtinEnabled[id] = next.enabled;
+      const temporary = `${this.#builtinSettingsPath}.${process.pid}.tmp`;
+      writeFileSync(
+        temporary,
+        `${JSON.stringify(this.#builtinEnabled, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 },
+      );
+      renameSync(temporary, this.#builtinSettingsPath);
+    }
     this.#versions.get(id)!.push(next);
     this.#save();
     return next;
@@ -335,9 +365,9 @@ export class PresetStore {
       const skill = this.#skills?.getSkill(id);
       if (skill === undefined)
         throw new Error(`invalid_skill_binding:${id}:not_found`);
-      if (!skill.enabled)
+      if (preset.enabled && !skill.enabled)
         throw new Error(`invalid_skill_binding:${id}:disabled`);
-      if (skill.health === "unavailable")
+      if (preset.enabled && skill.health === "unavailable")
         throw new Error(
           `invalid_skill_binding:${id}:${skill.unavailableReason ?? "unavailable"}`,
         );
@@ -346,11 +376,14 @@ export class PresetStore {
       const server = this.#mcp?.getServer(id);
       if (server === undefined)
         throw new Error(`invalid_mcp_binding:${id}:not_found`);
-      if (!server.enabled)
+      if (preset.enabled && !server.enabled)
         throw new Error(`invalid_mcp_binding:${id}:disabled`);
-      if (server.oauthState === "needs_auth")
+      if (preset.enabled && server.oauthState === "needs_auth")
         throw new Error(`invalid_mcp_binding:${id}:needs_auth`);
-      if (server.health === "unavailable" || server.health === "needs_review")
+      if (
+        preset.enabled &&
+        (server.health === "unavailable" || server.health === "needs_review")
+      )
         throw new Error(`invalid_mcp_binding:${id}:${server.health}`);
     }
   }

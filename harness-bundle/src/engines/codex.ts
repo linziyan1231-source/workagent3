@@ -1,3 +1,8 @@
+import {
+  nativeJson,
+  NativeApprovalWaits,
+  type EngineSessionOptions,
+} from "./types.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { nativeEngineEnvironment } from "./environment.js";
 import { JsonLineRpc } from "./jsonl-rpc.js";
@@ -49,6 +54,31 @@ const text = (value: unknown, key: string): string | undefined => {
   return typeof candidate === "string" ? candidate : undefined;
 };
 
+export const codexPermissions = (
+  mode: import("./types.js").EngineSessionOptions["permissionMode"],
+) => {
+  if (mode === "read_only") {
+    return { approvalPolicy: "on-request", sandbox: "read-only" } as const;
+  }
+  if (mode === "full_access") {
+    return { approvalPolicy: "never", sandbox: "danger-full-access" } as const;
+  }
+  return {
+    approvalPolicy: mode === "workspace_write" ? "on-request" : "never",
+    sandbox: "workspace-write",
+  } as const;
+};
+
+const codexModel = (modelId: string | undefined): string | undefined =>
+  modelId === "codex-native" ? undefined : modelId;
+
+const availableCodexModels = new Set([
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+]);
+
 export class CodexBridge implements EngineBridge {
   readonly id = "codex" as const;
   readonly #binary: string;
@@ -61,17 +91,67 @@ export class CodexBridge implements EngineBridge {
     this.#binary = binary;
   }
 
+  async listModels(): Promise<import("./types.js").EngineModel[]> {
+    const rpc = await this.#connection();
+    const models: import("./types.js").EngineModel[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: {
+        data: Array<{
+          model: string;
+          displayName: string;
+          isDefault: boolean;
+          defaultReasoningEffort?: string;
+          supportedReasoningEfforts: Array<{
+            reasoningEffort: string;
+            description: string;
+          }>;
+        }>;
+        nextCursor: string | null;
+      } = await rpc.request("model/list", {
+        limit: 100,
+        includeHidden: false,
+        cursor,
+      });
+      models.push(
+        ...page.data
+          .filter((model) => availableCodexModels.has(model.model))
+          .map((model) => ({
+            id: model.model,
+            name: model.displayName,
+            isDefault: model.isDefault,
+            reasoning: model.supportedReasoningEfforts
+              .filter((effort) => effort.reasoningEffort !== "ultra")
+              .map((effort) => ({
+                id: effort.reasoningEffort,
+                name: effort.reasoningEffort,
+              })),
+            ...(model.defaultReasoningEffort
+              ? {
+                  defaultReasoning:
+                    model.defaultReasoningEffort === "ultra"
+                      ? "max"
+                      : model.defaultReasoningEffort,
+                }
+              : {}),
+          })),
+      );
+      cursor = page.nextCursor;
+    } while (cursor);
+    return models;
+  }
+
   async create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
+    const modelId = codexModel(options?.modelId);
     const result = await rpc.request<ThreadResponse>("thread/start", {
       cwd: workspace,
-      ...(options?.modelId === undefined ? {} : { model: options.modelId }),
-      approvalPolicy: "never",
-      sandbox: "workspace-write",
+      ...(modelId === undefined ? {} : { model: modelId }),
+      ...codexPermissions(options?.permissionMode),
       serviceName: "workagent3",
       config: {
         mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
@@ -84,8 +164,9 @@ export class CodexBridge implements EngineBridge {
       () => {
         this.#sessions.delete(result.thread.id);
       },
-      options?.modelId,
+      modelId,
       options?.thinkingEffort,
+      options,
     );
     this.#sessions.set(result.thread.id, session);
     return session;
@@ -98,11 +179,11 @@ export class CodexBridge implements EngineBridge {
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
+    const modelId = codexModel(options?.modelId);
     await rpc.request("thread/resume", {
       threadId: nativeId,
       cwd: workspace,
-      approvalPolicy: "never",
-      sandbox: "workspace-write",
+      ...codexPermissions(options?.permissionMode),
       config: {
         mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
       },
@@ -114,8 +195,9 @@ export class CodexBridge implements EngineBridge {
       () => {
         this.#sessions.delete(nativeId);
       },
-      options?.modelId,
+      modelId,
       options?.thinkingEffort,
+      options,
     );
     this.#sessions.set(nativeId, session);
     return session;
@@ -129,13 +211,13 @@ export class CodexBridge implements EngineBridge {
     lastTurnId?: string,
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
+    const modelId = codexModel(options?.modelId);
     const result = await rpc.request<ThreadResponse>("thread/fork", {
       threadId: nativeId,
       ...(lastTurnId === undefined ? {} : { lastTurnId }),
       cwd: workspace,
-      ...(options?.modelId === undefined ? {} : { model: options.modelId }),
-      approvalPolicy: "never",
-      sandbox: "workspace-write",
+      ...(modelId === undefined ? {} : { model: modelId }),
+      ...codexPermissions(options?.permissionMode),
       config: {
         mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
       },
@@ -145,8 +227,9 @@ export class CodexBridge implements EngineBridge {
       result.thread.id,
       onEvent,
       () => this.#sessions.delete(result.thread.id),
-      options?.modelId,
+      modelId,
       options?.thinkingEffort,
+      options,
     );
     this.#sessions.set(result.thread.id, session);
     return session;
@@ -174,6 +257,7 @@ export class CodexBridge implements EngineBridge {
   }
 
   async close(): Promise<void> {
+    for (const session of this.#sessions.values()) session.disconnected();
     this.#rpc?.close();
     this.#child?.kill();
     this.#rpc = undefined;
@@ -202,18 +286,39 @@ export class CodexBridge implements EngineBridge {
     this.#child = child;
     const rpc = new JsonLineRpc(child.stdout, child.stdin);
     child.stderr.resume();
-    child.once("error", (error) => rpc.close(error));
+    child.stdout.once("close", () => {
+      for (const session of this.#sessions.values()) session.disconnected();
+    });
+    child.once("error", (error) => {
+      rpc.close(error);
+      for (const session of this.#sessions.values()) session.disconnected();
+    });
     child.once("exit", (code) => {
       rpc.close(
         new Error(`Codex app-server exited with ${code ?? "no status"}`),
       );
+      for (const session of this.#sessions.values()) session.disconnected();
+      this.#sessions.clear();
       this.#rpc = undefined;
       this.#child = undefined;
       this.#starting = undefined;
     });
-    rpc.onRequest((id) => {
-      // Approval bridging is added as a separate capability; fail closed until then.
-      rpc.respond(id, { decision: "decline" });
+    rpc.onRequest((id, method, params) => {
+      if (
+        method !== "item/commandExecution/requestApproval" &&
+        method !== "item/fileChange/requestApproval"
+      ) {
+        child.stdin.write(
+          `${JSON.stringify({ id, error: { code: -32601, message: "Unsupported server request" } })}\n`,
+        );
+        return;
+      }
+      const data = object(params) ?? {};
+      const session = this.#sessions.get(text(data, "threadId") ?? "");
+      void (
+        session?.requestApproval(method, data) ??
+        Promise.resolve({ decision: "cancel" })
+      ).then((result) => rpc.respond(id, result));
     });
     rpc.onNotification((method, params) => this.#notification(method, params));
     await rpc.request("initialize", {
@@ -272,14 +377,16 @@ export const projectCodexMcpServers = (
     }),
   );
 
-class CodexSession implements BridgeSession {
+export class CodexSession implements BridgeSession {
   readonly nativeId: string;
   readonly #rpc: JsonLineRpc;
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
   #activeTurn: string | undefined;
+  readonly #approvals: NativeApprovalWaits;
+  #approvalEnabled = false;
   readonly #modelId: string | undefined;
-  readonly #thinkingEffort: "low" | "medium" | "high" | undefined;
+  readonly #thinkingEffort: string | undefined;
 
   constructor(
     rpc: JsonLineRpc,
@@ -287,14 +394,17 @@ class CodexSession implements BridgeSession {
     emit: (event: BridgeEvent) => void,
     closed: () => void,
     modelId?: string,
-    thinkingEffort?: "low" | "medium" | "high",
+    thinkingEffort?: string,
+    options?: Pick<EngineSessionOptions, "requestApproval">,
   ) {
     this.#rpc = rpc;
     this.nativeId = nativeId;
+    this.#approvals = new NativeApprovalWaits(options?.requestApproval);
     this.#emit = emit;
     this.#closed = closed;
     this.#modelId = modelId;
-    this.#thinkingEffort = thinkingEffort;
+    // Existing sessions may still carry the retired ultra option.
+    this.#thinkingEffort = thinkingEffort === "ultra" ? "max" : thinkingEffort;
   }
 
   async send(content: string): Promise<string> {
@@ -307,10 +417,13 @@ class CodexSession implements BridgeSession {
         : { effort: this.#thinkingEffort }),
     });
     this.#activeTurn = result.turn.id;
+    this.#approvalEnabled = true;
     return result.turn.id;
   }
 
   async cancel(): Promise<void> {
+    this.#approvalEnabled = false;
+    this.#approvals.abort();
     if (this.#activeTurn === undefined) return;
     await this.#rpc.request("turn/interrupt", {
       threadId: this.nativeId,
@@ -318,9 +431,81 @@ class CodexSession implements BridgeSession {
     });
   }
 
+  async steer(content: string): Promise<string> {
+    if (this.#activeTurn === undefined) throw new Error("no_active_turn");
+    const result = await this.#rpc.request<{ turnId: string }>("turn/steer", {
+      threadId: this.nativeId,
+      expectedTurnId: this.#activeTurn,
+      input: [{ type: "text", text: content }],
+    });
+    return result.turnId;
+  }
+
   async close(): Promise<void> {
+    this.#approvalEnabled = false;
+    this.#approvals.abort();
     await this.#rpc.request("thread/unsubscribe", { threadId: this.nativeId });
     this.#closed();
+  }
+
+  disconnected(): void {
+    this.#approvalEnabled = false;
+    this.#approvals.abort();
+    if (this.#activeTurn === undefined) return;
+    const turnId = this.#activeTurn;
+    this.#activeTurn = undefined;
+    this.#emit({
+      type: "turn.failed",
+      turnId,
+      code: "codex_disconnected",
+      message: "Codex 进程已中断，请重新发送消息。",
+    });
+  }
+
+  async requestApproval(
+    method: string,
+    params: ObjectValue,
+  ): Promise<{ decision: string }> {
+    const turnId = text(params, "turnId");
+    if (
+      !this.#approvalEnabled ||
+      !turnId ||
+      turnId !== this.#activeTurn ||
+      text(params, "threadId") !== this.nativeId ||
+      (method !== "item/commandExecution/requestApproval" &&
+        method !== "item/fileChange/requestApproval")
+    )
+      return { decision: "cancel" };
+    const tool =
+      text(params, "command") ??
+      (method === "item/fileChange/requestApproval"
+        ? "fileChange"
+        : "commandExecution");
+    const decision = await this.#approvals.request({
+      turnId,
+      tool,
+      summary: text(params, "reason") ?? tool,
+      input: nativeJson(params),
+      ...(Array.isArray(params.availableDecisions)
+        ? {
+            options: nativeJson(
+              params.availableDecisions,
+            ) as import("./types.js").JsonValue[],
+          }
+        : {}),
+    });
+    const nativeDecision =
+      decision === "allow"
+        ? "accept"
+        : decision === "reject"
+          ? "decline"
+          : "cancel";
+    if (
+      Array.isArray(params.availableDecisions) &&
+      !params.availableDecisions.includes(nativeDecision)
+    )
+      return { decision: "cancel" };
+    return { decision: nativeDecision };
   }
 
   notification(method: string, params: ObjectValue): void {
@@ -331,13 +516,54 @@ class CodexSession implements BridgeSession {
     if (turnId === undefined) return;
     if (method === "turn/started") {
       this.#activeTurn = turnId;
+      this.#approvalEnabled = true;
       this.#emit({ type: "turn.started", turnId });
+      return;
+    }
+    if (method === "error") {
+      const error = object(params.error);
+      const message = text(error, "message") ?? "Codex 请求失败，请稍后重试。";
+      if (params.willRetry === true) {
+        this.#emit({ type: "turn.retrying", turnId, message });
+      } else {
+        this.#approvalEnabled = false;
+        this.#approvals.abort();
+        this.#activeTurn = undefined;
+        this.#emit({
+          type: "turn.failed",
+          turnId,
+          code: "codex_failed",
+          message,
+        });
+      }
       return;
     }
     if (method === "item/agentMessage/delta") {
       const delta = text(params, "delta");
+      const messageId = text(params, "itemId");
       if (delta !== undefined)
-        this.#emit({ type: "assistant.delta", turnId, delta });
+        this.#emit({
+          type: "assistant.delta",
+          turnId,
+          delta,
+          ...(messageId === undefined ? {} : { messageId }),
+        });
+      return;
+    }
+    if (
+      method === "item/commandExecution/outputDelta" ||
+      method === "item/fileChange/outputDelta"
+    ) {
+      const toolCallId = text(params, "itemId");
+      const delta = text(params, "delta");
+      if (toolCallId !== undefined && delta !== undefined)
+        this.#emit({
+          type: "tool.updated",
+          turnId,
+          toolCallId,
+          output: delta,
+          raw: nativeJson(params),
+        });
       return;
     }
     const itemType = text(item, "type");
@@ -347,19 +573,46 @@ class CodexSession implements BridgeSession {
         type: "assistant.completed",
         turnId,
         content: text(item, "text") ?? "",
+        ...(itemId === undefined ? {} : { messageId: itemId }),
       });
       return;
     }
     if (
       itemId !== undefined &&
-      (itemType === "commandExecution" || itemType === "mcpToolCall")
+      (itemType === "commandExecution" ||
+        itemType === "mcpToolCall" ||
+        itemType === "fileChange")
     ) {
+      const details = {
+        tool: text(item, "tool") ?? text(item, "command") ?? itemType,
+        raw: nativeJson(item),
+        ...(item?.arguments !== undefined
+          ? { input: nativeJson(item.arguments) }
+          : item?.changes !== undefined
+            ? { input: nativeJson(item.changes) }
+            : item?.command !== undefined
+              ? { input: nativeJson({ command: item.command, cwd: item.cwd }) }
+              : {}),
+        ...(item?.aggregatedOutput !== undefined
+          ? { output: nativeJson(item.aggregatedOutput) }
+          : {}),
+        ...(item?.result !== undefined
+          ? { result: nativeJson(item.result) }
+          : {}),
+        ...(Array.isArray(item?.changes)
+          ? {
+              locations: nativeJson(
+                item.changes.map((change) => ({ path: object(change)?.path })),
+              ),
+            }
+          : {}),
+      };
       if (method === "item/started") {
         this.#emit({
           type: "tool.started",
           turnId,
           toolCallId: itemId,
-          tool: itemType,
+          ...details,
         });
       } else if (method === "item/completed") {
         this.#emit({
@@ -367,12 +620,15 @@ class CodexSession implements BridgeSession {
           turnId,
           toolCallId: itemId,
           failed: text(item, "status") === "failed",
+          ...details,
         });
       }
       return;
     }
     if (method === "turn/completed") {
       const status = text(turn, "status");
+      this.#approvalEnabled = false;
+      this.#approvals.abort();
       this.#activeTurn = undefined;
       if (status === "interrupted") {
         this.#emit({ type: "turn.cancelled", turnId });

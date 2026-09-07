@@ -145,6 +145,7 @@ describe("SharedTurnController end-to-end contract", () => {
       }),
     );
     expect(reserve).toHaveBeenCalledWith({
+      engine: "codex",
       runId: wireRequest.runId,
       modelId: "gpt-5",
       estimatedUnits: estimatedAutomationUnits(wireRequest.context),

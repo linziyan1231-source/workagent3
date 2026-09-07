@@ -13,6 +13,12 @@ import type {
   ApprovalOutcome,
   ApprovalRequest,
 } from "@deepseek-ai/dsh-user-approval";
+import {
+  nativeJson,
+  type JsonValue,
+  type NativeApprovalRequest,
+  type NativeApprovalDecision,
+} from "./engines/types.js";
 import { authorized } from "./index.js";
 
 export type InteractionStatus =
@@ -27,11 +33,14 @@ export type PendingInteraction = {
   sessionId: string;
   turnId: string;
   kind: "approval";
+  native?: boolean;
   summary: string;
   tool: string;
   status: InteractionStatus;
   createdAt: string;
   resolvedAt?: string;
+  input?: JsonValue;
+  options?: JsonValue[];
 };
 
 type InteractionEvent =
@@ -48,7 +57,10 @@ type InteractionEvent =
       outcome: Exclude<InteractionStatus, "pending">;
     };
 
-type Resolver = (outcome: ApprovalOutcome) => void;
+type Resolver = {
+  resolve: (outcome: ApprovalOutcome) => void;
+  cleanup: () => void;
+};
 
 const valid = (value: unknown): value is PendingInteraction => {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -99,6 +111,7 @@ const input = async (
 
 export class ApprovalBridge {
   readonly #path: string;
+  #disposed = false;
   readonly #token: string;
   readonly #interactions = new Map<string, PendingInteraction>();
   readonly #resolvers = new Map<string, Resolver>();
@@ -114,6 +127,16 @@ export class ApprovalBridge {
     this.#path = join(dshHome, "workagent", "interactions.json");
     this.#publish = publish;
     this.#load();
+    ctx.effect(
+      () => () => {
+        this.#disposed = true;
+        for (const interaction of this.#interactions.values()) {
+          if (interaction.status === "pending")
+            this.#settle(interaction, "cancelled");
+        }
+      },
+      "workagent-approval-bridge: settle pending on teardown",
+    );
     ctx.effect(
       () => ctx.on("approval/request", (request) => this.#ask(request)),
       "workagent-approval-bridge: Harness answerer",
@@ -138,30 +161,121 @@ export class ApprovalBridge {
       latestTurn?.type === "turn/start"
         ? `turn-${latestTurn.data.turn}`
         : "turn-unknown";
+    return this.#request(
+      {
+        sessionId,
+        turnId,
+        tool: request.toolName,
+        summary: request.reason?.trim() || `Allow ${request.toolName}?`,
+      },
+      request.signal,
+    );
+  }
+
+  async requestNative(
+    sessionId: string,
+    request: NativeApprovalRequest,
+  ): Promise<NativeApprovalDecision> {
+    const outcome = await this.#request(
+      {
+        sessionId,
+        native: true,
+        turnId: request.turnId,
+        tool: request.tool,
+        summary: request.summary,
+        ...(request.input === undefined
+          ? {}
+          : { input: nativeJson(request.input) }),
+        ...(request.options === undefined
+          ? {}
+          : { options: nativeJson(request.options) as JsonValue[] }),
+      },
+      request.signal,
+    );
+    return outcome === "allowed-once"
+      ? "allow"
+      : outcome === "rejected"
+        ? "reject"
+        : "cancel";
+  }
+
+  pendingNative(): PendingInteraction[] {
+    return [...this.#interactions.values()]
+      .filter(
+        (item) =>
+          item.native === true &&
+          item.status === "pending" &&
+          this.#resolvers.has(item.id),
+      )
+      .map((item) => structuredClone(item));
+  }
+
+  respondNative(
+    sessionId: string,
+    approvalId: string,
+    decision: NativeApprovalDecision,
+  ): boolean {
+    const interaction = this.#interactions.get(approvalId);
+    if (
+      !interaction ||
+      interaction.native !== true ||
+      interaction.sessionId !== sessionId ||
+      interaction.status !== "pending" ||
+      !this.#resolvers.has(approvalId)
+    )
+      return false;
+    this.#settle(
+      interaction,
+      decision === "allow"
+        ? "allowed"
+        : decision === "reject"
+          ? "rejected"
+          : "cancelled",
+    );
+    return true;
+  }
+
+  #request(
+    details: Pick<
+      PendingInteraction,
+      | "sessionId"
+      | "turnId"
+      | "tool"
+      | "summary"
+      | "input"
+      | "options"
+      | "native"
+    >,
+    signal?: AbortSignal,
+  ): Promise<ApprovalOutcome> {
+    if (signal?.aborted || this.#disposed) return Promise.resolve("cancelled");
     const interaction: PendingInteraction = {
+      ...details,
       id: `interaction-${randomUUID()}`,
-      sessionId,
-      turnId,
       kind: "approval",
-      summary: request.reason?.trim() || `Allow ${request.toolName}?`,
-      tool: request.toolName,
       status: "pending",
       createdAt: new Date().toISOString(),
     };
     this.#interactions.set(interaction.id, interaction);
     this.#save();
-    this.#publish(sessionId, {
-      type: "approval.requested",
-      turnId,
-      approvalId: interaction.id,
-      summary: interaction.summary,
-    });
-
-    return new Promise<ApprovalOutcome>((resolve) => {
-      this.#resolvers.set(interaction.id, resolve);
+    return new Promise<ApprovalOutcome>((resolve, reject) => {
       const cancel = () => this.#settle(interaction, "cancelled");
-      if (request.signal?.aborted) cancel();
-      else request.signal?.addEventListener("abort", cancel, { once: true });
+      this.#resolvers.set(interaction.id, {
+        resolve,
+        cleanup: () => signal?.removeEventListener("abort", cancel),
+      });
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        this.#publish(interaction.sessionId, {
+          type: "approval.requested",
+          turnId: interaction.turnId,
+          approvalId: interaction.id,
+          summary: interaction.summary,
+        });
+      } catch (error) {
+        this.#settle(interaction, "unavailable");
+        reject(error);
+      }
     });
   }
 
@@ -234,22 +348,26 @@ export class ApprovalBridge {
     if (interaction.status !== "pending") return;
     interaction.status = status;
     interaction.resolvedAt = new Date().toISOString();
-    this.#save();
-    const resolve = this.#resolvers.get(interaction.id);
+    const pending = this.#resolvers.get(interaction.id);
     this.#resolvers.delete(interaction.id);
-    this.#publish(interaction.sessionId, {
-      type: "approval.resolved",
-      turnId: interaction.turnId,
-      approvalId: interaction.id,
-      outcome: status,
-    });
-    resolve?.(
-      status === "allowed"
-        ? "allowed-once"
-        : status === "rejected"
-          ? "rejected"
-          : status,
-    );
+    pending?.cleanup();
+    try {
+      this.#save();
+      this.#publish(interaction.sessionId, {
+        type: "approval.resolved",
+        turnId: interaction.turnId,
+        approvalId: interaction.id,
+        outcome: status,
+      });
+    } finally {
+      pending?.resolve(
+        status === "allowed"
+          ? "allowed-once"
+          : status === "rejected"
+            ? "rejected"
+            : status,
+      );
+    }
   }
 
   #load(): void {
@@ -257,8 +375,16 @@ export class ApprovalBridge {
     const parsed: unknown = JSON.parse(readFileSync(this.#path, "utf8"));
     if (!Array.isArray(parsed) || !parsed.every(valid))
       throw new Error("WorkAgent interaction index is invalid");
-    for (const interaction of parsed)
+    let recovered = false;
+    for (const interaction of parsed) {
+      if (interaction.status === "pending") {
+        interaction.status = "unavailable";
+        interaction.resolvedAt = new Date().toISOString();
+        recovered = true;
+      }
       this.#interactions.set(interaction.id, interaction);
+    }
+    if (recovered) this.#save();
   }
 
   #save(): void {

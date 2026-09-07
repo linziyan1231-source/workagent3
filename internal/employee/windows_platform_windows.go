@@ -19,14 +19,20 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"workagent3/internal/credentialbroker"
+	"workagent3/internal/employeesecrets"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/nativeauth"
 	"workagent3/internal/store"
 	"workagent3/internal/userhost"
+	"workagent3/internal/userhostlauncher"
 	"workagent3/internal/winutil"
 )
 
 type WindowsPlatformConfig struct {
+	CredentialRoot       string
+	LauncherExecutable   string
+	LaunchManifestRoot   string
 	DataRootBase         string
 	UserHostExecutable   string
 	HarnessCommand       string
@@ -70,12 +76,66 @@ func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) 
 	return &WindowsPlatform{config: config}, nil
 }
 
+func (p *WindowsPlatform) vault() (*employeesecrets.Vault, error) {
+	sid, err := winutil.CurrentSID()
+	if err != nil {
+		return nil, err
+	}
+	if sid != "S-1-5-18" {
+		return nil, errors.New("managed Windows credentials require the SYSTEM service identity")
+	}
+	if !filepath.IsAbs(p.config.CredentialRoot) {
+		return nil, errors.New("absolute credential root is required")
+	}
+	if err := winutil.EnsureServiceTree(p.config.CredentialRoot, false); err != nil {
+		return nil, err
+	}
+	return employeesecrets.New(p.config.CredentialRoot, credentialbroker.NewUserProtector()), nil
+}
+
 func (p *WindowsPlatform) EnsureAccount(_ context.Context, username string, password []byte) (Account, error) {
+	lock, err := winutil.AcquireInstanceLock("WorkAgent3-account-" + strings.ToLower(username))
+	if err != nil {
+		return Account{}, err
+	}
+	defer lock.Close()
+	vault, err := p.vault()
+	if err != nil {
+		return Account{}, err
+	}
+	id := "new-" + strings.ToLower(username)
+	if sid, _, lookupErr := winutil.LookupAccount(`.\` + username); lookupErr == nil {
+		id = sid
+	}
+	saved, err := vault.Read(id)
+	if errors.Is(err, employeesecrets.ErrMissing) && strings.HasPrefix(id, "new-") {
+		saved = employeesecrets.Record{Username: username, Password: append([]byte(nil), password...)}
+		err = vault.Write(id, saved)
+	} else if errors.Is(err, employeesecrets.ErrMissing) {
+		// A creation interrupted after NetUserAdd still has its pre-written secret.
+		saved, err = vault.Read("new-" + strings.ToLower(username))
+	}
+	if err != nil {
+		return Account{}, err
+	}
+	defer saved.Clear()
+	if saved.Phase != "" {
+		return Account{}, errors.New("Windows credential maintenance is pending")
+	}
+	password = saved.Password
 	sid, canonical, err := winutil.EnsureLocalStandardAccount(username, password)
 	if err != nil {
 		return Account{}, err
 	}
 	if err := winutil.EnsureBatchLogonRight(sid); err != nil {
+		return Account{}, err
+	}
+	saved.SID = sid
+	saved.Username = canonical
+	if err := vault.Write(sid, saved); err != nil {
+		return Account{}, err
+	}
+	if err := vault.Remove("new-" + strings.ToLower(username)); err != nil {
 		return Account{}, err
 	}
 	return Account{SID: sid, Canonical: canonical}, nil
@@ -113,6 +173,19 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(ctx context.Context, account Acc
 }
 
 func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, password []byte) error {
+	vault, err := p.vault()
+	if err != nil {
+		return err
+	}
+	saved, err := vault.Read(spec.SID)
+	if err != nil {
+		return err
+	}
+	defer saved.Clear()
+	if saved.Phase != "" {
+		return errors.New("Windows credential maintenance is pending")
+	}
+	password = saved.Password
 	runtimeDirectory := filepath.Join(spec.DataRoot, "runtime")
 	if err := os.MkdirAll(runtimeDirectory, 0o700); err != nil {
 		return err
@@ -130,10 +203,43 @@ func (p *WindowsPlatform) InstallRuntime(ctx context.Context, spec RuntimeSpec, 
 	if err := writeAtomic(configPath, payload); err != nil {
 		return fmt.Errorf("write UserHost configuration: %w", err)
 	}
-	return registerScheduledTask(ctx, scheduledTaskSpec{
-		Name: taskName(spec.SID), Username: spec.CanonicalUsername, Executable: p.config.UserHostExecutable,
-		ConfigPath: configPath, WorkingDirectory: filepath.Dir(p.config.UserHostExecutable),
-	}, password)
+	return p.registerLauncher(ctx, spec.SID, spec.CanonicalUsername, configPath, password)
+}
+
+func (p *WindowsPlatform) registerLauncher(ctx context.Context, sid, username, configPath string, password []byte) error {
+	if !filepath.IsAbs(p.config.LauncherExecutable) || !filepath.IsAbs(p.config.LaunchManifestRoot) {
+		return errors.New("fixed launcher and manifest root are required")
+	}
+	if err := winutil.EnsureServiceTree(p.config.LaunchManifestRoot, true); err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(p.config.LaunchManifestRoot, sid+".json")
+	payload, _ := json.Marshal(userhostlauncher.Manifest{Executable: p.config.UserHostExecutable, Config: configPath, SID: sid})
+	if err := writeAtomic(manifestPath, payload); err != nil {
+		return err
+	}
+	return registerScheduledTask(ctx, scheduledTaskSpec{Name: taskName(sid), Username: username, Executable: p.config.LauncherExecutable, ConfigPath: manifestPath, WorkingDirectory: filepath.Dir(p.config.LauncherExecutable)}, password)
+}
+
+func (p *WindowsPlatform) CheckManagedCredential(user store.User) error {
+	vault, err := p.vault()
+	if err != nil {
+		return err
+	}
+	saved, err := vault.Read(user.SID)
+	if err != nil {
+		return err
+	}
+	defer saved.Clear()
+	if saved.Phase != "" {
+		return errors.New("Windows credential maintenance is pending")
+	}
+	token, err := winutil.LogonManagedUser(localWindowsUsername(user), saved.Password)
+	if err != nil {
+		return err
+	}
+	token.Close()
+	return nil
 }
 
 func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath string) userhost.FileConfig {
@@ -194,7 +300,8 @@ func (p *WindowsPlatform) StopInstalledRuntime(ctx context.Context, sid string) 
 	script := `$ProgressPreference='SilentlyContinue'; $InformationPreference='SilentlyContinue'; ` +
 		`$service=New-Object -ComObject 'Schedule.Service'; $service.Connect(); ` +
 		`try { $task=$service.GetFolder('\').GetTask($env:WA3_TASK) } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }; ` +
-		`if ([int]$task.State -eq 4) { $task.Stop(0) }`
+		`if ([int]$task.State -eq 4) { $task.Stop(0) }; ` +
+		`for($i=0;$i -lt 100 -and [int]$task.State -eq 4;$i++){Start-Sleep -Milliseconds 100}; if([int]$task.State -eq 4){throw 'Employee task did not stop'}`
 	return runPowerShell(ctx, script, map[string]string{"WA3_TASK": taskName(sid)}, nil)
 }
 
@@ -254,6 +361,9 @@ func (p *WindowsPlatform) RemoveInstalledRuntime(ctx context.Context, sid string
 }
 
 func (p *WindowsPlatform) RepairInstalledRuntime(ctx context.Context, user store.User, password []byte) error {
+	if len(password) > 0 {
+		return errors.New("repair uses managed credentials; supplied Windows passwords are not accepted")
+	}
 	account, err := p.EnsureAccount(ctx, localWindowsUsername(user), password)
 	if err != nil {
 		return err
@@ -346,7 +456,21 @@ func (p *WindowsPlatform) DeleteRetainedEmployee(ctx context.Context, user store
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return winutil.DeleteManagedLocalAccount(localWindowsUsername(user), user.SID)
+	if err := winutil.DeleteManagedLocalAccount(localWindowsUsername(user), user.SID); err != nil {
+		return err
+	}
+	vault, err := p.vault()
+	if err != nil {
+		return err
+	}
+	if err := vault.Remove(user.SID); err != nil {
+		return err
+	}
+	err = os.Remove(filepath.Join(p.config.LaunchManifestRoot, user.SID+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func retainedEmployeeDataRoot(baseRoot, sid string) (string, error) {
@@ -397,7 +521,7 @@ func registerScheduledTask(ctx context.Context, spec scheduledTaskSpec, password
 	if len(password) == 0 {
 		return errors.New("Windows task password is required")
 	}
-	script := `$password=[Console]::In.ReadLine(); $action=New-ScheduledTaskAction -Execute $env:WA3_EXEC -Argument ('--config "'+$env:WA3_CONFIG+'"') -WorkingDirectory $env:WA3_WORK; $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero); Register-ScheduledTask -TaskName $env:WA3_TASK -Action $action -Settings $settings -User $env:WA3_USER -Password $password -RunLevel Limited -Force | Out-Null`
+	script := `$ErrorActionPreference='Stop'; $password=[Console]::In.ReadLine(); $action=New-ScheduledTaskAction -Execute $env:WA3_EXEC -Argument ('--config "'+$env:WA3_CONFIG+'"') -WorkingDirectory $env:WA3_WORK; $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero); $trigger=New-ScheduledTaskTrigger -AtStartup; Register-ScheduledTask -TaskName $env:WA3_TASK -Action $action -Trigger $trigger -Settings $settings -User $env:WA3_USER -Password $password -RunLevel Limited -Force | Out-Null; $scheduler=New-Object -ComObject Schedule.Service; $scheduler.Connect(); $scheduler.GetFolder('\').GetTask($env:WA3_TASK).SetSecurityDescriptor('D:P(A;;GA;;;SY)(A;;GR;;;BA)',0)`
 	environment := map[string]string{"WA3_TASK": spec.Name, "WA3_USER": spec.Username, "WA3_EXEC": spec.Executable, "WA3_CONFIG": spec.ConfigPath, "WA3_WORK": spec.WorkingDirectory}
 	input := append(append([]byte(nil), password...), '\n')
 	defer zero(input)

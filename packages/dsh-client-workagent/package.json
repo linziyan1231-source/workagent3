@@ -13,7 +13,8 @@
   "files": [
     "index.js",
     "client.js",
-    "tokens.css"
+    "tokens.css",
+    "document-preview.html"
   ],
   "dsh": {
     "client": {
@@ -35,5 +36,9 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "vitest": "3.2.4"
+  },
+  "dependencies": {
+    "docx-preview": "0.3.6",
+    "jszip": "3.10.1"
   }
 }
