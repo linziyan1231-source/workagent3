@@ -17,6 +17,61 @@ const setup = () => {
 };
 
 describe("WorkspaceStore", () => {
+  it("locates absolute project files while rejecting cross-project paths", () => {
+    const store = setup();
+    const first = store.create("First");
+    const second = store.create("Second");
+    store.write(first.id, "source.txt", Buffer.from("one\ntwo"));
+    store.write(second.id, "private.txt", Buffer.from("private"));
+    expect(store.locate(first.id, join(store.engineRoot(first.id), "source.txt")).path).toBe("source.txt");
+    expect(() => store.locate(first.id, join(store.engineRoot(second.id), "private.txt"))).toThrow();
+    expect(() => store.locate(first.id, "../outside.txt")).toThrow();
+  });
+  it("preserves a Windows UTF-8 BOM when editing browser-decoded text", () => {
+    const store = setup();
+    const project = store.create("BOM editor");
+    store.write(project.id, "windows.txt", Buffer.from("\uFEFF原文"));
+    store.editText(project.id, "windows.txt", "原文", "修改后");
+    expect(store.read(project.id, "windows.txt").toString()).toBe(
+      "\uFEFF修改后",
+    );
+  });
+  it("rejects non UTF-8 edits without converting the original bytes", () => {
+    const store = setup();
+    const project = store.create("Legacy encoding");
+    const bytes = Buffer.from([0xff, 0xfe, 0x41, 0x00]);
+    store.write(project.id, "utf16.txt", bytes);
+    expect(() =>
+      store.editText(
+        project.id,
+        "utf16.txt",
+        bytes.toString("utf8"),
+        "new text",
+      ),
+    ).toThrow("unsupported_text_encoding");
+    expect(store.read(project.id, "utf16.txt")).toEqual(bytes);
+  });
+  it("edits text against its original content and preserves conflicting changes", () => {
+    const store = setup();
+    const project = store.create("Editor");
+    store.write(project.id, "中文.txt", Buffer.from("original"));
+    store.editText(project.id, "中文.txt", "original", "first edit");
+    expect(() =>
+      store.editText(project.id, "中文.txt", "original", "stale edit"),
+    ).toThrow("file_changed");
+    expect(store.read(project.id, "中文.txt").toString()).toBe("first edit");
+    expect(() =>
+      store.editText(project.id, "../outside.txt", "", "escape"),
+    ).toThrow();
+    expect(() =>
+      store.editText(
+        project.id,
+        "中文.txt",
+        "first edit",
+        "x".repeat(2 * 1024 * 1024 + 1),
+      ),
+    ).toThrow("request_too_large");
+  });
   it("creates files exclusively without overwriting an existing upload", () => {
     const store = setup();
     const project = store.create("Upload project");

@@ -182,6 +182,7 @@ func run() error {
 	}
 
 	registry := runtimeapi.NewRegistry()
+	if employeeManager!=nil{registry.SetStarter(employeeManager.EnsureRuntime)}
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
@@ -211,6 +212,7 @@ func run() error {
 	}
 	if employeeManager != nil {
 		modules.EmployeeManagement = employeeManager
+		modules.Storage = employeeManager
 	}
 	server, err := portal.NewWithModules(data, registry, *secureCookie, modules)
 	if err != nil {
@@ -240,6 +242,7 @@ func run() error {
 
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
+	if employeeManager!=nil{root.Handle("/internal/runtime/control",employeeManager.RuntimeControl(registry))}
 	root.Handle("/internal/runtime/quota/", quota.RuntimeHandler(quotas, data))
 	root.Handle("/internal/runtime/audit", audit.RuntimeHandler(auditStore, data))
 	root.Handle("/internal/runtime/notifications", notifications.RuntimeHandler(notificationStore, data))

@@ -108,9 +108,11 @@ type sharedProjectDTO struct {
 }
 
 type sharedMemberDTO struct {
-	UserID   int64     `json:"userId"`
-	Role     string    `json:"role"`
-	JoinedAt time.Time `json:"joinedAt"`
+	UserID      int64     `json:"userId"`
+	DisplayName string    `json:"displayName"`
+	Username    string    `json:"username"`
+	Role        string    `json:"role"`
+	JoinedAt    time.Time `json:"joinedAt"`
 }
 
 type sharedInviteDTO struct {
@@ -241,7 +243,12 @@ func (s *Server) sharedProjectMembers(writer http.ResponseWriter, request *http.
 	}
 	values := make([]sharedMemberDTO, 0, len(members))
 	for _, member := range members {
-		values = append(values, sharedMemberDTO{UserID: member.UserID, Role: member.Role, JoinedAt: member.JoinedAt})
+		account, err := s.store.UserByID(request.Context(), member.UserID)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "shared_members_failed")
+			return
+		}
+		values = append(values, sharedMemberDTO{UserID: member.UserID, DisplayName: account.DisplayName, Username: account.Username, Role: member.Role, JoinedAt: member.JoinedAt})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"members": values})
 }

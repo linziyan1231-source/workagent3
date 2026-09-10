@@ -2,6 +2,7 @@ package employeemanager
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,14 @@ import (
 type listStore struct{ users []store.User }
 
 func (s listStore) ListManagedUsers(context.Context) ([]store.User, error) { return s.users, nil }
+func (s listStore) UserBySID(_ context.Context, sid string) (store.User, error) {
+	for _, user := range s.users {
+		if user.SID == sid {
+			return user, nil
+		}
+	}
+	return store.User{}, errors.New("not found")
+}
 
 func TestHandlerRequiresTokenAndProjectsManagedUsers(t *testing.T) {
 	handler := Handler(&Service{Users: listStore{users: []store.User{{Username: "alice", SID: "S-1-5-21-1000"}}}}, "secret")

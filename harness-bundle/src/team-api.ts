@@ -151,7 +151,19 @@ export const createTeamHandler =
         }
         if (request.method === "PATCH") {
           const input = await body(request);
-          const mutation: { name?: string; sessionMode?: string | null } = {};
+          const mutation: {
+            name?: string;
+            sessionMode?: string | null;
+            memberIds?: string[];
+          } = {};
+          if (input.memberIds !== undefined) {
+            if (
+              !Array.isArray(input.memberIds) ||
+              input.memberIds.some((value) => typeof value !== "string")
+            )
+              throw new Error("invalid_member_order");
+            mutation.memberIds = input.memberIds as string[];
+          }
           if (input.name !== undefined)
             mutation.name = text(input.name, "name");
           if (input.sessionMode !== undefined)

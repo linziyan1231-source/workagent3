@@ -232,6 +232,14 @@ await withPage(async (page) => {
           "Standard frame must correspond to the actual live interaction",
         );
         if (decision === "reject") {
+          await stopMux();
+          await page.reload();
+          await page.getByText("WorkAgent", { exact: true }).waitFor();
+          await startMux(created.id);
+          const replayed = await waitFrame("approval/requested", requested.payload.approvalId, 30000);
+          assert.ok(replayed, "Pending native approval must replay after browser reconnect");
+          assert.equal(replayed.rpcId, requested.rpcId);
+          row.reconnected = true;
           row.receipt = await json(page, "/api/respond", {
             method: "POST",
             body: JSON.stringify({

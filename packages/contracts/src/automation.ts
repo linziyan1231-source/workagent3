@@ -39,6 +39,7 @@ export const automationDefinitionSchema = z.object({
     .enum(["new_conversation", "existing"])
     .default("new_conversation"),
   conversationId: z.string().min(1).nullable().default(null),
+  skillId: z.string().min(1).nullable().optional(),
   nextRunAt: z.iso.datetime({ offset: true }).nullable(),
   lastRunAt: z.iso.datetime({ offset: true }).nullable(),
   createdAt: z.iso.datetime({ offset: true }),
@@ -60,6 +61,7 @@ export const automationMutationSchema = automationDefinitionSchema.pick({
   notificationPolicy: true,
   executionMode: true,
   conversationId: true,
+  skillId: true,
 });
 export type AutomationMutation = z.input<typeof automationMutationSchema>;
 
@@ -73,6 +75,7 @@ export const automationRunSchema = z.object({
   attempt: z.number().int().nonnegative(),
   sessionId: z.string().min(1).nullable(),
   result: z.string().nullable(),
+  skillSuggestionPath: z.string().nullable().optional(),
   error: z.string().nullable(),
   createdAt: z.iso.datetime({ offset: true }),
   startedAt: z.iso.datetime({ offset: true }).nullable(),

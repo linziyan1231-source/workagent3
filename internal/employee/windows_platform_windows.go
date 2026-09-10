@@ -16,9 +16,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
+	"workagent3/internal/contracts"
 	"workagent3/internal/credentialbroker"
 	"workagent3/internal/employeesecrets"
 	"workagent3/internal/mcpruntime"
@@ -30,6 +32,8 @@ import (
 )
 
 type WindowsPlatformConfig struct {
+	MaxRunningRuntimes   int
+	StorageLimits        *contracts.StorageLimits
 	CredentialRoot       string
 	LauncherExecutable   string
 	LaunchManifestRoot   string
@@ -46,6 +50,7 @@ type WindowsPlatformConfig struct {
 	ManagedToolsRoot     string
 	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
+	PublicBaseURL        string
 	Limits               winutil.JobLimits
 	NativeModels         NativeModelProvisioner
 	// HarnessModel and ModelGatewayBaseURL mirror the model gateway
@@ -59,7 +64,10 @@ type NativeModelProvisioner interface {
 	Provision(context.Context, string, string) (nativeauth.Bundle, error)
 }
 
-type WindowsPlatform struct{ config WindowsPlatformConfig }
+type WindowsPlatform struct {
+	config  WindowsPlatformConfig
+	startMu sync.Mutex
+}
 
 func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) {
 	if !filepath.IsAbs(config.DataRootBase) || !filepath.IsAbs(config.UserHostExecutable) || !filepath.IsAbs(config.HarnessCommand) || !filepath.IsAbs(config.HarnessProfileSource) || !filepath.IsAbs(config.ManagedSkillsRoot) {
@@ -73,6 +81,15 @@ func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) 
 		return nil, errors.New("Harness entrypoint must be relative to the released profile")
 	}
 	config.HarnessEntrypoint = entrypoint
+	for _, software := range []string{config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.CodexCommand, config.KimiCommand, config.ManagedSkillsRoot, config.ManagedToolsRoot} {
+		if software == "" {
+			continue
+		}
+		relative, err := filepath.Rel(config.DataRootBase, software)
+		if err == nil && (relative == "." || filepath.IsLocal(relative)) {
+			return nil, errors.New("public software must be outside employee and shared storage quotas")
+		}
+	}
 	return &WindowsPlatform{config: config}, nil
 }
 
@@ -151,6 +168,9 @@ func (p *WindowsPlatform) EnsurePrivateDataRoot(ctx context.Context, account Acc
 		return "", err
 	}
 	if err := winutil.EnsureSharedOwnerLayout(p.config.DataRootBase, account.SID); err != nil {
+		return "", err
+	}
+	if err := p.ensureStorageLimits(ctx, account.SID); err != nil {
 		return "", err
 	}
 	profileDirectory := filepath.Join(root, "dsh-home", "profiles", p.config.Profile)
@@ -246,8 +266,9 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 	return userhost.FileConfig{
 		SID: spec.SID, DataRoot: spec.DataRoot, HarnessCommand: p.config.HarnessCommand,
 		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
-		HarnessArguments: append([]string{filepath.Join(spec.DataRoot, "dsh-home", "profiles", p.config.Profile, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
-		PortalURL: p.config.PortalURL, RegistrationCredentialFile: credentialPath,
+		HarnessArguments: append([]string{filepath.Join(p.config.HarnessProfileSource, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
+		PublicBaseURL: p.config.PublicBaseURL,
+		PortalURL:     p.config.PortalURL, RegistrationCredentialFile: credentialPath,
 		ManagedSkillsRoot: p.config.ManagedSkillsRoot, ManagedToolsRoot: p.config.ManagedToolsRoot,
 		ManagedMCPServers: expandManagedMCPServers(p.config.ManagedMCPServers, spec),
 		Limits:            p.config.Limits,
@@ -281,6 +302,11 @@ func expandManagedMCPServers(servers []mcpruntime.Server, spec RuntimeSpec) []mc
 }
 
 func (p *WindowsPlatform) StartRuntime(ctx context.Context, spec RuntimeSpec) error {
+	p.startMu.Lock()
+	defer p.startMu.Unlock()
+	if err := p.checkRuntimeCapacity(ctx, spec.SID); err != nil {
+		return err
+	}
 	if err := startScheduledTask(ctx, taskName(spec.SID), startEmployeeTask, employeeTaskState); err != nil {
 		return err
 	}
@@ -306,6 +332,14 @@ func (p *WindowsPlatform) StopInstalledRuntime(ctx context.Context, sid string) 
 }
 
 func (p *WindowsPlatform) StartInstalledRuntime(ctx context.Context, sid string) error {
+	p.startMu.Lock()
+	defer p.startMu.Unlock()
+	if err := p.checkRuntimeCapacity(ctx, sid); err != nil {
+		return err
+	}
+	if err := p.ensureStorageLimits(ctx, sid); err != nil {
+		return err
+	}
 	runtimeDirectory := filepath.Join(p.config.DataRootBase, sid, "runtime")
 	credential, err := os.ReadFile(filepath.Join(runtimeDirectory, "portal-registration.token"))
 	if err != nil {

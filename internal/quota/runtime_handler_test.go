@@ -57,6 +57,27 @@ func TestRuntimeQuotaHandlerRejectsCrossSIDAndRemoteCallers(t *testing.T) {
 	}
 }
 
+func TestRuntimeQuotaUsageRejectsOtherSIDAndPayerOverride(t *testing.T) {
+	data := openTestStore(t)
+	const sid = "S-1-5-21-100"
+	if err := data.SetBudget(t.Context(), Budget{SID: sid, ModelID: "codex-native", Period: Daily, LimitUnits: 100}); err != nil {
+		t.Fatal(err)
+	}
+	handler := RuntimeHandler(data, runtimeCredentialStub{sid: "alice-secret"})
+	own := invokeRuntimeQuota(handler, "/internal/runtime/quota/usage", `{"sid":"`+sid+`","modelId":"codex-native"}`, "alice-secret", "127.0.0.1:55000")
+	if own.Code != 200 || !strings.Contains(own.Body.String(), `"limitUnits":100`) {
+		t.Fatalf("own usage: %d %s", own.Code, own.Body.String())
+	}
+	other := invokeRuntimeQuota(handler, "/internal/runtime/quota/usage", `{"sid":"S-1-5-21-200","modelId":"codex-native"}`, "alice-secret", "127.0.0.1:55000")
+	if other.Code != 401 {
+		t.Fatalf("cross SID: %d", other.Code)
+	}
+	override := invokeRuntimeQuota(handler, "/internal/runtime/quota/usage", `{"sid":"`+sid+`","modelId":"codex-native","payerSid":"S-1-5-21-200"}`, "alice-secret", "127.0.0.1:55000")
+	if override.Code != 400 {
+		t.Fatalf("payer override: %d", override.Code)
+	}
+}
+
 func TestRuntimeQuotaSettlementCannotCrossSID(t *testing.T) {
 	store := openTestStore(t)
 	const alice = "S-1-5-21-100"

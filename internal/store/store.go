@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+CREATE TABLE IF NOT EXISTS remembered_logins (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runtime_credentials (
   sid TEXT PRIMARY KEY,
   credential_digest BLOB NOT NULL CHECK (length(credential_digest) = 32)
@@ -246,6 +251,9 @@ func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled boo
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM remembered_logins WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke remembered logins: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit user state change: %w", err)
 	}
@@ -301,6 +309,9 @@ func (s *Store) ResetUserPassword(ctx context.Context, username, passwordHash st
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM remembered_logins WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke remembered logins: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit password reset: %w", err)
 	}
@@ -324,6 +335,9 @@ func (s *Store) SetUserAdmin(ctx context.Context, username string, admin bool) e
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM remembered_logins WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return fmt.Errorf("revoke remembered logins: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit administrator role change: %w", err)

@@ -14,3 +14,4 @@ allowBuilds:
 patchedDependencies:
   "@michengai/dsh-im-connect@0.1.30": patches/@michengai__dsh-im-connect@0.1.30.patch
   "@deepseek-ai/dsh-host-webserver@0.1.1-rc.2": patches/@deepseek-ai__dsh-host-webserver@0.1.1-rc.2.patch
+  "@deepseek-ai/dsh-web-frontend@0.1.1-rc.2": patches/@deepseek-ai__dsh-web-frontend@0.1.1-rc.2.patch

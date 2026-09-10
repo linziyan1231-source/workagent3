@@ -7,6 +7,7 @@ export function mountCompletionNotifications(
   ctx: Context,
   token: string,
   notifications: CompletionNotifications,
+  hasSession: (id: string) => boolean,
 ) {
   ctx.effect(
     () =>
@@ -44,6 +45,11 @@ export function mountCompletionNotifications(
               if (raw.length > 16384) throw new Error("提醒设置过长");
             }
             const input = JSON.parse(raw);
+            if (path === "/v1/completion-notifications/session" && request.method === "PUT") {
+              if (typeof input.sessionId !== "string" || !hasSession(input.sessionId) || typeof input.enabled !== "boolean") throw new Error("会话提醒设置不正确");
+              send(200, notifications.configureSession(input.sessionId, input.enabled));
+              return;
+            }
             if (
               path === "/v1/completion-notifications" &&
               request.method === "PUT"

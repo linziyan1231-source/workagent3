@@ -63,6 +63,15 @@ export class NativeApprovalWaits {
 }
 
 export type BridgeEvent =
+  | {
+      type: "process.updated";
+      turnId: string;
+      processId: string;
+      kind: "plan" | "reasoning";
+      text?: string;
+      delta?: string;
+      data?: JsonValue;
+    }
   | { type: "turn.started"; turnId: string }
   | { type: "turn.retrying"; turnId: string; message: string }
   | {
@@ -102,10 +111,20 @@ export type BridgeEvent =
 
 export type BridgeSession = {
   readonly nativeId: string;
+  readonly permissionMode?:
+    | EngineSessionOptions["permissionMode"]
+    | "manual_approval";
   cancel(): Promise<void>;
+  compact?(): Promise<void>;
   close(): Promise<void>;
-  send(content: string): Promise<string>;
-  steer(content: string): Promise<string>;
+  send(
+    content: string,
+    images?: readonly import("../native-images.js").NativeImage[],
+  ): Promise<string>;
+  steer(
+    content: string,
+    images?: readonly import("../native-images.js").NativeImage[],
+  ): Promise<string>;
 };
 
 export type NativeEngineStatus = {
@@ -149,6 +168,7 @@ export type EngineModel = {
 };
 
 export type EngineSessionOptions = {
+  requirePermission?: boolean;
   requestApproval?: (
     request: NativeApprovalRequest,
   ) => Promise<NativeApprovalDecision>;

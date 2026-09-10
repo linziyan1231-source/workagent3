@@ -84,10 +84,22 @@ const uploadBody = (request: IncomingMessage) => {
 const errorStatus = (error: unknown): [number, string] => {
   const code =
     error instanceof Error ? error.message : "workspace_operation_failed";
-  if (code === "workspace_not_found" || code === "file_not_found")
+  if (
+    code === "workspace_not_found" ||
+    code === "file_not_found" ||
+    code === "upload_not_found"
+  )
     return [404, code];
   if (code === "request_too_large") return [413, code];
-  if (code === "destination_exists" || code === "workspace_directory_exists")
+  if (
+    code === "destination_exists" ||
+    code === "workspace_directory_exists" ||
+    code === "file_changed" ||
+    code === "upload_busy" ||
+    code === "upload_offset_conflict" ||
+    code === "upload_incomplete" ||
+    code === "upload_limit_reached"
+  )
     return [409, code];
   if (
     code === "invalid_workspace_name" ||
@@ -98,7 +110,10 @@ const errorStatus = (error: unknown): [number, string] => {
     code === "not_a_directory" ||
     code === "not_a_file" ||
     code === "invalid_session_id" ||
-    code === "invalid_asset_name"
+    code === "invalid_asset_name" ||
+    code === "unsupported_text_encoding" ||
+    code === "invalid_upload" ||
+    code === "invalid_upload_chunk"
   )
     return [400, code];
   console.error("workagent-workspace-api: operation failed", error);
@@ -198,6 +213,57 @@ export class WorkspaceController {
         return;
       }
     }
+    const uploadMatch =
+      /^\/v1\/workspaces\/([^/]+)\/uploads(?:\/([^/]+)(?:\/(complete))?)?$/.exec(
+        url.pathname,
+      );
+    if (uploadMatch) {
+      const workspaceId = decodeURIComponent(uploadMatch[1]!);
+      const uploadId = uploadMatch[2];
+      const uploads = this.#store.uploads;
+      if (!uploadId && request.method === "GET")
+        return json(response, 200, uploads.list(workspaceId));
+      if (!uploadId && request.method === "POST") {
+        const input = await objectBody(request);
+        return json(
+          response,
+          201,
+          uploads.create(
+            workspaceId,
+            input as {
+              path: string;
+              name: string;
+              size: number;
+              lastModified: number;
+            },
+          ),
+        );
+      }
+      if (uploadId && !uploadMatch[3]) {
+        if (request.method === "GET")
+          return json(response, 200, uploads.get(workspaceId, uploadId));
+        if (request.method === "PATCH")
+          return json(
+            response,
+            200,
+            await uploads.append(
+              workspaceId,
+              uploadId,
+              Number(request.headers["upload-offset"]),
+              request.iterator({ destroyOnReturn: false }),
+            ),
+          );
+        if (request.method === "DELETE") {
+          uploads.cancel(workspaceId, uploadId);
+          response.writeHead(204);
+          response.end();
+          return;
+        }
+      }
+      if (uploadId && uploadMatch[3] && request.method === "POST")
+        return json(response, 200, await uploads.finish(workspaceId, uploadId));
+      return json(response, 405, { error: "method_not_allowed" });
+    }
     const workspaceMatch = /^\/v1\/workspaces\/([^/]+)$/.exec(url.pathname);
     if (workspaceMatch !== null) {
       const id = decodeURIComponent(workspaceMatch[1] ?? "");
@@ -224,7 +290,7 @@ export class WorkspaceController {
       return;
     }
     const match =
-      /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move|assets|attachments)$/.exec(
+      /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move|assets|attachments|locate)$/.exec(
         url.pathname,
       );
     if (match === null) {
@@ -235,6 +301,10 @@ export class WorkspaceController {
     const action = match[2];
     const path = url.searchParams.get("path") ?? "";
     const sessionId = url.searchParams.get("sessionId") ?? "";
+    if (action === "locate" && request.method === "GET") {
+      json(response, 200, this.#store.locate(id, path));
+      return;
+    }
     if (action === "files" && request.method === "GET") {
       json(response, 200, this.#store.listFiles(id, path));
       return;
@@ -250,6 +320,25 @@ export class WorkspaceController {
         ),
       );
       await pipeline(content.stream, response);
+      return;
+    }
+    if (action === "content" && request.method === "PATCH") {
+      const value = JSON.parse(
+        (await body(request, 16 * 1024 * 1024)).toString("utf8"),
+      ) as Record<string, unknown>;
+      if (
+        value === null ||
+        typeof value.original !== "string" ||
+        typeof value.text !== "string"
+      ) {
+        json(response, 400, { error: "invalid_text_edit" });
+        return;
+      }
+      json(
+        response,
+        200,
+        this.#store.editText(id, path, value.original, value.text),
+      );
       return;
     }
     if (action === "content" && request.method === "PUT") {

@@ -51,13 +51,15 @@ type usageQueueRecord struct {
 // material. There must be exactly one drainer per deployment (the Employee
 // Manager).
 type UsageDrainer struct {
-	client    *Client
-	sink      UsageSink
-	raw       []usageQueueRecord
-	pending   []contracts.GatewayUsageRecord
-	skipped   int
-	started   time.Time
-	batchSize int
+	client         *Client
+	sink           UsageSink
+	raw            []usageQueueRecord
+	pending        []contracts.GatewayUsageRecord
+	skipped        int
+	started        time.Time
+	batchSize      int
+	billingUpdated time.Time
+	billingRates   []contracts.BillingRate
 }
 
 func (c *Client) NewUsageDrainer(sink UsageSink) (*UsageDrainer, error) {
@@ -72,6 +74,9 @@ func (c *Client) NewUsageDrainer(sink UsageSink) (*UsageDrainer, error) {
 // because their key ID belongs to no managed employee key or the record is
 // unusable (missing request ID or timestamp).
 func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err error) {
+	if err := d.syncBilling(ctx); err != nil {
+		return 0, 0, err
+	}
 	if len(d.pending) == 0 && len(d.raw) == 0 {
 		d.started = time.Now()
 		raw, err := d.client.popUsage(ctx, UsageDrainBatch)
@@ -97,6 +102,9 @@ func (d *UsageDrainer) Drain(ctx context.Context) (persisted, skipped int, err e
 	for len(d.pending) > 0 {
 		if err := d.sink.RecordGatewayUsage(ctx, d.pending[0]); err != nil {
 			return persisted, d.skipped, fmt.Errorf("persist gateway usage %q: %w", d.pending[0].RequestID, err)
+		}
+		if err := d.recordCost(ctx, d.pending[0]); err != nil {
+			return persisted, d.skipped, err
 		}
 		d.pending = d.pending[1:]
 		persisted++

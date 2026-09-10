@@ -29,7 +29,7 @@ func run() error {
 	if !filepath.IsAbs(*configPath) {
 		return errors.New("an absolute --config path is required")
 	}
-	logFile, err := os.OpenFile(filepath.Join(filepath.Dir(*configPath), "userhost.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logFile, err := userhost.OpenRuntimeLog(filepath.Join(filepath.Dir(*configPath), "userhost.log"))
 	if err != nil {
 		return fmt.Errorf("open private UserHost log: %w", err)
 	}
@@ -38,6 +38,9 @@ func run() error {
 	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
 	config, err := userhost.LoadFileConfig(*configPath)
 	if err != nil {
+		return err
+	}
+	if err := userhost.ConfigureRuntimeStorage(config.DataRoot); err != nil {
 		return err
 	}
 	if config.ManagedToolsRoot != "" {
@@ -63,6 +66,7 @@ func run() error {
 		ManagedSkillsRoot:  config.ManagedSkillsRoot,
 		ManagedToolsRoot:   config.ManagedToolsRoot,
 		ManagedMCPServers:  config.ManagedMCPServers,
+		PublicBaseURL:      config.PublicBaseURL,
 		PlatformURL:        config.PortalURL,
 		PlatformCredential: credential,
 		HarnessModel:       config.HarnessModel, ModelGatewayBaseURL: config.ModelGatewayBaseURL,

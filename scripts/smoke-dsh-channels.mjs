@@ -53,21 +53,18 @@ await withPage(async (page) => {
     await page
       .getByRole("button", { name: "生成二维码", exact: true })
       .waitFor();
-    await page.getByRole("button", { name: "选择模型", exact: true }).click();
-    await page.getByRole("menuitem", { name: /引擎与模型/ }).click();
-    await page
-      .locator(".ima-model-group-title")
-      .filter({ hasText: /^Codex$/ })
-      .waitFor();
-    await page
-      .locator(".ima-model-group-title")
-      .filter({ hasText: /^Kimi$/ })
-      .waitFor();
-    if (evidence)
-      await page.screenshot({
-        path: join(evidence, `${id}-native-models.png`),
-      });
     for (const engine of ["Codex", "Kimi"]) {
+      await page
+        .getByRole("button", { name: "选择助手与模型", exact: true })
+        .click();
+      await page.getByRole("menuitem", { name: /^助手/ }).click();
+      await page
+        .getByRole("menuitemradio", { name: engine, exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "选择助手与模型", exact: true })
+        .click();
+      await page.getByRole("menuitem", { name: /^模型/ }).click();
       const choice = page
         .getByRole("group", { name: engine, exact: true })
         .getByRole("menuitemradio")
@@ -77,16 +74,10 @@ await withPage(async (page) => {
       assert(
         (
           await page
-            .getByRole("button", { name: "选择模型", exact: true })
+            .getByRole("button", { name: "选择助手与模型", exact: true })
             .innerText()
         ).includes(modelName),
       );
-      if (engine === "Codex") {
-        await page
-          .getByRole("button", { name: "选择模型", exact: true })
-          .click();
-        await page.getByRole("menuitem", { name: /引擎与模型/ }).click();
-      }
     }
     assert.equal(
       await page.getByText("仅已批准用户", { exact: true }).count(),

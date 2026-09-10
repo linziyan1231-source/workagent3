@@ -110,7 +110,11 @@ export class PlatformQuotaClient implements AutomationQuotaPort {
     }
   }
 
-  async #post(action: "reserve" | "settle", body: unknown): Promise<Response> {
+  async usage(modelId: string): Promise<{limitUnits: number; consumedUnits: number; reservedUnits: number; period: string}> {
+    return (await this.#post("usage", { sid: this.#configuration.sid, modelId })).json();
+  }
+
+  async #post(action: "reserve" | "settle" | "usage", body: unknown): Promise<Response> {
     const response = await fetch(
       new URL(`internal/runtime/quota/${action}`, this.#configuration.baseURL),
       {

@@ -379,6 +379,7 @@ export const projectCodexMcpServers = (
 
 export class CodexSession implements BridgeSession {
   readonly nativeId: string;
+  readonly permissionMode: EngineSessionOptions["permissionMode"];
   readonly #rpc: JsonLineRpc;
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
@@ -395,10 +396,11 @@ export class CodexSession implements BridgeSession {
     closed: () => void,
     modelId?: string,
     thinkingEffort?: string,
-    options?: Pick<EngineSessionOptions, "requestApproval">,
+    options?: Pick<EngineSessionOptions, "requestApproval" | "permissionMode">,
   ) {
     this.#rpc = rpc;
     this.nativeId = nativeId;
+    this.permissionMode = options?.permissionMode ?? "workspace_write";
     this.#approvals = new NativeApprovalWaits(options?.requestApproval);
     this.#emit = emit;
     this.#closed = closed;
@@ -407,10 +409,19 @@ export class CodexSession implements BridgeSession {
     this.#thinkingEffort = thinkingEffort === "ultra" ? "max" : thinkingEffort;
   }
 
-  async send(content: string): Promise<string> {
+  async send(
+    content: string,
+    images: readonly import("../native-images.js").NativeImage[] = [],
+  ): Promise<string> {
     const result = await this.#rpc.request<TurnResponse>("turn/start", {
       threadId: this.nativeId,
-      input: [{ type: "text", text: content }],
+      input: [
+        { type: "text", text: content },
+        ...images.map((image) => ({
+          type: "image",
+          url: `data:${image.mimeType};base64,${image.data}`,
+        })),
+      ],
       ...(this.#modelId === undefined ? {} : { model: this.#modelId }),
       ...(this.#thinkingEffort === undefined
         ? {}
@@ -431,12 +442,27 @@ export class CodexSession implements BridgeSession {
     });
   }
 
-  async steer(content: string): Promise<string> {
+  async compact(): Promise<void> {
+    await this.#rpc.request("thread/compact/start", {
+      threadId: this.nativeId,
+    });
+  }
+
+  async steer(
+    content: string,
+    images: readonly import("../native-images.js").NativeImage[] = [],
+  ): Promise<string> {
     if (this.#activeTurn === undefined) throw new Error("no_active_turn");
     const result = await this.#rpc.request<{ turnId: string }>("turn/steer", {
       threadId: this.nativeId,
       expectedTurnId: this.#activeTurn,
-      input: [{ type: "text", text: content }],
+      input: [
+        { type: "text", text: content },
+        ...images.map((image) => ({
+          type: "image",
+          url: `data:${image.mimeType};base64,${image.data}`,
+        })),
+      ],
     });
     return result.turnId;
   }
@@ -514,6 +540,27 @@ export class CodexSession implements BridgeSession {
     const turnId =
       text(params, "turnId") ?? text(turn, "id") ?? this.#activeTurn;
     if (turnId === undefined) return;
+    if (method === "turn/plan/updated") {
+      this.#emit({
+        type: "process.updated",
+        turnId,
+        processId: `${turnId}-plan`,
+        kind: "plan",
+        text: text(params, "explanation") || "",
+        data: nativeJson(params.plan || []),
+      });
+      return;
+    }
+    if (method === "item/reasoning/summaryTextDelta") {
+      this.#emit({
+        type: "process.updated",
+        turnId,
+        processId: `${text(params, "itemId") || turnId}-summary-${params.summaryIndex || 0}`,
+        kind: "reasoning",
+        delta: text(params, "delta") || "",
+      });
+      return;
+    }
     if (method === "turn/started") {
       this.#activeTurn = turnId;
       this.#approvalEnabled = true;

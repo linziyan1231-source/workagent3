@@ -17,10 +17,7 @@ describe("WorkAgent dsh client composition", () => {
 
   it("routes assistants to the real preset editor", () => {
     expect(client).toContain('assistants: ["助手", navigate("assistants")]');
-    expect(client).not.toContain('location.assign("/chatgpt/")');
-    expect(client).toContain(
-      'localStorage.setItem(AGENT_PICK_KEY, "builtin-general")',
-    );
+    expect(client).toContain('localStorage.getItem(CHAT_PAGE_KEY) || "/chatgpt/"');
   });
 
   it("uses the WorkAgent visual language for shell actions and agents", () => {
@@ -34,7 +31,7 @@ describe("WorkAgent dsh client composition", () => {
     expect(client).not.toContain("wide ? label : label.slice(0, 1)");
     expect(client).toContain("workagentHomeNavigation");
     expect(client).toContain(
-      'className: "workagent-button workagent-overlay-back"',
+      'workagent-overlay',
     );
   });
 

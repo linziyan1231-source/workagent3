@@ -20,9 +20,11 @@ import (
 
 type UserStore interface {
 	ListManagedUsers(context.Context) ([]store.User, error)
+	UserBySID(context.Context, string) (store.User, error)
 }
 
 type Service struct {
+	Storage     StoragePlatform
 	Jobs        *JobStore
 	Provisioner *employee.Provisioner
 	Lifecycle   employee.Lifecycle

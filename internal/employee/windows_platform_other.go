@@ -6,12 +6,15 @@ import (
 	"context"
 	"errors"
 
+	"workagent3/internal/contracts"
 	"workagent3/internal/mcpruntime"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
 type WindowsPlatformConfig struct {
+	MaxRunningRuntimes   int
+	StorageLimits        *contracts.StorageLimits
 	CredentialRoot       string
 	LauncherExecutable   string
 	LaunchManifestRoot   string
@@ -28,6 +31,7 @@ type WindowsPlatformConfig struct {
 	ManagedToolsRoot     string
 	ManagedMCPServers    []mcpruntime.Server
 	PortalURL            string
+	PublicBaseURL        string
 	Limits               winutil.JobLimits
 	NativeModels         NativeModelProvisioner
 	HarnessModel         string

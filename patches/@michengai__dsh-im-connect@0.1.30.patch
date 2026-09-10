@@ -1,133 +1,411 @@
---- a/lib/index.js
-+++ b/lib/index.js
-@@ -13,6 +13,7 @@
-     'agentDefaultModel',
-     'llm',
-     'permissionPresets',
-+    'workagentChannels',
- ];
- export const Config = Schema.object({
-     stateDir: Schema.string().default(''),
-@@ -48,7 +49,15 @@
-     log(`[boot] ChannelManager 构造 ${Date.now() - applyStarted}ms`);
-     ctx.effect(() => {
-         manager.registerApi(ctx);
--        void manager.initEnabled().finally(() => { void manager.attachMappedSessions(); });
-+        let detachNotifications;
-+        void manager.initEnabled().finally(() => {
-+            void manager.attachMappedSessions();
-+            if (!manager.disposed) detachNotifications = ctx.get('workagentChannels').attachNotifications({
-+                targets: () => manager.notificationTargets(),
-+                send: (targetId, text) => manager.sendNotification(targetId, text),
+diff --git a/lib/channels/dingtalk.js b/lib/channels/dingtalk.js
+index caeec62..b3302e5 100644
+--- a/lib/channels/dingtalk.js
++++ b/lib/channels/dingtalk.js
+@@ -89,6 +89,11 @@ export function createDingtalkChannel(config, log) {
+             targets.clear();
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text, kind) {
++            const target = kind === 'group' ? { type: 'group', openConversationId: chatId } : { type: 'user', userId: chatId };
++            const card = await cards.create(target, text);
++            await cards.finish(card, text);
++        },
+         async send(chatId, text) {
+             const webhook = webhooks.get(chatId);
+             if (!webhook)
+diff --git a/lib/channels/feishu.js b/lib/channels/feishu.js
+index 74a65b4..8e0849b 100644
+--- a/lib/channels/feishu.js
++++ b/lib/channels/feishu.js
+@@ -78,6 +78,14 @@ export function createFeishuChannel(id, config, log) {
+             ws = undefined;
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text) {
++            if (!client) throw new Error(`${id}: 尚未连接`);
++            const result = await client.im.message.create({
++                params: { receive_id_type: 'chat_id' },
++                data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) },
 +            });
-+        });
-+        ctx.effect(() => () => detachNotifications?.(), 'im-connect.notifications');
-         log(`[boot] apply 完成 ${Date.now() - applyStarted}ms`);
-         return () => { manager.disposeApi(); void fileLog.flush(); };
-     }, 'im-connect.serve');
---- a/lib/manager.js
-+++ b/lib/manager.js
-@@ -710,6 +710,26 @@
-     permissionPresets() {
-         return this.ctx.permissionPresets;
++            if (result.code) throw new Error(`${id}: 消息发送被拒绝`);
++        },
+         async send(chatId, text) {
+             if (!client)
+                 throw new Error(`${id}: 尚未连接`);
+diff --git a/lib/channels/wecom.js b/lib/channels/wecom.js
+index 67b8945..ac3c260 100644
+--- a/lib/channels/wecom.js
++++ b/lib/channels/wecom.js
+@@ -206,6 +206,10 @@ export function createWecomChannel(config, log) {
+             broker = undefined;
+             statusText = '已停止';
+         },
++        async sendNotification(chatId, text) {
++            if (!client) throw new Error('wecom: 尚未连接');
++            await client.sendMessage(chatId, { msgtype: 'markdown', markdown: { content: text } });
++        },
+         async send(chatId, text) {
+             if (!broker)
+                 throw new Error('wecom: 尚未连接');
+diff --git a/lib/client.js b/lib/client.js
+index faab1f2..19ec68b 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -18,8 +18,8 @@ window.__ModuleLoader__.load({
+     const IM_LOCALE_NS = "im-connect";
+     const IM_LOCALES = {
+       zh: {
+-        "settings.label": "IM助理", "settings.title": "IM机器人", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
+-        "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
++        "settings.label": "IM助理", "settings.title": "消息渠道", "settings.description": "管理各渠道账号。每个账号独立选择工作区、助手、模型和权限，配置仅保存在本机。",
++        "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、助手、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
+         "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
+         "account.countZero": "0 个账号", "account.countOnline": "{online} / {total} 在线", "account.countOffline": "{total} / {total} 离线", "account.statusProcessing": "处理中…", "account.statusOnline": "在线", "account.statusOffline": "离线", "account.statusRunning": "运行正常", "account.statusNotConnected": "未连接", "account.receive": "接收消息", "account.receiveDescription": "关闭后保留账号配置，但不接收新消息", "account.removeConfirm": "确定移除这个账号？本机保存的配置和凭据将一并删除。",
+         "action.addAccount": "添加账号", "action.generateQr": "生成二维码", "action.checkConnection": "检查连接", "action.reconnectAccount": "重新连接", "action.removeAccount": "移除接入", "status.saving": "保存中…", "status.saved": "已保存",
+@@ -359,6 +359,13 @@ window.__ModuleLoader__.load({
+     };
+     const openListedSession = (id, hostOpen) => {
+       if (!id) return;
++      if (String(id).startsWith("session-channel-")) {
++        const url = new URL(window.location.href);
++        url.searchParams.set("frontend", "dsh");
++        url.searchParams.set("session", id);
++        window.location.assign(url);
++        return;
++      }
+       if (String(id).startsWith("im:")) {
+         api("/sessions/ensure", {
+           method: "POST",
+@@ -379,7 +386,7 @@ window.__ModuleLoader__.load({
+     };
+     let channelSkin = "native";
+
+-    function BindModal({ ch, onClose, onConnected, catalog, permissions, workspaces, defaults, createWorkspace, pickDirectory, modelT, permissionT, t = fallbackT }) {
++    function BindModal({ ch, onClose, onConnected, catalog, assistants, permissions, workspaces, defaults, createWorkspace, pickDirectory, modelT, permissionT, t = fallbackT }) {
+       const hasQr = ch.kind === "qr" || ch.kind === "qr-or-credentials";
+       const hasManual = ch.kind === "credentials" || ch.kind === "qr-or-credentials";
+       const [tab, setTab] = useState(hasQr ? "qr" : "manual");
+@@ -391,6 +398,7 @@ window.__ModuleLoader__.load({
+       const [success, setSuccess] = useState("");
+       const [settings, setSettings] = useState(() => ({
+         cwd: defaults && defaults.cwd || "",
++        presetId: defaults && defaults.assistant && defaults.assistant.presetId || "",
+         provider: defaults && defaults.assistant && defaults.assistant.provider || "",
+         model: defaults && defaults.assistant && defaults.assistant.model || "",
+         reasoningEffort: defaults && defaults.assistant && defaults.assistant.reasoningEffort || "",
+@@ -515,7 +523,7 @@ window.__ModuleLoader__.load({
+             h(AccountSettingsPicker, {
+               value: settings,
+               onChange: (patch) => setSettings((current) => ({ ...current, ...patch })),
+-              catalog,
++              catalog, assistants,
+               permissions,
+               workspaces,
+               createWorkspace,
+@@ -714,6 +722,14 @@ window.__ModuleLoader__.load({
+       );
      }
-+    notificationTargets() {
-+        const targets = new Map();
-+        for (const record of this.sessions.list()) {
-+            const account = this.store.channels[record.channel];
-+            if (!account) continue;
-+            const id = JSON.stringify([record.channel, record.kind, record.chatId]);
-+            const platform = this.platformOf(record.channel, account);
-+            targets.set(id, { id, channelId: record.channel, chatId: record.chatId, kind: record.kind,
-+                label: `${account.name || CHANNEL_META[platform].label} · ${record.kind === 'group' ? '群聊' : '私聊'} · ${record.title || record.chatId}`,
-+                connected: this.running.has(record.channel) });
-+        }
-+        return [...targets.values()];
+
++    function reasoningEffortLabel(id, name) {
++      return ({
++        none: "无", minimal: "最低", low: "低", medium: "中",
++        high: "高", xhigh: "极高", max: "最高", ultra: "极高",
++        off: "关闭", thinking: "开启", on: "开启",
++      })[id] || name || id;
 +    }
-+    async sendNotification(targetId, text) {
-+        const target = this.notificationTargets().find((row) => row.id === targetId);
-+        const channel = target && this.running.get(target.channelId);
-+        if (!channel) throw new Error('提醒渠道未连接');
-+        if (channel.sendNotification) await channel.sendNotification(target.chatId, text, target.kind);
-+        else await channel.send(target.chatId, text);
-+    }
-     async listModelCatalog() {
-         const llm = this.ctx.get?.('llm');
-         const providers = llm?.listProviders?.() ?? [];
-@@ -744,6 +764,7 @@
++
+     function AccountSettingsPicker(props) {
+       const t = props.t || fallbackT;
+       const modelT = props.modelT || ((key) => key);
+@@ -729,10 +745,13 @@ window.__ModuleLoader__.load({
+       const [fullAccessAcknowledged, setFullAccessAcknowledged] = useState(false);
+       const items = props.workspaces || [];
+       const providers = props.catalog || [];
++      const assistants = props.assistants || [];
+       const permissions = props.permissions || [];
+       const provider = value.provider || (value.assistant && value.assistant.provider) || "";
+       const model = value.model || (value.assistant && value.assistant.model) || "";
+       const effort = value.reasoningEffort || (value.assistant && value.assistant.reasoningEffort) || "";
++      const presetId = value.presetId || (value.assistant && value.assistant.presetId) || (provider === "workagent-harness" ? "builtin-general" : provider.startsWith("workagent-") ? "builtin-" + provider.slice(10) : "");
++      const assistant = assistants.find((item) => item.id === presetId);
+       const cwd = value.cwd || "";
+       const permission = value.permission || "";
+       const privateAccess = value.privateAccess === "all" ? "all" : "approved";
+@@ -757,11 +776,11 @@ window.__ModuleLoader__.load({
+       const efforts = reasoning
+         ? [
+             ...(reasoning.defaultEffort ? [] : [{ id: "", name: modelT("effort.providerDefault") }]),
+-            ...((reasoning.efforts || []).map((item) => ({ id: item.id, name: item.name || item.id, description: item.description }))),
++            ...((reasoning.efforts || []).map((item) => ({ id: item.id, name: reasoningEffortLabel(item.id, item.name), description: item.description }))),
+           ]
+         : [];
+       const effortLabel = reasoning
+-        ? ((efforts.find((item) => item.id === effectiveEffort) || {}).name || effectiveEffort || modelT("effort.providerDefault"))
++        ? ((efforts.find((item) => item.id === effectiveEffort) || {}).name || reasoningEffortLabel(effectiveEffort) || modelT("effort.providerDefault"))
+         : "";
+       const permissionOptions = permissions.map((item) => ({ ...item, label: permissionLabel(item, t) }));
+       const currentPermission = permissionOptions.find((item) => item.value === permission);
+@@ -832,25 +851,36 @@ window.__ModuleLoader__.load({
+           h("div", { className: "ima-chip-split" }),
+           h(ChipRow, { icon: h(PlusIcon), label: t("composer.addWorkspace"), onClick: onAddWorkspace }),
+         ), true),
+-        field("model", modelT("menu.model"), h(ChipMenu, {
++        field("model", "助手与模型", h(ChipMenu, {
+           open: open === "model",
+           onToggle: (next) => { setOpen(next ? "model" : ""); if (next) setModelPane("root"); },
+           icon: null,
+-          label: (currentModel && currentModel.label) || t("account.selectModel"),
+-          title: currentModel && currentModel.label,
++          label: [assistant ? assistant.name : (presetId ? "助手不可用" : "默认助手"), (currentModel && currentModel.label) || t("account.selectModel")].join(" · "),
++          title: [assistant ? assistant.name : "默认助手", currentModel && currentModel.label].filter(Boolean).join(" · "),
+           suffix: effortLabel,
+-          ariaLabel: modelT("trigger.selectAria"),
++          ariaLabel: "选择助手与模型",
+           menuAria: modelT("menu.aria"),
+           className: "ima-account-picker ima-model-select",
+           menuClassName: "ima-model-menu",
+         },
+           modelPane === "root" && [
++            h(ChipRow, { key: "assistant", kv: true, label: "助手", hint: assistant ? assistant.name : (presetId ? "助手不可用" : "默认助手"), chevron: true, onClick: () => setModelPane("assistant") }),
+             h(ChipRow, { key: "model", kv: true, label: modelT("menu.model"), hint: (currentModel && currentModel.label) || t("account.selectModel"), chevron: true, onClick: () => setModelPane("model") }),
+             reasoning && h(ChipRow, { key: "effort", kv: true, label: modelT("menu.effort"), hint: effortLabel || modelT("effort.providerDefault"), chevron: true, onClick: () => setModelPane("effort") }),
+           ],
++          modelPane === "assistant" && assistants.map((item) => h(ModelChoiceRow, {
++            key: item.id, label: item.name, active: item.id === presetId,
++            onClick: () => {
++              const available = models.filter((row) => row.provider === item.provider);
++              const next = available.find((row) => row.model === item.modelId) || available.find((row) => row.model === model) || available[0];
++              if (!next) { setHint("该助手暂无可用模型"); return; }
++              update({ presetId: item.id, provider: next.provider, model: next.model, reasoningEffort: (next.reasoning && next.reasoning.defaultEffort) || "" });
++              setOpen("");
++            },
++          })),
+           modelPane === "model" && (models.length === 0
+             ? h("div", { className: "ima-chip-empty" }, modelT("empty.models"))
+-            : modelGroups.map((group) => h("section", { key: group.id, className: "ima-model-group", role: "group", "aria-label": group.name },
++            : modelGroups.filter((group) => !assistant || group.id === assistant.provider).map((group) => h("section", { key: group.id, className: "ima-model-group", role: "group", "aria-label": group.name },
+                 h("div", { className: "ima-model-group-title" }, group.name),
+                 ...group.models.map((item) => h(ModelChoiceRow, {
+                   key: item.value,
+@@ -859,7 +889,9 @@ window.__ModuleLoader__.load({
+                   active: item.provider === provider && item.model === model,
+                   onClick: () => {
+                     const nextEffort = (item.reasoning && item.reasoning.defaultEffort) || "";
+-                    update({ provider: item.provider, model: item.model, reasoningEffort: nextEffort });
++                    const nextAssistant = assistant && assistant.provider === item.provider ? assistant : assistants.find((row) => row.provider === item.provider && row.id.startsWith("builtin-")) || assistants.find((row) => row.provider === item.provider);
++                    if (item.provider.startsWith("workagent-") && !nextAssistant) { setHint("请先在助手设置中启用该引擎的助手"); return; }
++                    update({ presetId: nextAssistant ? nextAssistant.id : "", provider: item.provider, model: item.model, reasoningEffort: nextEffort });
+                     setOpen("");
+                   },
                  })),
-             });
-         }
-+        out.push(...await this.ctx.get('workagentChannels').models());
-         return out;
+@@ -1002,11 +1034,11 @@ window.__ModuleLoader__.load({
+       const efforts = reasoning
+         ? [
+             ...(reasoning.defaultEffort ? [] : [{ id: "", name: props.modelT("effort.providerDefault") }]),
+-            ...((reasoning.efforts || []).map((item) => ({ id: item.id, name: item.name || item.id, description: item.description }))),
++            ...((reasoning.efforts || []).map((item) => ({ id: item.id, name: reasoningEffortLabel(item.id, item.name), description: item.description }))),
+           ]
+         : [];
+       const effortLabel = reasoning
+-        ? ((efforts.find((item) => item.id === effectiveEffort) || {}).name || effectiveEffort || props.modelT("effort.providerDefault"))
++        ? ((efforts.find((item) => item.id === effectiveEffort) || {}).name || reasoningEffortLabel(effectiveEffort) || props.modelT("effort.providerDefault"))
+         : "";
+       const permissionOptions = permissions.map((item) => ({
+         ...item,
+@@ -1117,6 +1149,7 @@ window.__ModuleLoader__.load({
+               ariaLabel: props.modelT("trigger.selectAria"),
+             },
+               modelPane === "root" && [
++            h(ChipRow, { key: "assistant", kv: true, label: "助手", hint: assistant ? assistant.name : (presetId ? "助手不可用" : "默认助手"), chevron: true, onClick: () => setModelPane("assistant") }),
+                 h(ChipRow, {
+                   key: "model",
+                   kv: true,
+@@ -1207,7 +1240,7 @@ window.__ModuleLoader__.load({
+       );
      }
-     async startOne(id) {
---- a/lib/engine/router.js
-+++ b/lib/engine/router.js
-@@ -135,7 +135,7 @@
-             const canListStored = typeof persistence?.list === "function";
-             if (!canListLive && !canListStored)
-                 return undefined;
--            const ids = new Set();
-+            const ids = new Set(this.ctx.get('workagentChannels').listSessionIds());
-             if (canListLive && live.list) {
-                 for (const session of live.list())
-                     ids.add(String(session.id));
-@@ -205,10 +205,11 @@
-     }
-     async create(channelId, kind, chatId, title, preferredSessionId) {
-         const key = sessionKeyOf(channelId, kind, chatId);
--        const sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
-+        let sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
-         let handle;
-         try {
--            handle = await this.createHandle(sessionId, channelId);
-+            handle = await this.createHandle(sessionId, channelId, title);
-+            sessionId = handle.sessionId ?? sessionId;
-         }
-         catch (error) {
-             if (!preferredSessionId || !isIdCollision(error))
-@@ -232,6 +233,17 @@
-         return binding;
-     }
-     async resume(record) {
-+        const service = this.ctx.get('workagentChannels');
-+        const config = this.resolveConfig(record.channel);
-+        if (record.sessionId.startsWith('session-channel-')) {
-+            if (!service.handles(config.provider)) return undefined;
-+            const handle = await service.open(config, record.sessionId, record.title);
-+            if (!handle) return undefined;
-+            return { key: sessionKeyOf(record.channel, record.kind, record.chatId),
-+                channelId: record.channel, kind: record.kind, chatId: record.chatId,
-+                sessionId: record.sessionId, handle };
-+        }
-+        if (service.handles(config.provider)) return undefined;
-         const liveAgent = this.ctx.agents?.get?.(record.sessionId);
-         if (liveAgent) {
-             const binding = {
-@@ -267,7 +279,10 @@
-             return undefined;
-         }
-     }
--    async createHandle(sessionId, channelId) {
-+    async createHandle(sessionId, channelId, title) {
-+        const service = this.ctx.get('workagentChannels');
-+        const selection = this.resolveConfig(channelId);
-+        if (service.handles(selection.provider)) return service.open(selection, undefined, title);
-         const agents = this.ctx.agents;
-         if (!agents?.create)
-             throw new Error('当前 Host 没有 agents 服务，无法创建 IM 会话');
-@@ -314,6 +329,7 @@
-         return norm(left) === norm(right);
-     }
-     async attachWorkspace(sessionId, channelId) {
-+        if (sessionId.startsWith('session-channel-')) return;
-         let workspaces = [];
-         try {
-             workspaces = this.ctx.get?.('workspaceRegistry')?.list?.() ?? [];
+
+-    function AccountInspector({ account, catalog, permissions, workspaces, createWorkspace, pickDirectory, modelT, permissionT, t, onAction, onSave }) {
++    function AccountInspector({ account, catalog, assistants, permissions, workspaces, createWorkspace, pickDirectory, modelT, permissionT, t, onAction, onSave }) {
+       const [draft, setDraft] = useState(account);
+       const [note, setNote] = useState("");
+       const saveSeq = useRef(0);
+@@ -1215,7 +1248,7 @@ window.__ModuleLoader__.load({
+         saveSeq.current += 1;
+         setDraft(account);
+         setNote("");
+-      }, [account.id, account.cwd, account.permission, account.privateAccess, account.receiveEnabled, account.assistant && account.assistant.provider, account.assistant && account.assistant.model, account.assistant && account.assistant.reasoningEffort]);
++      }, [account.id, account.cwd, account.permission, account.privateAccess, account.receiveEnabled, account.assistant && account.assistant.presetId, account.assistant && account.assistant.provider, account.assistant && account.assistant.model, account.assistant && account.assistant.reasoningEffort]);
+       const save = (patch) => {
+         const seq = ++saveSeq.current;
+         const next = { ...draft, ...patch };
+@@ -1224,6 +1257,7 @@ window.__ModuleLoader__.load({
+         return onSave(account.id, {
+           name: next.name,
+           cwd: next.cwd,
++          presetId: next.assistant.presetId || null,
+           provider: next.assistant.provider,
+           model: next.assistant.model,
+           reasoningEffort: next.assistant.reasoningEffort || null,
+@@ -1235,10 +1269,11 @@ window.__ModuleLoader__.load({
+         });
+       };
+       const applySettings = (patch) => {
+-        const hasAssistant = Object.prototype.hasOwnProperty.call(patch, "provider") || Object.prototype.hasOwnProperty.call(patch, "model") || Object.prototype.hasOwnProperty.call(patch, "reasoningEffort");
++        const hasAssistant = Object.prototype.hasOwnProperty.call(patch, "presetId") || Object.prototype.hasOwnProperty.call(patch, "provider") || Object.prototype.hasOwnProperty.call(patch, "model") || Object.prototype.hasOwnProperty.call(patch, "reasoningEffort");
+         if (!hasAssistant) return save(patch);
+         const assistant = {
+           ...(draft.assistant || {}),
++          ...(Object.prototype.hasOwnProperty.call(patch, "presetId") ? { presetId: patch.presetId } : {}),
+           ...(Object.prototype.hasOwnProperty.call(patch, "provider") ? { provider: patch.provider } : {}),
+           ...(Object.prototype.hasOwnProperty.call(patch, "model") ? { model: patch.model } : {}),
+           ...(Object.prototype.hasOwnProperty.call(patch, "reasoningEffort") ? { reasoningEffort: patch.reasoningEffort || undefined } : {}),
+@@ -1258,7 +1293,7 @@ window.__ModuleLoader__.load({
+           h(AccountSettingsPicker, {
+             value: draft,
+             onChange: applySettings,
+-            catalog,
++            catalog, assistants,
+             permissions,
+             workspaces,
+             createWorkspace,
+@@ -1292,7 +1327,7 @@ window.__ModuleLoader__.load({
+       const [editing, setEditing] = useState(null);
+       const [selected, setSelected] = useState(storedAccountSelection);
+       const [expanded, setExpanded] = useState({ weixin: true });
+-      const [catalog, setCatalog] = useState({ providers: [], permissions: [], assistant: null, cwd: "", permission: "" });
++      const [catalog, setCatalog] = useState({ providers: [], assistants: [], permissions: [], assistant: null, cwd: "", permission: "" });
+       const workspaces = props.useWorkspaces ? (props.useWorkspaces((state) => state && state.items || []) || []) : [];
+       const refreshSeq = useRef(0);
+       const selectAccount = useCallback((id) => {
+@@ -1323,7 +1358,7 @@ window.__ModuleLoader__.load({
+         ensureStyle();
+         refresh();
+         api("/assistant").then((data) => {
+-          if (data.ok) setCatalog({ providers: data.providers || [], permissions: data.permissions || [], assistant: data.assistant || null, cwd: data.cwd || "", permission: data.permission || "" });
++          if (data.ok) setCatalog({ providers: data.providers || [], assistants: data.assistants || [], permissions: data.permissions || [], assistant: data.assistant || null, cwd: data.cwd || "", permission: data.permission || "" });
+         }).catch(() => undefined);
+       }, [refresh]);
+       useEffect(() => { const timer = setInterval(refresh, 4000); return () => clearInterval(timer); }, [refresh]);
+@@ -1411,6 +1446,7 @@ window.__ModuleLoader__.load({
+                 ? h(AccountInspector, {
+                     account: selectedAccount,
+                     catalog: catalog.providers,
++          assistants: catalog.assistants,
+                     permissions: catalog.permissions,
+                     workspaces,
+                     createWorkspace: props.createWorkspace,
+@@ -1431,6 +1467,7 @@ window.__ModuleLoader__.load({
+         editing && h(BindModal, {
+           ch: (channels || []).find((item) => item.id === editing) || { id: editing, label: editing, kind: "qr", fields: [] },
+           catalog: catalog.providers,
++          assistants: catalog.assistants,
+           permissions: catalog.permissions,
+           workspaces,
+           createWorkspace: props.createWorkspace,
+@@ -2229,10 +2266,16 @@ window.__ModuleLoader__.load({
+
+     function apply(ctx) {
+       ensureStyle();
+-      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, IM_LOCALES), "im-connect: dictionaries");
++      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, { ...IM_LOCALES, en: IM_LOCALES.zh }), "im-connect: dictionaries");
+       const t = ctx.locale.bind(IM_LOCALE_NS);
+-      const permissionT = ctx.locale.bind("permission.access");
+-      const modelT = ctx.locale.bind("model");
++      const permissionT = (key) => ({
++        "confirm.title": "启用完全访问", "confirm.description": "助手将能够访问工作区以外的文件并执行命令，请仅在信任此账号的使用者时启用。",
++        "confirm.acknowledge": "我了解并接受上述权限", "confirm.cancel": "取消", "confirm.enable": "启用完全访问",
++      })[key] || key;
++      const modelT = (key) => ({
++        "effort.providerDefault": "模型默认", "menu.model": "模型", "menu.effort": "思考强度",
++        "trigger.selectAria": "选择模型", "menu.aria": "模型设置", "empty.models": "暂无可用模型", "trigger.fallback": "选择模型",
++      })[key] || key;
+       const subscribeLocale = (listener) => ctx.locale.subscribe(listener);
+       const localeSnapshot = () => ctx.locale.getSnapshot();
+       function LocalizedChannelRail(props) {
+@@ -2253,9 +2296,9 @@ window.__ModuleLoader__.load({
+       };
+       ctx.slots.inject("settings.section", () => ctx.slots.register({
+           name: "settings.section",
+-          id: "im-assistant",
+-          order: 28,
+-          label: () => t("settings.label"),
++          id: "workagent-channels",
++          order: 35,
++          label: "消息渠道",
+           icon: "chat",
+           locale: IM_LOCALE_NS,
+         inject: () => ({
+diff --git a/lib/engine/assistant-settings.d.ts b/lib/engine/assistant-settings.d.ts
+index 1353db7..042a5b6 100644
+--- a/lib/engine/assistant-settings.d.ts
++++ b/lib/engine/assistant-settings.d.ts
+@@ -1,11 +1,13 @@
+ /** IM 助理页选择的模型。 */
+ export interface AssistantModel {
++    presetId?: string;
+     provider: string;
+     model: string;
+     reasoningEffort?: string;
+ }
+ export type PermissionPreset = string;
+ export declare function normalizeAssistantModel(input: {
++    presetId?: unknown;
+     provider?: unknown;
+     model?: unknown;
+     reasoningEffort?: unknown;
+@@ -14,4 +16,4 @@ export declare function pickAssistantModel(...candidates: Array<AssistantModel |
+ export declare function normalizeWorkspacePath(input: unknown): string | undefined;
+ export declare function normalizePermission(input: unknown, officialNames?: readonly string[]): PermissionPreset | undefined;
+ export declare function normalizeEffort(input: unknown): string | undefined;
+-//# sourceMappingURL=assistant-settings.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=assistant-settings.d.ts.map
+diff --git a/lib/engine/assistant-settings.js b/lib/engine/assistant-settings.js
+index 25aa9ab..9398456 100644
+--- a/lib/engine/assistant-settings.js
++++ b/lib/engine/assistant-settings.js
+@@ -4,7 +4,8 @@ export function normalizeAssistantModel(input) {
+     if (!provider || !model)
+         return undefined;
+     const reasoningEffort = normalizeEffort(input.reasoningEffort);
+-    return reasoningEffort ? { provider, model, reasoningEffort } : { provider, model };
++    const presetId = typeof input.presetId === 'string' ? input.presetId.trim() : '';
++    return { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}), ...(presetId ? { presetId } : {}) };
+ }
+ export function pickAssistantModel(...candidates) {
+     for (const item of candidates) {
+diff --git a/lib/engine/gateway.js b/lib/engine/gateway.js
+index 8c203dd..efa0cb1 100644
 --- a/lib/engine/gateway.js
 +++ b/lib/engine/gateway.js
-@@ -349,12 +349,12 @@
+@@ -1,4 +1,5 @@
+ import { ApprovalBroker } from './approval.js';
++import { handleWorkagentCommand, checkWorkagentIdle } from './workagent-commands.js';
+ import { SessionMerger } from './merge.js';
+ import { SessionRouter } from './router.js';
+ import { isImSessionId } from './session-id.js';
+@@ -311,6 +312,10 @@ export class ImEngine {
+         }
+     }
+     async handleCommand(channel, msg) {
++        try {
++            const reply = await handleWorkagentCommand(this, channel, msg);
++            if (reply !== undefined) return reply;
++        } catch (error) { return `命令未完成：${error instanceof Error ? error.message : '请稍后重试'}`; }
+         const [raw] = msg.text.trim().split(/\s+/);
+         const cmd = raw?.toLowerCase();
+         const kind = msg.kind === 'group' ? 'group' : 'dm';
+@@ -334,6 +339,8 @@ export class ImEngine {
+         const kind = msg.kind === 'group' ? 'group' : 'dm';
+         const title = (msg.username || msg.text || msg.chatId).slice(0, 40);
+         const binding = await this.router.getOrCreate(channel.id, kind, msg.chatId, title);
++        if (!await checkWorkagentIdle(this, channel, msg, binding)) return;
++        if (binding.handle?.workagent) this.store.upsert(binding.key, {...this.store.get(binding.key),lastInputAt:new Date().toISOString()});
+         const content = [];
+         if (msg.text.trim())
+             content.push({ type: 'text', text: msg.text.trim() });
+@@ -349,12 +356,12 @@ export class ImEngine {
              this.sessionActors.set(binding.sessionId, msg.userId);
          this.streams.reset(`${channel.id}:${msg.chatId}`);
          await channel.sendAction?.(msg.chatId, 'typing').catch(() => undefined);
@@ -146,9 +424,90 @@
          this.log(`[${channel.id}] 已注入 ${binding.sessionId}`);
      }
      async answerApproval(channelId, msg, allow) {
+@@ -779,4 +786,4 @@ export class ImEngine {
+         return { status: 'delivered', deliveredAny };
+     }
+ }
+-//# sourceMappingURL=gateway.js.map
+\ No newline at end of file
++//# sourceMappingURL=gateway.js.map
+diff --git a/lib/engine/router.js b/lib/engine/router.js
+index dee9b60..566f838 100644
+--- a/lib/engine/router.js
++++ b/lib/engine/router.js
+@@ -135,7 +135,7 @@ export class SessionRouter {
+             const canListStored = typeof persistence?.list === "function";
+             if (!canListLive && !canListStored)
+                 return undefined;
+-            const ids = new Set();
++            const ids = new Set(this.ctx.get('workagentChannels').listSessionIds());
+             if (canListLive && live.list) {
+                 for (const session of live.list())
+                     ids.add(String(session.id));
+@@ -205,10 +205,11 @@ export class SessionRouter {
+     }
+     async create(channelId, kind, chatId, title, preferredSessionId) {
+         const key = sessionKeyOf(channelId, kind, chatId);
+-        const sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
++        let sessionId = preferredSessionId || createImSessionId(channelId, kind, chatId);
+         let handle;
+         try {
+-            handle = await this.createHandle(sessionId, channelId);
++            handle = await this.createHandle(sessionId, channelId, title, key);
++            sessionId = handle.sessionId ?? sessionId;
+         }
+         catch (error) {
+             if (!preferredSessionId || !isIdCollision(error))
+@@ -232,6 +233,17 @@ export class SessionRouter {
+         return binding;
+     }
+     async resume(record) {
++        const service = this.ctx.get('workagentChannels');
++        const config = record.workagentConfig || this.resolveConfig(record.channel);
++        if (record.sessionId.startsWith('session-channel-')) {
++            if (!service.handles(config.provider)) return undefined;
++            const handle = await service.open(config, record.sessionId, record.title, sessionKeyOf(record.channel, record.kind, record.chatId));
++            if (!handle) return undefined;
++            return { key: sessionKeyOf(record.channel, record.kind, record.chatId),
++                channelId: record.channel, kind: record.kind, chatId: record.chatId,
++                sessionId: record.sessionId, handle };
++        }
++        if (service.handles(config.provider)) return undefined;
+         const liveAgent = this.ctx.agents?.get?.(record.sessionId);
+         if (liveAgent) {
+             const binding = {
+@@ -267,7 +279,10 @@ export class SessionRouter {
+             return undefined;
+         }
+     }
+-    async createHandle(sessionId, channelId) {
++    async createHandle(sessionId, channelId, title, key) {
++        const service = this.ctx.get('workagentChannels');
++        const selection = this.resolveConfig(channelId);
++        if (service.handles(selection.provider)) return service.open(selection, undefined, title, key);
+         const agents = this.ctx.agents;
+         if (!agents?.create)
+             throw new Error('当前 Host 没有 agents 服务，无法创建 IM 会话');
+@@ -314,6 +329,7 @@ export class SessionRouter {
+         return norm(left) === norm(right);
+     }
+     async attachWorkspace(sessionId, channelId) {
++        if (sessionId.startsWith('session-channel-')) return;
+         let workspaces = [];
+         try {
+             workspaces = this.ctx.get?.('workspaceRegistry')?.list?.() ?? [];
+@@ -396,4 +412,4 @@ function isIdCollision(error) {
+     const message = error instanceof Error ? error.message : String(error);
+     return message.includes('id collision') || message.includes('already has a persisted log');
+ }
+-//# sourceMappingURL=router.js.map
+\ No newline at end of file
++//# sourceMappingURL=router.js.map
+diff --git a/lib/engine/session-id.js b/lib/engine/session-id.js
+index 39ee519..bea71a1 100644
 --- a/lib/engine/session-id.js
 +++ b/lib/engine/session-id.js
-@@ -12,7 +12,7 @@
+@@ -12,7 +12,7 @@ export function createImSessionId(channel, kind, chatId, now = Date.now()) {
      return `${IM_SESSION_PREFIX}${channel}:${kind}:${stamp}:${chatId}`;
  }
  export function isImSessionId(sessionId) {
@@ -157,105 +516,300 @@
  }
  const CHANNEL_IDS = ['dingtalk', 'feishu', 'lark', 'weixin', 'wecom', 'qq', 'telegram'];
  const STAMP_RE = /^\d{13,}$/;
---- a/lib/client.js
-+++ b/lib/client.js
-@@ -18,7 +18,7 @@
-     const IM_LOCALE_NS = "im-connect";
-     const IM_LOCALES = {
-       zh: {
--        "settings.label": "IM助理", "settings.title": "IM机器人", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
-+        "settings.label": "IM助理", "settings.title": "消息渠道", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
-         "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
-         "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
-         "account.countZero": "0 个账号", "account.countOnline": "{online} / {total} 在线", "account.countOffline": "{total} / {total} 离线", "account.statusProcessing": "处理中…", "account.statusOnline": "在线", "account.statusOffline": "离线", "account.statusRunning": "运行正常", "account.statusNotConnected": "未连接", "account.receive": "接收消息", "account.receiveDescription": "关闭后保留账号配置，但不接收新消息", "account.removeConfirm": "确定移除这个账号？本机保存的配置和凭据将一并删除。",
-@@ -359,6 +359,13 @@
-     };
-     const openListedSession = (id, hostOpen) => {
-       if (!id) return;
-+      if (String(id).startsWith("session-channel-")) {
-+        const url = new URL(window.location.href);
-+        url.searchParams.set("frontend", "dsh");
-+        url.searchParams.set("session", id);
-+        window.location.assign(url);
-+        return;
-+      }
-       if (String(id).startsWith("im:")) {
-         api("/sessions/ensure", {
-           method: "POST",
-@@ -2229,10 +2236,16 @@
- 
-     function apply(ctx) {
-       ensureStyle();
--      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, IM_LOCALES), "im-connect: dictionaries");
-+      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, { ...IM_LOCALES, en: IM_LOCALES.zh }), "im-connect: dictionaries");
-       const t = ctx.locale.bind(IM_LOCALE_NS);
--      const permissionT = ctx.locale.bind("permission.access");
--      const modelT = ctx.locale.bind("model");
-+      const permissionT = (key) => ({
-+        "confirm.title": "启用完全访问", "confirm.description": "助手将能够访问工作区以外的文件并执行命令，请仅在信任此账号的使用者时启用。",
-+        "confirm.acknowledge": "我了解并接受上述权限", "confirm.cancel": "取消", "confirm.enable": "启用完全访问",
-+      })[key] || key;
-+      const modelT = (key) => ({
-+        "effort.providerDefault": "模型默认", "menu.model": "引擎与模型", "menu.effort": "思考强度",
-+        "trigger.selectAria": "选择模型", "menu.aria": "模型设置", "empty.models": "暂无可用模型", "trigger.fallback": "选择模型",
-+      })[key] || key;
-       const subscribeLocale = (listener) => ctx.locale.subscribe(listener);
-       const localeSnapshot = () => ctx.locale.getSnapshot();
-       function LocalizedChannelRail(props) {
-@@ -2253,9 +2266,9 @@
-       };
-       ctx.slots.inject("settings.section", () => ctx.slots.register({
-           name: "settings.section",
--          id: "im-assistant",
--          order: 28,
--          label: () => t("settings.label"),
-+          id: "workagent-channels",
-+          order: 35,
-+          label: "消息渠道",
-           icon: "chat",
-           locale: IM_LOCALE_NS,
-         inject: () => ({
---- a/lib/channels/wecom.js
-+++ b/lib/channels/wecom.js
-@@ -206,6 +206,10 @@
-             broker = undefined;
-             statusText = '已停止';
-         },
-+        async sendNotification(chatId, text) {
-+            if (!client) throw new Error('wecom: 尚未连接');
-+            await client.sendMessage(chatId, { msgtype: 'markdown', markdown: { content: text } });
-+        },
-         async send(chatId, text) {
-             if (!broker)
-                 throw new Error('wecom: 尚未连接');
---- a/lib/channels/dingtalk.js
-+++ b/lib/channels/dingtalk.js
-@@ -89,6 +89,11 @@
-             targets.clear();
-             statusText = '已停止';
-         },
-+        async sendNotification(chatId, text, kind) {
-+            const target = kind === 'group' ? { type: 'group', openConversationId: chatId } : { type: 'user', userId: chatId };
-+            const card = await cards.create(target, text);
-+            await cards.finish(card, text);
-+        },
-         async send(chatId, text) {
-             const webhook = webhooks.get(chatId);
-             if (!webhook)
---- a/lib/channels/feishu.js
-+++ b/lib/channels/feishu.js
-@@ -78,6 +78,14 @@
-             ws = undefined;
-             statusText = '已停止';
-         },
-+        async sendNotification(chatId, text) {
-+            if (!client) throw new Error(`${id}: 尚未连接`);
-+            const result = await client.im.message.create({
-+                params: { receive_id_type: 'chat_id' },
-+                data: { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) },
+diff --git a/lib/engine/types.d.ts b/lib/engine/types.d.ts
+index bee91bf..f8fb0c5 100644
+--- a/lib/engine/types.d.ts
++++ b/lib/engine/types.d.ts
+@@ -41,6 +41,7 @@ export interface ChannelAdapter {
+     skipMerge?: boolean;
+ }
+ export interface EngineConfig {
++    presetId?: string;
+     cwd: string;
+     provider: string;
+     model: string;
+@@ -49,4 +50,4 @@ export interface EngineConfig {
+     permissionPreset: string;
+     reasoningEffort?: string;
+ }
+-//# sourceMappingURL=types.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=types.d.ts.map
+diff --git a/.cache/channel-assistants/after/lib/engine/workagent-commands.js b/lib/engine/workagent-commands.js
+new file mode 100644
+index 0000000..0584983
+--- /dev/null
++++ b/lib/engine/workagent-commands.js
+@@ -0,0 +1,100 @@
++import { sessionKeyOf } from './session-id.js';
++const aliases = { '/help':'帮助', '/帮助':'帮助', '/new':'新对话', '/clear':'新对话', '/新对话':'新对话', '/history':'历史', '/历史':'历史', '/switch':'切换', '/切换':'切换', '/projects':'项目', '/项目':'项目', '/model':'模型', '/模型':'模型', '/continue':'继续', '/继续':'继续', '/compact':'压缩', '/压缩':'压缩', '/rename':'重命名', '/重命名':'重命名', '/quota':'额度', '/额度':'额度', '/cancel':'取消', '/取消':'取消', '/idle':'空闲', '/空闲':'空闲', '/策略':'策略' };
++const help = '直接发消息继续当前会话。\n/新对话 [项目序号或 ID]\n/项目 查看项目\n/历史 查看本聊天历史\n/切换 序号或会话 ID\n/模型 [序号或模型 ID]\n/继续 继续空闲前的会话\n/压缩 压缩当前上下文\n/重命名 新名称\n/额度 查看当前模型额度\n/空闲 分钟（0 表示不检查）\n/策略 询问、继续或新建\n/取消 取消待续接消息或停止当前执行\n/帮助';
++const choice = (rows, value) => rows.find((row) => row.id === value) || (/^[1-9]\d*$/.test(value) ? rows[Number(value)-1] : undefined);
++export async function handleWorkagentCommand(engine, channel, msg) {
++  const [raw, ...parts] = msg.text.trim().split(/\s+/);
++  const command = aliases[raw.toLowerCase()];
++  if (!command) return undefined;
++  const service = engine.ctx.get('workagentChannels');
++  const config = engine.resolveConfig(channel.id);
++  if (!service.handles(config.provider)) return undefined;
++  const argument = parts.join(' ');
++  const kind = msg.kind === 'group' ? 'group' : 'dm';
++  const key = sessionKeyOf(channel.id, kind, msg.chatId);
++  if (command === '帮助') return help;
++  if (command === '项目') return service.projects().map((row,index)=>`${index+1}. ${row.name} (${row.id})`).join('\n') || '暂无项目。';
++  const history = () => service.history(key);
++  if (command === '历史' || (command === '切换' && !argument)) return history().map((row,index)=>`${index+1}. ${row.title} (${row.id})`).join('\n') || '本聊天暂无历史会话。';
++  const binding = await engine.router.getOrCreate(channel.id,kind,msg.chatId,msg.username || msg.chatId);
++  const saved = engine.store.get(key);
++  if (saved?.pendingInput?.userId && saved.pendingInput.userId !== msg.userId && ['继续','取消','新对话'].includes(command)) return '请由发送待续接消息的用户选择。';
++  const update = (values) => engine.store.upsert(key,{...engine.store.get(key),...values});
++  if (engine.questions.has(binding.sessionId) || engine.broker.has(binding.sessionId)) return '请先完成当前问题或审批。';
++  if (command === '空闲') {
++    const minutes=Number(argument);
++    if(!argument || !Number.isInteger(minutes) || minutes<0 || minutes>10080) return '用法：/空闲 分钟，范围 0–10080；0 表示不检查。';
++    update({idleMinutes:minutes}); return `空闲检查已设置为 ${minutes} 分钟。`;
++  }
++  if(command==='策略') {
++    if(!['询问','继续','新建'].includes(argument)) return '用法：/策略 询问、继续或新建';
++    update({idlePolicy:argument}); return `空闲后将${argument}。`;
++  }
++  if(command==='取消') {
++    if(saved?.pendingInput){update({pendingInput:null,lastInputAt:new Date().toISOString()});return '已取消待续接消息。';}
++    await service.cancel(key,binding.sessionId); return '已请求停止当前执行。';
++  }
++  if(command==='继续') {
++    update({pendingInput:null,lastInputAt:new Date().toISOString()});
++    try { await engine.inject(channel,{...(saved?.pendingInput || {...msg,text:'请继续当前任务。'}),workagentContinue:true}); }
++    catch(error) { if(saved?.pendingInput) update({pendingInput:saved.pendingInput}); throw error; }
++    return '已继续当前会话。';
++  }
++  if(command==='重命名') {
++    if(!argument) return '用法：/重命名 新名称';
++    await service.rename(key,binding.sessionId,argument); engine.router.rename(binding.sessionId,argument); return `已重命名为 ${argument}`;
++  }
++  if(command==='额度') {
++    const value=await service.quota(key,binding.sessionId);
++    return `当前模型额度（${value.period}）：上限 ${value.limitUnits}，已用 ${value.consumedUnits}，预留 ${value.reservedUnits}。`;
++  }
++  if(command==='压缩') { await service.compact(key,binding.sessionId); return '已提交上下文压缩。'; }
++  if(command==='模型') {
++    const catalog=await service.sessionModels(key,binding.sessionId);
++    const models=catalog.groups.flatMap((group)=>group.models);
++    if(!argument) return `当前模型：${catalog.current.model}\n`+models.map((row,index)=>`${index+1}. ${row.name} (${row.id})`).join('\n');
++    const selected=choice(models,argument); if(!selected) return '没有找到这个模型，请先发送 /模型。';
++    const workagentConfig=await service.selectModel(key,binding.sessionId,selected.id); update({workagentConfig}); return `已切换到 ${selected.name}`;
++  }
++  if(history().find((row)=>row.id===binding.sessionId)?.active) return '当前会话仍在运行，请停止或等待完成后切换。';
++  let handle, workagentConfig;
++  if(command==='切换') {
++    const selected=choice(history(),argument); if(!selected) return '没有找到本聊天的这个历史会话。';
++    if(selected.active) return '目标会话仍在运行，请稍后再切换。';
++    if(selected.id===binding.sessionId) return '已是当前会话。';
++    handle=await service.resume(key,selected.id);
++    workagentConfig=service.configuration(key,selected.id);
++  } else if(command==='新对话') {
++    workagentConfig=saved?.workagentConfig || config;
++    if(argument){const project=choice(service.projects(),argument);if(!project)return '没有找到项目，请先发送 /项目。';workagentConfig={...workagentConfig,cwd:project.cwd};}
++    handle=await service.open(workagentConfig,undefined,msg.username || msg.chatId,key);
++  } else return undefined;
++  if(!handle) return '暂时无法打开目标会话。';
++  await binding.handle?.dispose();
++  engine.router.live.set(key,{...binding,sessionId:handle.sessionId,handle});
++  update({sessionId:handle.sessionId,title:service.history(key).find((row)=>row.id===handle.sessionId)?.title || saved?.title,workagentConfig,pendingInput:null,lastInputAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
++  if(command==='新对话' && saved?.pendingInput) {
++    try { await engine.inject(channel,{...saved.pendingInput,workagentContinue:true}); }
++    catch(error) { update({pendingInput:saved.pendingInput}); throw error; }
++  }
++  return `已${command==='新对话'?'新建':'切换'}会话：${handle.sessionId}`;
++}
++
++export async function checkWorkagentIdle(engine,channel,msg,binding) {
++  if(!binding.handle?.workagent || msg.workagentContinue) return true;
++  const record=engine.store.get(binding.key);
++  const service=engine.ctx.get('workagentChannels');
++  const history=service.history(binding.key).find((row)=>row.id===binding.sessionId);
++  const minutes=record?.idleMinutes ?? 30;
++  const last=Math.max(Date.parse(record?.lastInputAt || '') || 0,Date.parse(history?.updatedAt || '') || 0);
++  if(!record?.lastInputAt || !minutes || history?.active || Date.now()-last<minutes*60000) return true;
++  const pending=record.pendingInput;
++  if(pending){await channel.send(msg.chatId,'已有一条待续接消息。请先发送 /继续、/新对话 或 /取消。');return false;}
++  if(record.idlePolicy==='继续') return true;
++  engine.store.upsert(binding.key,{...record,pendingInput:msg});
++  if(record.idlePolicy==='新建') {
++    const reply=await handleWorkagentCommand(engine,channel,{...msg,text:'/新对话'});
++    if(reply) await channel.send(msg.chatId,reply);
++  } else await channel.send(msg.chatId,`会话已空闲超过 ${minutes} 分钟。消息已暂存，请发送 /继续、/新对话 或 /取消。`);
++  return false;
++}
+diff --git a/lib/index.js b/lib/index.js
+index cfbc91b..a1af005 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -13,6 +13,7 @@ export const inject = [
+     'agentDefaultModel',
+     'llm',
+     'permissionPresets',
++    'workagentChannels',
+ ];
+ export const Config = Schema.object({
+     stateDir: Schema.string().default(''),
+@@ -48,7 +49,17 @@ export function apply(ctx, config) {
+     log(`[boot] ChannelManager 构造 ${Date.now() - applyStarted}ms`);
+     ctx.effect(() => {
+         manager.registerApi(ctx);
+-        void manager.initEnabled().finally(() => { void manager.attachMappedSessions(); });
++        let detachNotifications;
++        void manager.initEnabled().finally(() => {
++            void manager.attachMappedSessions();
++            if (!manager.disposed) detachNotifications = ctx.get('workagentChannels').attachNotifications({
++                targets: () => manager.notificationTargets(),
++                send: (targetId, text) => manager.sendNotification(targetId, text),
++                sendFile: (targetId, path) => manager.sendNotificationFile(targetId, path),
++                active: () => manager.running.size > 0,
 +            });
-+            if (result.code) throw new Error(`${id}: 消息发送被拒绝`);
-+        },
-         async send(chatId, text) {
-             if (!client)
-                 throw new Error(`${id}: 尚未连接`);
++        });
++        ctx.effect(() => () => detachNotifications?.(), 'im-connect.notifications');
+         log(`[boot] apply 完成 ${Date.now() - applyStarted}ms`);
+         return () => { manager.disposeApi(); void fileLog.flush(); };
+     }, 'im-connect.serve');
+@@ -56,4 +67,4 @@ export function apply(ctx, config) {
+ export { CHANNEL_META, CHANNEL_ORDER, listChannelMeta } from './channels/meta.js';
+ export { IM_ORIGIN, IM_SESSION_PREFIX, createImSessionId, isImOrigin, isImSessionId, isTaskSession, sessionKeyOf, } from './engine/session-id.js';
+ export { splitText } from './engine/split.js';
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
++//# sourceMappingURL=index.js.map
+diff --git a/lib/manager.js b/lib/manager.js
+index 40a89d1..9458d87 100644
+--- a/lib/manager.js
++++ b/lib/manager.js
+@@ -5,6 +5,7 @@ import { createChannelAdapter } from './channels/factory.js';
+ import { CHANNEL_META, CHANNEL_ORDER, supportsQr } from './channels/meta.js';
+ import { PairingHub } from './channels/qr/hub.js';
+ import { SessionMapStore } from './engine/session-store.js';
++import { sessionKeyOf } from './engine/session-id.js';
+ import { createFileVault, createServiceVault, credentialRef } from './engine/credentials.js';
+ import { ImEngine } from './engine/gateway.js';
+ import { SeenStore } from './engine/seen-store.js';
+@@ -394,6 +395,7 @@ export class ChannelManager {
+                                 permission: this.currentPermission(),
+                                 permissions: this.permissionOptions(),
+                                 providers: await this.listModelCatalog(),
++                                assistants: this.ctx.get('workagentChannels').assistants(),
+                             });
+                             return;
+                         }
+@@ -611,6 +613,12 @@ export class ChannelManager {
+         const normalized = this.normalizeAccountSettings(platform, input, state);
+         if (!normalized.ok)
+             return normalized;
++        if (['presetId', 'provider', 'model', 'reasoningEffort'].some((key) => (state.assistant?.[key] || '') !== (normalized.settings.assistant[key] || ''))) {
++            for (const record of this.sessions.list()) {
++                if (record.channel !== accountId || !record.workagentConfig) continue;
++                this.sessions.upsert(sessionKeyOf(record.channel, record.kind, record.chatId), { ...record, workagentConfig: undefined });
++            }
++        }
+         state.name = normalized.settings.name;
+         state.assistant = normalized.settings.assistant;
+         state.cwd = normalized.settings.cwd;
+@@ -677,6 +685,7 @@ export class ChannelManager {
+         const next = normalizeAssistantModel(assistant ?? {});
+         if (!next)
+             return;
++        this.engineConfig.presetId = next.presetId;
+         this.engineConfig.provider = next.provider;
+         this.engineConfig.model = next.model;
+         this.engineConfig.reasoningEffort = next.reasoningEffort;
+@@ -710,6 +719,32 @@ export class ChannelManager {
+     permissionPresets() {
+         return this.ctx.permissionPresets;
+     }
++    notificationTargets() {
++        const targets = new Map();
++        for (const record of this.sessions.list()) {
++            const account = this.store.channels[record.channel];
++            if (!account) continue;
++            const id = JSON.stringify([record.channel, record.kind, record.chatId]);
++            const platform = this.platformOf(record.channel, account);
++            targets.set(id, { id, channelId: record.channel, chatId: record.chatId, kind: record.kind,
++                label: `${account.name || CHANNEL_META[platform].label} · ${record.kind === 'group' ? '群聊' : '私聊'} · ${record.title || record.chatId}`,
++                connected: this.running.has(record.channel), supportsFiles: typeof this.running.get(record.channel)?.sendMedia === 'function' });
++        }
++        return [...targets.values()];
++    }
++    async sendNotification(targetId, text) {
++        const target = this.notificationTargets().find((row) => row.id === targetId);
++        const channel = target && this.running.get(target.channelId);
++        if (!channel) throw new Error('提醒渠道未连接');
++        if (channel.sendNotification) await channel.sendNotification(target.chatId, text, target.kind);
++        else await channel.send(target.chatId, text);
++    }
++    async sendNotificationFile(targetId, path) {
++        const target = this.notificationTargets().find((row) => row.id === targetId);
++        const channel = target && this.running.get(target.channelId);
++        if (!channel?.sendMedia) throw new Error('提醒渠道不支持文件');
++        await channel.sendMedia(target.chatId, path);
++    }
+     async listModelCatalog() {
+         const llm = this.ctx.get?.('llm');
+         const providers = llm?.listProviders?.() ?? [];
+@@ -744,6 +779,7 @@ export class ChannelManager {
+                 })),
+             });
+         }
++        out.push(...await this.ctx.get('workagentChannels').models());
+         return out;
+     }
+     async startOne(id) {
+@@ -922,7 +958,7 @@ export class ChannelManager {
+             const resolved = await llm.resolveModelInfo(assistant.provider, assistant.model).catch(() => undefined);
+             if (resolved === undefined || resolved.reasoning !== undefined)
+                 return;
+-            state.assistant = { provider: assistant.provider, model: assistant.model };
++            state.assistant = { ...assistant, reasoningEffort: undefined };
+             changed = true;
+             this.log(`[manager] 已清理 ${id} 的无效推理等级 ${assistant.reasoningEffort}`);
+         }));
+@@ -932,12 +968,19 @@ export class ChannelManager {
+     normalizeAccountSettings(platform, input, previous) {
+         const fallback = this.currentAssistant();
+         const assistant = normalizeAssistantModel({
++            presetId: input.presetId !== undefined ? input.presetId : previous.assistant?.presetId,
+             provider: input.provider ?? previous.assistant?.provider ?? fallback?.provider,
+             model: input.model ?? previous.assistant?.model ?? fallback?.model,
+             reasoningEffort: input.reasoningEffort !== undefined ? input.reasoningEffort : previous.assistant?.reasoningEffort,
+         });
+         if (!assistant)
+             return { ok: false, error: '请选择提供商和模型' };
++        if (assistant.presetId && !this.ctx.get('workagentChannels').handles(assistant.provider))
++            return { ok: false, error: '助手与所选模型不匹配，请重新选择助手' };
++        if (this.ctx.get('workagentChannels').handles(assistant.provider)) {
++            try { this.ctx.get('workagentChannels').validateAssistant(assistant); }
++            catch { return { ok: false, error: '助手不可用或与所选模型不匹配，请重新选择助手' }; }
++        }
+         const cwd = normalizeWorkspacePath(input.cwd ?? previous.cwd ?? this.currentWorkspace());
+         if (!cwd)
+             return { ok: false, error: '请选择工作区' };
+@@ -989,6 +1032,7 @@ export class ChannelManager {
+         return {
+             ...this.engineConfig,
+             cwd: normalizeWorkspacePath(state.cwd) ?? this.engineConfig.cwd,
++            presetId: assistant?.presetId,
+             provider: assistant?.provider ?? this.engineConfig.provider,
+             model: assistant?.model ?? this.engineConfig.model,
+             reasoningEffort: assistant?.reasoningEffort,
+@@ -1046,11 +1090,11 @@ function pairingSettings(input) {
+     if (!input)
+         return {};
+     const out = {};
+-    for (const key of ['name', 'provider', 'model', 'reasoningEffort', 'cwd', 'permission', 'privateAccess']) {
++    for (const key of ['name', 'presetId', 'provider', 'model', 'reasoningEffort', 'cwd', 'permission', 'privateAccess']) {
+         const value = input[key];
+         if (value !== undefined && value !== null)
+             out[`__setting_${key}`] = String(value);
+     }
+     return out;
+ }
+-//# sourceMappingURL=manager.js.map
+\ No newline at end of file
++//# sourceMappingURL=manager.js.map

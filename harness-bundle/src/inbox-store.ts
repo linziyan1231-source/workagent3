@@ -28,6 +28,7 @@ const empty = (): InboxDocument => ({
 });
 
 export class InboxStore {
+  hasProcessing() { return this.#document.receipts.some((receipt)=>receipt.status==="processing"); }
   readonly #path: string;
   #document: InboxDocument;
 

@@ -213,6 +213,12 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	mux := http.NewServeMux()
+	if workspaceRoot != "" {
+		imports := &capabilityImporter{journal: filepath.Join(filepath.Dir(workspaceRoot), "capability-imports.jsonl"), skills: skills, skillPublisher: skillPublisher, mcp: catalog, credentials: credentials, mcpPublisher: publisher}
+		mux.HandleFunc("GET /v1/imports", imports.history)
+		mux.HandleFunc("POST /v1/imports/skill", imports.skill)
+		mux.HandleFunc("POST /v1/imports/mcp", imports.mcps)
+	}
 	mux.HandleFunc("GET /v1/system/status", runtimeSystemStatus(target, token))
 	mux.HandleFunc("POST /v1/system/restart", runtimeSystemRestart(restart))
 	mux.HandleFunc("GET /v1/credentials", listCredentialStatuses(credentials, target, token))

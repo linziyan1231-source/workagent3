@@ -18,6 +18,8 @@ import {
 } from "node:path";
 import { randomUUID } from "node:crypto";
 import { link, open, rename, rm, writeFile } from "node:fs/promises";
+import { isUtf8 } from "node:buffer";
+import { ResumableUploads } from "./resumable-upload.js";
 
 export const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
@@ -127,6 +129,7 @@ const validateRelativePath = (value: string, allowEmpty = true): string => {
 };
 
 export class WorkspaceStore {
+  readonly uploads: ResumableUploads;
   readonly #root: string;
   readonly #indexPath: string;
   readonly #assetIndexPath: string;
@@ -138,6 +141,13 @@ export class WorkspaceStore {
     this.#root = resolve(root);
     this.#indexPath = join(dshHome, "workagent", "workspaces.json");
     this.#assetIndexPath = join(dshHome, "workagent", "workspace-assets.json");
+    this.uploads = new ResumableUploads(
+      join(dshHome, "workagent", "uploads"),
+      (id, path) => {
+        this.#resolve(id, path, true, true);
+      },
+      (id, path, stream) => this.writeStream(id, path, stream, false),
+    );
     mkdirSync(this.#root, { recursive: true, mode: 0o700 });
     if (existsSync(this.#indexPath)) {
       const parsed: unknown = JSON.parse(readFileSync(this.#indexPath, "utf8"));
@@ -226,6 +236,14 @@ export class WorkspaceStore {
 
   engineRoot(id: string): string {
     return this.#workspaceRoot(id);
+  }
+
+  locate(id: string, reference: string): WorkspaceEntry {
+    const path = (isAbsolute(reference) ? relative(this.#workspaceRoot(id), reference) : reference).replaceAll("\\", "/");
+    const absolute = this.#resolve(id, path, false);
+    const stat = statSync(absolute);
+    if (!stat.isFile()) throw new Error("not_a_file");
+    return { path, name: basename(absolute), kind: "file", size: stat.size, modifiedAt: stat.mtime.toISOString() };
   }
 
   listFiles(id: string, path = ""): WorkspaceEntry[] {
@@ -333,6 +351,30 @@ export class WorkspaceStore {
     } finally {
       await rm(temporary, { force: true });
     }
+  }
+
+  editText(
+    id: string,
+    path: string,
+    original: string,
+    text: string,
+  ): WorkspaceEntry {
+    const absolute = this.#resolve(id, path, false);
+    if (
+      statSync(absolute).size > 2 * 1024 * 1024 ||
+      Buffer.byteLength(text) > 2 * 1024 * 1024
+    )
+      throw new Error("request_too_large");
+    const bytes = readFileSync(absolute);
+    if (!isUtf8(bytes)) throw new Error("unsupported_text_encoding");
+    const current = bytes.toString("utf8");
+    // Fetch's UTF-8 decoder removes a BOM. Preserve it when saving Windows files.
+    const bom =
+      current.startsWith("\uFEFF") && !original.startsWith("\uFEFF")
+        ? "\uFEFF"
+        : "";
+    if (current !== bom + original) throw new Error("file_changed");
+    return this.write(id, path, Buffer.from(bom + text, "utf8"));
   }
 
   write(

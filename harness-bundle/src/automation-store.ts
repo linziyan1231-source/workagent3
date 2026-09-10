@@ -302,6 +302,13 @@ export class AutomationStore {
     return next;
   }
 
+  bindSession(runId: string, sessionId: string): void {
+    const run = this.#requiredRun(runId);
+    if (run.status !== "running") return;
+    this.#runs.set(runId, automationRunSchema.parse({ ...run, sessionId }));
+    this.#save();
+  }
+
   interruptedExecutions(): AutomationExecution[] {
     return [...this.#runs.values()]
       .filter(
@@ -328,7 +335,12 @@ export class AutomationStore {
   finish(
     runId: string,
     outcome:
-      | { status: "succeeded"; sessionId: string; result?: string }
+      | {
+          status: "succeeded";
+          sessionId: string;
+          result?: string;
+          skillSuggestionPath?: string;
+        }
       | { status: "failed"; error: string; sessionId?: string },
   ): AutomationRun {
     const run = this.#requiredRun(runId);
@@ -337,8 +349,12 @@ export class AutomationStore {
     const next = automationRunSchema.parse({
       ...run,
       status: outcome.status,
-      sessionId: outcome.sessionId ?? null,
+      sessionId: outcome.sessionId ?? run.sessionId,
       result: outcome.status === "succeeded" ? (outcome.result ?? null) : null,
+      skillSuggestionPath:
+        outcome.status === "succeeded"
+          ? (outcome.skillSuggestionPath ?? null)
+          : null,
       error: outcome.status === "failed" ? outcome.error : null,
       finishedAt: this.#clock.now().toISOString(),
     });
@@ -399,12 +415,17 @@ export class AutomationStore {
 export type AutomationExecution = {
   automationRunId: string;
   definition: AutomationDefinition;
+  onSessionStarted?: (sessionId: string) => void;
 };
 
 export interface AutomationRunnerPort {
   execute(
     request: AutomationExecution,
-  ): Promise<{ sessionId: string; result?: string }>;
+  ): Promise<{
+    sessionId: string;
+    result?: string;
+    skillSuggestionPath?: string;
+  }>;
   cancel?(automationRunId: string): Promise<void>;
   reconcileInterrupted?(request: AutomationExecution): Promise<void>;
 }
@@ -464,6 +485,8 @@ export class AutomationScheduler {
             const result = await this.runner.execute({
               automationRunId: run.id,
               definition: run.definitionSnapshot,
+              onSessionStarted: (sessionId) =>
+                this.store.bindSession(run.id, sessionId),
             });
             this.#notifyTerminal(
               this.store.finish(run.id, { status: "succeeded", ...result }),

@@ -12,6 +12,24 @@ import (
 
 func Handler(service *Service, token string) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/runtime/ensure",func(w http.ResponseWriter,r *http.Request){
+		var input struct{SID string `json:"sid"`}
+		if !decode(r,&input){http.Error(w,"invalid request",400);return}
+		err:=service.EnsureRuntime(r.Context(),input.SID);respond(w,map[string]bool{"started":err==nil},err)
+	})
+	mux.HandleFunc("GET /v1/storage/{sid}", func(w http.ResponseWriter, r *http.Request) {
+		value, err := service.StorageUsage(r.Context(), r.PathValue("sid"), nil)
+		respond(w, value, err)
+	})
+	mux.HandleFunc("PUT /v1/storage/{sid}", func(w http.ResponseWriter, r *http.Request) {
+		var input contracts.StorageLimits
+		if !decode(r, &input) {
+			http.Error(w, "invalid storage limits", http.StatusBadRequest)
+			return
+		}
+		value, err := service.StorageUsage(r.Context(), r.PathValue("sid"), &input)
+		respond(w, value, err)
+	})
 	mux.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
 		users, sources, err := service.ListManagedUsers(r.Context())
 		respond(w, map[string]any{"users": users, "kimi_datasource_sources": sources}, err)

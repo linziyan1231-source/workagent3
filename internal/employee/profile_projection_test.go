@@ -1,107 +1,110 @@
 package employee
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestProjectHarnessProfileReplacesCompletePackageTree(t *testing.T) {
+func makeReleasedProfile(t *testing.T, root, version string) string {
+	t.Helper()
+	path := filepath.Join(root, version)
+	if err := os.MkdirAll(filepath.Join(path, "node_modules", "package"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"package.json": "{\"version\":\"" + version + "\"}", "cordis.patch.yml": "[]", "node_modules/package/index.js": version} {
+		if err := os.WriteFile(filepath.Join(path, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+func TestProfileReferenceUpgradeKeepsPrivateDataAndRollback(t *testing.T) {
 	root := t.TempDir()
-	source, destination := filepath.Join(root, "release"), filepath.Join(root, "private", "workagent")
-	if err := os.MkdirAll(destination, 0o700); err != nil {
+	first, second := makeReleasedProfile(t, root, "v1"), makeReleasedProfile(t, root, "v2")
+	destination := filepath.Join(root, "employee", "profile")
+	if err := projectHarnessProfile(first, destination); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(destination, "obsolete.js"), []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for i := range 96 {
-		path := filepath.Join(source, fmt.Sprintf("package-%d", i), "index.js")
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(fmt.Sprint(i)), 0o600); err != nil {
+	for name, data := range map[string]string{"cordis.patch.yml": "private patch", "personal-plugin.json": "private settings"} {
+		if err := os.WriteFile(filepath.Join(destination, name), []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := projectHarnessProfile(source, destination); err != nil {
-		t.Fatal(err)
-	}
-	for i := range 96 {
-		data, err := os.ReadFile(filepath.Join(destination, fmt.Sprintf("package-%d", i), "index.js"))
-		if err != nil || string(data) != fmt.Sprint(i) {
-			t.Fatalf("package %d incomplete: %q %v", i, data, err)
+	for _, release := range []string{second, first} {
+		if err := projectHarnessProfile(release, destination); err != nil {
+			t.Fatal(err)
+		}
+		target, err := filepath.EvalSymlinks(filepath.Join(destination, "node_modules", "package", "index.js"))
+		expected, expectedErr := filepath.EvalSymlinks(filepath.Join(release, "node_modules", "package", "index.js"))
+		if err != nil || expectedErr != nil || !strings.EqualFold(target, expected) {
+			t.Fatalf("software is not referenced: %s %v", target, err)
+		}
+		data, _ := os.ReadFile(filepath.Join(destination, "cordis.patch.yml"))
+		if string(data) != "private patch" {
+			t.Fatal("private patch replaced")
+		}
+		data, _ = os.ReadFile(filepath.Join(destination, "personal-plugin.json"))
+		if string(data) != "private settings" {
+			t.Fatal("personal data removed")
 		}
 	}
-	if _, err := os.Stat(filepath.Join(destination, "obsolete.js")); !os.IsNotExist(err) {
-		t.Fatalf("obsolete file retained: %v", err)
+}
+func TestProfileReferenceRefusesUnidentifiedSoftwareAndCustomManifest(t *testing.T) {
+	root := t.TempDir()
+	source := makeReleasedProfile(t, root, "release")
+	destination := filepath.Join(root, "employee")
+	if err := os.MkdirAll(filepath.Join(destination, "node_modules"), 0700); err != nil {
+		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(filepath.Dir(destination))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("staging or backup retained: %v %v", entries, err)
+	personal := filepath.Join(destination, "node_modules", "private.txt")
+	if err := os.WriteFile(personal, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectHarnessProfile(source, destination); err == nil {
+		t.Fatal("unidentified directory accepted")
+	}
+	if data, _ := os.ReadFile(personal); string(data) != "data" {
+		t.Fatal("data lost")
+	}
+	fresh := filepath.Join(root, "fresh")
+	if err := projectHarnessProfile(source, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "package.json"), []byte(`{"private":"plugin"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectHarnessProfile(source, fresh); err == nil {
+		t.Fatal("custom manifest overwritten")
 	}
 }
 
-func TestCopyProfileTreeReportsConcurrentCopyFailure(t *testing.T) {
+func TestProfileReferenceDoesNotFollowPrivateConfigLinks(t *testing.T) {
 	root := t.TempDir()
-	source, destination := filepath.Join(root, "release"), filepath.Join(root, "staging")
-	for _, path := range []string{source, destination} {
-		if err := os.Mkdir(path, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for i := range 96 {
-		name := fmt.Sprintf("file-%d", i)
-		if err := os.WriteFile(filepath.Join(source, name), []byte(name), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(destination, "file-0"), []byte("collision"), 0o600); err != nil {
+	source := makeReleasedProfile(t, root, "release")
+	private := filepath.Join(root, "employee")
+	if err := os.MkdirAll(private, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyProfileTree(source, destination); err == nil {
-		t.Fatal("copy collision was ignored")
-	}
-	// Cleanup immediately: no copy worker may still hold destination files open.
-	if err := os.RemoveAll(destination); err != nil {
-		t.Fatalf("copy workers still active: %v", err)
-	}
-}
-
-func TestProjectHarnessProfileCopiesFilesAndInternalLinks(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "released-profile")
-	if err := os.MkdirAll(filepath.Join(source, "zzz-packages", "runtime"), 0o700); err != nil {
+	other := filepath.Join(root, "other.json")
+	if err := os.WriteFile(other, []byte("private data"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "zzz-packages", "runtime", "index.js"), []byte("runtime"), 0o600); err != nil {
+	if err := os.Symlink(other, filepath.Join(private, "package.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join("zzz-packages", "runtime"), filepath.Join(source, "aaa-runtime")); err != nil {
-		t.Skipf("symlinks are unavailable: %v", err)
+	if err := projectHarnessProfile(source, private); err == nil {
+		t.Fatal("linked private manifest accepted")
 	}
-	destination := filepath.Join(root, "private", "dsh-home", "profiles", "workagent")
-	if err := projectHarnessProfile(source, destination); err != nil {
+	if data, _ := os.ReadFile(other); string(data) != "private data" {
+		t.Fatal("another file was modified")
+	}
+	link := filepath.Join(root, "redirect")
+	if err := os.Symlink(private, link); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := os.ReadFile(filepath.Join(destination, "aaa-runtime", "index.js"))
-	if err != nil || string(payload) != "runtime" {
-		t.Fatalf("projected profile link is unusable: %q %v", payload, err)
-	}
-}
-
-func TestProjectHarnessProfileRejectsEscapingLink(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "released-profile")
-	if err := os.MkdirAll(source, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join("..", "secret"), filepath.Join(source, "escape")); err != nil {
-		t.Skipf("symlinks are unavailable: %v", err)
-	}
-	err := projectHarnessProfile(source, filepath.Join(root, "private", "workagent"))
-	if err == nil {
-		t.Fatal("escaping profile symlink was accepted")
+	if err := projectHarnessProfile(source, filepath.Join(link, "profile")); err == nil {
+		t.Fatal("linked ancestor accepted")
 	}
 }

@@ -55,6 +55,37 @@ func TestSharedFileManagerRoutesOnlyInsideOwnedProject(t *testing.T) {
 	}
 }
 
+func TestSharedBinaryUploadPreservesBytesAndRejectsOverwrite(t *testing.T) {
+	ownerSID := "S-1-5-21-1000"
+	base := t.TempDir()
+	projectID := "project_1234567890"
+	root := filepath.Join(base, "shared", ownerSID, projectID)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := newSharedFileManager(filepath.Join(base, ownerSID), ownerSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte{0, 255, 1, 2, 128}
+	input := sharedFileRequest{ProjectID: projectID, Operation: "write-buffer", Path: "fixture.bin", Data: base64.StdEncoding.EncodeToString(data)}
+	if _, err := manager.OperateFile(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	input.Data = base64.StdEncoding.EncodeToString([]byte("replacement"))
+	if _, err := manager.OperateFile(t.Context(), input); err == nil {
+		t.Fatal("overwriting an attachment was allowed")
+	}
+	actual, err := os.ReadFile(filepath.Join(root, "fixture.bin"))
+	if err != nil || string(actual) != string(data) {
+		t.Fatalf("binary bytes changed: %v", err)
+	}
+	input.Path = "../escape.bin"
+	if _, err := manager.OperateFile(t.Context(), input); err == nil {
+		t.Fatal("upload escaped shared project")
+	}
+}
+
 func TestSharedFileManagerRejectsSymlinkTraversal(t *testing.T) {
 	ownerSID := "S-1-5-21-1000"
 	base := t.TempDir()

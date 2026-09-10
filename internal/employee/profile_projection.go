@@ -1,193 +1,127 @@
 package employee
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 )
 
-// projectHarnessProfile installs the immutable, release-owned Harness profile
-// into a SID-private DSH_HOME. Symlinks are preserved only when they stay
-// inside the released profile tree.
+// ProjectHarnessProfile selects shared software without copying dependencies.
+// The caller must stop the runtime first. Legacy package trees require the
+// audited migration script; provisioning never deletes an unidentified tree.
+func ProjectHarnessProfile(source, destination string) error {
+	source, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	destination, err = filepath.Abs(destination)
+	if err != nil {
+		return err
+	}
+	// Provisioning runs as SYSTEM: never follow employee-controlled directory
+	// links or a linked configuration file while writing the private projection.
+	for path := destination; ; path = filepath.Dir(path) {
+		info, err := os.Lstat(path)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("private profile ancestor is a link: %s", path)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if filepath.Dir(path) == path {
+			break
+		}
+	}
+	for _, path := range []string{source, filepath.Join(source, "node_modules")} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("released software must be a normal directory: %s", path)
+		}
+	}
+	manifest, err := os.ReadFile(filepath.Join(source, "package.json"))
+	if err != nil {
+		return err
+	}
+	if !json.Valid(manifest) {
+		return errors.New("invalid released profile manifest")
+	}
+	if err := os.MkdirAll(destination, 0700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(destination)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("profile configuration must be a private normal directory")
+	}
+	modules := filepath.Join(destination, "node_modules")
+	oldTarget, err := os.Readlink(modules)
+	if err != nil {
+		if _, statErr := os.Lstat(modules); !errors.Is(statErr, os.ErrNotExist) {
+			return errors.New("legacy or personal node_modules requires audited software migration before activation")
+		}
+	}
+	// Do not overwrite a locally extended package manifest during an upgrade.
+	manifestPath := filepath.Join(destination, "package.json")
+	if info, err := os.Lstat(manifestPath); err == nil && !info.Mode().IsRegular() {
+		return errors.New("private profile manifest must be a normal file")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if current, err := os.ReadFile(manifestPath); err == nil && !bytes.Equal(current, manifest) {
+		previous, readErr := os.ReadFile(filepath.Join(filepath.Dir(oldTarget), "package.json"))
+		if readErr != nil || !bytes.Equal(current, previous) {
+			return errors.New("private profile manifest differs from its release; preserve and reconcile personal plugins before activation")
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// These are configuration, not software. Never replace the employee patch.
+	patchPath := filepath.Join(destination, "cordis.patch.yml")
+	if _, err := os.Lstat(patchPath); errors.Is(err, os.ErrNotExist) {
+		patch, err := os.ReadFile(filepath.Join(source, "cordis.patch.yml"))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(patchPath, patch, 0600); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	target := filepath.Join(source, "node_modules")
+	if oldTarget != target {
+		staging, err := os.MkdirTemp(destination, ".reference-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(staging)
+		link := filepath.Join(staging, "node_modules")
+		if err := os.Symlink(target, link); err != nil {
+			return fmt.Errorf("create shared package reference: %w", err)
+		}
+		if oldTarget != "" {
+			if err := os.Rename(modules, filepath.Join(staging, "previous")); err != nil {
+				return err
+			}
+		}
+		if err := os.Rename(link, modules); err != nil {
+			if oldTarget != "" {
+				_ = os.Rename(filepath.Join(staging, "previous"), modules)
+			}
+			return err
+		}
+	}
+	return os.WriteFile(manifestPath, manifest, 0600)
+}
+
 func projectHarnessProfile(source, destination string) error {
-	source = filepath.Clean(source)
-	destination = filepath.Clean(destination)
-	info, err := os.Lstat(source)
-	if err != nil {
-		return fmt.Errorf("inspect Harness profile source: %w", err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("Harness profile source must be a normal directory")
-	}
-	parent := filepath.Dir(destination)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return fmt.Errorf("create private Harness profile parent: %w", err)
-	}
-	staging, err := os.MkdirTemp(parent, ".profile-staging-")
-	if err != nil {
-		return fmt.Errorf("create Harness profile staging directory: %w", err)
-	}
-	defer os.RemoveAll(staging)
-	if err := copyProfileTree(source, staging); err != nil {
-		return err
-	}
-	backup := destination + ".previous"
-	if err := os.RemoveAll(backup); err != nil {
-		return fmt.Errorf("remove stale Harness profile backup: %w", err)
-	}
-	_, destinationErr := os.Lstat(destination)
-	hadDestination := destinationErr == nil
-	if destinationErr != nil && !errors.Is(destinationErr, os.ErrNotExist) {
-		return fmt.Errorf("inspect previous Harness profile: %w", destinationErr)
-	}
-	if hadDestination {
-		if err := os.Rename(destination, backup); err != nil {
-			return fmt.Errorf("retain previous Harness profile: %w", err)
-		}
-	}
-	if err := os.Rename(staging, destination); err != nil {
-		if hadDestination {
-			_ = os.Rename(backup, destination)
-		}
-		return fmt.Errorf("activate Harness profile: %w", err)
-	}
-	if hadDestination {
-		if err := os.RemoveAll(backup); err != nil {
-			return fmt.Errorf("remove previous Harness profile: %w", err)
-		}
-	}
-	return nil
-}
-
-func copyProfileTree(source, destination string) error {
-	type profileLink struct{ relative, target string }
-	type profileFile struct {
-		source, target, relative string
-		mode                     fs.FileMode
-	}
-	var links []profileLink
-	var files []profileFile
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		if relative == "." {
-			return nil
-		}
-		target := filepath.Join(destination, relative)
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			if err := validateProfileLink(source, path, link); err != nil {
-				return err
-			}
-			links = append(links, profileLink{relative: relative, target: link})
-			return nil
-		}
-		if entry.IsDir() {
-			if err := os.Mkdir(target, info.Mode().Perm()); err != nil {
-				return fmt.Errorf("copy Harness profile directory %s: %w", relative, err)
-			}
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Harness profile contains unsupported file %s", relative)
-		}
-		files = append(files, profileFile{path, target, relative, info.Mode().Perm()})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	// Package profiles contain tens of thousands of small files. Bound parallel
-	// copies to avoid serial filesystem latency exhausting the provisioning job.
-	jobs := make(chan profileFile)
-	failed := make(chan struct{})
-	var workers sync.WaitGroup
-	var firstError sync.Once
-	var copyErr error
-	for range 32 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for file := range jobs {
-				if err := copyProfileFile(file.source, file.target, file.mode); err != nil {
-					firstError.Do(func() {
-						copyErr = fmt.Errorf("copy Harness profile file %s: %w", file.relative, err)
-						close(failed)
-					})
-					return
-				}
-			}
-		}()
-	}
-enqueue:
-	for _, file := range files {
-		select {
-		case jobs <- file:
-		case <-failed:
-			break enqueue
-		}
-	}
-	close(jobs)
-	// All writers must finish before creating links or removing failed staging.
-	workers.Wait()
-	if copyErr != nil {
-		return copyErr
-	}
-	// Windows decides whether a symlink targets a file or directory when the
-	// link is created. Create links only after every target has been copied.
-	for _, link := range links {
-		if err := os.Symlink(link.target, filepath.Join(destination, link.relative)); err != nil {
-			return fmt.Errorf("copy Harness profile symlink %s: %w", link.relative, err)
-		}
-	}
-	return nil
-}
-
-func validateProfileLink(source, path, link string) error {
-	if filepath.IsAbs(link) {
-		return fmt.Errorf("Harness profile symlink %s has an absolute target", path)
-	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(path), link))
-	relative, err := filepath.Rel(source, resolved)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("Harness profile symlink %s escapes the profile root", path)
-	}
-	return nil
-}
-
-func copyProfileFile(source, destination string, mode fs.FileMode) error {
-	input, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(output, input); err != nil {
-		output.Close()
-		return err
-	}
-	// This is a rebuildable copy of the immutable release. Closing each file
-	// before the staging-directory swap is sufficient; flushing every package
-	// file individually makes large profiles exceed the provisioning deadline.
-	return output.Close()
+	return ProjectHarnessProfile(source, destination)
 }

@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
-import {
-  adminApi,
-  errorMessage,
-  number,
-  modelName,
-  type Employee,
-  type Job,
-  type Budget,
-} from "./adminApi.js";
+import { adminApi, errorMessage, type Employee, type Job } from "./adminApi.js";
 import { Dialog, ActionForm, Password, date } from "./adminUi.js";
 import { EmployeePanel } from "./EmployeePanel.js";
+import { DollarUsage, DollarBudgets } from "./DollarUsage.js";
 import { AuditLog } from "./AuditLog.js";
 import "./AdminPortal.css";
 export function AdminPortal({
@@ -177,45 +170,7 @@ export function AdminPortal({
                 value={users.filter((u) => !u.enabled || u.offboarded).length}
               />
             </div>
-            <div className="admin-quota-overview" aria-label="额度总览">
-              {["harness-default", "codex-native", "kimi-native"].map((id) => {
-                const budgets = users
-                  .flatMap((u) => u.budgets ?? [])
-                  .filter((b) => b.modelId === id);
-                return (
-                  <div className="admin-card" key={id}>
-                    <h2>{modelName(id)}</h2>
-                    <strong>
-                      {number(
-                        budgets.reduce(
-                          (sum, b) =>
-                            sum +
-                            Math.max(
-                              0,
-                              b.limitUnits - b.consumedUnits - b.reservedUnits,
-                            ),
-                          0,
-                        ),
-                      )}
-                    </strong>
-                    <span>剩余额度</span>
-                    <small>
-                      已用{" "}
-                      {number(
-                        budgets.reduce((sum, b) => sum + b.consumedUnits, 0),
-                      )}{" "}
-                      / 总额{" "}
-                      {number(
-                        budgets.reduce((sum, b) => sum + b.limitUnits, 0),
-                      )}
-                    </small>
-                    {users.some((u) => u.quota_unavailable) && (
-                      <small role="status">部分账户额度暂不可用</small>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <DollarUsage users={users} />
             {error && (
               <p role="alert">
                 {error} <button onClick={() => void reload()}>重试</button>
@@ -328,7 +283,7 @@ export function AdminPortal({
               )}
             </section>
             <p className="admin-footnote">
-              临时额度仅在当前计费周期生效，到期自动恢复永久额度。
+              每个账户独立计算美元额度，DSH 与 Codex / ChatGPT 共享。
             </p>
           </>
         ) : (
@@ -378,33 +333,7 @@ export function AdminPortal({
   );
 }
 function AccountBudgets({ user }: { user: Employee }) {
-  if (user.quota_unavailable) return <span>额度暂不可用</span>;
-  if (!user.budgets?.length) return <span>未配置额度</span>;
-  return (
-    <div className="admin-account-budgets">
-      {user.budgets.map((b: Budget) => (
-        <div key={b.modelId}>
-          <span>{modelName(b.modelId)}</span>
-          <span>
-            剩余{" "}
-            {number(
-              Math.max(0, b.limitUnits - b.consumedUnits - b.reservedUnits),
-            )}{" "}
-            / {number(b.limitUnits)}
-          </span>
-          <progress
-            aria-label={`${user.username} ${modelName(b.modelId)} 已用额度`}
-            max={Math.max(1, b.limitUnits)}
-            value={b.consumedUnits + b.reservedUnits}
-          />
-          <small>
-            已用 {number(b.consumedUnits)} · {b.temporary ? "临时额度 · " : ""}
-            {date(b.resetsAt)} 重置
-          </small>
-        </div>
-      ))}
-    </div>
-  );
+  return <DollarBudgets username={user.username} />;
 }
 function Metric({ label, value }: { label: string; value: number }) {
   return (

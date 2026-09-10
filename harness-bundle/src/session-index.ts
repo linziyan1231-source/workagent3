@@ -29,6 +29,7 @@ export type StoredSession = {
   updatedAt: string;
   workspaceId?: string;
   workspacePath?: string;
+  channelKey?: string;
   internal?: boolean;
   modelId?: string;
   thinkingEffort?: string;
@@ -81,6 +82,7 @@ const valid = (value: unknown): value is StoredSession => {
     (item.lastTurn === undefined ||
       sessionLastTurnSchema.safeParse(item.lastTurn).success) &&
     (item.workspaceId === undefined || typeof item.workspaceId === "string") &&
+    (item.channelKey === undefined || typeof item.channelKey === "string") &&
     (item.workspacePath === undefined ||
       typeof item.workspacePath === "string") &&
     (item.internal === undefined || typeof item.internal === "boolean") &&

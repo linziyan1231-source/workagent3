@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
+import * as primitives from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   act,
   fireEvent,
@@ -17,11 +18,14 @@ beforeAll(async () => {
   await import("./client.js");
   client = registration.factory((name) => {
     if (name === "react") return React;
+    if (name === "@deepseek-ai/dsh-client-ui-primitives") return primitives;
     throw new Error(`unexpected client external ${name}`);
   });
 });
 
 beforeEach(() => {
+  sessionStorage.clear();
+  window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -85,6 +89,101 @@ function compose(
 }
 
 describe("WorkAgent dsh slot components", () => {
+  it("creates a weekly continuation and edits a versioned cron schedule", async () => {
+    window.history.replaceState({}, "", "/?workagent=automations");
+    let definitions = [];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (path, init = {}) => {
+        const url = String(path);
+        let value = [];
+        if (init.method === "POST" || init.method === "PATCH") {
+          const input = JSON.parse(init.body);
+          definitions = [
+            {
+              ...input,
+              id: "job",
+              version: (input.version || 0) + 1,
+              nextRunAt: null,
+            },
+          ];
+          value = definitions[0];
+        } else if (url.endsWith("/automations")) value = definitions;
+        else if (url.endsWith("/presets"))
+          value = [{ id: "kimi", name: "Kimi", engine: "kimi", enabled: true }];
+        else if (url.endsWith("/workspaces"))
+          value = [{ id: "project", name: "项目" }];
+        else if (url.endsWith("/sessions"))
+          value = [
+            {
+              id: "continued",
+              title: "每周会话",
+              engine: "kimi",
+              workspaceId: "project",
+            },
+            {
+              id: "wrong",
+              title: "其他项目",
+              engine: "kimi",
+              workspaceId: "elsewhere",
+            },
+          ];
+        return new Response(JSON.stringify(value), {
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+    const overlay = compose().find(
+      (entry) => entry.options.id === "workagent-page",
+    );
+    render(React.createElement(overlay.Component));
+    await screen.findByRole("option", { name: "Kimi" });
+    for (const [label, value] of [
+      ["任务名称", "汇总"],
+      ["执行助手", "kimi"],
+      ["所属项目", "project"],
+      ["任务内容", "检查进展"],
+      ["执行频率", "weekly"],
+      ["执行方式", "existing"],
+    ])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(screen.queryByRole("option", { name: "其他项目" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("继续的对话"), {
+      target: { value: "continued" },
+    });
+    fireEvent.change(screen.getByLabelText("结果通知"), {
+      target: { value: "on_failure" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+    await screen.findByRole("button", { name: "编辑任务" });
+    expect(definitions[0]).toMatchObject({
+      schedule: { kind: "weekly", daysOfWeek: [1], hour: 9 },
+      executionMode: "existing",
+      conversationId: "continued",
+      notificationPolicy: "on_failure",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "编辑任务" }));
+    fireEvent.change(screen.getByLabelText("执行频率"), {
+      target: { value: "cron" },
+    });
+    fireEvent.change(screen.getByLabelText("Cron 表达式"), {
+      target: { value: "0 8 * * 1-5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存任务" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+      ).toBe(true),
+    );
+    expect(
+      JSON.parse(
+        fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")[1]
+          .body,
+      ),
+    ).toMatchObject({
+      version: 1,
+      schedule: { kind: "cron", expression: "0 8 * * 1-5" },
+    });
+  });
   it("saves completion notifications only after explicit target selection and shows delivery failures", async () => {
     let saved = {
       enabled: false,
@@ -120,10 +219,7 @@ describe("WorkAgent dsh slot components", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "接收聊天" }), {
       target: { value: "target-1" },
     });
-    fireEvent.change(
-      screen.getByRole("textbox", { name: "WorkAgent 访问网址" }),
-      { target: { value: "https://workagent.example.com" } },
-    );
+    expect(screen.queryByRole("textbox", { name: "WorkAgent 访问网址" })).toBeNull();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
     ).toBe(false);
@@ -132,8 +228,9 @@ describe("WorkAgent dsh slot components", () => {
     expect(saved).toMatchObject({
       enabled: true,
       targetId: "target-1",
-      baseURL: "https://workagent.example.com",
+
     });
+    expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")[1].body)).not.toHaveProperty("baseURL");
     expect(screen.getByText("渠道未连接")).toBeTruthy();
     expect(screen.getByRole("button", { name: "重试推送" }).disabled).toBe(
       false,
@@ -145,6 +242,17 @@ describe("WorkAgent dsh slot components", () => {
     localStorage.setItem("workagent.files.open", "true");
     localStorage.setItem("workagent.hero.workspace", "preview-project");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (
+        String(path).includes("/interactions?") ||
+        String(path).endsWith("/uploads")
+      )
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const url = String(path);
       if (url.includes("/office-preview/content/"))
         return new Response(
@@ -184,6 +292,17 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path) => {
+        if (
+          String(path).includes("/interactions?") ||
+          String(path).endsWith("/uploads")
+        )
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const url = new URL(String(path), "http://localhost");
         if (url.pathname.endsWith("/content"))
           return new Response("<script>window.unsafe = true</script>中文内容");
@@ -299,6 +418,14 @@ describe("WorkAgent dsh slot components", () => {
     localStorage.setItem("workagent.hero.workspace", "project");
     let finishOld;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const url = new URL(String(path), "http://localhost");
       if (url.pathname.endsWith("/content")) {
         if (url.searchParams.get("path") === "old.txt")
@@ -348,7 +475,7 @@ describe("WorkAgent dsh slot components", () => {
       async (path, init = {}) =>
         new Response(
           JSON.stringify(
-            init.method === "PUT"
+            init.method === "POST"
               ? { error: "destination_exists" }
               : String(path).endsWith("/workspaces")
                 ? [{ id: "project", name: "项目" }]
@@ -362,7 +489,7 @@ describe("WorkAgent dsh slot components", () => {
                   ],
           ),
           {
-            status: init.method === "PUT" ? 409 : 200,
+            status: init.method === "POST" ? 409 : 200,
             headers: { "Content-Type": "application/json" },
           },
         ),
@@ -377,8 +504,8 @@ describe("WorkAgent dsh slot components", () => {
     });
     await screen.findByText("notes.txt：同名文件已存在，请换一个名称。");
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("overwrite=0"),
-      expect.objectContaining({ method: "PUT" }),
+      expect.stringContaining("/uploads"),
+      expect.objectContaining({ method: "POST" }),
     );
     expect(
       screen.getByRole("button", { name: "notes.txt", exact: true }),
@@ -389,26 +516,29 @@ describe("WorkAgent dsh slot components", () => {
   it("accepts a 1 GB file and rejects larger files before sending them", async () => {
     localStorage.setItem("workagent.files.open", "true");
     localStorage.setItem("workagent.hero.workspace", "project");
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        async (path, init = {}) =>
-          new Response(
-            JSON.stringify(
-              init.method === "PUT"
-                ? { size: 1024 ** 3 }
-                : String(path).endsWith("/workspaces")
-                  ? [{ id: "project", name: "项目" }]
-                  : [],
-            ),
-            { headers: { "Content-Type": "application/json" } },
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path, init = {}) =>
+        new Response(
+          JSON.stringify(
+            init.method === "POST"
+              ? {
+                  id: "upload",
+                  size: 1024 ** 3,
+                  offset: 1024 ** 3,
+                  path: "large.bin",
+                }
+              : String(path).endsWith("/workspaces")
+                ? [{ id: "project", name: "项目" }]
+                : [],
           ),
-      );
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
     const Sidebar = compose().find(
       (entry) => entry.options.id === "workagent-files",
     ).Component;
     const view = render(<Sidebar />);
-    await screen.findByText("拖入文件上传 · 单个最大 1 GB");
+    await screen.findByLabelText("选择上传文件");
     const file = new File(["fixture"], "large.bin");
     Object.defineProperty(file, "size", { value: 1024 ** 3 });
     fireEvent.change(screen.getByLabelText("选择上传文件"), {
@@ -416,8 +546,11 @@ describe("WorkAgent dsh slot components", () => {
     });
     await screen.findByText("已上传 1 个文件");
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("large.bin"),
-      expect.objectContaining({ method: "PUT", body: file }),
+      expect.stringContaining("/uploads"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"size":1073741824'),
+      }),
     );
     const oversized = new File(["fixture"], "oversized.bin");
     Object.defineProperty(oversized, "size", { value: 1024 ** 3 + 1 });
@@ -426,7 +559,9 @@ describe("WorkAgent dsh slot components", () => {
     });
     await screen.findByText("oversized.bin：超过 1 GB");
     expect(
-      fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT"),
+      fetchMock.mock.calls.filter(
+        ([, init]) => init?.method === "POST" && init?.body !== undefined,
+      ),
     ).toHaveLength(1);
     view.unmount();
   });
@@ -570,7 +705,8 @@ describe("WorkAgent dsh slot components", () => {
       async (path) =>
         new Response(
           JSON.stringify(
-            String(path).endsWith("/messages")
+            String(path).endsWith("/messages") ||
+              String(path).includes("/interactions?")
               ? []
               : { id: "retry-session", engine: "codex", title: "重试状态" },
           ),
@@ -741,6 +877,14 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const url = String(path);
         if (init.method === "POST") {
           name = JSON.parse(init.body).destination.split("/").pop();
@@ -862,7 +1006,7 @@ describe("WorkAgent dsh slot components", () => {
     fireEvent.change(screen.getByLabelText("服务地址"), {
       target: { value: "https://example.com/mcp" },
     });
-    fireEvent.submit(container.querySelector("form"));
+    fireEvent.submit(screen.getByLabelText("服务地址").closest("form"));
     expect(await screen.findByText("Docs")).toBeTruthy();
     expect(
       JSON.parse(
@@ -878,6 +1022,14 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const target = String(path);
         const payload = target.includes("/marketplace")
           ? { entries: [] }
@@ -1141,6 +1293,14 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const models = ["first", "second"]
           .filter((id) => !retired || id !== "second")
           .map((id) => ({
@@ -1248,36 +1408,16 @@ describe("WorkAgent dsh slot components", () => {
     expect(screen.queryByLabelText(/key/i)).toBeNull();
   });
 
-  it("shows remaining quota as percentages in the settings action area", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
-      const payload = String(path).includes("/quota/usage")
-        ? {
-            limitUnits: 100,
-            consumedUnits: 20,
-            reservedUnits: 5,
-            period: "weekly",
-            periodKey: "2026-W36",
-          }
-        : [
-            {
-              id: "codex-native",
-              providerId: "codex",
-              displayName: "Codex",
-            },
-          ];
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    const quota = compose().find(
-      (entry) => entry.options.id === "workagent-quota",
-    );
-    render(React.createElement(quota.Component));
-    expect(await screen.findByText("75%")).toBeTruthy();
-    expect(screen.getByText("使用额度")).toBeTruthy();
+  it("shows remaining percentages in user settings without dollar amounts", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async path => new Response(JSON.stringify(String(path) === "/api/quota/dollars" ? {budgets:[{pool:"codex",dailyUsd:2,weeklyUsd:5,dailyLimitUsd:40,weeklyLimitUsd:80},{pool:"kimi",dailyUsd:1,weeklyUsd:3,dailyLimitUsd:10,weeklyLimitUsd:20}]} : []),{headers:{"Content-Type":"application/json"}}));
+    const Component=compose().find(entry=>entry.options.id==="workagent-quota").Component;
+    const view=render(<Component />);
+    expect(await screen.findByText("95%")).toBeTruthy();
+    expect(screen.getByText("94%")).toBeTruthy();
+    expect(view.container.textContent).not.toMatch(/\$|美元/);
+    expect(screen.getByText("DSH 与 Codex / ChatGPT 共享额度。")).toBeTruthy();
+    view.unmount();
   });
-
   it("uses the official theme service", () => {
     const entries = compose();
     const themeEntry = entries.find(
@@ -1290,6 +1430,14 @@ describe("WorkAgent dsh slot components", () => {
 
   it("selects every assistant and supports personal project choices", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const target = String(path);
       const payload = target.endsWith("/presets")
         ? [
@@ -1366,6 +1514,14 @@ describe("WorkAgent dsh slot components", () => {
 
   it("clears the conversation filter when search is closed", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const payload = String(path).endsWith("/sessions")
         ? [
             {
@@ -1400,6 +1556,14 @@ describe("WorkAgent dsh slot components", () => {
 
   it("keeps projectless conversations outside project groups", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const target = String(path);
       const payload = target.endsWith("/sessions")
         ? [
@@ -1501,10 +1665,72 @@ describe("WorkAgent dsh slot components", () => {
     expect(screen.queryByText("项目甲")).toBeNull();
   });
 
+  it("keeps only failed conversations selected after a partial batch delete", async () => {
+    let removed = false;
+    const calls = [];
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path, init = {}) => {
+        const target = String(path);
+        if (init.method === "DELETE") {
+          calls.push(target);
+          if (target.endsWith("/one")) {
+            removed = true;
+            return new Response(null, { status: 204 });
+          }
+          return new Response('{"error":"session_busy"}', { status: 409 });
+        }
+        const payload = target.endsWith("/sessions")
+          ? [
+              !removed && {
+                id: "one",
+                title: "成功项",
+                engine: "codex",
+                workspaceId: "project",
+                updatedAt: "2026-09-08T01:00:00Z",
+              },
+              {
+                id: "two",
+                title: "失败项",
+                engine: "codex",
+                workspaceId: "project",
+                updatedAt: "2026-09-08T00:00:00Z",
+              },
+            ].filter(Boolean)
+          : target.endsWith("/workspaces")
+            ? [{ id: "project", name: "项目" }]
+            : [];
+        return new Response(JSON.stringify(payload), {
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+    const sidebar = compose().find(
+      (entry) => entry.options.id === "workagent-sidebar-browser",
+    );
+    render(React.createElement(sidebar.Component));
+    await screen.findByRole("button", { name: "编辑对话 成功项" });
+    fireEvent.click(screen.getByRole("button", { name: "多选对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "全选当前列表" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除选中（2）" }));
+    await screen.findByRole("button", { name: "删除选中（1）" });
+    expect(screen.getByRole("alert").textContent).toContain("失败项");
+    expect(screen.getByLabelText("选择对话 失败项").checked).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
   it("renames projects and deletes conversations from the sidebar", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const target = String(path);
         const payload = target.endsWith("/sessions")
           ? [
@@ -1563,6 +1789,14 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         if (init.method === "POST")
           return new Response(
             JSON.stringify(fail ? { error: "暂时无法创建" } : {}),
@@ -1649,10 +1883,39 @@ describe("WorkAgent dsh slot components", () => {
     );
   });
 
+  it("clears the successful home draft and allows another send without remounting", async () => {
+    let turns=0;
+    vi.spyOn(globalThis,"fetch").mockImplementation(async (path,init={})=>{
+      const url=String(path);let payload=[];
+      if(init.method==="POST"&&url.endsWith("/sessions"))payload={id:`created-${turns}`};
+      else if(init.method==="POST"&&url.endsWith("/turns")){turns++;payload={};}
+      else if(url.endsWith("/presets"))payload=[{id:"builtin-general",engine:"codex",name:"Codex",enabled:true}];
+      else if(url.endsWith("/model-options"))payload=[{engine:"codex",state:"ready",models:[{id:"test-model",name:"test",isDefault:true,reasoning:[]}]}];
+      return new Response(JSON.stringify(payload),{headers:{"Content-Type":"application/json"}});
+    });
+    const Component=compose().find(e=>e.options.id==="workagent-workspace-composer").Component;
+    const view=render(<Component/>);
+    await waitFor(()=>expect(screen.getByLabelText("模型").value).toBe("test-model"));
+    for(const value of ["test connection","second message"]){
+      fireEvent.change(screen.getByLabelText("输入消息"),{target:{value}});
+      await waitFor(()=>expect(screen.getByRole("button",{name:"发送消息"}).disabled).toBe(false));
+      fireEvent.click(screen.getByRole("button",{name:"发送消息"}));
+      await waitFor(()=>expect(screen.getByLabelText("输入消息").value).toBe(""));
+    }
+    expect(turns).toBe(2);view.unmount();
+  });
   it("creates team work from the new-conversation composer", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const target = String(path);
         let payload = [];
         if (init.method === "POST" && target.endsWith("/teams"))
@@ -1725,6 +1988,14 @@ describe("WorkAgent dsh slot components", () => {
   it("browses and previews workspace text files", async () => {
     window.history.replaceState({}, "", "/?workagent=workspaces");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       if (String(path).includes("/content?"))
         return new Response("hello workspace", {
           status: 200,
@@ -1788,6 +2059,14 @@ describe("WorkAgent dsh slot components", () => {
       "/?session=session-1&message=message-1",
     );
     vi.spyOn(globalThis, "fetch").mockImplementation(async (path) => {
+      if (String(path).includes("/interactions?"))
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      if (String(path) === "/api/speech/capability")
+        return new Response('{"enabled":false}', {
+          headers: { "content-type": "application/json" },
+        });
       const payload = String(path).endsWith("/messages")
         ? [
             {
@@ -1907,12 +2186,36 @@ describe("conversation controls", () => {
         open,
         list: { subscribe: () => () => {} },
       },
-      connection: { api: { sessions: { history } } },
+      connection: {
+        api: {
+          sessions: {
+            history,
+            models: async () => ({
+              result: {
+                ok: true,
+                value: {
+                  current: { provider: "codex", model: "gpt-6-astra" },
+                  groups: [
+                    {
+                      id: "codex",
+                      name: "Codex",
+                      models: [{ id: "gpt-6-astra", name: "GPT-6 Astra" }],
+                    },
+                  ],
+                },
+              },
+            }),
+          },
+        },
+      },
       on: () => () => {},
     }).find((entry) => entry.options.id === "workagent-page").Component;
     const view = render(<Component />);
     try {
       await screen.findByText("canonical reply");
+      expect((await screen.findByLabelText("当前会话模型")).value).toBe(
+        "codex/gpt-6-astra",
+      );
       expect(history).toHaveBeenCalledWith(
         { sessionId: "session-main" },
         expect.any(AbortSignal),
@@ -2204,6 +2507,14 @@ describe("conversation controls", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).includes("/interactions?"))
+          return new Response("[]", {
+            headers: { "content-type": "application/json" },
+          });
+        if (String(path) === "/api/speech/capability")
+          return new Response('{"enabled":false}', {
+            headers: { "content-type": "application/json" },
+          });
         const url = String(path);
         if (sideFixture && init.method === "DELETE") {
           if (sideFixture.failDelete)
@@ -2272,6 +2583,68 @@ describe("conversation controls", () => {
       },
     };
   }
+  it("restores cached chat and draft before the network responds and ignores abandoned history", async () => {
+    const f = mountChat();
+    const originalFetch = f.fetchMock.getMockImplementation();
+    let resolveHistory;
+    let delayMain = false;
+    const navigate = (id) => {
+      const anchor = document.createElement("a");
+      anchor.href = `/?session=${id}`;
+      document.body.append(anchor);
+      fireEvent.click(anchor);
+      anchor.remove();
+    };
+    try {
+      await screen.findByText("agent reply");
+      fireEvent.change(screen.getByLabelText("继续对话"), {
+        target: { value: "unsent main draft" },
+      });
+      f.fetchMock.mockImplementation((path, init) => {
+        if (delayMain && String(path).includes("/sessions/session-main"))
+          return new Promise(() => {});
+        if (String(path).endsWith("/sessions/navigation-delayed/messages")) {
+          return new Promise((resolve) => {
+            resolveHistory = resolve;
+          });
+        }
+        if (String(path).endsWith("/sessions/navigation-delayed"))
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                id: "navigation-delayed",
+                title: "Delayed chat",
+                engine: "codex",
+              }),
+              { headers: { "content-type": "application/json" } },
+            ),
+          );
+        return originalFetch(path, init);
+      });
+      navigate("navigation-delayed");
+      await screen.findByText("Delayed chat");
+      expect(screen.queryByText("agent reply")).toBeNull();
+      expect(screen.getByLabelText("继续对话").value).toBe("");
+      delayMain = true;
+      navigate("session-main");
+      expect(screen.getByText("agent reply")).toBeTruthy();
+      expect(screen.getByLabelText("继续对话").value).toBe("unsent main draft");
+      await act(async () =>
+        resolveHistory(
+          new Response(
+            JSON.stringify([
+              { id: "late", role: "assistant", text: "abandoned response" },
+            ]),
+            { headers: { "content-type": "application/json" } },
+          ),
+        ),
+      );
+      expect(screen.queryByText("abandoned response")).toBeNull();
+      expect(screen.getByText("agent reply")).toBeTruthy();
+    } finally {
+      f.done();
+    }
+  });
   it("confirms side-chat deletion, preserves failures, and opens a fresh chat instead of old history", async () => {
     const key = "workagent.side-chat.session-main";
     localStorage.setItem(key, "side-old");
@@ -2424,6 +2797,23 @@ describe("conversation controls", () => {
       else delete navigator.clipboard;
       vi.unstubAllGlobals();
     }
+  });
+  it("confirms mobile branches before creating a conversation", async () => {
+    const f = mountChat();
+    window.matchMedia = vi.fn(() => ({ matches: true }));
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    try {
+      await screen.findByText("agent reply");
+      fireEvent.click(screen.getByRole("button", { name: "分支", exact: true }));
+      await screen.findByText("从这里创建分支？");
+      const forks = () => f.fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/fork"));
+      expect(forks()).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "继续当前对话" }));
+      expect(forks()).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "分支", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "创建分支", exact: true }));
+      await waitFor(() => expect(forks()).toHaveLength(1));
+    } finally { f.done(); }
   });
   it("sends input through steer while keeping the stop control available", async () => {
     const f = mountChat(true, "steer");
@@ -2723,7 +3113,7 @@ describe("model defaults settings", () => {
     expect(screen.getByLabelText("Kimi 默认思考强度").value).toBe("low");
     expect(
       screen.getByLabelText("Kimi 默认思考强度").selectedOptions[0].textContent,
-    ).toBe("轻度（low）");
+    ).toBe("低");
     window.dispatchEvent(
       new CustomEvent("workagent:hero-agent", { detail: "builtin-kimi" }),
     );

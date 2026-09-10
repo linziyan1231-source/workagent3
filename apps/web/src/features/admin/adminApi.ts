@@ -11,6 +11,7 @@ export type Grant = {
 export type Employee = {
   username: string;
   windows_username: string;
+  windows_sid: string;
   enabled: boolean;
   offboarded: boolean;
   created_at: string;

@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { RuntimePreferences } from "./runtime-preferences.js";
+import { nativeImages } from "./native-images.js";
+import {
+  automationSkillPrompt,
+  validatedSkillSuggestion,
+} from "./automation-skills.js";
 import {
   CompletionNotifications,
   type NotificationTransport,
@@ -7,6 +13,7 @@ import { mountCompletionNotifications } from "./completion-notifications-api.js"
 import { resolve as resolvePath } from "node:path";
 import {
   channelEngine,
+  channelAssistantContext,
   channelPermission,
   channelModelCatalog,
   channelEvent,
@@ -187,10 +194,12 @@ type SessionRecord = {
   updatedAt: string;
   workspaceId: string;
   workspacePath?: string;
+  channelKey?: string;
   internal?: boolean;
   modelId?: string;
   thinkingEffort?: string;
   permissionMode?: "read_only" | "workspace_write" | "full_access";
+  requirePermission?: boolean;
   preset: PresetBinding;
   parentSessionId?: string;
   branchKind?: "fork" | "edit" | "side_chat";
@@ -599,6 +608,13 @@ export class RuntimeController
     return this.#sessions.get(id)!;
   }
   readonly #ctx: Context;
+  readonly #preferences: RuntimePreferences;
+  #drainUntil = 0;
+  get #draining() {
+    return this.#drainUntil > Date.now();
+  }
+  #activityExtra: () => { active: boolean; nextWakeAt: string | null } =
+    () => ({ active: true, nextWakeAt: null });
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
@@ -646,6 +662,8 @@ export class RuntimeController
     const dshHome = process.env.DSH_HOME;
     if (dshHome === undefined)
       throw new Error("workagent-runtime-api: DSH_HOME is required");
+    this.#preferences = new RuntimePreferences(dshHome);
+    this.#preferences.mount(ctx, token);
     this.#conversationQuota = new ConversationQuota(dshHome, quota);
     this.#index = new SessionIndex(dshHome);
     this.#messages = new MessageStore(dshHome);
@@ -654,8 +672,14 @@ export class RuntimeController
     this.#completionNotifications = new CompletionNotifications(
       dshHome,
       workspaces,
+      process.env.WORKAGENT_PUBLIC_BASE_URL,
     );
-    mountCompletionNotifications(ctx, token, this.#completionNotifications);
+    mountCompletionNotifications(
+      ctx,
+      token,
+      this.#completionNotifications,
+      (id) => this.#sessions.has(id),
+    );
     this.#presets = presets;
     this.#mcp = mcp;
     this.#skills = skills;
@@ -816,18 +840,175 @@ export class RuntimeController
   }
 
   channelService() {
+    const owned = (key: string, id: string) => {
+      const record = this.#sessions.get(id);
+      if (
+        !record ||
+        record.channelKey !== key ||
+        !id.startsWith("session-channel-")
+      )
+        throw new Error("channel_session_not_found");
+      return record;
+    };
+    const configuration = (key: string, id: string): ChannelConfig => {
+      const record = owned(key, id);
+      return {
+        provider: `workagent-${record.engine}`,
+        presetId: record.preset.presetId,
+        model: record.modelId!,
+        ...(record.thinkingEffort
+          ? { reasoningEffort: record.thinkingEffort }
+          : {}),
+        cwd: this.#engineWorkspace(record),
+        permissionPreset:
+          record.permissionMode === "full_access"
+            ? "danger-full-access"
+            : record.permissionMode === "read_only"
+              ? "read-only"
+              : "workspace-write",
+      };
+    };
     return {
+      configuration,
+      cancel: (key: string, id: string) => {
+        const record = owned(key, id);
+        if (record.handle) return record.handle.agent.cancel({ kind: "user" });
+        return this.nativeSessionPort.cancel(id);
+      },
+      history: (key: string) =>
+        [...this.#sessions]
+          .filter(([, record]) => record.channelKey === key)
+          .map(([id, record]) => ({
+            id,
+            title: record.title,
+            updatedAt: record.updatedAt,
+            workspaceId: record.workspaceId,
+            active: Boolean(
+              record.inputPending ||
+                record.activating ||
+                record.queue?.length ||
+                (record.activity && record.activity.state !== "idle"),
+            ),
+          }))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      projects: () =>
+        this.#workspaces.list().map((project) => ({
+          id: project.id,
+          name: project.name,
+          cwd: this.#workspaces.engineRoot(project.id),
+        })),
+      resume: (key: string, id: string) =>
+        this.#openChannel(configuration(key, id), id, undefined, key),
+      rename: (key: string, id: string, title: string) => {
+        const record = owned(key, id);
+        if (record.engine === "harness") {
+          if (!title.trim() || title.length > 200)
+            throw new Error("invalid_title");
+          record.title = title.trim();
+          record.updatedAt = new Date().toISOString();
+          this.#persist(id, record);
+          return record.title;
+        }
+        return this.nativeSessionPort.rename(id, title);
+      },
+      sessionModels: async (key: string, id: string) => {
+        const record = owned(key, id);
+        if (record.engine === "harness") {
+          const groups = channelModelCatalog(
+            await discoverModels(this.#ctx, new Map()),
+          );
+          return {
+            current: { provider: "harness", model: record.modelId! },
+            routable: true,
+            groups,
+            failures: [],
+          };
+        }
+        return this.nativeSessionPort.models(id);
+      },
+      selectModel: async (key: string, id: string, model: string) => {
+        const record = owned(key, id);
+        if (record.engine === "harness") {
+          if (
+            record.inputPending ||
+            record.activating ||
+            (record.activity && record.activity.state !== "idle")
+          )
+            throw new Error("session_input_pending");
+          const groups = await discoverModels(this.#ctx, new Map());
+          if (!groups[0]?.models.some((row) => row.id === model))
+            throw new Error("engine_model_unavailable");
+          await record.handle?.dispose();
+          record.handle = undefined;
+          record.modelId = model;
+          delete record.thinkingEffort;
+          this.#persist(id, record);
+          return configuration(key, id);
+        }
+        await this.nativeSessionPort.selectModel(id, {
+          provider: record.engine,
+          model,
+        });
+        return configuration(key, id);
+      },
+      compact: async (key: string, id: string) => {
+        const record = owned(key, id);
+        if (
+          record.inputPending ||
+          record.activating ||
+          (record.activity && record.activity.state !== "idle")
+        )
+          throw new Error("session_input_pending");
+        record.inputPending = true;
+        try {
+          await this.#activate(id, record);
+          if (!record.native?.compact)
+            throw new Error("engine_compact_unavailable");
+          await record.native.compact();
+        } finally {
+          record.inputPending = false;
+        }
+      },
+      quota: async (key: string, id: string) => {
+        const record = owned(key, id);
+        const client = PlatformQuotaClient.fromEnvironment();
+        if (!client) throw new Error("quota_not_configured");
+        return client.usage(record.modelId!.replace(/^kimi-code\//, ""));
+      },
       attachNotifications: (transport: NotificationTransport) =>
         this.#completionNotifications.attach(transport),
       handles: (provider?: string) => channelEngine(provider) !== undefined,
+      assistants: () =>
+        this.#presets
+          .list()
+          .filter((preset) => preset.enabled)
+          .map(({ id, name, engine, modelId }) => ({
+            id,
+            name: id === "builtin-general" ? "通用助手" : name,
+            provider: `workagent-${engine}`,
+            modelId,
+          })),
+      validateAssistant: (config: ChannelConfig) => {
+        const engine = channelEngine(config.provider);
+        const preset = this.#presets.resolve(
+          config.presetId ||
+            (engine === "harness" ? "builtin-general" : `builtin-${engine}`),
+        );
+        if (preset.resolvedSnapshot.engine !== engine)
+          throw new Error("channel_assistant_engine_mismatch");
+      },
       models: async () =>
         channelModelCatalog(await discoverModels(this.#ctx, this.#bridges)),
       listSessionIds: () =>
         [...this.#sessions.keys()].filter((id) =>
           id.startsWith("session-channel-"),
         ),
-      open: (config: ChannelConfig, sessionId?: string, title?: string) =>
-        this.#openChannel(config, sessionId, title),
+      open: (
+        config: ChannelConfig,
+        sessionId?: string,
+        title?: string,
+        channelKey?: string,
+      ) => this.#openChannel(config, sessionId, title, channelKey),
     };
   }
 
@@ -835,34 +1016,51 @@ export class RuntimeController
     config: ChannelConfig,
     sessionId?: string,
     title?: string,
+    channelKey?: string,
   ) {
+    if (this.#draining) throw new Error("runtime_draining");
     const engine = channelEngine(config.provider);
     if (!engine) throw new Error("unsupported_channel_engine");
+    const presetId =
+      config.presetId ||
+      (engine === "harness" ? "builtin-general" : `builtin-${engine}`);
     const permissionMode = channelPermission(config.permissionPreset);
     const workspacePath = resolvePath(
       config.cwd || this.#workspaces.engineRoot("default"),
     );
     const existing = sessionId ? this.#sessions.get(sessionId) : undefined;
+    if (existing?.channelKey && existing.channelKey !== channelKey)
+      throw new Error("channel_session_not_found");
     if (
       sessionId &&
       (!existing ||
         existing.engine !== engine ||
+        existing.preset.presetId !== presetId ||
         existing.modelId !== config.model ||
         existing.thinkingEffort !== config.reasoningEffort ||
         existing.permissionMode !== permissionMode ||
         resolvePath(this.#engineWorkspace(existing)) !== workspacePath)
     )
       return undefined;
-    const credentialError = nativeCredentialError(
-      engine,
-      this.#credentials.statusFor(`${engine}-native`),
-    );
+    const credentialError =
+      engine === "harness"
+        ? undefined
+        : nativeCredentialError(
+            engine,
+            this.#credentials.statusFor(`${engine}-native`),
+          );
     if (credentialError) throw new Error(credentialError);
     const id = sessionId ?? `session-channel-${randomUUID()}`;
     let record = existing;
     if (!record) {
+      const preset = this.#presets.resolve(presetId);
+      if (preset.resolvedSnapshot.engine !== engine)
+        throw new Error("channel_assistant_engine_mismatch");
       if (!config.model) throw new Error("channel_model_required");
-      const models = await this.#bridges.get(engine)!.listModels();
+      const models =
+        engine === "harness"
+          ? (await discoverModels(this.#ctx, new Map()))[0]!.models
+          : await this.#bridges.get(engine)!.listModels();
       const model = models.find((row) => row.id === config.model);
       if (
         !model ||
@@ -873,6 +1071,10 @@ export class RuntimeController
       )
         throw new Error("channel_model_unavailable");
       const now = new Date().toISOString();
+      const context = channelAssistantContext(
+        preset.resolvedSnapshot.systemPrompt,
+        engine === "harness" ? [] : this.#resolvedSkills(preset),
+      );
       record = {
         engine,
         events: [],
@@ -882,6 +1084,11 @@ export class RuntimeController
         nativeId: id,
         nextEventSequence: 1,
         title: title || "消息渠道会话",
+        ...(context
+          ? {
+              pendingContext: `${context}\n\n`,
+            }
+          : {}),
         createdAt: now,
         updatedAt: now,
         workspaceId:
@@ -893,12 +1100,13 @@ export class RuntimeController
                 workspacePath,
             )?.id ?? "default",
         workspacePath,
+        ...(channelKey ? { channelKey } : {}),
         modelId: config.model,
         permissionMode,
         ...(config.reasoningEffort
           ? { thinkingEffort: config.reasoningEffort }
           : {}),
-        preset: this.#presets.resolve(`builtin-${engine}`),
+        preset,
       };
       this.#sessions.set(id, record);
       try {
@@ -908,7 +1116,11 @@ export class RuntimeController
         throw error;
       }
       this.#persist(id, record);
-    } else await this.#activate(id, record);
+    } else {
+      if (channelKey) record.channelKey = channelKey;
+      await this.#activate(id, record);
+      this.#persist(id, record);
+    }
     const session = record;
     return {
       sessionId: id,
@@ -961,6 +1173,10 @@ export class RuntimeController
         }
       },
       dispose: async () => {
+        if (session.handle) {
+          await session.handle.dispose();
+          session.handle = undefined;
+        }
         if (session.native) {
           try {
             await session.native.cancel();
@@ -974,6 +1190,7 @@ export class RuntimeController
   }
 
   async openTeamSession(request: TeamSessionRequest): Promise<void> {
+    if (this.#draining) throw new Error("runtime_draining");
     const existing = this.#sessions.get(request.sessionId);
     if (existing !== undefined) {
       if (existing.handle === undefined && existing.native === undefined)
@@ -1092,6 +1309,7 @@ export class RuntimeController
   async executeInbox(
     request: InboxExecution,
   ): Promise<{ sessionId: string; replyText?: string }> {
+    if (this.#draining) throw new Error("runtime_draining");
     const messageId = `message-${request.receiptId}`;
     if (
       this.#messages
@@ -1199,7 +1417,73 @@ export class RuntimeController
     await record.native!.cancel();
   }
 
+  setActivityProvider(
+    provider: () => { active: boolean; nextWakeAt: string | null },
+  ) {
+    this.#activityExtra = provider;
+  }
+
+  activitySnapshot() {
+    const extra = this.#activityExtra();
+    const notifications = this.#completionNotifications.snapshot();
+    const records = [...this.#sessions.values()];
+    return {
+      known: true,
+      active:
+        extra.active ||
+        notifications.channelActive ||
+        notifications.deliveries.some(
+          (row) => row.status === "pending" || row.status === "sending",
+        ) ||
+        this.#automationExecutions.size > 0 ||
+        this.#sharedTurnExecutions.size > 0 ||
+        records.some(
+          (record) =>
+            record.inputPending ||
+            record.activating ||
+            record.queue?.length ||
+            (record.activity && record.activity.state !== "idle"),
+        ),
+      nextWakeAt: extra.nextWakeAt,
+      lastActiveAt:
+        records
+          .map((record) => record.updatedAt)
+          .sort()
+          .at(-1) ?? null,
+      channelActive: notifications.channelActive,
+      draining: this.#draining,
+    };
+  }
+
   mount(): void {
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
+          kind: "exact",
+          path: "/v1/activity",
+          handler: async (request, response) => {
+            if (!authorized(request, this.#token))
+              return writeJson(response, 401, {
+                error: "authentication_required",
+              });
+            if (request.method === "POST") {
+              try {
+                const input = await readJson(request);
+                if (typeof input.draining !== "boolean")
+                  return writeJson(response, 400, { error: "invalid_request" });
+                if (input.draining && this.activitySnapshot().active)
+                  return writeJson(response, 409, { error: "runtime_busy" });
+                this.#drainUntil = input.draining ? Date.now() + 120_000 : 0;
+              } catch {
+                return writeJson(response, 400, { error: "invalid_request" });
+              }
+            } else if (request.method !== "GET")
+              return writeJson(response, 405, { error: "method_not_allowed" });
+            writeJson(response, 200, this.activitySnapshot());
+          },
+        }),
+      "workagent: runtime idle admission",
+    );
     this.#ctx.effect(
       () =>
         this.#ctx.webServer.register({
@@ -1512,7 +1796,7 @@ export class RuntimeController
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|fork|side-chat)$/.exec(
+      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|fork|side-chat|configuration)$/.exec(
         path,
       );
     if (match === null) {
@@ -1523,6 +1807,53 @@ export class RuntimeController
     const record = this.#sessions.get(id);
     if (record === undefined || record.internal === true) {
       writeJson(response, 404, { error: "session_not_found" });
+      return;
+    }
+    if (match[2] === "configuration" && request.method === "PATCH") {
+      const input = await readJson(request);
+      if (
+        !["read_only", "workspace_write", "full_access"].includes(
+          String(input.permissionMode),
+        )
+      )
+        return writeJson(response, 400, { error: "invalid_permission_mode" });
+      if (record.engine === "harness")
+        return writeJson(response, 400, { error: "native_session_required" });
+      if (
+        record.inputPending ||
+        record.activating ||
+        (record.activity && record.activity.state !== "idle")
+      )
+        return writeJson(response, 409, { error: "session_input_pending" });
+      record.inputPending = true;
+      const previous = record.permissionMode;
+      try {
+        await record.native?.close();
+        record.native = undefined;
+        if (this.#sessions.get(id) !== record)
+          throw new Error("session_not_found");
+        record.permissionMode = input.permissionMode as NonNullable<
+          SessionRecord["permissionMode"]
+        >;
+        record.requirePermission = true;
+        await this.#activate(id, record);
+        if (this.#sessions.get(id) !== record)
+          throw new Error("session_not_found");
+        this.#persist(id, record);
+        writeJson(response, 200, { permissionMode: record.permissionMode });
+      } catch (error) {
+        await record.native?.close().catch(() => undefined);
+        record.native = undefined;
+        if (previous === undefined) delete record.permissionMode;
+        else record.permissionMode = previous;
+        writeJson(response, 409, {
+          error:
+            error instanceof Error ? error.message : "permission_update_failed",
+        });
+      } finally {
+        delete record.requirePermission;
+        record.inputPending = false;
+      }
       return;
     }
     if (
@@ -1663,6 +1994,13 @@ export class RuntimeController
         return;
       }
     }
+    if (match[2] === "configuration" && request.method === "GET") {
+      writeJson(response, 200, {
+        permissionMode: record.permissionMode ?? record.native?.permissionMode ??
+          (record.engine === "harness" ? "workspace_write" : undefined),
+      });
+      return;
+    }
     if (match[2] === "messages" && request.method === "GET") {
       writeJson(response, 200, this.#messages.list(id));
       return;
@@ -1758,6 +2096,8 @@ export class RuntimeController
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
+    if (this.#draining)
+      return writeJson(response, 503, { error: "runtime_draining" });
     const input = await readJson(request);
     if (
       (input.engine !== "harness" &&
@@ -1924,10 +2264,18 @@ export class RuntimeController
     });
   }
 
-  async #executeAutomation(
-    request: AutomationExecution,
-  ): Promise<{ sessionId: string; result?: string }> {
+  async #executeAutomation(request: AutomationExecution): Promise<{
+    sessionId: string;
+    result?: string;
+    skillSuggestionPath?: string;
+  }> {
+    if (this.#draining) throw new Error("runtime_draining");
     const definition = request.definition;
+    const skillPrompt = automationSkillPrompt(
+      definition,
+      request.automationRunId,
+      this.#skills,
+    );
     const sessionId =
       this.#automationTargets.get(request.automationRunId) ??
       automationTargetSessionId(request.automationRunId, definition);
@@ -1942,18 +2290,26 @@ export class RuntimeController
       definition.executionMode === "existing"
         ? await this.#existingAutomationSession(sessionId, definition)
         : await this.#startAutomationSession(sessionId, request);
+    request.onSessionStarted?.(sessionId);
     const terminal = this.#waitForTerminal(sessionId);
     record.updatedAt = new Date().toISOString();
     try {
       if (record.handle !== undefined) {
         record.handle.agent.followup(
           createUserMessage({
-            content: [{ type: "text", text: definition.input }],
+            content: [{ type: "text", text: skillPrompt.input }],
             source: { kind: "user" },
           }),
         );
       } else {
-        await record.native!.send(definition.input);
+        await record.native!.send(
+          skillPrompt.input,
+          await nativeImages(
+            this.#workspaces,
+            record.workspaceId,
+            definition.input,
+          ),
+        );
       }
     } catch (error) {
       this.#publish(record, {
@@ -1975,12 +2331,22 @@ export class RuntimeController
       createdAt: new Date().toISOString(),
     });
     this.#persist(sessionId, record);
-    return terminal;
+    const result = await terminal;
+    const skillSuggestionPath = await validatedSkillSuggestion(
+      this.#workspaces,
+      record.workspaceId,
+      skillPrompt.path,
+    );
+    return {
+      ...result,
+      ...(skillSuggestionPath ? { skillSuggestionPath } : {}),
+    };
   }
 
   async #executeSharedTurn(
     request: SharedTurnRuntimeRequest,
   ): Promise<SharedTurnResult> {
+    if (this.#draining) throw new Error("runtime_draining");
     const sessionId = `session-shared-${request.conversationId}`;
     this.#sharedTurnTargets.set(request.runId, sessionId);
     let record = this.#sessions.get(sessionId);
@@ -2087,7 +2453,10 @@ export class RuntimeController
         }),
       );
     } else {
-      await record.native!.send(input);
+      await record.native!.send(
+        input,
+        await nativeImages(this.#workspaces, record.workspaceId, input),
+      );
     }
     this.#persist(sessionId, record);
     const result = await terminal;
@@ -2504,6 +2873,7 @@ export class RuntimeController
     input: QueuedInput,
     steering: boolean,
   ): Promise<void> {
+    if (this.#draining) throw new Error("runtime_draining");
     const running = !!record.activity && record.activity.state !== "idle";
     if (record.inputPending || (!steering && running))
       throw new Error("session_input_pending");
@@ -2556,8 +2926,14 @@ export class RuntimeController
           }),
         );
       } else {
-        nativeTurnId =
-          await record.native![steering ? "steer" : "send"](content);
+        nativeTurnId = await record.native![steering ? "steer" : "send"](
+          content,
+          await nativeImages(
+            this.#workspaces,
+            record.workspaceId,
+            input.content,
+          ),
+        );
       }
       if (this.#sessions.get(id) !== record) {
         await this.#conversationQuota.release(quotaRunId);
@@ -2616,6 +2992,51 @@ export class RuntimeController
   }
 
   #publish(record: SessionRecord, event: PublicEvent): void {
+    if (
+      this.#sessions.get(event.sessionId) === record &&
+      event.type === "assistant.completed" &&
+      typeof event.content === "string"
+    ) {
+      const known = new Set(
+        this.#workspaces
+          .listAssets(record.workspaceId, event.sessionId)
+          .map((asset) => asset.path),
+      );
+      for (const match of event.content.matchAll(
+        /\[[^\]\n]+\]\((<[^>]+>|[^)\n]+)\)/g,
+      )) {
+        try {
+          const reference = decodeURIComponent(
+            match[1]!.replace(/^<|>$/g, "").replace(/^sandbox:|^file:\/\//, ""),
+          ).replace(/#L?\d+(?:-L?\d+)?$/, "");
+          if (/^[a-z]+:\/\//i.test(reference)) continue;
+          const file = this.#workspaces.locate(record.workspaceId, reference);
+          if (!known.has(file.path)) {
+            this.#workspaces.registerArtifact(
+              record.workspaceId,
+              event.sessionId,
+              file.path,
+            );
+            known.add(file.path);
+          }
+        } catch {
+          /* A result link is an artifact only while it resolves inside this workspace. */
+        }
+      }
+    }
+    if (event.type === "turn.started" && typeof event.turnId === "string") {
+      this.#preferences.started(event.sessionId, event.turnId, async () => {
+        if (this.#sessions.get(event.sessionId) !== record) return;
+        if (record.handle) record.handle.agent.cancel({ kind: "user" });
+        else await record.native?.cancel();
+      });
+    } else if (
+      ["turn.completed", "turn.failed", "turn.cancelled"].includes(
+        event.type,
+      ) &&
+      typeof event.turnId === "string"
+    )
+      this.#preferences.ended(event.sessionId, event.turnId);
     if (event.type === "turn.started" && typeof event.turnId === "string")
       this.#conversationQuota.started(event.sessionId, event.turnId);
     if (
@@ -2730,7 +3151,8 @@ export class RuntimeController
     const mcpServers = this.#resolvedMcpServers(record.preset);
     this.#validateMcpCompatibility(record.engine, mcpServers);
     const resolvedSkills = this.#resolvedSkills(record.preset);
-    this.#validateSkillCompatibility(record.engine, resolvedSkills);
+    if (!id.startsWith("session-channel-"))
+      this.#validateSkillCompatibility(record.engine, resolvedSkills);
     if (record.engine === "harness") {
       const selection = this.#harnessSelection(record);
       try {
@@ -2741,6 +3163,8 @@ export class RuntimeController
             model: selection.model,
           },
           setup: async (agentContext) => {
+            if (id.startsWith("session-channel-"))
+              this.#applyChannelPermission(agentContext, record);
             installModelSelection(agentContext, {
               current: selection,
               assembled: undefined,
@@ -2774,6 +3198,7 @@ export class RuntimeController
     const onEvent = (event: BridgeEvent) =>
       this.#publish(record, this.#nativeEvent(id, record, event));
     const options = {
+      ...(record.requirePermission ? { requirePermission: true } : {}),
       mcpServers,
       requestApproval: (approval: NativeApprovalRequest) =>
         // Internal shared tasks have no interactive approval surface.
@@ -2925,6 +3350,7 @@ export class RuntimeController
     this.#openNativeLog(id, record);
     this.#index.set({
       id,
+      ...(record.channelKey ? { channelKey: record.channelKey } : {}),
       nativeId: record.nativeId,
       engine: record.engine,
       title: record.title,
@@ -2964,7 +3390,10 @@ export class RuntimeController
     workspace: string,
     mcpServers: readonly ResolvedMcpServer[],
     skills: readonly ResolvedSkill[],
-    record: Pick<SessionRecord, "modelId" | "thinkingEffort">,
+    record: Pick<
+      SessionRecord,
+      "modelId" | "thinkingEffort" | "permissionMode"
+    >,
   ): Promise<AgentHandle> {
     const selection = this.#harnessSelection(record);
     return this.#ctx.agents.create({
@@ -2972,6 +3401,8 @@ export class RuntimeController
       meta: { cwd: workspace },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup: async (agentContext) => {
+        if (id.startsWith("session-channel-"))
+          this.#applyChannelPermission(agentContext, record);
         installModelSelection(agentContext, {
           current: selection,
           assembled: undefined,
@@ -2994,5 +3425,29 @@ export class RuntimeController
         ? { reasoningEffort: ReasoningEffortId(record.thinkingEffort) }
         : {}),
     };
+  }
+
+  #applyChannelPermission(
+    agentContext: Context,
+    record: Pick<SessionRecord, "permissionMode">,
+  ) {
+    const permissions = (
+      this.#ctx as Context & {
+        permissionPresets: {
+          set(
+            session: NonNullable<Context["agent"]>["session"],
+            preset: string,
+          ): void;
+        };
+      }
+    ).permissionPresets;
+    permissions.set(
+      agentContext.agent!.session,
+      record.permissionMode === "read_only"
+        ? "read-only"
+        : record.permissionMode === "full_access"
+          ? "danger-full-access"
+          : "workspace-write",
+    );
   }
 }

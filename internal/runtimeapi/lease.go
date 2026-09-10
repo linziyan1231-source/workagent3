@@ -45,7 +45,7 @@ func LeaseHandler(registry *Registry, authorizer LeaseAuthorizer) http.Handler {
 				http.Error(writer, "registration_rejected", http.StatusUnauthorized)
 				return
 			}
-			if _, err := registry.Resolve(request.Context(), sid); err != nil {
+			if _, err := registry.Lookup(sid); err != nil {
 				http.Error(writer, "runtime_unavailable", http.StatusServiceUnavailable)
 				return
 			}

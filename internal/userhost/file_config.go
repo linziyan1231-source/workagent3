@@ -14,6 +14,7 @@ import (
 )
 
 type FileConfig struct {
+	PublicBaseURL              string              `json:"publicBaseURL,omitempty"`
 	SID                        string              `json:"sid"`
 	DataRoot                   string              `json:"dataRoot"`
 	HarnessCommand             string              `json:"harnessCommand"`

@@ -79,7 +79,7 @@ func (m *sharedFileManager) OperateFile(ctx context.Context, request sharedFileR
 	}
 	operation := strings.TrimSpace(request.Operation)
 	if operation != "list" {
-		if err := validateSharedPathNoReparse(root, relative, operation == "write"); err != nil {
+		if err := validateSharedPathNoReparse(root, relative, operation == "write" || operation == "write-buffer"); err != nil {
 			return nil, err
 		}
 	}
@@ -163,6 +163,25 @@ func (m *sharedFileManager) OperateFile(ctx context.Context, request sharedFileR
 			contentType = http.DetectContentType(content)
 		}
 		return json.Marshal("data:" + contentType + ";base64," + encoded)
+	case "write-buffer":
+		if relative == "" || len(request.Data) > maxSharedFileData {
+			return nil, errors.New("shared upload is invalid or oversized")
+		}
+		data, err := base64.StdEncoding.DecodeString(request.Data)
+		if err != nil {
+			return nil, errors.New("shared upload encoding is invalid")
+		}
+		file, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			_ = os.Remove(targetPath)
+			return nil, err
+		}
+		return []byte("true"), nil
 	case "write":
 		if relative == "" || len(request.Data) > maxSharedFileData {
 			return nil, errors.New("shared file write is invalid or oversized")

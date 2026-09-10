@@ -104,6 +104,7 @@ type AuditPort interface {
 }
 
 type Modules struct {
+	Storage            StoragePort
 	ModelAccess        ModelAccessPort
 	Quota              QuotaUsagePort
 	SpeechQuota        SpeechQuotaPort
@@ -152,6 +153,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("GET /api/auth/remembered", s.rememberedLogin)
+	mux.HandleFunc("DELETE /api/auth/remembered", s.forgetLogin)
 	mux.HandleFunc("POST /api/auth/password", s.changePassword)
 	mux.HandleFunc("POST /api/auth/logout", s.requireUser(s.logout))
 	mux.HandleFunc("GET /api/auth/me", s.requireUser(s.me))
@@ -163,6 +166,8 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/portal/admin/user-jobs", s.requireUser(s.requireAdmin(s.adminUserJob)))
 	mux.HandleFunc("GET /api/portal/admin/users/usage", s.requireUser(s.requireAdmin(s.adminUsersUsage)))
 	mux.HandleFunc("GET /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
+ mux.HandleFunc("GET /api/quota/dollars",s.requireUser(s.dollarBudgets))
+ mux.HandleFunc("GET /api/portal/admin/usage",s.requireUser(s.dollarUsage))
 	mux.HandleFunc("POST /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
 	mux.HandleFunc("POST /api/portal/admin/users/{action}", s.requireUser(s.requireAdmin(s.adminUserAction)))
 	mux.HandleFunc("POST /api/portal/admin/users/kimi-datasource", s.requireUser(s.requireAdmin(s.adminKimiDatasource)))
@@ -180,6 +185,9 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/system/capabilities", s.requireUser(s.systemCapabilities))
 	mux.HandleFunc("GET /api/system/diagnostics", s.requireUser(s.systemDiagnostics))
 	mux.HandleFunc("POST /api/system/runtime/restart", s.requireUser(s.restartRuntime))
+	mux.HandleFunc("GET /api/system/storage", s.requireUser(s.storageUsage))
+	mux.HandleFunc("PUT /api/portal/admin/storage", s.requireUser(s.requireAdmin(s.adminStorage)))
+	mux.HandleFunc("GET /api/portal/admin/storage", s.requireUser(s.requireAdmin(s.adminStorage)))
 	mux.HandleFunc("GET /api/models", s.requireUser(s.models))
 	mux.HandleFunc("GET /api/quota/usage", s.requireUser(s.quotaUsage))
 	mux.HandleFunc("GET /api/quota/gateway-usage", s.requireUser(s.gatewayUsage))
@@ -527,6 +535,8 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
+		UseRemembered bool `json:"useRemembered"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(request.Body, 4*1024))
 	decoder.DisallowUnknownFields()
@@ -535,28 +545,56 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	markAudit(request, input.Username, false)
-	user, lookupErr := s.store.UserByUsername(request.Context(), input.Username)
-	encoded := s.dummyHash
-	if lookupErr == nil {
-		encoded = user.PasswordHash
-	}
-	valid := auth.VerifyPassword(encoded, []byte(input.Password))
-	if lookupErr != nil || !valid || user.Disabled {
-		writeError(writer, http.StatusUnauthorized, "invalid_credentials")
-		return
+	var user store.User
+	if input.UseRemembered {
+		var err error
+		user, err = s.rememberedUser(request)
+		if err != nil || !strings.EqualFold(user.Username, input.Username) || input.Password != "" {
+			writeError(writer, http.StatusUnauthorized, "invalid_credentials")
+			return
+		}
+	} else {
+		var lookupErr error
+		user, lookupErr = s.store.UserByUsername(request.Context(), input.Username)
+		encoded := s.dummyHash
+		if lookupErr == nil {
+			encoded = user.PasswordHash
+		}
+		valid := auth.VerifyPassword(encoded, []byte(input.Password))
+		if lookupErr != nil || !valid || user.Disabled {
+			writeError(writer, http.StatusUnauthorized, "invalid_credentials")
+			return
+		}
 	}
 	token, err := auth.RandomToken(32)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	expires := s.now().Add(s.sessionLife)
+	lifetime := s.sessionLife
+	if input.Remember {
+		lifetime = 30 * 24 * time.Hour
+	}
+	expires := s.now().Add(lifetime)
 	if err := s.store.CreateSession(request.Context(), token, user.ID, expires); err != nil {
 		log.Printf("create Portal login session: %v", err)
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	http.SetCookie(writer, &http.Cookie{Name: s.cookieName(), Value: token, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode, Expires: expires})
+	cookie := &http.Cookie{Name: s.cookieName(), Value: token, Path: "/", HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteStrictMode}
+	if input.Remember {
+		cookie.Expires = expires
+		cookie.MaxAge = int(lifetime.Seconds())
+	}
+	http.SetCookie(writer, cookie)
+	if !input.UseRemembered || !input.Remember {
+		if err := s.saveRememberedLogin(writer, request, user, input.Remember); err != nil {
+			writer.Header().Del("Set-Cookie")
+			_ = s.store.DeleteSession(request.Context(), token)
+			writeError(writer, http.StatusInternalServerError, "internal_error")
+			return
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -747,6 +785,14 @@ func (s *Server) proxyDsh(writer http.ResponseWriter, request *http.Request, use
 }
 
 func (s *Server) proxyRuntimePath(writer http.ResponseWriter, request *http.Request, user store.User, stripPrefix string) {
+	if tracker, ok := s.runtimes.(interface{ BeginRequest(string) (func(), error) }); ok {
+		done, err := tracker.BeginRequest(user.SID)
+		if err != nil {
+			writeError(writer, 503, "runtime_unavailable")
+			return
+		}
+		defer done()
+	}
 	endpoint, err := s.runtimes.Resolve(request.Context(), user.SID)
 	if err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "runtime_unavailable")

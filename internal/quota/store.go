@@ -103,7 +103,10 @@ func OpenRecorder(path string) (*Store, error) {
 }
 
 func open(path string, authorizer ModelAuthorizationPort) (*Store, error) {
-	database, err := sql.Open("sqlite", path)
+	// Reserve and settle read before writing. Acquire the write reservation at
+	// BEGIN so a concurrent usage recorder cannot cause a lock-upgrade failure;
+	// busy_timeout alone cannot wait out that SQLite deadlock.
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open quota database: %w", err)
 	}
@@ -119,11 +122,7 @@ func open(path string, authorizer ModelAuthorizationPort) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
-	// busy_timeout lets the Portal and the Employee Manager drain share this
-	// database file across processes without spurious SQLITE_BUSY failures.
 	_, err := s.db.ExecContext(ctx, `
-PRAGMA busy_timeout = 5000;
-PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS quota_budgets (
   sid TEXT NOT NULL CHECK (sid LIKE 'S-1-%'),
   model_id TEXT NOT NULL,
@@ -182,6 +181,8 @@ ON quota_gateway_usage(sid, failed, matched_run_id, occurred_at);
 CREATE TABLE IF NOT EXISTS quota_gateway_checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), through_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS quota_gateway_holds (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), release_after_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS quota_gateway_run_owners (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), sid TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quota_dollar_budgets (sid TEXT NOT NULL,pool TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(sid,pool));
+CREATE TABLE IF NOT EXISTS quota_dollar_usage (request_id TEXT PRIMARY KEY,pool TEXT NOT NULL,usd REAL NOT NULL,estimated INTEGER NOT NULL);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate quota database: %w", err)
@@ -340,8 +341,18 @@ func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservatio
 		if err := ensureGatewayFresh(ctx, tx, request.SID, request.At); err != nil {
 			return Reservation{}, false, err
 		}
-		checked := false
+
+		// Once synchronized, monetary gateway pools replace legacy per-model token caps.
+		dollarChecked, err := checkDollarAdmission(ctx, tx, request)
+		if err != nil {
+			return Reservation{}, false, err
+		}
+		checked := dollarChecked
 		for _, scope := range scopes {
+			if dollarChecked {
+				checked = true
+				break
+			}
 			if (scope.id == "harness-default" && request.Engine != "harness" && request.ModelID != "harness-default") || (scope.id == "codex-native" && (request.Engine == "harness" || request.ModelID == "harness-default")) {
 				continue
 			}

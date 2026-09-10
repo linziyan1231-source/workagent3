@@ -34,15 +34,15 @@ separately maintained component and must never be writable by employee accounts.
 The Portal's **restart** action closes ingress for the employee, stops and starts
 the existing task, and reopens the account only after runtime registration.
 **Repair** checks the stored credential before stopping service, reprojects the
-profile and reinstalls configuration/task using that same credential. Neither
+software references and reinstalls configuration/task using that same credential. Neither
 operation changes the Windows password. Supplied Windows passwords are rejected.
 Windows-account rename also uses the SID-bound managed credential.
 
 Releases must still be complete and immutable: stage Portal, Web, UserHost and
 the full Harness profile together. Serialize activation, pause ingress and the
-manager, stop employees, swap complete staged profiles, update manager/runtime
+manager, stop employees, switch public software references while retaining private profile configuration, update manager/runtime
 configuration and launch manifests, and restart. Rollback restores these files
-and profiles; it does not re-register tasks. Verify the actual UserHost process
+and software references; it does not re-register tasks. See `shared-software-storage.md` for audited legacy migration and retention. Verify the actual UserHost process
 path and resolved profile files rather than checking only the launcher path.
 
 ## Password maintenance and legacy adoption

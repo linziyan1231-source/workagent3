@@ -7,7 +7,8 @@ import {
   type Job,
 } from "./adminApi.js";
 import { Dialog, ActionForm, Password } from "./adminUi.js";
-import { QuotaEditor } from "./QuotaEditor.js";
+import { DollarBudgets } from "./DollarUsage.js";
+import { StorageEditor } from "./StorageEditor.js";
 export function EmployeePanel({
   employee: u,
   sources,
@@ -106,6 +107,7 @@ export function EmployeePanel({
       <div className="admin-tabs" role="tablist" aria-label="账户管理">
         {[
           ["quota", "使用额度"],
+          ["storage", "磁盘空间"],
           ["service", "账户与服务"],
           ["datasource", "数据源"],
         ].map(([id, label]) => (
@@ -122,7 +124,8 @@ export function EmployeePanel({
           </button>
         ))}
       </div>
-      {tab === "quota" && <QuotaEditor username={u.username} />}
+      {tab === "quota" && <DollarBudgets username={u.username} />}
+      {tab === "storage" && <StorageEditor key={u.username} username={u.username} />}
       {tab === "datasource" && sources.length === 0 && (
         <p className="admin-empty">当前部署尚未接入 Kimi 数据源服务。</p>
       )}

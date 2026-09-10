@@ -75,6 +75,7 @@ vi.mock("./engines/codex.js", () => ({
       native.emit = emit;
       return {
         nativeId: `native-${++native.sequence}`,
+        permissionMode: "workspace_write" as const,
         send: async (content: string) => {
           native.calls.push({ method: "send", content });
           emit({ type: "turn.started", turnId: "active" });
@@ -208,11 +209,11 @@ async function fixture(
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
-  const call = async (path: string, body?: unknown) => {
+  const call = async (path: string, body?: unknown, method?: string) => {
     const response = await fetch(
       `http://127.0.0.1:${address.port}/v1/sessions${path}`,
       {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           authorization: "Bearer test-token",
           "content-type": "application/json",
@@ -356,6 +357,68 @@ it("does not resume or report a model selection accepted after deletion during m
     expect(new SessionIndex(f.home).list()).toEqual([]);
   } finally {
     release();
+    await f.close();
+  }
+});
+
+it("reads the effective native permission without persisting or changing the legacy session", async () => {
+  const f = await fixture();
+  try {
+    const before = new SessionIndex(f.home).list()[0]?.permissionMode;
+    expect(before).toBeUndefined();
+    expect((await f.call("/session-source/configuration")).data).toEqual({
+      permissionMode: "workspace_write",
+    });
+    expect(new SessionIndex(f.home).list()[0]?.permissionMode).toBeUndefined();
+    expect(native.resumedOptions.at(-1)).not.toHaveProperty("permissionMode");
+    expect(
+      native.calls.some(
+        (call) => call.method === "send" || call.method === "reserve",
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+it("updates real native permissions only after resume accepts them and preserves the old setting on failure", async () => {
+  const f = await fixture();
+  try {
+    expect(
+      (
+        await f.call(
+          "/session-source/configuration",
+          { permissionMode: "read_only" },
+          "PATCH",
+        )
+      ).status,
+    ).toBe(200);
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      permissionMode: "read_only",
+      requirePermission: true,
+    });
+    expect(new SessionIndex(f.home).list()[0]?.permissionMode).toBe(
+      "read_only",
+    );
+    native.resumeError = "engine_permission_unavailable";
+    expect(
+      (
+        await f.call(
+          "/session-source/configuration",
+          { permissionMode: "full_access" },
+          "PATCH",
+        )
+      ).status,
+    ).toBe(409);
+    expect(new SessionIndex(f.home).list()[0]?.permissionMode).toBe(
+      "read_only",
+    );
+    expect(
+      native.calls.some(
+        (call) => call.method === "send" || call.method === "reserve",
+      ),
+    ).toBe(false);
+  } finally {
     await f.close();
   }
 });

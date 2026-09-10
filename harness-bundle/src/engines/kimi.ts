@@ -153,6 +153,8 @@ export const applyKimiOptions = async (
       ],
     ] as const) {
       const option = configSelect(configOptions, category);
+      if (category === "mode" && options?.requirePermission && !option)
+        throw new Error("engine_permission_unavailable");
       if (option && value !== undefined && value !== option.currentValue) {
         try {
           const result = await connection.setSessionConfigOption({
@@ -188,8 +190,11 @@ export const applyKimiOptions = async (
     options?.permissionMode === undefined ||
     modes === undefined ||
     modes === null
-  )
+  ) {
+    if (options?.requirePermission)
+      throw new Error("engine_permission_unavailable");
     return;
+  }
   const terms = {
     read_only: ["plan", "read", "ask", "default"],
     workspace_write: ["acceptedit", "edit", "agent", "auto", "yolo"],
@@ -201,6 +206,8 @@ export const applyKimiOptions = async (
       .replace(/[^a-z]/g, "");
     return terms.some((term) => value.includes(term));
   });
+  if (target === undefined && options.requirePermission)
+    throw new Error("engine_permission_unavailable");
   if (target !== undefined && target.id !== modes.currentModeId)
     await connection.setSessionMode({ sessionId, modeId: target.id });
 };
@@ -220,6 +227,23 @@ export const kimiSessionFailure = (
     data === undefined ? message : `${message} ${JSON.stringify(data)}`;
   return new Error(`engine_session_failed:kimi:${operation}: ${detail}`);
 };
+
+export function kimiPermission(result: {
+  configOptions?: SessionConfigOption[];
+  modes?: { currentModeId: string } | null;
+}): BridgeSession["permissionMode"] {
+  const mode =
+    configSelect(result.configOptions, "mode")?.currentValue ??
+    result.modes?.currentModeId;
+  return (
+    {
+      default: "manual_approval",
+      plan: "read_only",
+      auto: "workspace_write",
+      yolo: "full_access",
+    } as const
+  )[mode as "default" | "plan" | "auto" | "yolo"];
+}
 
 export class KimiBridge implements EngineBridge {
   readonly id = "kimi" as const;
@@ -282,7 +306,10 @@ export class KimiBridge implements EngineBridge {
       result.sessionId,
       onEvent,
       () => this.#sessions.delete(result.sessionId),
-      options,
+      {
+        ...options,
+        permissionMode: options?.permissionMode ?? kimiPermission(result),
+      },
     );
     this.#sessions.set(result.sessionId, session);
     return session;
@@ -295,8 +322,9 @@ export class KimiBridge implements EngineBridge {
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
     const connection = await this.#connect();
+    let result;
     try {
-      const result = await connection.unstable_resumeSession({
+      result = await connection.unstable_resumeSession({
         sessionId: nativeId,
         cwd: workspace,
         mcpServers: projectMcpServers(options?.mcpServers ?? []),
@@ -318,7 +346,10 @@ export class KimiBridge implements EngineBridge {
       () => {
         this.#sessions.delete(nativeId);
       },
-      options,
+      {
+        ...options,
+        permissionMode: options?.permissionMode ?? kimiPermission(result),
+      },
     );
     this.#sessions.set(nativeId, session);
     return session;
@@ -356,7 +387,10 @@ export class KimiBridge implements EngineBridge {
       result.sessionId,
       onEvent,
       () => this.#sessions.delete(result.sessionId),
-      options,
+      {
+        ...options,
+        permissionMode: options?.permissionMode ?? kimiPermission(result),
+      },
     );
     this.#sessions.set(result.sessionId, session);
     return session;
@@ -527,6 +561,7 @@ class KimiClient implements Client {
 
 export class KimiSession implements BridgeSession {
   readonly nativeId: string;
+  readonly permissionMode: BridgeSession["permissionMode"];
   readonly #connection: ClientSideConnection;
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
@@ -543,16 +578,22 @@ export class KimiSession implements BridgeSession {
     nativeId: string,
     emit: (event: BridgeEvent) => void,
     closed: () => void,
-    options?: Pick<EngineSessionOptions, "requestApproval">,
+    options?: Pick<EngineSessionOptions, "requestApproval"> & {
+      permissionMode?: BridgeSession["permissionMode"];
+    },
   ) {
     this.#connection = connection;
     this.nativeId = nativeId;
+    this.permissionMode = options?.permissionMode;
     this.#approvals = new NativeApprovalWaits(options?.requestApproval);
     this.#emit = emit;
     this.#closed = closed;
   }
 
-  async send(content: string): Promise<string> {
+  async send(
+    content: string,
+    images: readonly import("../native-images.js").NativeImage[] = [],
+  ): Promise<string> {
     if (this.#activeTurn !== undefined)
       throw new Error("Kimi already has an active turn");
     const turnId = `turn-${randomUUID()}`;
@@ -564,7 +605,14 @@ export class KimiSession implements BridgeSession {
     this.#completion = this.#connection
       .prompt({
         sessionId: this.nativeId,
-        prompt: [{ type: "text", text: content }],
+        prompt: [
+          { type: "text", text: content },
+          ...images.map((image) => ({
+            type: "image" as const,
+            mimeType: image.mimeType,
+            data: image.data,
+          })),
+        ],
       })
       .then((result) => {
         if (this.#activeTurn !== turnId) return;
@@ -611,7 +659,14 @@ export class KimiSession implements BridgeSession {
     await this.#connection.cancel({ sessionId: this.nativeId });
   }
 
-  async steer(content: string): Promise<string> {
+  async compact(): Promise<void> {
+    await this.send("/compact");
+  }
+
+  async steer(
+    content: string,
+    images: readonly import("../native-images.js").NativeImage[] = [],
+  ): Promise<string> {
     if (this.#activeTurn === undefined) throw new Error("no_active_turn");
     if (this.#steering) throw new Error("session_input_pending");
     this.#steering = true;
@@ -621,7 +676,7 @@ export class KimiSession implements BridgeSession {
       const completion = this.#completion;
       await this.cancel();
       await completion;
-      return await this.send(content);
+      return await this.send(content, images);
     } finally {
       this.#steering = false;
     }
@@ -677,6 +732,29 @@ export class KimiSession implements BridgeSession {
     const turnId = this.#activeTurn;
     if (turnId === undefined) return;
     const update = params.update;
+    if (update.sessionUpdate === "plan") {
+      this.#emit({
+        type: "process.updated",
+        turnId,
+        processId: `${turnId}-plan`,
+        kind: "plan",
+        data: nativeJson(update.entries),
+      });
+      return;
+    }
+    if (
+      update.sessionUpdate === "agent_thought_chunk" &&
+      update.content.type === "text"
+    ) {
+      this.#emit({
+        type: "process.updated",
+        turnId,
+        processId: `${turnId}-thought`,
+        kind: "reasoning",
+        delta: update.content.text,
+      });
+      return;
+    }
     if (
       update.sessionUpdate === "agent_message_chunk" &&
       update.content.type === "text"

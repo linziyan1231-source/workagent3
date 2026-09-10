@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  baseURL,
   json,
   openSettingsSection,
   withPage,
@@ -20,7 +19,7 @@ await withPage(async (page) => {
   const initial = {
     enabled: before.enabled,
     targetId: before.targetId,
-    baseURL: before.baseURL,
+    attachFiles: before.attachFiles === true,
   };
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -43,9 +42,9 @@ await withPage(async (page) => {
       .waitFor();
     assert.equal((await json(page, endpoint)).enabled, false);
     await toggle.uncheck();
-    await section
-      .getByRole("textbox", { name: "WorkAgent 访问网址" })
-      .fill(baseURL);
+    assert.equal(await section.getByRole("textbox", { name: "WorkAgent 访问网址" }).count(), 0);
+    const updated = await json(page, endpoint, { method: "PUT", body: JSON.stringify({ ...initial, baseURL: "https://client.example.com" }) });
+    assert.equal(Object.hasOwn(updated, "baseURL"), false);
     await section.getByRole("button", { name: "保存提醒设置" }).click();
     await section
       .getByRole("status")
@@ -59,10 +58,8 @@ await withPage(async (page) => {
       false,
     );
     assert.equal(
-      await reloaded
-        .getByRole("textbox", { name: "WorkAgent 访问网址" })
-        .inputValue(),
-      baseURL,
+      await reloaded.getByRole("textbox", { name: "WorkAgent 访问网址" }).count(),
+      0,
     );
     assert.deepEqual(
       (await json(page, endpoint)).deliveries,
@@ -85,6 +82,8 @@ await withPage(async (page) => {
             defaultOff: true,
             invalidRecipientRejected: true,
             settingsPersisted: true,
+            clientAddressIgnored: true,
+            addressInputRemoved: true,
             externalMessagesSent: false,
             errors,
           },

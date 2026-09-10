@@ -184,6 +184,7 @@ func readStdioInitialize(stdout io.Reader) error {
 func stdioMCPEnvironment(values map[string]string) []string {
 	allowed := map[string]struct{}{
 		"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {},
+		"XDG_CACHE_HOME": {}, "npm_config_cache": {}, "PIP_CACHE_DIR": {}, "UV_CACHE_DIR": {}, "PYTHONPYCACHEPREFIX": {},
 		"LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}, "HOME": {},
 	}
 	environment := make([]string, 0, len(allowed)+len(values))

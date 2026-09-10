@@ -24,6 +24,7 @@ const stateSchema = z.object({
     message: z.string().optional(),
   }),
   tools: z.record(z.string(), fact),
+  processes: z.record(z.string(), fact),
   capabilities: fact,
 });
 export type NativeSessionProjection = z.infer<typeof stateSchema>;
@@ -44,7 +45,7 @@ declare module "@deepseek-ai/dsh-session-projection" {
 
 export const nativeSessionProjection: ProjectionDefinition<"nativeSession"> = {
   key: "nativeSession",
-  stateVersion: 1,
+  stateVersion: 2,
   stateSchema: projectionSchema,
   init: () => ({
     messages: [],
@@ -54,6 +55,7 @@ export const nativeSessionProjection: ProjectionDefinition<"nativeSession"> = {
     metadata: {},
     activity: { state: "idle" },
     tools: {},
+    processes: {},
     capabilities: {},
   }),
   apply(state, event) {
@@ -109,6 +111,20 @@ export const nativeSessionProjection: ProjectionDefinition<"nativeSession"> = {
     if (data.type.startsWith("tool."))
       next.progress = next.activeTool ? "正在执行工具…" : "";
     if (data.type === "session.capabilities") next.capabilities = data;
+    if (data.type === "process.updated" && typeof data.processId === "string") {
+      const previous = state.processes[data.processId];
+      next.processes = {
+        ...state.processes,
+        [data.processId]: {
+          ...previous,
+          ...data,
+          text:
+            typeof data.delta === "string"
+              ? `${previous?.text || ""}${data.delta}`
+              : data.text || "",
+        },
+      };
+    }
     return next;
   },
   wire: { viewSchema: projectionSchema, view: (state) => state },

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"workagent3/internal/runtimeapi"
 )
@@ -63,6 +64,25 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 			return
 		}
 		switch request.URL.Path {
+		case "/internal/runtime/quota/usage":
+			var input struct {
+				SID     string `json:"sid"`
+				ModelID string `json:"modelId"`
+			}
+			if !decodeRuntimeInput(request, &input) {
+				writeRuntimeError(writer, 400, "invalid_request")
+				return
+			}
+			if !authorizer.RuntimeRegistrationAuthorized(request.Context(), input.SID, credential) {
+				writeRuntimeError(writer, 401, "registration_rejected")
+				return
+			}
+			value, err := store.Usage(request.Context(), input.SID, input.ModelID, time.Time{})
+			if err != nil {
+				writeQuotaError(writer, err)
+				return
+			}
+			writeRuntimeJSON(writer, 200, value)
 		case "/internal/runtime/quota/reserve":
 			var input runtimeReserveInput
 			if !decodeRuntimeInput(request, &input) {

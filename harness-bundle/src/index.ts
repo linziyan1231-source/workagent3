@@ -262,7 +262,12 @@ export function apply(ctx: Context): void {
     new TeamOrchestrator(teams, teamRunner),
     runtime,
   );
-  new InboxController(ctx, token, new InboxStore(dshHome), runtime);
+  const inbox = new InboxStore(dshHome);
+  new InboxController(ctx, token, inbox, runtime);
+  runtime.setActivityProvider(() => {
+    const definitions=automations.list();
+    return { active: inbox.hasProcessing() || definitions.some((definition)=>automations.history(definition.id).some((run)=>run.status==="pending"||run.status==="running")) || teams.list().some((team)=>teams.tasks(team.id).some((task)=>task.status==="queued"||task.status==="running")), nextWakeAt: definitions.filter((definition)=>definition.enabled&&definition.nextRunAt).map((definition)=>definition.nextRunAt!).sort()[0] ?? null };
+  });
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),
   );

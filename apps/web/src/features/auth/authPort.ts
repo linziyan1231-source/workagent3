@@ -33,17 +33,36 @@ export const authPort = {
   async currentUser(): Promise<AuthUser> {
     return (await requestJson<UserEnvelope>("/api/auth/me")).user;
   },
-  async login(username: string, password: string): Promise<AuthUser> {
+  async login(
+    username: string,
+    password: string,
+    remember = false,
+  ): Promise<AuthUser> {
     return (
       await requestJson<UserEnvelope>("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
       })
     ).user;
   },
   logout(): Promise<void> {
     return requestJson("/api/auth/logout", { method: "POST" });
+  },
+  rememberedLogin(): Promise<{ username: string | null }> {
+    return requestJson("/api/auth/remembered");
+  },
+  forgetLogin(): Promise<void> {
+    return requestJson("/api/auth/remembered", { method: "DELETE" });
+  },
+  async loginRemembered(username: string): Promise<AuthUser> {
+    return (
+      await requestJson<UserEnvelope>("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, useRemembered: true, remember: true }),
+      })
+    ).user;
   },
   async changePassword(
     input: ChangePasswordInput,

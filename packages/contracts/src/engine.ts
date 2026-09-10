@@ -59,6 +59,15 @@ const eventBaseSchema = z.object({
 
 export const engineEventSchema = z.discriminatedUnion("type", [
   eventBaseSchema.extend({
+    type: z.literal("process.updated"),
+    turnId: z.string().min(1),
+    processId: z.string().min(1),
+    kind: z.enum(["plan", "reasoning"]),
+    text: z.string().optional(),
+    delta: z.string().optional(),
+    data: z.json().optional(),
+  }),
+  eventBaseSchema.extend({
     type: z.literal("session.created"),
     engine: engineIdSchema,
   }),

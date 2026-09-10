@@ -28,7 +28,7 @@ func (s *Server) sharedFiles(writer http.ResponseWriter, request *http.Request, 
 	}
 	input.ProjectID = strings.TrimSpace(input.ProjectID)
 	input.Operation = strings.TrimSpace(input.Operation)
-	allowed := map[string]bool{"dir": true, "list": true, "metadata": true, "read": true, "read-buffer": true, "image-base64": true, "write": true, "remove": true, "rename": true}
+	allowed := map[string]bool{"dir": true, "list": true, "metadata": true, "read": true, "read-buffer": true, "image-base64": true, "write": true, "write-buffer": true, "remove": true, "rename": true}
 	if !allowed[input.Operation] || len(input.Path) > 4096 || len(input.NewName) > 255 || len(input.Data) > maxSharedFilePayload {
 		writeError(writer, http.StatusBadRequest, "invalid_shared_file_request")
 		return

@@ -2,6 +2,10 @@
 
 WorkAgent3 is a Web-only, SID-isolated office agent platform. The implementation follows [plan.md](./plan.md): Go owns the Windows platform and Portal, while TypeScript owns the official DeepSeek Harness Web client composition, WorkAgent slot plugins, and shared contracts.
 
+## User guide
+
+中文操作说明见 [WorkAgent3 使用指南](docs/user-guide.md)，覆盖首次使用、对话与文件、助手与技能、定时任务、共享协作、消息渠道和管理员操作。
+
 ## Prerequisites
 
 - Node.js 24 or newer

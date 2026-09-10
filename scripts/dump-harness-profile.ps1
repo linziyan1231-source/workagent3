@@ -17,12 +17,16 @@ $appearanceDirectory = Join-Path $profileHome 'dsh-client-appearance'
 $profileNodeModules = Join-Path $profileDirectory 'node_modules'
 $profileLockfile = Join-Path $profileDirectory 'pnpm-lock.yaml'
 
+& pnpm --dir (Join-Path $repositoryRoot 'packages\dsh-client-workagent') build
+if ($LASTEXITCODE -ne 0) { throw 'Failed to build the WorkAgent client' }
+
 New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $bundleDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $contractsDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $clientDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $appearanceDirectory | Out-Null
 if (Test-Path -LiteralPath $profileNodeModules) {
+    if ((Split-Path -Parent ([IO.Path]::GetFullPath($profileNodeModules))) -ne [IO.Path]::GetFullPath($profileDirectory)) { throw 'Profile dependency path escaped the intended profile' }
     Remove-Item -LiteralPath $profileNodeModules -Recurse -Force
 }
 if (Test-Path -LiteralPath $profileLockfile) {

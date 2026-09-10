@@ -4,16 +4,25 @@
   "credentialRoot": "C:\\WorkAgent3\\service-data\\windows-credentials",
   "launcherExecutable": "C:\\WorkAgent3\\bootstrap\\userhost-launcher.exe",
   "launchManifestRoot": "C:\\WorkAgent3\\service-data\\employee-launch",
-  "userHostExecutable": "C:\\WorkAgent3\\bin\\userhost.exe",
-  "harnessCommand": "C:\\WorkAgent3\\bin\\dsh.exe",
-  "harnessEntrypoint": "dist\\index.js",
-  "codexCommand": "C:\\WorkAgent3\\bin\\codex.exe",
-  "kimiCommand": "C:\\WorkAgent3\\bin\\kimi.exe",
+  "userHostExecutable": "C:\\WorkAgent3\\releases\\example-v1\\userhost.exe",
+  "harnessCommand": "C:\\WorkAgent3\\tools\\node-v24\\node.exe",
+  "harnessEntrypoint": "node_modules\\@deepseek-ai\\dsh\\lib\\bin.js",
+  "codexCommand": "C:\\WorkAgent3\\releases\\example-v1\\native-cli\\codex\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+  "kimiCommand": "C:\\WorkAgent3\\releases\\example-v1\\native-cli\\kimi\\kimi.exe",
   "profile": "workagent",
-  "harnessProfileSource": "C:\\WorkAgent3\\release\\profiles\\workagent",
-  "managedSkillsRoot": "C:\\WorkAgent3\\release\\managed-skills",
-  "managedToolsRoot": "C:\\WorkAgent3\\release\\managed-tools\\officecli",
+  "harnessProfileSource": "C:\\WorkAgent3\\releases\\example-v1\\profiles\\workagent",
+  "managedSkillsRoot": "C:\\WorkAgent3\\releases\\example-v1\\managed-skills",
+  "managedToolsRoot": "C:\\WorkAgent3\\releases\\example-v1\\managed-tools\\officecli",
+  "publicBaseURL": "https://workagent.example.com",
   "portalUrl": "http://127.0.0.1:8080",
+  "runtimePolicy": {
+    "maxRunningRuntimes": 20,
+    "idleMinutes": 30
+  },
+  "storageLimits": {
+    "personalBytes": 64424509440,
+    "sharedBytes": 21474836480
+  },
   "limits": {
     "MemoryBytes": 4294967296,
     "CPUPercent": 80,
@@ -24,9 +33,17 @@
     "managementKeyFile": "C:\\WorkAgent3\\cliproxy\\management.key",
     "baseUrl": "http://127.0.0.1:8317/v1",
     "codexModel": "gpt-5.6-sol",
-    "codexModels": ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"],
+    "codexModels": [
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra"
+    ],
     "kimiModel": "kimi-k3",
-    "kimiModels": ["kimi-for-coding", "kimi-for-coding-highspeed", "kimi-k3"],
+    "kimiModels": [
+      "kimi-for-coding",
+      "kimi-for-coding-highspeed",
+      "kimi-k3"
+    ],
     "rpm": 30,
     "codexDailyUsd": 40,
     "codexWeeklyUsd": 80,

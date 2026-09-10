@@ -8,9 +8,54 @@
   min-height: 100vh;
   background: var(--a-bg);
   color: var(--a-text);
-  font-size: 14px;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
   line-height: 1.6;
   display: flex;
+}
+.admin-dollar-budgets {
+  display: grid;
+  gap: 12px;
+  min-width: 260px;
+  white-space: normal;
+}
+.admin-dollar-budgets > div {
+  display: grid;
+  gap: 4px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+.admin-dollar-budgets strong {
+  font: inherit;
+  font-weight: 600;
+}
+.admin-dollar-budgets small {
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  color: var(--a-muted);
+}
+.admin-dollar-budgets progress {
+  height: 4px;
+  width: 100%;
+}
+.admin-dollar-usage {
+  padding: 18px;
+}
+.admin-dollar-usage h2 {
+  font-size: calc(15px * var(--workagent-font-scale, 0.928571));
+  margin-top: 0;
+}
+.admin-usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.admin-usage-filters label {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.admin-usage-filters input,
+.admin-usage-filters select {
+  min-width: 0;
+  width: 100%;
 }
 .admin-app button,
 .admin-dialog button,
@@ -62,7 +107,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 19px;
+  font-size: calc(19px * var(--workagent-font-scale, 0.928571));
   font-weight: 750;
   text-decoration: none;
   color: var(--a-text);
@@ -76,10 +121,10 @@
   height: 32px;
   width: 32px;
   border-radius: 10px;
-  font-size: 17px;
+  font-size: calc(17px * var(--workagent-font-scale, 0.928571));
 }
 .admin-eyebrow {
-  font-size: 10px;
+  font-size: calc(10px * var(--workagent-font-scale, 0.928571));
   font-weight: 650;
   letter-spacing: 0.13em;
   color: var(--a-muted);
@@ -125,7 +170,7 @@
   gap: 9px;
 }
 .admin-identity > button {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   margin-left: auto;
   padding: 5px 7px;
   background: transparent;
@@ -139,17 +184,17 @@
   border-radius: 11px;
   background: #eff1fc;
   color: #5d67a6;
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
   font-weight: 600;
 }
 .admin-identity strong {
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .admin-identity small,
 .admin-user-cell small {
   display: block;
   color: var(--a-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
 }
 .admin-main {
   margin-left: 224px;
@@ -160,7 +205,7 @@
 .admin-topbar {
   height: 77px;
   border-bottom: 1px solid var(--a-border);
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
   margin: 0 0 42px;
 }
@@ -172,7 +217,7 @@
   color: #bcc3d2;
 }
 .admin-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
 }
 .admin-heading {
   display: flex;
@@ -182,7 +227,7 @@
   margin-bottom: 27px;
 }
 .admin-heading h1 {
-  font-size: 29px;
+  font-size: calc(29px * var(--workagent-font-scale, 0.928571));
   letter-spacing: -0.03em;
   line-height: 1.3;
   margin: 0 0 9px;
@@ -191,7 +236,7 @@
 .admin-heading p:last-child {
   color: var(--a-muted);
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
 }
 .admin-metrics {
   display: grid;
@@ -209,11 +254,11 @@
   justify-content: space-between;
 }
 .admin-metrics span {
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
 }
 .admin-metrics strong {
-  font-size: 27px;
+  font-size: calc(27px * var(--workagent-font-scale, 0.928571));
   line-height: 1.4;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
@@ -233,7 +278,7 @@
   padding: 22px 24px;
 }
 .admin-table-toolbar h2 {
-  font-size: 14px;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
   margin: 0;
   font-weight: 650;
 }
@@ -249,6 +294,7 @@
   gap: 10px;
 }
 .admin-app input,
+.admin-app select,
 .admin-dialog input,
 .admin-dialog select {
   background: var(--a-panel);
@@ -263,7 +309,7 @@
 }
 .admin-table-toolbar input {
   width: 250px;
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   background: var(--a-bg);
 }
 .admin-table-scroll {
@@ -271,11 +317,11 @@
   overflow: auto;
 }
 .admin-app table {
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   white-space: nowrap;
 }
 .admin-app th {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   font-weight: 500;
   color: var(--a-muted);
   background: var(--a-bg);
@@ -283,6 +329,7 @@
   border-bottom: 1px solid var(--a-border);
 }
 .admin-app td {
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
   padding: 20px 24px;
   border-bottom: 1px solid var(--a-border);
 }
@@ -299,10 +346,10 @@
 }
 .admin-user-cell strong {
   font-weight: 600;
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
 }
 .admin-badge {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   display: inline-flex;
   padding: 3px 9px;
   border-radius: 6px;
@@ -322,7 +369,7 @@
   border: 0;
   background: transparent;
   color: var(--a-accent);
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   padding: 5px;
 }
 .admin-link span {
@@ -334,7 +381,7 @@
   color: var(--a-muted);
 }
 .admin-footnote {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
   margin: 20px 3px;
 }
@@ -347,7 +394,7 @@
   border: 1px solid var(--a-border);
   border-radius: 12px;
   margin-bottom: 20px;
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .admin-job progress {
   width: 180px;
@@ -381,7 +428,7 @@
   padding: 26px 30px;
   max-height: 88vh;
   width: min(460px, calc(100vw - 32px));
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
   line-height: 1.6;
   overflow: auto;
 }
@@ -400,10 +447,10 @@
 }
 .admin-dialog h2 {
   margin: 0;
-  font-size: 21px;
+  font-size: calc(21px * var(--workagent-font-scale, 0.928571));
 }
 .admin-dialog-heading button {
-  font-size: 23px;
+  font-size: calc(23px * var(--workagent-font-scale, 0.928571));
   border: 0;
   background: transparent;
   padding: 0 7px;
@@ -420,7 +467,7 @@
   background: transparent;
   padding: 9px 0;
   color: var(--a-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .admin-tabs button[aria-selected="true"] {
   color: var(--a-accent);
@@ -440,12 +487,12 @@
   min-width: 0;
 }
 .admin-form label {
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   display: grid;
   gap: 7px;
 }
 .admin-form label small {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
 }
 .admin-form > button {
@@ -457,7 +504,7 @@
   gap: 15px;
 }
 .admin-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
   line-height: 1.8;
   margin: 9px 0;
@@ -486,7 +533,7 @@
 .admin-action-list button {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .admin-action-list button.selected {
   border-color: var(--a-accent);
@@ -498,7 +545,7 @@
   border-top: 1px solid var(--a-border);
 }
 .admin-dialog h3 {
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
   margin: 0;
   font-weight: 600;
 }
@@ -530,11 +577,11 @@
   font-variant-numeric: tabular-nums;
 }
 .admin-quota-amount strong {
-  font-size: 21px;
+  font-size: calc(21px * var(--workagent-font-scale, 0.928571));
   font-weight: 550;
 }
 .admin-quota-amount > span {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--a-muted);
 }
 .admin-quota-amount button {
@@ -554,7 +601,7 @@
   flex: 1;
   border-color: transparent;
   background: transparent;
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   padding: 7px;
 }
 .admin-segment button[aria-pressed="true"] {
@@ -628,7 +675,7 @@
     gap: 12px;
   }
   .admin-metrics strong {
-    font-size: 22px;
+    font-size: calc(22px * var(--workagent-font-scale, 0.928571));
   }
 }
 @media (max-width: 650px) {
@@ -660,7 +707,7 @@
   }
   .admin-sidebar-bottom > a {
     padding: 0;
-    font-size: 11px;
+    font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   }
   .admin-identity {
     border: 0;
@@ -675,7 +722,7 @@
   }
   .admin-sidebar nav button {
     padding: 7px 12px;
-    font-size: 12px;
+    font-size: calc(12px * var(--workagent-font-scale, 0.928571));
   }
   .admin-main {
     margin-left: 0;
@@ -686,13 +733,13 @@
     margin-bottom: 25px;
   }
   .admin-heading h1 {
-    font-size: 23px;
+    font-size: calc(23px * var(--workagent-font-scale, 0.928571));
   }
   .admin-heading {
     gap: 12px;
   }
   .admin-heading > .admin-primary {
-    font-size: 12px;
+    font-size: calc(12px * var(--workagent-font-scale, 0.928571));
     padding: 8px 10px;
   }
   .admin-metrics {
@@ -703,7 +750,7 @@
     padding: 12px;
   }
   .admin-metrics span {
-    font-size: 10px;
+    font-size: calc(10px * var(--workagent-font-scale, 0.928571));
   }
   .admin-table-toolbar {
     padding: 16px;
@@ -793,11 +840,11 @@
   padding: 20px;
 }
 .admin-quota-overview h2 {
-  font-size: 14px;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
   margin: 0 0 12px;
 }
 .admin-quota-overview strong {
-  font-size: 27px;
+  font-size: calc(27px * var(--workagent-font-scale, 0.928571));
 }
 .admin-quota-overview small,
 .admin-quota-overview span {
@@ -814,7 +861,7 @@
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 3px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .admin-account-budgets progress {
   grid-column: 1 / -1;

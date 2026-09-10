@@ -128,13 +128,33 @@ export class TeamStore {
   update(
     id: string,
     expectedVersion: number,
-    mutation: { name?: string; sessionMode?: string | null },
+    mutation: {
+      name?: string;
+      sessionMode?: string | null;
+      memberIds?: string[];
+    },
   ): Team {
     const team = this.#requiredTeam(id);
     if (team.version !== expectedVersion)
       throw new Error("team_version_conflict");
+    if (
+      mutation.memberIds &&
+      (mutation.memberIds.length !== team.members.length ||
+        new Set(mutation.memberIds).size !== team.members.length ||
+        mutation.memberIds[0] !==
+          team.members.find((member) => member.role === "lead")?.id ||
+        mutation.memberIds.some(
+          (id) => !team.members.some((member) => member.id === id),
+        ))
+    )
+      throw new Error("invalid_member_order");
     const next = teamSchema.parse({
       ...team,
+      members: mutation.memberIds
+        ? mutation.memberIds.map(
+            (id) => team.members.find((member) => member.id === id)!,
+          )
+        : team.members,
       ...(mutation.name === undefined ? {} : { name: mutation.name }),
       ...(mutation.sessionMode === undefined
         ? {}

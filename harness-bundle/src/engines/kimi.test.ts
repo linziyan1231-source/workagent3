@@ -7,10 +7,43 @@ import {
   KimiSession,
   kimiSessionFailure,
   applyKimiOptions,
+  kimiPermission,
 } from "./kimi.js";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
 const roots: string[] = [];
+it("reports the native permission and does not guess for an unrecognised restored mode", () => {
+  expect(kimiPermission({ modes: { currentModeId: "plan" } })).toBe(
+    "read_only",
+  );
+  expect(kimiPermission({ modes: { currentModeId: "auto" } })).toBe(
+    "workspace_write",
+  );
+  expect(kimiPermission({ modes: { currentModeId: "yolo" } })).toBe(
+    "full_access",
+  );
+  expect(kimiPermission({ modes: { currentModeId: "default" } })).toBe(
+    "manual_approval",
+  );
+  expect(
+    kimiPermission({ modes: { currentModeId: "future-mode" } }),
+  ).toBeUndefined();
+  expect(
+    kimiPermission({
+      modes: { currentModeId: "auto" },
+      configOptions: [
+        {
+          type: "select",
+          id: "mode",
+          name: "Mode",
+          category: "mode",
+          currentValue: "plan",
+          options: [{ value: "plan", name: "Plan" }],
+        },
+      ],
+    }),
+  ).toBe("read_only");
+});
 it("waits for ACP cancellation before steering and rejects concurrent steering", async () => {
   let finish!: (result: { stopReason: string }) => void;
   const prompt = vi

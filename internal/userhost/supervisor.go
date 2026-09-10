@@ -25,6 +25,7 @@ import (
 var ErrRestartRequested = errors.New("runtime restart requested")
 
 type Config struct {
+	PublicBaseURL      string
 	SID                string
 	DataRoot           string
 	Command            string
@@ -52,7 +53,7 @@ type Supervisor struct {
 	job              *winutil.Job
 	lock             *winutil.InstanceLock
 	cmd              *exec.Cmd
-	harnessLog       *os.File
+	harnessLog       *rotatingHarnessLog
 	exited           chan error
 	gateway          *runtimeGateway
 	gatewayExited    chan error
@@ -143,7 +144,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	arguments := append([]string{}, s.config.Arguments...)
 	arguments = append(arguments, "--profile", s.config.Profile)
-	harnessLog, err := os.OpenFile(filepath.Join(directories.logs, "harness.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	harnessLog, err := openHarnessLog(filepath.Join(directories.logs, "harness.log"), 16*1024*1024)
 	if err != nil {
 		job.Close()
 		lock.Close()
@@ -152,6 +153,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
 	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot, s.config.ModelGatewayBaseURL, s.config.HarnessModel)
+	command.Env = append(command.Env, "WORKAGENT_PUBLIC_BASE_URL="+s.config.PublicBaseURL)
 	command.Stdout = harnessLog
 	command.Stderr = harnessLog
 	if err := command.Start(); err != nil {
@@ -294,18 +296,23 @@ type privateDirectories struct {
 	native    string
 	runtime   string
 	logs      string
+	cache     string
+	temporary string
 }
 
 func ensureDirectories(root string) (privateDirectories, error) {
 	directories := privateDirectories{
 		dshHome: filepath.Join(root, "dsh-home"), workspace: filepath.Join(root, "workspace"), native: filepath.Join(root, "native"),
 		runtime: filepath.Join(root, "runtime"), logs: filepath.Join(root, "logs"),
+		cache: filepath.Join(root, "cache"), temporary: filepath.Join(root, "tmp"),
 	}
-	for _, path := range []string{directories.dshHome, directories.workspace, filepath.Join(directories.native, "codex"), filepath.Join(directories.native, "kimi"), directories.runtime, directories.logs} {
+	for _, path := range []string{directories.dshHome, directories.workspace, filepath.Join(directories.native, "codex"), filepath.Join(directories.native, "kimi"), directories.runtime, directories.logs, directories.cache, directories.temporary, filepath.Join(directories.dshHome, "plugins")} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return privateDirectories{}, fmt.Errorf("create private runtime directory: %w", err)
 		}
 	}
+	cleanRuntimeCache(directories.cache, time.Now().Add(-14*24*time.Hour))
+	cleanRuntimeCache(directories.temporary, time.Now().Add(-7*24*time.Hour))
 	return directories, nil
 }
 
@@ -322,7 +329,7 @@ func reserveLoopbackPort() (int, error) {
 }
 
 func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot, gatewayBaseURL, harnessModel string) []string {
-	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "TEMP": {}, "TMP": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
+	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
 		key, _, _ := strings.Cut(value, "=")
@@ -335,6 +342,12 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 	}
 	environment = append(environment,
 		"DSH_HOME="+directories.dshHome,
+		"TEMP="+directories.temporary, "TMP="+directories.temporary,
+		"XDG_CACHE_HOME="+directories.cache,
+		"npm_config_cache="+filepath.Join(directories.cache, "npm"),
+		"PIP_CACHE_DIR="+filepath.Join(directories.cache, "pip"),
+		"UV_CACHE_DIR="+filepath.Join(directories.cache, "uv"),
+		"PYTHONPYCACHEPREFIX="+filepath.Join(directories.cache, "python"),
 		"WORKAGENT_WORKSPACE_ROOT="+directories.workspace,
 		"CODEX_HOME="+filepath.Join(directories.native, "codex"),
 		"KIMI_CODE_HOME="+filepath.Join(directories.native, "kimi"),

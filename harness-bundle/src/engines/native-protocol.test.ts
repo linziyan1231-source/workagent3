@@ -2,6 +2,39 @@ import { expect, it, vi } from "vitest";
 import { CodexSession } from "./codex.js";
 import { KimiSession } from "./kimi.js";
 
+it("preserves native plan updates and public reasoning summaries separately from assistant answers", () => {
+  const emit = vi.fn();
+  const session = new CodexSession({} as never, "s", emit, () => {});
+  session.notification("turn/plan/updated", {
+    turnId: "t",
+    explanation: "检查后验证",
+    plan: [{ step: "检查", status: "in_progress" }],
+  });
+  session.notification("item/reasoning/summaryTextDelta", {
+    turnId: "t",
+    itemId: "r",
+    summaryIndex: 0,
+    delta: "正在核对接口",
+  });
+  expect(emit.mock.calls.map(([event]) => event)).toEqual([
+    {
+      type: "process.updated",
+      turnId: "t",
+      processId: "t-plan",
+      kind: "plan",
+      text: "检查后验证",
+      data: [{ step: "检查", status: "in_progress" }],
+    },
+    {
+      type: "process.updated",
+      turnId: "t",
+      processId: "r-summary-0",
+      kind: "reasoning",
+      delta: "正在核对接口",
+    },
+  ]);
+});
+
 it("preserves command, file changes and assistant identity", () => {
   const emit = vi.fn();
   const session = new CodexSession({} as never, "s", emit, () => {});

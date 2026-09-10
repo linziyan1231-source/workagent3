@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   authPort,
   type AuthUser,
@@ -7,26 +7,9 @@ import {
 import { ApiError } from "../../shared/api/http.js";
 import zhCN from "./locales/zh-CN.json";
 import "./LoginPage.css";
+import { usePasswordVisibility } from "./usePasswordVisibility.js";
 
-const locales = import.meta.glob<typeof zhCN>("./locales/*.json", {
-  eager: true,
-  import: "default",
-});
-const languages = [
-  ["zh-CN", "简体中文"],
-  ["zh-TW", "繁體中文"],
-  ["ja-JP", "日本語"],
-  ["ko-KR", "한국어"],
-  ["tr-TR", "Türkçe"],
-  ["uk-UA", "Українська"],
-  ["pt-BR", "Português (BR)"],
-  ["de-DE", "Deutsch"],
-  ["es-ES", "Español"],
-  ["fa-IR", "فارسی"],
-  ["en-US", "English"],
-];
 const usernameKey = "workagent.login.username";
-const languageKey = "workagent.login.language";
 
 function Field({
   name,
@@ -92,10 +75,7 @@ export function LoginPage({
 }: {
   onAuthenticated: (user: AuthUser) => void;
 }) {
-  const [language, setLanguage] = useState(
-    () => localStorage.getItem(languageKey) ?? "zh-CN",
-  );
-  const t = locales[`./locales/${language}.json`] ?? zhCN;
+  const t = zhCN;
   const [username, setUsername] = useState(
     () => localStorage.getItem(usernameKey) ?? "",
   );
@@ -103,7 +83,13 @@ export function LoginPage({
     () => !!localStorage.getItem(usernameKey),
   );
   const [password, setPassword] = useState("");
-  const [visible, setVisible] = useState(false);
+  const [savedUsername, setSavedUsername] = useState<string | null>(null);
+  const edited = useRef(false);
+  const savedEdit = useRef<{ start: number; end: number } | null>(null);
+  const { inputRef, canReveal, visible, toggle } = usePasswordVisibility(
+    password,
+    setPassword,
+  );
   const [changing, setChanging] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -113,19 +99,112 @@ export function LoginPage({
     success?: boolean;
   } | null>(null);
 
+  const savedPassword =
+    !changing &&
+    savedUsername !== null &&
+    username.trim().toLowerCase() === savedUsername.toLowerCase();
+
+  useEffect(() => {
+    if (!savedPassword) return;
+    const input = inputRef.current!;
+    // Preserve the native edit (including Safari/mobile input), then discard
+    // placeholder characters around it. Deletion clears the whole credential.
+    const beginEdit = (event: InputEvent) => {
+      savedEdit.current = {
+        start: input.selectionStart ?? 0,
+        end: input.selectionEnd ?? input.value.length,
+      };
+      if (event.inputType.startsWith("delete")) {
+        event.preventDefault();
+        input.value = "";
+        edited.current = true;
+        setSavedUsername(null);
+        setPassword("");
+      }
+    };
+    const finishEdit = () => {
+      let value = input.value;
+      if (savedEdit.current) {
+        const { start, end } = savedEdit.current;
+        value = value.slice(start, value.length - (8 - end));
+      }
+      savedEdit.current = null;
+      input.value = value;
+      edited.current = true;
+      setSavedUsername(null);
+      setPassword(value);
+    };
+    input.addEventListener("beforeinput", beginEdit, true);
+    input.addEventListener("input", finishEdit, true);
+    return () => {
+      input.removeEventListener("beforeinput", beginEdit, true);
+      input.removeEventListener("input", finishEdit, true);
+      savedEdit.current = null;
+    };
+  }, [savedPassword, inputRef]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void authPort
+      .rememberedLogin()
+      .then((saved) => {
+        if (cancelled || edited.current || !saved.username) return;
+        setUsername(saved.username);
+        setSavedUsername(saved.username);
+        setPassword("");
+        setRemember(true);
+      })
+      .catch(() => {
+        /* Manual login remains available when the probe fails. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enterPassword = () => {
+    edited.current = true;
+    setSavedUsername(null);
+    setPassword("");
+    inputRef.current?.focus();
+  };
+
+  const changeRemember = async (checked: boolean) => {
+    edited.current = true;
+    if (checked) {
+      setRemember(true);
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    setRemember(false);
+    try {
+      await authPort.forgetLogin();
+      setRemember(false);
+      localStorage.removeItem(usernameKey);
+      if (savedPassword) enterPassword();
+    } catch {
+      setRemember(true);
+      setMessage({ text: "清除已保存的密码失败，请重试" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     document.title = changing ? t.changePassword.pageTitle : t.pageTitle;
-    document.documentElement.lang = language;
+    document.documentElement.lang = "zh-CN";
     return () => {
       document.title = "WorkAgent";
     };
-  }, [language, t, changing]);
+  }, [t, changing]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
     setMessage(null);
-    if (!username.trim() || !password) {
+    edited.current = true;
+    if (!username.trim() || (!password && !savedPassword)) {
       setMessage({ text: t.errors.empty });
       return;
     }
@@ -164,13 +243,16 @@ export function LoginPage({
           return;
         }
         setChanging(false);
+        setSavedUsername(null);
         setPassword("");
         setNewPassword("");
         setConfirmation("");
         setMessage({ text: t.changePassword.success, success: true });
         return;
       }
-      const user = await authPort.login(username.trim(), password);
+      const user = savedPassword
+        ? await authPort.loginRemembered(username.trim())
+        : await authPort.login(username.trim(), password, remember);
       if (remember) localStorage.setItem(usernameKey, username.trim());
       else localStorage.removeItem(usernameKey);
       if (!user.admin) {
@@ -179,6 +261,11 @@ export function LoginPage({
       }
       onAuthenticated(user);
     } catch (error) {
+      if (savedPassword && error instanceof ApiError && error.status === 401) {
+        enterPassword();
+        setMessage({ text: "已保存的密码已失效，请重新输入密码" });
+        return;
+      }
       const text =
         error instanceof ApiError
           ? error.status === 429
@@ -194,12 +281,12 @@ export function LoginPage({
   };
 
   const switchMode = () => {
+    edited.current = true;
     setChanging(!changing);
     setMessage(null);
     setPassword("");
     setNewPassword("");
     setConfirmation("");
-    setVisible(false);
   };
 
   return (
@@ -207,27 +294,6 @@ export function LoginPage({
       <div
         className={`login-page__card${changing ? " login-page__card--change-password" : ""}`}
       >
-        <label
-          className="login-page__lang-select-wrapper"
-          htmlFor="lang-select"
-        >
-          <select
-            id="lang-select"
-            className="login-page__lang-select"
-            aria-label={t.languageToggle}
-            value={language}
-            onChange={(event) => {
-              setLanguage(event.target.value);
-              localStorage.setItem(languageKey, event.target.value);
-            }}
-          >
-            {languages.map(([code, label]) => (
-              <option key={code} value={code}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
         <div className="login-page__header">
           <h1 className="login-page__title">WorkAgent</h1>
           <p className="login-page__subtitle">
@@ -243,7 +309,12 @@ export function LoginPage({
             label={t.username}
             placeholder={t.usernamePlaceholder}
             value={username}
-            onChange={setUsername}
+            onChange={(value) => {
+              edited.current = true;
+              setUsername(value);
+              setSavedUsername(null);
+              setPassword("");
+            }}
             autoComplete="username"
           />
           <div className="login-page__form-item">
@@ -263,39 +334,58 @@ export function LoginPage({
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
               <input
+                ref={inputRef}
                 id="password"
                 name="password"
-                type={visible ? "text" : "password"}
+                type={!savedPassword && visible ? "text" : "password"}
                 className="login-page__input"
                 placeholder={
                   changing
                     ? t.changePassword.currentPasswordPlaceholder
                     : t.passwordPlaceholder
                 }
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={savedPassword ? "off" : "current-password"}
+                value={savedPassword ? "••••••••" : password}
+                onChange={(event) => {
+                  edited.current = true;
+                  setSavedUsername(null);
+                  setPassword(event.target.value);
+                }}
                 required
               />
-              <button
-                type="button"
-                className="login-page__toggle-password"
-                aria-label={visible ? t.hidePassword : t.showPassword}
-                aria-pressed={visible}
-                onClick={() => setVisible(!visible)}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  aria-hidden="true"
+              {!savedPassword && (!password || canReveal) && (
+                <button
+                  type="button"
+                  className="login-page__toggle-password"
+                  aria-label={
+                    !savedPassword && visible ? t.hidePassword : t.showPassword
+                  }
+                  aria-pressed={!savedPassword && visible}
+                  disabled={savedPassword || !canReveal}
+                  title={
+                    !savedPassword && canReveal
+                      ? visible
+                        ? t.hidePassword
+                        : t.showPassword
+                      : "自动填充的密码不可查看，清空后手动输入可查看"
+                  }
+                  onClick={() => {
+                    if (!savedPassword) toggle();
+                  }}
                 >
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                  {visible && <path d="m1 1 22 22" />}
-                </svg>
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden="true"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                    {!savedPassword && visible && <path d="m1 1 22 22" />}
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
           {changing ? (
@@ -329,13 +419,17 @@ export function LoginPage({
                   id="remember-me"
                   type="checkbox"
                   checked={remember}
-                  onChange={(event) => {
-                    setRemember(event.target.checked);
-                    if (!event.target.checked)
-                      localStorage.removeItem(usernameKey);
-                  }}
+                  disabled={busy}
+                  onChange={(event) =>
+                    void changeRemember(event.target.checked)
+                  }
                 />
-                <label htmlFor="remember-me">{t.rememberMe}</label>
+                <label
+                  htmlFor="remember-me"
+                  title="在此浏览器保存 30 天，自动填充后不可查看；取消勾选可清除"
+                >
+                  记住密码
+                </label>
               </div>
               <button
                 type="button"
@@ -402,8 +496,10 @@ export function LoginPage({
         <div className="login-page__footer">
           <div className="login-page__footer-content">
             <span>{t.footerPrimary}</span>
-            <span className="login-page__footer-divider">•</span>
-            <span>{t.footerSecondary}</span>
+            <span className="login-page__footer-divider" aria-hidden="true" />
+            <span>无需下载</span>
+            <span className="login-page__footer-divider" aria-hidden="true" />
+            <span>开箱即用</span>
           </div>
         </div>
       </div>

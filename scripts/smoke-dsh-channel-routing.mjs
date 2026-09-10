@@ -32,6 +32,12 @@ const config = {
   permissionPreset: "read-only",
 };
 const service = {
+  history: () =>
+    [...sessions.keys()].map((id) => ({
+      id,
+      active: false,
+      updatedAt: new Date().toISOString(),
+    })),
   handles: (provider) =>
     ["workagent-codex", "workagent-kimi"].includes(provider),
   listSessionIds: () => [...sessions.keys()],

@@ -24,6 +24,11 @@ type fakeUsageQueue struct {
 }
 
 func (q *fakeUsageQueue) serve(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Path == "/keys" || request.URL.Path == "/v0/management/plugins/cpa-key-policy/keys" {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"keys":[]}`))
+		return
+	}
 	if request.URL.Path != "/v0/management/usage-queue" {
 		writer.WriteHeader(http.StatusNotFound)
 		return

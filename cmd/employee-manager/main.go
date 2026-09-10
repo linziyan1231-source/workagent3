@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"workagent3/internal/audit"
+	"workagent3/internal/contracts"
 	"workagent3/internal/employee"
 	"workagent3/internal/employeemanager"
 	"workagent3/internal/mcpruntime"
@@ -31,24 +32,27 @@ import (
 )
 
 type managerConfig struct {
-	CredentialRoot       string              `json:"credentialRoot,omitempty"`
-	LauncherExecutable   string              `json:"launcherExecutable,omitempty"`
-	LaunchManifestRoot   string              `json:"launchManifestRoot,omitempty"`
-	DatabasePath         string              `json:"databasePath"`
-	DataRootBase         string              `json:"dataRootBase"`
-	UserHostExecutable   string              `json:"userHostExecutable"`
-	HarnessCommand       string              `json:"harnessCommand"`
-	HarnessEntrypoint    string              `json:"harnessEntrypoint"`
-	CodexCommand         string              `json:"codexCommand,omitempty"`
-	KimiCommand          string              `json:"kimiCommand,omitempty"`
-	HarnessArguments     []string            `json:"harnessArguments,omitempty"`
-	Profile              string              `json:"profile"`
-	HarnessProfileSource string              `json:"harnessProfileSource"`
-	ManagedSkillsRoot    string              `json:"managedSkillsRoot"`
-	ManagedToolsRoot     string              `json:"managedToolsRoot,omitempty"`
-	ManagedMCPServers    []mcpruntime.Server `json:"managedMcpServers,omitempty"`
-	PortalURL            string              `json:"portalUrl"`
-	Limits               winutil.JobLimits   `json:"limits"`
+	RuntimePolicy        employeemanager.RuntimePolicy `json:"runtimePolicy"`
+	StorageLimits        *contracts.StorageLimits      `json:"storageLimits,omitempty"`
+	CredentialRoot       string                        `json:"credentialRoot,omitempty"`
+	LauncherExecutable   string                        `json:"launcherExecutable,omitempty"`
+	LaunchManifestRoot   string                        `json:"launchManifestRoot,omitempty"`
+	DatabasePath         string                        `json:"databasePath"`
+	DataRootBase         string                        `json:"dataRootBase"`
+	UserHostExecutable   string                        `json:"userHostExecutable"`
+	HarnessCommand       string                        `json:"harnessCommand"`
+	HarnessEntrypoint    string                        `json:"harnessEntrypoint"`
+	CodexCommand         string                        `json:"codexCommand,omitempty"`
+	KimiCommand          string                        `json:"kimiCommand,omitempty"`
+	HarnessArguments     []string                      `json:"harnessArguments,omitempty"`
+	Profile              string                        `json:"profile"`
+	HarnessProfileSource string                        `json:"harnessProfileSource"`
+	ManagedSkillsRoot    string                        `json:"managedSkillsRoot"`
+	ManagedToolsRoot     string                        `json:"managedToolsRoot,omitempty"`
+	ManagedMCPServers    []mcpruntime.Server           `json:"managedMcpServers,omitempty"`
+	PortalURL            string                        `json:"portalUrl"`
+	PublicBaseURL        string                        `json:"publicBaseURL,omitempty"`
+	Limits               winutil.JobLimits             `json:"limits"`
 	// ModelGateway holds the CLIProxyAPI downstream key policy. Model and quota
 	// values are mandatory when present — no code defaults exist; see
 	// docs/employee-manager.config.example.json for the full template.
@@ -183,7 +187,9 @@ func run() error {
 		harnessModel, modelGatewayBaseURL = config.ModelGateway.CodexModel, config.ModelGateway.BaseURL
 	}
 	platform, err := employee.NewWindowsPlatform(employee.WindowsPlatformConfig{
-		CredentialRoot: config.CredentialRoot, LauncherExecutable: config.LauncherExecutable, LaunchManifestRoot: config.LaunchManifestRoot,
+		MaxRunningRuntimes: config.RuntimePolicy.MaxRunningRuntimes,
+		StorageLimits:      config.StorageLimits,
+		CredentialRoot:     config.CredentialRoot, LauncherExecutable: config.LauncherExecutable, LaunchManifestRoot: config.LaunchManifestRoot,
 		DataRootBase: config.DataRootBase, UserHostExecutable: config.UserHostExecutable,
 		HarnessCommand: config.HarnessCommand, HarnessEntrypoint: config.HarnessEntrypoint,
 		CodexCommand: config.CodexCommand,
@@ -192,6 +198,7 @@ func run() error {
 		ManagedSkillsRoot: config.ManagedSkillsRoot,
 		ManagedToolsRoot:  config.ManagedToolsRoot,
 		ManagedMCPServers: config.ManagedMCPServers,
+		PublicBaseURL:     config.PublicBaseURL,
 		PortalURL:         config.PortalURL, Limits: config.Limits, NativeModels: nativeModels,
 		HarnessModel: harnessModel, ModelGatewayBaseURL: modelGatewayBaseURL,
 	})
@@ -215,11 +222,11 @@ func run() error {
 			return err
 		}
 		defer jobs.Close()
-		service := &employeemanager.Service{Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore, Jobs: jobs}
+		service := &employeemanager.Service{Storage: platform, Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore, Jobs: jobs}
 		if err := service.RestoreJobs(); err != nil {
 			return err
 		}
-		return serveManager(ctx, *listen, *tokenFile, service)
+		return serveManager(ctx, *listen, *tokenFile, service, config)
 	}
 	var user store.User
 	switch *action {
@@ -391,7 +398,7 @@ func runUsageDrain(ctx context.Context, drainer *modelgateway.UsageDrainer, inte
 	}
 }
 
-func serveManager(ctx context.Context, address, tokenPath string, service *employeemanager.Service) error {
+func serveManager(ctx context.Context, address, tokenPath string, service *employeemanager.Service, config managerConfig) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || host != "127.0.0.1" {
 		return errors.New("Employee Manager must listen on an exact 127.0.0.1 address")
@@ -408,6 +415,11 @@ func serveManager(ctx context.Context, address, tokenPath string, service *emplo
 	if secret == "" {
 		return errors.New("Employee Manager token is empty")
 	}
+	resources, err := employeemanager.NewRuntimeResources(config.RuntimePolicy, config.PortalURL, secret, filepath.Join(filepath.Dir(config.DatabasePath), "runtime-wakeups.json"), service.EnsureRuntime, service.Lifecycle.Platform.StopInstalledRuntime)
+	if err != nil {
+		return err
+	}
+	go resources.Run(ctx)
 	server := &http.Server{Addr: address, Handler: employeemanager.Handler(service, secret), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		<-ctx.Done()
@@ -429,9 +441,12 @@ func loadManagerConfig(path string) (managerConfig, error) {
 	defer file.Close()
 	decoder := json.NewDecoder(io.LimitReader(file, 64*1024))
 	decoder.DisallowUnknownFields()
-	var config managerConfig
+	config := managerConfig{RuntimePolicy: employeemanager.RuntimePolicy{MaxRunningRuntimes: 20, IdleMinutes: 30}}
 	if err := decoder.Decode(&config); err != nil {
 		return managerConfig{}, fmt.Errorf("decode Employee Manager configuration: %w", err)
+	}
+	if config.RuntimePolicy.MaxRunningRuntimes < 0 || config.RuntimePolicy.MaxRunningRuntimes > 10000 || config.RuntimePolicy.IdleMinutes < 0 || config.RuntimePolicy.IdleMinutes > 10080 {
+		return managerConfig{}, errors.New("invalid runtime policy")
 	}
 	for _, path := range []string{config.DatabasePath, config.DataRootBase, config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.ManagedSkillsRoot, config.CredentialRoot, config.LauncherExecutable, config.LaunchManifestRoot} {
 		if !filepath.IsAbs(path) {

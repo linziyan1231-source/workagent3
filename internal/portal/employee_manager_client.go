@@ -13,12 +13,22 @@ import (
 	"time"
 
 	"workagent3/internal/contracts"
+	"workagent3/internal/runtimeapi"
 )
 
 type EmployeeManagerClient struct {
 	baseURL string
 	token   string
 	client  *http.Client
+}
+
+func (c *EmployeeManagerClient) EnsureRuntime(ctx context.Context, sid string) error {
+	client := *c
+	client.client = &http.Client{Timeout: 60 * time.Second}
+	return client.call(ctx, http.MethodPost, "/v1/runtime/ensure", map[string]string{"sid": sid}, nil)
+}
+func (c *EmployeeManagerClient) RuntimeControl(registry *runtimeapi.Registry) http.Handler {
+	return runtimeapi.ControlHandler(registry, c.token)
 }
 
 func (c *EmployeeManagerClient) StartMaintenance(ctx context.Context, action, username, newName string) (ProvisionJob, error) {

@@ -25,10 +25,19 @@ type Registry struct {
 	now         func() time.Time
 	entries     map[string]Registration
 	credentials map[string][sha256.Size]byte
+	lastAccess  map[string]time.Time
+	requests    map[string]int
+	draining    map[string]time.Time
+	starter     func(context.Context, string) error
+	starting    map[string]*runtimeStart
+}
+type runtimeStart struct {
+	done chan struct{}
+	err  error
 }
 
 func NewRegistry() *Registry {
-	return &Registry{now: time.Now, entries: make(map[string]Registration), credentials: make(map[string][sha256.Size]byte)}
+	return &Registry{now: time.Now, entries: make(map[string]Registration), credentials: make(map[string][sha256.Size]byte), lastAccess: make(map[string]time.Time), requests: make(map[string]int), draining: make(map[string]time.Time), starting: make(map[string]*runtimeStart)}
 }
 
 // Authorize installs the per-employee credential used by UserHost to publish
@@ -76,12 +85,15 @@ func (r *Registry) Register(registration Registration) error {
 		return errors.New("runtime registration identity, token, and future expiry are required")
 	}
 	r.mu.Lock()
+	if _, ok := r.entries[registration.SID]; !ok {
+		r.lastAccess[registration.SID] = r.now()
+	}
 	r.entries[registration.SID] = registration
 	r.mu.Unlock()
 	return nil
 }
 
-func (r *Registry) Resolve(_ context.Context, sid string) (Endpoint, error) {
+func (r *Registry) Lookup(sid string) (Endpoint, error) {
 	r.mu.RLock()
 	registration, ok := r.entries[sid]
 	r.mu.RUnlock()
@@ -90,6 +102,61 @@ func (r *Registry) Resolve(_ context.Context, sid string) (Endpoint, error) {
 	}
 	endpoint, _ := url.Parse(registration.BaseURL)
 	return Endpoint{BaseURL: endpoint, Token: registration.Token}, nil
+}
+
+func (r *Registry) SetStarter(start func(context.Context, string) error) { r.starter = start }
+func (r *Registry) Resolve(ctx context.Context, sid string) (Endpoint, error) {
+	r.mu.Lock()
+	if r.draining[sid].After(r.now()) {
+		r.mu.Unlock()
+		return Endpoint{}, ErrRuntimeUnavailable
+	}
+	r.lastAccess[sid] = r.now()
+	r.mu.Unlock()
+	endpoint, err := r.Lookup(sid)
+	if err == nil || r.starter == nil {
+		return endpoint, err
+	}
+	r.mu.Lock()
+	if current, ok := r.entries[sid]; ok && current.ExpiresAt.After(r.now()) {
+		r.mu.Unlock()
+		return r.Lookup(sid)
+	}
+	pending := r.starting[sid]
+	if pending == nil {
+		pending = &runtimeStart{done: make(chan struct{})}
+		r.starting[sid] = pending
+		go func() {
+			startCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			pending.err = r.starter(startCtx, sid)
+			r.mu.Lock()
+			delete(r.starting, sid)
+			close(pending.done)
+			r.mu.Unlock()
+		}()
+	}
+	r.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return Endpoint{}, ctx.Err()
+	case <-pending.done:
+		if pending.err != nil {
+			return Endpoint{}, pending.err
+		}
+		return r.Lookup(sid)
+	}
+}
+
+func (r *Registry) BeginRequest(sid string) (func(), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.draining[sid].After(r.now()) {
+		return nil, ErrRuntimeUnavailable
+	}
+	r.requests[sid]++
+	r.lastAccess[sid] = r.now()
+	return func() { r.mu.Lock(); r.requests[sid]--; r.lastAccess[sid] = r.now(); r.mu.Unlock() }, nil
 }
 
 func (r *Registry) Remove(sid, token string) {

@@ -1,184 +1,306 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { chromium } from "playwright";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { chromium, webkit } from "playwright";
 import {
   baseURL,
   smokeUsername,
   requireSmokeEnvironment,
 } from "./smoke-dsh-helpers.mjs";
-
 requireSmokeEnvironment();
-const browser = await chromium.launch();
-const page = await browser.newPage({
-  viewport: { width: 1440, height: 900 },
-  reducedMotion: "reduce",
-});
-const errors = [];
-page.on("pageerror", (error) => errors.push(error.message));
-const output = process.env.WORKAGENT_SMOKE_SCREENSHOT_DIR;
-const screenshot = async (name) => {
-  if (!output) return;
-  await mkdir(output, { recursive: true });
-  await page.screenshot({ path: join(output, name) });
-};
+const engine = process.env.WORKAGENT_SMOKE_WEBKIT ? "webkit" : "chromium";
+const output = join(
+  process.env.WORKAGENT_SMOKE_EVIDENCE_DIR ??
+    process.env.WORKAGENT_SMOKE_SCREENSHOT_DIR ??
+    ".cache/login-smoke",
+  engine,
+);
+await mkdir(output, { recursive: true });
+const profile = await mkdtemp(join(tmpdir(), "workagent-login-smoke-"));
+const preview = process.env.WORKAGENT_LOGIN_PREVIEW;
+const report = { checks: [], errors: [], preview: !!preview };
+let context;
+async function openBrowser() {
+  context = await { chromium, webkit }[engine].launchPersistentContext(
+    profile,
+    {
+      headless: true,
+      viewport: { width: 1440, height: 900 },
+      reducedMotion: "reduce",
+    },
+  );
+  const page = context.pages()[0];
+  page.on("pageerror", (e) => report.errors.push(e.message));
+  return page;
+}
 try {
-  const documentResponse = await page.goto(`${baseURL}/?frontend=dsh`);
-  assert.match(documentResponse.headers()["cache-control"], /no-store/);
-  await page.getByRole("heading", { name: "WorkAgent", exact: true }).waitFor();
-  assert.equal(await page.title(), "WorkAgent - 登录");
-  assert.equal(await page.locator(".login-page img").count(), 0);
-  const card = await page.locator(".login-page__card").boundingBox();
-  assert.equal(card.width, 360);
-  assert.equal(Math.round(card.x + card.width / 2), 720);
-  assert.match(
-    await page
-      .locator(".login-page")
-      .evaluate((el) => getComputedStyle(el).backgroundImage),
-    /151, 160, 197/,
-  );
-  await screenshot("login-desktop.png");
-
-  for (const code of await page
-    .locator("#lang-select option")
-    .evaluateAll((options) => options.map((el) => el.value))) {
-    await page.locator("#lang-select").selectOption(code);
-    assert.match(await page.title(), /WorkAgent/);
-    assert.doesNotMatch(await page.locator("body").innerText(), /puxin\s*ai/i);
+  let page = await openBrowser();
+  if (preview) {
+    await page.route(`${baseURL}/?frontend=dsh`, async (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: await readFile(join(preview, "index.html")),
+      }),
+    );
+    await page.route("**/assets/*", async (route) =>
+      route.fulfill({
+        contentType: route.request().url().endsWith(".css")
+          ? "text/css"
+          : "text/javascript",
+        body: await readFile(
+          join(
+            preview,
+            "assets",
+            new URL(route.request().url()).pathname.split("/").pop(),
+          ),
+        ),
+      }),
+    );
   }
-  await page.locator("#lang-select").selectOption("en-US");
-  await page.reload();
-  await page.getByRole("button", { name: "Sign In", exact: true }).waitFor();
-  await page.locator("#lang-select").selectOption("zh-CN");
-  await page.locator("#password").fill("visibility-check");
-  await page.getByRole("button", { name: "显示密码" }).click();
-  assert.equal(await page.locator("#password").getAttribute("type"), "text");
-  await page.getByRole("button", { name: "隐藏密码" }).click();
-  assert.equal(
-    await page.locator("#password").getAttribute("type"),
-    "password",
+  await page.addInitScript(() =>
+    localStorage.setItem("workagent.login.language", "en-US"),
   );
-  await page.locator("#password").fill("");
-
-  await page.getByRole("button", { name: "修改密码", exact: true }).click();
-  await page.locator("#username").fill("validation-only");
-  await page.locator("#password").fill("not-a-real-credential");
-  await page.locator("#new-password").fill("validation-example-one");
-  await page.locator("#confirm-password").fill("validation-example-two");
-  let passwordRequests = 0;
-  page.on("request", (request) => {
-    if (request.url().endsWith("/api/auth/password")) passwordRequests++;
-  });
-  await page.getByRole("button", { name: "确认修改" }).click();
-  await page
-    .getByRole("alert")
-    .filter({ hasText: "两次输入的新密码不一致" })
-    .waitFor();
-  assert.equal(passwordRequests, 0);
-  await page.getByRole("button", { name: "返回登录" }).click();
-  assert.equal(await page.locator("#password").inputValue(), "");
-  await page.locator("#username").fill("");
-
-  // Exercise the visible error state without making failed real login attempts.
-  await page.route("**/api/auth/login", (route) =>
-    route.fulfill({
-      status: 401,
-      contentType: "application/json",
-      body: JSON.stringify({ error: "invalid_credentials" }),
-    }),
-  );
-  await page.locator("#username").fill("validation-only");
-  await page.locator("#password").fill("invalid-example");
-  await page.getByRole("button", { name: "登录", exact: true }).click();
-  await page
-    .getByRole("alert")
-    .filter({ hasText: "用户名或密码错误" })
-    .waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: "登录", exact: true }).isEnabled(),
-    true,
-  );
-  await page.unroute("**/api/auth/login");
-  await page.reload();
-  await page.locator("#username").waitFor();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await screenshot("login-mobile.png");
-  assert.equal(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-    true,
-  );
-  await page.setViewportSize({ width: 844, height: 390 });
-  await page
-    .getByRole("button", { name: "登录", exact: true })
-    .scrollIntoViewIfNeeded();
-  assert.equal(
-    await page.getByRole("button", { name: "登录", exact: true }).isVisible(),
-    true,
-  );
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  await page.locator("#username").fill(smokeUsername);
-  await page.locator("#password").fill(process.env.WORKAGENT_SMOKE_PASSWORD);
-  await page.getByLabel("记住我", { exact: true }).check();
-  await page.getByRole("button", { name: "登录", exact: true }).click();
-  await page.waitForURL("**/?frontend=dsh");
-  await page.getByText("WorkAgent", { exact: true }).waitFor();
-  await page.getByRole("button", { name: /settings|设置/i }).waitFor();
-  await screenshot("login-authenticated-dsh.png");
-  assert.deepEqual(errors, []);
-  // Credentials must never be saved by the remember-me control.
-  const storage = await page.evaluate(() => ({ ...localStorage }));
-  assert.equal(storage["workagent.login.username"], smokeUsername);
-  assert.equal(
-    Object.values(storage).some((value) =>
-      value.includes(process.env.WORKAGENT_SMOKE_PASSWORD),
-    ),
-    false,
-  );
-  await page.request.post(`${baseURL}/api/auth/logout`, {
-    headers: { Origin: new URL(baseURL).origin },
-  });
   await page.goto(`${baseURL}/?frontend=dsh`);
-  await page.locator("#username").waitFor();
-  assert.equal(await page.locator("#username").inputValue(), smokeUsername);
-  assert.equal(await page.locator("#password").inputValue(), "");
-  await page.getByLabel("记住我", { exact: true }).uncheck();
-  await page.reload();
-  await page.locator("#username").waitFor();
-  assert.equal(await page.locator("#username").inputValue(), "");
-  if (output)
-    await writeFile(
-      join(output, "login-checks.json"),
-      JSON.stringify(
-        {
-          branding: "WorkAgent",
-          legacyLayout: true,
-          languages: 11,
-          passwordVisibility: true,
-          passwordValidation: true,
-          loginErrorRecovery: true,
-          mobile: true,
-          realLoginToDsh: true,
-          logout: true,
-          rememberUsername: true,
-          pageErrors: errors,
-        },
-        null,
-        2,
+  await page.getByRole("button", { name: "登录", exact: true }).waitFor();
+  assert.equal(await page.locator("#lang-select").count(), 0);
+  assert.equal(await page.locator("html").getAttribute("lang"), "zh-CN");
+  report.checks.push(
+    "Login and password-change UI use Chinese regardless of previous language preference",
+  );
+  const password = page.locator("#password");
+  const reveal = page.locator(".login-page__toggle-password");
+  assert(await reveal.isDisabled());
+  await password.pressSequentially("manual-example");
+  assert(await reveal.isEnabled());
+  await reveal.click();
+  assert.equal(await password.getAttribute("type"), "text");
+  // Unknown replacement models password-manager fills without manual edit events.
+  await password.evaluate((el) => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    ).set.call(el, "autofilled-example");
+    el.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertReplacementText",
+        data: "autofilled-example",
+      }),
+    );
+  });
+  assert.equal(await password.getAttribute("type"), "password");
+  assert.equal(await reveal.count(), 0);
+  await password.press("End");
+  await password.pressSequentially("x");
+  assert.equal(await reveal.count(), 0);
+  await password.fill("");
+  await password.pressSequentially("new-manual-example");
+  assert(await reveal.isEnabled());
+  await reveal.click();
+  assert.equal(await password.getAttribute("type"), "text");
+  await password.fill("");
+  assert.equal(await password.inputValue(), "");
+  assert.equal(await password.getAttribute("type"), "password");
+  report.checks.push(
+    "Typed passwords can be revealed; unknown fills and partial edits remain masked; clearing restores manual reveal",
+  );
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dots = await page
+      .locator(".login-page__footer-divider")
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          w: el.getBoundingClientRect().width,
+          h: el.getBoundingClientRect().height,
+          color: getComputedStyle(el).backgroundColor,
+          left:
+            el.getBoundingClientRect().left -
+            el.previousElementSibling.getBoundingClientRect().right,
+          right:
+            el.nextElementSibling.getBoundingClientRect().left -
+            el.getBoundingClientRect().right,
+        })),
+      );
+    assert.equal(dots.length, 2);
+    assert.deepEqual(dots[0], dots[1]);
+    assert.equal(dots[0].left, dots[0].right);
+    assert(
+      await page
+        .locator(".login-page__card")
+        .evaluate((el) => el.getBoundingClientRect().right <= innerWidth),
+    );
+    await page.screenshot({ path: join(output, `login-${width}.png`) });
+  }
+  report.checks.push(
+    "Both footer dots have identical size and spacing at desktop and mobile widths",
+  );
+  await page.getByRole("button", { name: "修改密码", exact: true }).click();
+  await page.locator("#new-password").waitFor();
+  assert.equal(await page.locator("#lang-select").count(), 0);
+  await page.getByRole("button", { name: "返回登录", exact: true }).click();
+  if (!preview) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator("#username").fill(smokeUsername);
+    await password.fill(process.env.WORKAGENT_SMOKE_PASSWORD);
+    await page.getByLabel("记住密码", { exact: true }).check();
+    const loginResponse = page.waitForResponse((r) =>
+      r.url().endsWith("/api/auth/login"),
+    );
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    assert.equal((await loginResponse).status(), 200);
+    await page.locator(".hHd-Xa_root").waitFor();
+    const cookie = (await context.cookies()).find((c) =>
+      c.name.endsWith("workagent-session"),
+    );
+    assert(cookie.httpOnly);
+    assert(cookie.expires > Date.now() / 1000 + 29 * 86400);
+    const deviceCookie = (await context.cookies()).find((c) =>
+      c.name.endsWith("workagent-session-remembered"),
+    );
+    assert(deviceCookie?.httpOnly);
+    assert(deviceCookie.expires > Date.now() / 1000 + 29 * 86400);
+    const storage = await page.evaluate(() => Object.values(localStorage));
+    assert(
+      !storage.some((value) =>
+        value.includes(process.env.WORKAGENT_SMOKE_PASSWORD),
       ),
     );
-  console.log(
-    "Portal login smoke passed: WorkAgent branding, WorkAgent2 layout, languages, password controls, responsive layout, authenticated DSH and logout",
-  );
-} catch (error) {
-  if (output)
+    // Closing a browser cancels its pending application requests; stop observing
+    // the old page once the restart begins, then observe the new browser again.
+    page.removeAllListeners("pageerror");
+    await context.close();
+    page = await openBrowser();
+    await page.goto(`${baseURL}/?frontend=dsh`);
+    await page.locator(".hHd-Xa_root").waitFor();
+    assert.equal(
+      (await page.request.get(`${baseURL}/api/auth/me`)).status(),
+      200,
+    );
     await page.screenshot({
-      path: join(output, "login-failure.png"),
-      mask: [page.locator("input")],
+      path: join(output, "remembered-after-browser-restart.png"),
     });
-  throw error;
+    report.checks.push(
+      "Remembered login survives a real browser restart with a 30-day HttpOnly cookie and no password in localStorage",
+    );
+    assert.equal(
+      (
+        await page.request.post(`${baseURL}/api/auth/logout`, {
+          headers: { Origin: baseURL },
+        })
+      ).status(),
+      204,
+    );
+    page.removeAllListeners("pageerror");
+    await page.close();
+    page = await context.newPage();
+    page.on("pageerror", (error) => report.errors.push(error.message));
+    assert.equal(
+      (await page.request.get(`${baseURL}/api/auth/me`)).status(),
+      401,
+    );
+    await page.goto(`${baseURL}/?frontend=dsh`);
+    await page.locator("#password").waitFor();
+    await page.waitForFunction(
+      () => document.querySelector("#password")?.value === "••••••••",
+    );
+    assert.equal(await page.locator("#password").inputValue(), "••••••••");
+    assert.equal(
+      await page.locator("#password").getAttribute("readonly"),
+      null,
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "重新输入密码", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(await page.locator(".login-page__toggle-password").count(), 0);
+    const savedResponse = page.waitForResponse((r) =>
+      r.url().endsWith("/api/auth/login"),
+    );
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    const savedLogin = await savedResponse;
+    assert.equal(savedLogin.status(), 200);
+    assert.deepEqual(savedLogin.request().postDataJSON(), {
+      username: smokeUsername,
+      useRemembered: true,
+      remember: true,
+    });
+    await page.locator(".hHd-Xa_root").waitFor();
+    page.removeAllListeners("pageerror");
+    await page.request.post(`${baseURL}/api/auth/logout`, {
+      headers: { Origin: baseURL },
+    });
+    await context.close();
+    page = await openBrowser();
+    await page.goto(`${baseURL}/?frontend=dsh`);
+    await page.waitForFunction(
+      () => document.querySelector("#password")?.value === "••••••••",
+    );
+    await page.screenshot({ path: join(output, "saved-password-masked.png") });
+    assert(
+      !(await page.evaluate(() => document.cookie)).includes(
+        "workagent-session-remembered",
+      ),
+    );
+    await page.locator("#password").click();
+    await page.locator("#password").press("Backspace");
+    assert.equal(await page.locator("#password").inputValue(), "");
+    await page.locator("#password").pressSequentially("manual-after-delete");
+    assert.equal(
+      await page.locator("#password").inputValue(),
+      "manual-after-delete",
+    );
+    assert(await page.locator(".login-page__toggle-password").isEnabled());
+    await page.reload();
+    await page.waitForFunction(
+      () => document.querySelector("#password")?.value === "••••••••",
+    );
+    await page.getByLabel("记住密码", { exact: true }).uncheck();
+    await page.waitForFunction(
+      () => document.querySelector("#password")?.value === "",
+    );
+    assert.equal(await page.locator("#password").inputValue(), "");
+    await page.reload();
+    assert.equal(
+      (await (await page.request.get(`${baseURL}/api/auth/remembered`)).json())
+        .username,
+      null,
+    );
+    assert.equal(await page.locator("#password").inputValue(), "");
+    report.checks.push(
+      "Saved login survives logout, fills an opaque masked value, submits without exposing a password, and can be forgotten",
+    );
+    const ordinary = await page.request.post(`${baseURL}/api/auth/login`, {
+      headers: { Origin: baseURL },
+      data: {
+        username: smokeUsername,
+        password: process.env.WORKAGENT_SMOKE_PASSWORD,
+        remember: false,
+      },
+    });
+    assert.equal(ordinary.status(), 200);
+    const ordinaryCookie = (await context.cookies()).find((c) =>
+      c.name.endsWith("workagent-session"),
+    );
+    assert.equal(ordinaryCookie.expires, -1);
+    await page.request.post(`${baseURL}/api/auth/logout`, {
+      headers: { Origin: baseURL },
+    });
+    report.checks.push(
+      "Explicit logout revokes the current session; ordinary login has no persistent session cookie",
+    );
+  }
+  assert.deepEqual(report.errors, []);
+  console.log(JSON.stringify(report));
 } finally {
-  await browser.close();
+  if (context) await context.close();
+  await writeFile(
+    join(output, "login-report.json"),
+    JSON.stringify(report, null, 2),
+  );
+  if (!resolve(profile).startsWith(join(tmpdir(), "workagent-login-smoke-")))
+    throw new Error("Temporary browser profile escaped its directory");
+  await rm(profile, { recursive: true, force: true });
 }

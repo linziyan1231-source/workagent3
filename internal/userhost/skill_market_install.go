@@ -137,7 +137,7 @@ func extractMarketSkillArchive(archivePath, destination string) error {
 	var total uint64
 	for _, file := range reader.File {
 		clean := path.Clean(file.Name)
-		if clean == "." || clean == ".." || path.IsAbs(clean) || strings.HasPrefix(clean, "../") || strings.Contains(file.Name, `\`) {
+		if clean == "." || clean == ".." || path.IsAbs(clean) || strings.HasPrefix(clean, "../") || strings.ContainsAny(file.Name, `\:`) {
 			return errors.New("market skill archive escapes destination")
 		}
 		info := file.FileInfo()

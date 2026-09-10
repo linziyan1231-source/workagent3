@@ -27,6 +27,38 @@ const createTeam = (store: TeamStore) =>
   });
 
 describe("TeamStore", () => {
+  it("persists member ordering without changing the lead or losing members", () => {
+    const home = root();
+    const store = new TeamStore(home);
+    let team = createTeam(store);
+    team = store.addMember(team.id, {
+      name: "A",
+      engine: "codex",
+      presetId: "a",
+    });
+    team = store.addMember(team.id, {
+      name: "B",
+      engine: "kimi",
+      presetId: "b",
+    });
+    const ids = team.members.map((member) => member.id);
+    expect(() =>
+      store.update(team.id, team.version, {
+        memberIds: [ids[1]!, ids[0]!, ids[2]!],
+      }),
+    ).toThrow("invalid_member_order");
+    expect(() =>
+      store.update(team.id, team.version, {
+        memberIds: [ids[0]!, ids[1]!, ids[1]!],
+      }),
+    ).toThrow("invalid_member_order");
+    store.update(team.id, team.version, {
+      memberIds: [ids[0]!, ids[2]!, ids[1]!],
+    });
+    expect(
+      new TeamStore(home).get(team.id)?.members.map((member) => member.name),
+    ).toEqual(["Lead", "B", "A"]);
+  });
   it("persists team members, mailbox, tasks, and replay events", () => {
     const home = root();
     const store = new TeamStore(home);

@@ -281,6 +281,27 @@ describe("AutomationScheduler", () => {
     expect(store.getRun(pending.id)?.status).toBe("cancelled");
   });
 
+  it("exposes the execution session while running and preserves it on failure", async () => {
+    const store = new AutomationStore(root());
+    const definition = store.create({ ...mutation, enabled: false });
+    const run = store.runNow(definition.id);
+    const scheduler = new AutomationScheduler(store, {
+      execute: async (request) => {
+        request.onSessionStarted?.("session-approval");
+        expect(store.getRun(run.id)).toMatchObject({
+          status: "running",
+          sessionId: "session-approval",
+        });
+        throw new Error("turn_failed");
+      },
+    });
+    await scheduler.tick();
+    expect(store.getRun(run.id)).toMatchObject({
+      status: "failed",
+      sessionId: "session-approval",
+    });
+  });
+
   it("publishes terminal notifications according to notificationPolicy", async () => {
     const data = root();
     const store = new AutomationStore(data);

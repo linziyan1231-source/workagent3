@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
+const mermaidRoot = dirname(require.resolve("mermaid"));
 
 const tokensPath = new URL("./tokens.css", import.meta.url);
 const previewAssets = {
@@ -22,6 +23,41 @@ const previewAssets = {
 export const inject = ["webServer"];
 
 export function apply(ctx) {
+  ctx.effect(
+    () =>
+      ctx.webServer.register({
+        kind: "prefix",
+        path: "/plugins/@workagent/dsh-client/mermaid",
+        handler: async (request, response) => {
+          const path = new URL(request.url, "http://localhost").pathname.slice(
+            "/plugins/@workagent/dsh-client/mermaid/".length,
+          );
+          // Serve only the pinned distribution's ESM files and chunks.
+          if (
+            !["GET", "HEAD"].includes(request.method) ||
+            !/^(?:chunks\/mermaid\.esm\.min\/)?[a-zA-Z0-9_.-]+\.mjs$/.test(path)
+          ) {
+            response.writeHead(404);
+            response.end();
+            return;
+          }
+          try {
+            const data = await readFile(join(mermaidRoot, path));
+            response.writeHead(200, {
+              "content-type": "text/javascript",
+              "cache-control": "no-cache",
+              "content-length": data.length,
+            });
+            response.end(request.method === "HEAD" ? undefined : data);
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+            response.writeHead(404);
+            response.end();
+          }
+        },
+      }),
+    "workagent-client: pinned mermaid assets",
+  );
   for (const [name, [path, type]] of Object.entries(previewAssets)) {
     ctx.effect(
       () =>

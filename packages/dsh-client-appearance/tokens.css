@@ -156,6 +156,8 @@ body[data-workagent-theme] .workagent-agent.is-active {
 }
 body[data-workagent-theme]
   :is(
+    .workagent-sidebar-project-row,
+    .workagent-sidebar-session,
     .workagent-sidebar-project-row button,
     .workagent-sidebar-session button,
     .workagent-button,
@@ -207,8 +209,7 @@ body[data-workagent-theme="graphite"] .workagent-hero-composer {
   background: linear-gradient(135deg, #252932, #202229);
 }
 body[data-workagent-theme="graphite"]
-  .workagent-sidebar-session
-  button.is-active {
+  .workagent-sidebar-session:has(button.is-active) {
   box-shadow: inset 2px 0 var(--dsw-color-accent);
 }
 body[data-workagent-theme="paper"] .pXSMma_headlineText {
@@ -238,7 +239,8 @@ body[data-workagent-theme="jade"] .workagent-agent-strip,
 body[data-workagent-theme="jade"] .workagent-agent {
   border-radius: 24px;
 }
-body[data-workagent-theme="jade"] .workagent-sidebar-session button.is-active {
+body[data-workagent-theme="jade"]
+  .workagent-sidebar-session:has(button.is-active) {
   background: var(--dsw-color-panel);
   box-shadow: var(--dsw-appearance-shadow);
 }
@@ -249,7 +251,7 @@ body[data-workagent-theme="jade"] .workagent-sidebar-session button.is-active {
   color: var(--dsw-color-text);
 }
 .wa-appearance-heading {
-  font-size: 14px;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
   margin-bottom: 12px;
 }
 .wa-appearance-grid {
@@ -280,10 +282,10 @@ body[data-workagent-theme="jade"] .workagent-sidebar-session button.is-active {
   background: var(--dsw-color-accent-soft);
 }
 .wa-appearance-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
 }
 .wa-appearance-choice small {
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--dsw-color-muted);
 }
 .wa-appearance-preview {
@@ -365,7 +367,7 @@ body[data-workagent-theme="jade"] .workagent-sidebar-session button.is-active {
   background: var(--dsw-color-bg);
   border: 1px solid var(--dsw-color-border);
   border-radius: var(--dsw-radius);
-  font-size: 12px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
 }
 .wa-appearance-system label,
 .wa-appearance-night {
@@ -394,7 +396,7 @@ body[data-workagent-theme="jade"] .workagent-sidebar-session button.is-active {
 .wa-appearance-system p {
   grid-column: 1 / -1;
   margin: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
   color: var(--dsw-color-muted);
 }
 @media (max-width: 760px) {
