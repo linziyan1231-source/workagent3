@@ -15,20 +15,21 @@ import (
 var networkRulesMu sync.Mutex
 var fwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
 var firewallAPI = windows.NewLazySystemDLL("FirewallAPI.dll")
-var appSublayer = mustAppGUID("{96b1407c-ab46-41e0-8374-9a3978d63ff2}")
-var packageCondition = mustAppGUID("{71bc78fa-f17c-4997-a602-6abb261f351c}")
-var remoteAddressCondition = mustAppGUID("{b235ae9a-1d64-49b8-a44c-5ff3d9095045}")
-var localAddressCondition = mustAppGUID("{d9ee00de-c1ef-4617-bfe3-ffd8f5a08957}")
-var remotePortCondition = mustAppGUID("{c35a604d-d22b-4e1a-91b4-68f674ee674b}")
-var localPortCondition = mustAppGUID("{0c1ba1af-5765-453f-af22-a8f791ac775b}")
-var protocolCondition = mustAppGUID("{3971ef2b-623e-4f9a-8cb1-6e79b806b9a7}")
 
-func mustAppGUID(value string) windows.GUID {
-	v, err := windows.GUIDFromString(value)
-	if err != nil {
-		panic(err)
-	}
-	return v
+// These fixed WFP identities must not call GUIDFromString: it loads ole32.dll
+// during package initialization, before an AppContainer worker can dispatch.
+var appSublayer = windows.GUID{Data1: 0x96b1407c, Data2: 0xab46, Data3: 0x41e0, Data4: [8]byte{0x83, 0x74, 0x9a, 0x39, 0x78, 0xd6, 0x3f, 0xf2}}
+var packageCondition = windows.GUID{Data1: 0x71bc78fa, Data2: 0xf17c, Data3: 0x4997, Data4: [8]byte{0xa6, 0x02, 0x6a, 0xbb, 0x26, 0x1f, 0x35, 0x1c}}
+var remoteAddressCondition = windows.GUID{Data1: 0xb235ae9a, Data2: 0x1d64, Data3: 0x49b8, Data4: [8]byte{0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45}}
+var localAddressCondition = windows.GUID{Data1: 0xd9ee00de, Data2: 0xc1ef, Data3: 0x4617, Data4: [8]byte{0xbf, 0xe3, 0xff, 0xd8, 0xf5, 0xa0, 0x89, 0x57}}
+var remotePortCondition = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x4e1a, Data4: [8]byte{0x91, 0xb4, 0x68, 0xf6, 0x74, 0xee, 0x67, 0x4b}}
+var localPortCondition = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf7, 0x91, 0xac, 0x77, 0x5b}}
+var protocolCondition = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa7}}
+var appNetworkLayers = [4]windows.GUID{
+	{Data1: 0xc38d57d1, Data2: 0x05a7, Data3: 0x4c33, Data4: [8]byte{0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82}},
+	{Data1: 0x4a72393b, Data2: 0x319f, Data3: 0x44bc, Data4: [8]byte{0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4}},
+	{Data1: 0xe1cd9fe7, Data2: 0xf4b5, Data3: 0x4273, Data4: [8]byte{0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50}},
+	{Data1: 0xa3b42c97, Data2: 0x9f04, Data3: 0x4672, Data4: [8]byte{0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f}},
 }
 
 type appFWBlob struct {
@@ -127,9 +128,7 @@ func EnableAppNetwork(rule AppNetworkRule) (string, error) {
 		return "", err
 	}
 	packageMatch := appFWCondition{Field: packageCondition, Value: appFWValue{Type: 13, Value: uintptr(unsafe.Pointer(sid))}}
-	layers := []string{"{c38d57d1-05a7-4c33-904f-7fbceee60e82}", "{4a72393b-319f-44bc-84c3-ba54dcb3b6b4}", "{e1cd9fe7-f4b5-4273-96c0-592e487b8650}", "{a3b42c97-9f04-4672-b87e-cee9c483257f}"}
-	for index, raw := range layers {
-		layer := mustAppGUID(raw)
+	for index, layer := range appNetworkLayers {
 		if err = addAppFilter(engine, identity, layer, []appFWCondition{packageMatch}, false); err != nil {
 			return "", err
 		}
