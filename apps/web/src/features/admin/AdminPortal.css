@@ -551,6 +551,7 @@
   margin: 0;
   font-weight: 600;
 }
+.admin-app .admin-danger,
 .admin-dialog .admin-danger {
   background: #fff0f0;
   color: #ad4141;
@@ -643,6 +644,7 @@
   .admin-dialog .admin-primary {
     color: #171c32;
   }
+  .admin-app .admin-danger,
   .admin-dialog .admin-danger {
     background: #402c30;
     color: #f2acac;

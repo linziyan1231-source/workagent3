@@ -209,17 +209,17 @@ try {
     .waitFor();
   if (fixture) {
     await adminPage
-      .getByRole("button", { name: "应急删除", exact: true })
+      .getByRole("button", { name: "删除", exact: true })
       .click();
     const panel = adminPage.getByRole("region", { name: "确认安全处置" });
     assert(
       await panel
-        .getByRole("button", { name: "确认应急删除", exact: true })
+        .getByRole("button", { name: "确认删除", exact: true })
         .isDisabled(),
     );
     await panel.getByRole("textbox").fill("确认示范漏洞已影响所有安装版本");
     await panel
-      .getByRole("button", { name: "确认应急删除", exact: true })
+      .getByRole("button", { name: "确认删除", exact: true })
       .click();
     assert(writes.some((w) => w.action === "delete" && w.reason));
     checks.push(

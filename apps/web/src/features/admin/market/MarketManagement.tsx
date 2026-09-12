@@ -3,8 +3,8 @@ import { marketApi, type Entry, type MarketCatalog } from "./marketApi.js";
 import { errorMessage } from "../shared/adminErrors.js";
 const labels: Record<string, string> = {
   update: "统一升级",
-  disable: "应急停用",
-  delete: "应急删除",
+  disable: "停用",
+  delete: "删除",
   unlist: "禁用",
   relist: "恢复上架",
 };
@@ -110,6 +110,7 @@ export function MarketManagement({
               ].map((action) => (
                 <button
                   key={action}
+                  className={action === "delete" ? "admin-danger" : undefined}
                   disabled={busy}
                   onClick={() => {
                     setSelection({ entry: e, action });
