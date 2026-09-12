@@ -18,6 +18,7 @@ import {
   type JsonValue,
   type NativeApprovalRequest,
   type NativeApprovalDecision,
+  type NativeApprovalOption,
 } from "./engines/types.js";
 import { authorized } from "./runtime-http.js";
 
@@ -41,6 +42,8 @@ export type PendingInteraction = {
   resolvedAt?: string;
   input?: JsonValue;
   options?: JsonValue[];
+  choices?: NativeApprovalOption[];
+  selectedOptionId?: string;
 };
 
 type InteractionEvent =
@@ -58,7 +61,7 @@ type InteractionEvent =
     };
 
 type Resolver = {
-  resolve: (outcome: ApprovalOutcome) => void;
+  resolve: (outcome: ApprovalOutcome | { optionId: string }) => void;
   cleanup: () => void;
 };
 
@@ -161,7 +164,7 @@ export class ApprovalBridge {
       latestTurn?.type === "turn/start"
         ? `turn-${latestTurn.data.turn}`
         : "turn-unknown";
-    return this.#request(
+    const outcome = await this.#request(
       {
         sessionId,
         turnId,
@@ -170,6 +173,7 @@ export class ApprovalBridge {
       },
       request.signal,
     );
+    return typeof outcome === "string" ? outcome : "cancelled";
   }
 
   async requestNative(
@@ -189,14 +193,19 @@ export class ApprovalBridge {
         ...(request.options === undefined
           ? {}
           : { options: nativeJson(request.options) as JsonValue[] }),
+        ...(request.choices === undefined
+          ? {}
+          : { choices: structuredClone(request.choices) }),
       },
       request.signal,
     );
-    return outcome === "allowed-once"
-      ? "allow"
-      : outcome === "rejected"
-        ? "reject"
-        : "cancel";
+    return typeof outcome === "object"
+      ? outcome
+      : outcome === "allowed-once"
+        ? "allow"
+        : outcome === "rejected"
+          ? "reject"
+          : "cancel";
   }
 
   pendingNative(): PendingInteraction[] {
@@ -224,13 +233,20 @@ export class ApprovalBridge {
       !this.#resolvers.has(approvalId)
     )
       return false;
+    const choice =
+      typeof decision === "object"
+        ? interaction.choices?.find((item) => item.id === decision.optionId)
+        : undefined;
+    if (typeof decision === "object" && !choice) return false;
+    const outcome = choice?.outcome ?? decision;
     this.#settle(
       interaction,
-      decision === "allow"
+      outcome === "allow"
         ? "allowed"
-        : decision === "reject"
+        : outcome === "reject"
           ? "rejected"
           : "cancelled",
+      choice?.id,
     );
     return true;
   }
@@ -244,10 +260,11 @@ export class ApprovalBridge {
       | "summary"
       | "input"
       | "options"
+      | "choices"
       | "native"
     >,
     signal?: AbortSignal,
-  ): Promise<ApprovalOutcome> {
+  ): Promise<ApprovalOutcome | { optionId: string }> {
     if (signal?.aborted || this.#disposed) return Promise.resolve("cancelled");
     const interaction: PendingInteraction = {
       ...details,
@@ -258,25 +275,27 @@ export class ApprovalBridge {
     };
     this.#interactions.set(interaction.id, interaction);
     this.#save();
-    return new Promise<ApprovalOutcome>((resolve, reject) => {
-      const cancel = () => this.#settle(interaction, "cancelled");
-      this.#resolvers.set(interaction.id, {
-        resolve,
-        cleanup: () => signal?.removeEventListener("abort", cancel),
-      });
-      signal?.addEventListener("abort", cancel, { once: true });
-      try {
-        this.#publish(interaction.sessionId, {
-          type: "approval.requested",
-          turnId: interaction.turnId,
-          approvalId: interaction.id,
-          summary: interaction.summary,
+    return new Promise<ApprovalOutcome | { optionId: string }>(
+      (resolve, reject) => {
+        const cancel = () => this.#settle(interaction, "cancelled");
+        this.#resolvers.set(interaction.id, {
+          resolve,
+          cleanup: () => signal?.removeEventListener("abort", cancel),
         });
-      } catch (error) {
-        this.#settle(interaction, "unavailable");
-        reject(error);
-      }
-    });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          this.#publish(interaction.sessionId, {
+            type: "approval.requested",
+            turnId: interaction.turnId,
+            approvalId: interaction.id,
+            summary: interaction.summary,
+          });
+        } catch (error) {
+          this.#settle(interaction, "unavailable");
+          reject(error);
+        }
+      },
+    );
   }
 
   async #handle(
@@ -319,13 +338,36 @@ export class ApprovalBridge {
       json(response, 400, { error: "invalid_response" });
       return;
     }
-    if (value.decision !== "allow" && value.decision !== "reject") {
+    if (
+      value.sessionId !== undefined &&
+      value.sessionId !== interaction.sessionId
+    ) {
+      json(response, 404, { error: "interaction_not_found" });
+      return;
+    }
+    const choice =
+      interaction.native && typeof value.optionId === "string"
+        ? interaction.choices?.find((item) => item.id === value.optionId)
+        : undefined;
+    if (
+      (value.optionId !== undefined && !choice) ||
+      (!choice && value.decision !== "allow" && value.decision !== "reject")
+    ) {
       json(response, 400, { error: "invalid_decision" });
       return;
     }
-    const status = value.decision === "allow" ? "allowed" : "rejected";
+    const decision = choice?.outcome ?? value.decision;
+    const status =
+      decision === "allow"
+        ? "allowed"
+        : decision === "reject"
+          ? "rejected"
+          : "cancelled";
     if (interaction.status !== "pending") {
-      if (interaction.status === status) {
+      if (
+        interaction.status === status &&
+        interaction.selectedOptionId === choice?.id
+      ) {
         json(response, 200, { accepted: false, status: interaction.status });
       } else {
         json(response, 409, { error: "interaction_already_resolved" });
@@ -337,16 +379,18 @@ export class ApprovalBridge {
       json(response, 409, { error: "interaction_no_longer_live" });
       return;
     }
-    this.#settle(interaction, status);
+    this.#settle(interaction, status, choice?.id);
     json(response, 200, { accepted: true, status });
   }
 
   #settle(
     interaction: PendingInteraction,
     status: Exclude<InteractionStatus, "pending">,
+    optionId?: string,
   ): void {
     if (interaction.status !== "pending") return;
     interaction.status = status;
+    if (optionId !== undefined) interaction.selectedOptionId = optionId;
     interaction.resolvedAt = new Date().toISOString();
     const pending = this.#resolvers.get(interaction.id);
     this.#resolvers.delete(interaction.id);
@@ -361,11 +405,13 @@ export class ApprovalBridge {
       });
     } finally {
       pending?.resolve(
-        status === "allowed"
-          ? "allowed-once"
-          : status === "rejected"
-            ? "rejected"
-            : status,
+        optionId !== undefined
+          ? { optionId }
+          : status === "allowed"
+            ? "allowed-once"
+            : status === "rejected"
+              ? "rejected"
+              : status,
       );
     }
   }

@@ -159,7 +159,9 @@ function WorkspaceComposer({ sharedProject } = {}) {
     presetState.rows[0];
   const availableProjects = workspaceState.rows;
   const modelGroup = modelState.rows.find(
-    (group) => group.engine === selectedPreset?.engine,
+    (group) =>
+      group.engine === selectedPreset?.engine &&
+      group.acpCatalogId === selectedPreset?.acpCatalogId,
   );
   const availableModels = modelGroup?.models || [];
   const defaults = resolveModelDefaults(
@@ -184,9 +186,18 @@ function WorkspaceComposer({ sharedProject } = {}) {
       : defaultEffort(selectedPreset?.engine, selectedModel),
     defaultsRevision,
   );
+  const availablePermissions =
+    selectedPreset?.engine === "acp"
+      ? [
+          ["", "使用引擎原生审批"],
+          ...permissionOptions.filter(
+            ([id]) => modelGroup?.permissionModes?.[id],
+          ),
+        ]
+      : permissionOptions;
   const [permissionMode, setPermissionMode] = useDraftOption(
     draftKey,
-    permissionOptions.map(([id]) => ({ id })),
+    availablePermissions.map(([id]) => ({ id })),
     defaults.permissionMode,
     defaultsRevision,
   );
@@ -243,10 +254,13 @@ function WorkspaceComposer({ sharedProject } = {}) {
       const common = {
         ...(modelId ? { modelId } : {}),
         ...(thinkingEffort ? { thinkingEffort } : {}),
-        permissionMode,
+        ...(permissionMode ? { permissionMode } : {}),
       };
       const options = {
         engine: selectedPreset.engine,
+        ...(selectedPreset.acpCatalogId
+          ? { acpCatalogId: selectedPreset.acpCatalogId }
+          : {}),
         title: plainSessionTitle(fileReferenceLabel(content).slice(0, 28)),
         presetId: selectedPreset.id,
         ...common,
@@ -398,7 +412,7 @@ function WorkspaceComposer({ sharedProject } = {}) {
               heading: "权限",
               value: permissionMode,
               onChange: (event) => setPermissionMode(event.target.value),
-              options: permissionOptions,
+              options: availablePermissions,
             }),
           ),
         ),

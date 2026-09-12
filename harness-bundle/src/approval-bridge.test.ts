@@ -79,6 +79,58 @@ const request = (signal = new AbortController().signal) => ({
   options: [{ optionId: "allow-42", kind: "allow_once" }],
   signal,
 });
+it("binds native option choices to their session and makes only the exact repeated option idempotent", async () => {
+  const f = fixture();
+  const pending = f.bridge.requestNative("session-1", {
+    ...request(),
+    choices: [
+      { id: "once", label: "Allow once", outcome: "allow", scope: "once" },
+      {
+        id: "session",
+        label: "Allow session",
+        outcome: "allow",
+        scope: "session",
+      },
+    ],
+  });
+  const rows = (await f.http("GET", "/v1/interactions?sessionId=session-1"))
+    .body as Array<{ id: string }>;
+  const path = `/v1/interactions/${rows[0]!.id}/respond`;
+  expect(
+    (await f.http("POST", path, { sessionId: "other", optionId: "session" }))
+      .status,
+  ).toBe(404);
+  expect(
+    (
+      await f.http("POST", path, {
+        sessionId: "session-1",
+        optionId: "invented",
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await f.http("POST", path, {
+        sessionId: "session-1",
+        optionId: "session",
+      })
+    ).status,
+  ).toBe(200);
+  await expect(pending).resolves.toEqual({ optionId: "session" });
+  expect(
+    (
+      await f.http("POST", path, {
+        sessionId: "session-1",
+        optionId: "session",
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (await f.http("POST", path, { sessionId: "session-1", optionId: "once" }))
+      .status,
+  ).toBe(409);
+  f.dispose();
+});
 it.each(["allow", "reject"] as const)(
   "persists a native request and resolves %s through the authenticated interaction API",
   async (decision) => {

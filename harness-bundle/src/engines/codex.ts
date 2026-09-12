@@ -1,3 +1,4 @@
+import { codexApprovalChoices } from "./approval-options.js";
 import {
   nativeJson,
   NativeApprovalWaits,
@@ -593,7 +594,7 @@ export class CodexSession implements BridgeSession {
   async requestApproval(
     method: string,
     params: ObjectValue,
-  ): Promise<{ decision: string }> {
+  ): Promise<{ decision: import("./types.js").JsonValue }> {
     const turnId = text(params, "turnId");
     if (
       !this.#approvalEnabled ||
@@ -609,11 +610,18 @@ export class CodexSession implements BridgeSession {
       (method === "item/fileChange/requestApproval"
         ? "fileChange"
         : "commandExecution");
+    const offered = (
+      Array.isArray(params.availableDecisions)
+        ? nativeJson(params.availableDecisions)
+        : ["accept", "decline", "cancel"]
+    ) as import("./types.js").JsonValue[];
+    const choices = codexApprovalChoices(offered);
     const decision = await this.#approvals.request({
       turnId,
       tool,
       summary: text(params, "reason") ?? tool,
       input: nativeJson(params),
+      choices,
       ...(Array.isArray(params.availableDecisions)
         ? {
             options: nativeJson(
@@ -622,6 +630,12 @@ export class CodexSession implements BridgeSession {
           }
         : {}),
     });
+    if (typeof decision === "object") {
+      const choice = choices.find((item) => item.id === decision.optionId);
+      return {
+        decision: choice ? offered[Number(choice.id.slice(7))]! : "cancel",
+      };
+    }
     const nativeDecision =
       decision === "allow"
         ? "accept"

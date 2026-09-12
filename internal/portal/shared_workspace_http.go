@@ -41,7 +41,7 @@ func (s *Server) sharedWorkspaceHTTP(w http.ResponseWriter, r *http.Request, use
 		writeError(w, 405, "use_resumable_upload")
 		return
 	}
-	if resource != "uploads" && resource != "files" && resource != "content" && resource != "directories" && resource != "move" && resource != "locate" {
+	if resource != "search" && resource != "uploads" && resource != "files" && resource != "content" && resource != "directories" && resource != "move" && resource != "locate" {
 		writeError(w, 404, "not_found")
 		return
 	}

@@ -32,11 +32,15 @@ const (
 	OwnerAutomation    DataOwner = "automation"
 	OwnerSkill         DataOwner = "skill"
 	OwnerMCP           DataOwner = "mcp"
+	OwnerChatForward   DataOwner = "chatforward"
+	OwnerFeedback      DataOwner = "feedback"
+	OwnerPublishedApps DataOwner = "published-apps"
 )
 
 var globalOwners = map[DataOwner]struct{}{
 	OwnerPortalAuth: {}, OwnerCollaboration: {}, OwnerQuota: {}, OwnerSkillMarket: {},
 	OwnerNotifications: {}, OwnerAudit: {}, OwnerSettings: {}, OwnerModelAccess: {},
+	OwnerChatForward: {}, OwnerFeedback: {}, OwnerPublishedApps: {},
 }
 
 var sidOwners = map[DataOwner]struct{}{
@@ -134,6 +138,9 @@ func CreateBackup(ctx context.Context, backupRoot, applicationVersion string, so
 		}
 		seen[key] = true
 		file := fmt.Sprintf("%02d-%s.db", index+1, source.Owner)
+		if source.Owner == OwnerFeedback {
+			file = fmt.Sprintf("%02d-%s.zip", index+1, source.Owner)
+		}
 		destination := filepath.Join(staging, file)
 		err = source.Exporter.ExportBackup(ctx, destination)
 		if err != nil {

@@ -2,6 +2,7 @@ package chatforward
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -24,8 +25,15 @@ const (
 )
 
 type Proxy struct {
-	target *url.URL
-	secret []byte
+	target  *url.URL
+	secret  []byte
+	quota   *Store
+	enabled func(context.Context, string) bool
+}
+
+// SetQuota enables fresh per-SID accounting. No legacy ledger is imported.
+func (p *Proxy) SetQuota(quota *Store, enabled func(context.Context, string) bool) {
+	p.quota, p.enabled = quota, enabled
 }
 
 func NewProxy(rawURL, secretFile string) (*Proxy, error) {
@@ -52,6 +60,18 @@ func NewProxy(rawURL, secretFile string) (*Proxy, error) {
 }
 
 func (p *Proxy) ServeChatForward(writer http.ResponseWriter, request *http.Request, identity contracts.ChatForwardDelegation) {
+	if p.quota != nil {
+		if !p.enabled(request.Context(), identity.SID) {
+			http.Error(writer, "ChatForward account is unavailable", http.StatusForbidden)
+			return
+		}
+		subject, err := p.quota.Subject(request.Context(), identity.SID)
+		if err != nil {
+			http.Error(writer, "ChatForward quota is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		identity.UserID = strconv.FormatInt(subject, 10)
+	}
 	target := *p.target
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(outgoing *httputil.ProxyRequest) {

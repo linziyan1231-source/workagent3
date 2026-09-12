@@ -122,7 +122,9 @@ function resolveModelDefaults(group, preferences, preset) {
       ([id]) => id === saved?.permissionMode,
     )
       ? saved.permissionMode
-      : "workspace_write",
+      : group?.engine === "acp" || preset?.engine === "acp"
+        ? ""
+        : "workspace_write",
   };
 }
 
@@ -172,7 +174,15 @@ function ModelDefaultsFields({ group, preset, defaults, save }) {
     }),
     field("默认权限", {
       value: defaults.permissionMode,
-      options: permissionOptions,
+      options:
+        group.engine === "acp"
+          ? [
+              ["", "使用引擎原生审批"],
+              ...permissionOptions.filter(
+                ([id]) => group.permissionModes?.[id],
+              ),
+            ]
+          : permissionOptions,
       onChange: (event) =>
         save(key, {
           permissionMode: event.target.value,
@@ -197,7 +207,9 @@ async function personalTaskDefaults() {
     enabled.find((row) => row.id === "builtin-general") ||
     enabled[0];
   const group = (Array.isArray(modelOptions) ? modelOptions : []).find(
-    (row) => row.engine === preset?.engine,
+    (row) =>
+      row.engine === preset?.engine &&
+      row.acpCatalogId === preset?.acpCatalogId,
   );
   const defaults = resolveModelDefaults(
     group,
@@ -206,10 +218,13 @@ async function personalTaskDefaults() {
   );
   return {
     engine: preset?.engine || "harness",
+    ...(preset?.acpCatalogId ? { acpCatalogId: preset.acpCatalogId } : {}),
     presetId: preset?.id || "builtin-general",
     modelId: defaults.modelId,
     thinkingEffort: defaults.thinkingEffort,
-    permissionMode: defaults.permissionMode,
+    ...(defaults.permissionMode
+      ? { permissionMode: defaults.permissionMode }
+      : {}),
   };
 }
 

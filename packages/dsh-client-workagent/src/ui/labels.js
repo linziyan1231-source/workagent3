@@ -20,6 +20,7 @@ const valueLabels = {
   harness: "通用引擎",
   codex: "Codex",
   kimi: "Kimi",
+  acp: "ACP 引擎",
   "codex-native": "Codex 原生模型",
   "harness-default": "通用默认模型",
   "kimi-native": "Kimi 原生模型",

@@ -15,6 +15,7 @@ import {
   type PresetDefinition,
   type PresetMutation,
   type LegacyPresetAsset,
+  validEngineSelection,
 } from "@workagent/contracts";
 import type { ModelAccessStore } from "./model-access-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
@@ -181,6 +182,9 @@ export class PresetStore {
     const next = presetDefinitionSchema.parse({
       ...current,
       ...value,
+      ...(value.engine && value.engine !== "acp"
+        ? { acpCatalogId: undefined }
+        : {}),
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     });
@@ -420,7 +424,8 @@ export class PresetStore {
   }
 
   #validate(preset: PresetDefinition): void {
-    if (preset.modelId !== null) {
+    if (!validEngineSelection(preset)) throw new Error("invalid_acp_selection");
+    if (preset.modelId !== null && preset.engine !== "acp") {
       const authorization = this.#models.authorizationFor(preset.modelId);
       if (!authorization.authorized)
         throw new Error(`invalid_model_binding:${authorization.reason}`);

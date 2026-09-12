@@ -21,6 +21,7 @@ type WindowsPlatformConfig struct {
 	DataRootBase            string
 	UserHostExecutable      string
 	HarnessCommand          string
+	PublishedPythonCommand  string
 	HarnessEntrypoint       string
 	CodexCommand            string
 	KimiCommand             string

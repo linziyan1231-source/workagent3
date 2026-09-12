@@ -51,15 +51,29 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
   ) {}
 
   async execute(request: AutomationExecution) {
-    const preset = this.presets.resolve(request.definition.presetId);
-    const modelId = executionBillingModel(
-      request.definition.engine,
-      preset.resolvedSnapshot.modelId,
-    );
+    const admission = this.inner.admit?.(request);
+    try {
+      return await this.#executeAdmitted(request);
+    } finally {
+      admission?.release();
+    }
+  }
+
+  async #executeAdmitted(request: AutomationExecution) {
     const units = estimatedAutomationUnits(request.definition.input);
+    let submitted = false;
     const state = { cancelled: false, started: false };
     this.#active.set(request.automationRunId, state);
     try {
+      const preset = this.presets.resolve(request.definition.presetId);
+      const modelId =
+        request.definition.engine === "acp" && this.inner.billingModel
+          ? await this.inner.billingModel(request)
+          : executionBillingModel(
+              request.definition.engine,
+              preset.resolvedSnapshot.modelId,
+            );
+      if (state.cancelled) throw new Error("automation_cancelled");
       try {
         await this.quota.reserve({
           runId: request.automationRunId,
@@ -76,10 +90,19 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
       try {
         if (state.cancelled) throw new Error("automation_cancelled");
         state.started = true;
-        result = await this.inner.execute(request);
+        result = await this.inner.execute({
+          ...request,
+          onSubmitted: (turnId) => {
+            submitted = true;
+            request.onSubmitted?.(turnId);
+          },
+        });
       } catch (error) {
         try {
-          await this.#settle(request.automationRunId, 0);
+          await this.#settle(
+            request.automationRunId,
+            request.definition.engine === "acp" && submitted ? units : 0,
+          );
         } catch (settlementError) {
           throw new AggregateError(
             [error, settlementError],
@@ -111,10 +134,13 @@ export class QuotaAutomationRunner implements AutomationRunnerPort {
       return;
     }
     const preset = this.presets.resolve(request.definition.presetId);
-    const modelId = executionBillingModel(
-      request.definition.engine,
-      preset.resolvedSnapshot.modelId,
-    );
+    const modelId =
+      request.definition.engine === "acp" && this.inner.billingModel
+        ? await this.inner.billingModel(request, true)
+        : executionBillingModel(
+            request.definition.engine,
+            preset.resolvedSnapshot.modelId,
+          );
     const units = estimatedAutomationUnits(request.definition.input);
     const reservation = await this.quota.reserve({
       runId: request.automationRunId,
@@ -149,15 +175,29 @@ export class QuotaTeamRunner implements TeamRunnerPort {
   ) {}
 
   async executeTeamTask(request: TeamExecution) {
-    const preset = this.presets.resolve(request.presetId);
-    const modelId = executionBillingModel(
-      request.engine,
-      preset.resolvedSnapshot.modelId,
-    );
+    const admission = this.inner.admitTeamTask?.(request);
+    try {
+      return await this.#executeAdmitted(request);
+    } finally {
+      admission?.release();
+    }
+  }
+
+  async #executeAdmitted(request: TeamExecution) {
     const units = estimatedAutomationUnits(request.input);
+    let submitted = false;
     const state = { cancelled: false, started: false };
     this.#active.set(request.taskId, state);
     try {
+      const preset = this.presets.resolve(request.presetId);
+      const modelId =
+        request.engine === "acp" && this.inner.teamBillingModel
+          ? await this.inner.teamBillingModel(request)
+          : executionBillingModel(
+              request.engine,
+              preset.resolvedSnapshot.modelId,
+            );
+      if (state.cancelled) throw new Error("team_task_cancelled");
       try {
         await this.quota.reserve({
           runId: request.taskId,
@@ -174,10 +214,19 @@ export class QuotaTeamRunner implements TeamRunnerPort {
       try {
         if (state.cancelled) throw new Error("team_task_cancelled");
         state.started = true;
-        result = await this.inner.executeTeamTask(request);
+        result = await this.inner.executeTeamTask({
+          ...request,
+          onSubmitted: (turnId) => {
+            submitted = true;
+            request.onSubmitted?.(turnId);
+          },
+        });
       } catch (error) {
         try {
-          await this.#settle(request.taskId, 0);
+          await this.#settle(
+            request.taskId,
+            request.engine === "acp" && submitted ? units : 0,
+          );
         } catch (settlementError) {
           throw new AggregateError(
             [error, settlementError],
@@ -207,10 +256,13 @@ export class QuotaTeamRunner implements TeamRunnerPort {
       return;
     }
     const preset = this.presets.resolve(request.presetId);
-    const modelId = executionBillingModel(
-      request.engine,
-      preset.resolvedSnapshot.modelId,
-    );
+    const modelId =
+      request.engine === "acp" && this.inner.teamBillingModel
+        ? await this.inner.teamBillingModel(request, true)
+        : executionBillingModel(
+            request.engine,
+            preset.resolvedSnapshot.modelId,
+          );
     const units = estimatedAutomationUnits(request.input);
     const reservation = await this.quota.reserve({
       runId: request.taskId,

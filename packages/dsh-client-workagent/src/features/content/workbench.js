@@ -807,7 +807,13 @@ export function createWorkbench({
       try {
         await request(
           `${apiRoot}/interactions/${encodeURIComponent(item.id)}/respond`,
-          { method: "POST", body: JSON.stringify({ decision }) },
+          {
+            method: "POST",
+            body: JSON.stringify({
+              sessionId,
+              ...(typeof decision === "string" ? { decision } : decision),
+            }),
+          },
         );
         setPending((rows) => rows.filter((row) => row.id !== item.id));
       } catch (reason) {
@@ -950,9 +956,17 @@ export function createWorkbench({
           h(
             "optgroup",
             { label: "权限" },
-            h("option", { value: "read_only" }, "只读"),
-            h("option", { value: "workspace_write" }, "项目内读写"),
-            h("option", { value: "full_access" }, "完全访问"),
+            ...[
+              ["read_only", "只读"],
+              ["workspace_write", "项目内读写"],
+              ["full_access", "完全访问"],
+            ]
+              .filter(
+                ([id]) =>
+                  session?.engine !== "acp" ||
+                  session.acpSnapshot?.permissionModes?.[id],
+              )
+              .map(([id, label]) => h("option", { key: id, value: id }, label)),
           ),
         ),
       ),
@@ -977,12 +991,33 @@ export function createWorkbench({
                 }),
               )
             : null,
-          button("允许本次", () => void decide(item, "allow"), {
-            disabled: saving,
-          }),
-          button("拒绝", () => void decide(item, "reject"), {
-            disabled: saving,
-          }),
+          item.choices?.length
+            ? item.choices.map((choice) =>
+                button(
+                  choice.label,
+                  () => void decide(item, { optionId: choice.id }),
+                  {
+                    key: choice.id,
+                    disabled: saving,
+                    title: {
+                      once: "仅本次操作",
+                      session: "在此会话中生效",
+                      rule: "保存此操作的授权规则",
+                      remember: "由引擎按选项说明记住此选择",
+                    }[choice.scope],
+                  },
+                ),
+              )
+            : [
+                button("允许本次", () => void decide(item, "allow"), {
+                  key: "allow",
+                  disabled: saving,
+                }),
+                button("拒绝", () => void decide(item, "reject"), {
+                  key: "reject",
+                  disabled: saving,
+                }),
+              ],
           button("停止任务", cancel, { disabled: saving }),
         ),
       ),
@@ -1163,9 +1198,17 @@ export function createWorkbench({
     const [entries, setEntries] = React.useState([]);
     const [filesOpen, setFilesOpen] = React.useState(false);
     const [commandsOpen, setCommandsOpen] = React.useState(false);
+    const [nativeCommands, setNativeCommands] = React.useState([]);
+    const [fileCursor, setFileCursor] = React.useState(null);
+    const [findingFiles, setFindingFiles] = React.useState(false);
     const mention = /(?:^|\s)@([^\s]*)$/.exec(input)?.[1];
+    const slash = /^\/([^\s]*)$/.exec(input);
     const showingFiles = filesOpen || mention !== undefined;
     const workspaceId = session?.workspaceId;
+    const fileSearchKey = React.useRef("");
+    const fileSearch = React.useRef(null);
+    const pageRequest = React.useRef(null);
+    fileSearchKey.current = `${workspaceId}:${mention ?? ""}:${directory}`;
     const live = React.useRef(true);
     React.useEffect(() => {
       live.current = true;
@@ -1174,21 +1217,101 @@ export function createWorkbench({
         uploadControl.current?.abort();
       };
     }, []);
+    const releaseSearch = (workspace, cursor) => {
+      if (cursor)
+        void request(
+          `${workspaceEndpoint(workspace)}/search?cursor=${encodeURIComponent(cursor)}`,
+          { method: "DELETE" },
+        ).catch(() => {});
+    };
     React.useEffect(() => {
       if (!showingFiles || !workspaceId) return;
       const abort = new AbortController();
+      const search = { workspaceId, cursor: null };
+      fileSearch.current = search;
+      setFindingFiles(true);
+      setFileCursor(null);
       request(
-        `${workspaceEndpoint(workspaceId)}/files?path=${encodeURIComponent(directory)}`,
+        mention === undefined
+          ? `${workspaceEndpoint(workspaceId)}/files?path=${encodeURIComponent(directory)}`
+          : `${workspaceEndpoint(workspaceId)}/search?q=${encodeURIComponent(mention)}&limit=50`,
         { signal: abort.signal },
       )
         .then((rows) => {
-          if (!abort.signal.aborted) setEntries(rows);
+          if (abort.signal.aborted) {
+            releaseSearch(workspaceId, rows.nextCursor);
+          } else {
+            setEntries(Array.isArray(rows) ? rows : rows.items);
+            search.cursor = rows.nextCursor || null;
+            setFileCursor(rows.nextCursor || null);
+          }
         })
         .catch((error) => {
           if (!abort.signal.aborted) onError(error.message);
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setFindingFiles(false);
         });
-      return () => abort.abort();
-    }, [workspaceId, showingFiles, directory]);
+      return () => {
+        abort.abort();
+        pageRequest.current?.abort();
+        if (fileSearch.current === search) fileSearch.current = null;
+        releaseSearch(search.workspaceId, search.cursor);
+      };
+    }, [workspaceId, showingFiles, directory, mention]);
+    const nextFilePage = async () => {
+      const query = mention,
+        key = fileSearchKey.current,
+        search = fileSearch.current;
+      if (!search?.cursor) return;
+      pageRequest.current?.abort();
+      const abort = new AbortController();
+      pageRequest.current = abort;
+      setFindingFiles(true);
+      try {
+        const rows = await request(
+          `${workspaceEndpoint(workspaceId)}/search?q=${encodeURIComponent(query || "")}&limit=50&cursor=${encodeURIComponent(search.cursor)}`,
+          { signal: abort.signal },
+        );
+        // A changed input starts a new search; its response owns the visible list.
+        if (abort.signal.aborted || fileSearch.current !== search) {
+          releaseSearch(search.workspaceId, rows.nextCursor);
+          return;
+        }
+        setEntries((items) => [...items, ...rows.items]);
+        search.cursor = rows.nextCursor || null;
+        setFileCursor(rows.nextCursor || null);
+      } catch (error) {
+        if (!abort.signal.aborted) onError(friendlyError(error.message));
+      } finally {
+        if (key === fileSearchKey.current) setFindingFiles(false);
+      }
+    };
+    React.useEffect(() => {
+      setNativeCommands([]);
+      if ((!slash && !commandsOpen) || !session?.id) return;
+      const abort = new AbortController();
+      let timer;
+      const refresh = async () => {
+        try {
+          const catalog = await request(
+            `${apiRoot}/sessions/${encodeURIComponent(session.id)}/commands`,
+            { signal: abort.signal },
+          );
+          if (!abort.signal.aborted) setNativeCommands(catalog.items || []);
+        } catch (error) {
+          if (!abort.signal.aborted && error.status !== 404)
+            onError(friendlyError(error.message));
+        } finally {
+          if (!abort.signal.aborted) timer = setTimeout(refresh, 2000);
+        }
+      };
+      void refresh();
+      return () => {
+        abort.abort();
+        clearTimeout(timer);
+      };
+    }, [session?.id, Boolean(slash), commandsOpen]);
     const insert = async (path, savedEntry) => {
       let entry = savedEntry;
       try {
@@ -1269,9 +1392,16 @@ export function createWorkbench({
       );
     }, [workspaceId, uploading, disabled, setInput, uploadToProject, mention]);
     const skills = session?.preset?.resolvedSnapshot?.skillIds || [];
-    const slash = /^\/([^\s]*)$/.exec(input);
     const commands = [
       { id: "btw", label: "发起侧聊", text: "/btw " },
+      ...nativeCommands
+        .filter((row) => row.id !== "btw")
+        .map((row) => ({
+          id: row.id,
+          label: row.description || row.label,
+          text: `/${row.id} `,
+          inputHint: row.inputHint,
+        })),
       ...skills.map((id) => ({
         id,
         label: `使用已加载技能 ${id}`,
@@ -1349,7 +1479,7 @@ export function createWorkbench({
               className: "workagent-composer-menu",
               "aria-label": "引用项目文件",
             },
-            directory
+            directory && mention === undefined
               ? button("上级目录", () =>
                   setDirectory(directory.split("/").slice(0, -1).join("/")),
                 )
@@ -1358,22 +1488,38 @@ export function createWorkbench({
               .filter(
                 (entry) =>
                   mention === undefined ||
-                  entry.name.toLowerCase().includes(mention.toLowerCase()),
+                  entry.path.toLowerCase().includes(mention.toLowerCase()),
               )
               .map((entry) =>
                 button(
-                  `${entry.kind === "directory" ? "▸ " : ""}${entry.name}`,
+                  `${entry.kind === "directory" ? "▸ " : ""}${mention === undefined ? entry.name : entry.path}`,
                   () => {
                     if (entry.kind === "directory") setDirectory(entry.path);
                     else {
-                      insert(entry.path);
+                      insert(entry.path, entry);
                       setFilesOpen(false);
                     }
                   },
                   { key: entry.path },
                 ),
               ),
-            entries.length ? null : h("span", null, "此目录没有文件"),
+            findingFiles ? h("span", { role: "status" }, "正在搜索…") : null,
+            fileCursor
+              ? button("继续搜索", () => void nextFilePage(), {
+                  disabled: findingFiles,
+                })
+              : null,
+            entries.length || findingFiles
+              ? null
+              : h(
+                  "span",
+                  null,
+                  mention === undefined
+                    ? "此目录没有文件"
+                    : fileCursor
+                      ? "已搜索部分目录，可继续搜索"
+                      : "没有匹配文件",
+                ),
           )
         : null,
       slash || commandsOpen

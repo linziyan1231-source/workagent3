@@ -31,6 +31,7 @@ type PersonalTaskStore interface {
 type PersonalTaskOptions struct {
 	Title          string `json:"title"`
 	Engine         string `json:"engine"`
+	AcpCatalogID   string `json:"acpCatalogId,omitempty"`
 	PresetID       string `json:"presetId,omitempty"`
 	ModelID        string `json:"modelId,omitempty"`
 	ThinkingEffort string `json:"thinkingEffort,omitempty"`
@@ -236,11 +237,21 @@ func (s *Server) personalTaskOperations(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		input.Options.Title = strings.TrimSpace(input.Options.Title)
-		if input.Options.Title == "" || len(input.Options.Title) > 128 || (input.Options.Engine != "harness" && input.Options.Engine != "codex" && input.Options.Engine != "kimi") {
+		if input.Options.Title == "" || len(input.Options.Title) > 128 || (input.Options.Engine != "harness" && input.Options.Engine != "codex" && input.Options.Engine != "kimi" && input.Options.Engine != "acp") || ((input.Options.Engine == "acp") != (input.Options.AcpCatalogID != "")) {
 			writeError(w, 400, "invalid_personal_task")
 			return
 		}
 		configuration, _ := json.Marshal(input.Options)
+		if input.Options.Engine == "acp" {
+			if s.modules.AcpCatalog == nil {
+				writeError(w, 503, "acp_catalog_unavailable")
+				return
+			}
+			if _, err := s.modules.AcpCatalog.Resolve(input.Options.AcpCatalogID, ""); err != nil {
+				writeAcpError(w, err)
+				return
+			}
+		}
 		op, err = s.modules.Collaboration.BeginPersonalTask(r.Context(), collaboration.PersonalTaskOperation{ID: "ptask_" + strconv.FormatInt(user.ID, 10) + "_" + input.OperationID, UserID: user.ID, CreatorSID: user.SID, ProjectID: input.ProjectID, Name: input.Options.Title, Configuration: configuration})
 	case http.MethodGet:
 		op, err = s.modules.Collaboration.PersonalTaskOperation(r.Context(), r.URL.Query().Get("id"), user.ID)

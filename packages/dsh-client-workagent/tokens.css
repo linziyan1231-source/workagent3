@@ -2058,7 +2058,10 @@ div:has(> .workagent-agents) {
   line-height: 1.7;
 }
 .workagent-form.workagent-automation-form {
-  --workagent-form-control-height: 44px;
+  --workagent-form-control-height: max(
+    44px,
+    calc(var(--workagent-type-input) * 1.5 + 24px)
+  );
   gap: 22px 24px;
   padding: 28px;
   border-radius: 16px;

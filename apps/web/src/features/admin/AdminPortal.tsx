@@ -2,6 +2,8 @@ import { useState } from "react";
 import { AccountsPage } from "./accounts/AccountsPage.js";
 import { useAccountDirectory } from "./accounts/useAccountDirectory.js";
 import { AuditLog } from "./audit/AuditLog.js";
+import { FeedbackInbox } from "./feedback/FeedbackInbox.js";
+import { AcpCatalog } from "./acp/AcpCatalog.js";
 import { MarketManagement } from "./market/MarketManagement.js";
 import { errorMessage } from "./shared/adminErrors.js";
 import "./AdminPortal.css";
@@ -42,6 +44,24 @@ export function AdminPortal({
         </a>
         <span className="admin-eyebrow">管理空间</span>
         <nav aria-label="管理导航">
+          <button
+            aria-label="ACP 引擎"
+            title="ACP 引擎"
+            aria-current={view === "acp" ? "page" : undefined}
+            onClick={() => setView("acp")}
+          >
+            <span>⚙</span>
+            <span className="admin-nav-label">ACP 引擎</span>
+          </button>
+          <button
+            aria-label="问题反馈"
+            title="问题反馈"
+            aria-current={view === "feedback" ? "page" : undefined}
+            onClick={() => setView("feedback")}
+          >
+            <span>✉</span>
+            <span className="admin-nav-label">问题反馈</span>
+          </button>
           <button
             aria-label="市场能力"
             title="市场能力"
@@ -105,7 +125,11 @@ export function AdminPortal({
               ? "账户与额度"
               : view === "market"
                 ? "市场能力"
-                : "操作记录"}
+                : view === "feedback"
+                  ? "问题反馈"
+                  : view === "acp"
+                    ? "ACP 引擎"
+                    : "操作记录"}
           </span>
           <span className="admin-status">管理控制台</span>
         </header>
@@ -113,6 +137,8 @@ export function AdminPortal({
         <AccountsPage active={view === "accounts"} directory={directory} />
         {view === "market" && <MarketManagement users={directory.users} />}
         {view === "audit" && <AuditLog />}
+        {view === "feedback" && <FeedbackInbox />}
+        {view === "acp" && <AcpCatalog />}
       </div>
     </main>
   );

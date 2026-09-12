@@ -258,15 +258,457 @@ window.__ModuleLoader__.load({
       return saved;
     }
 
+    // src/features/agents/acp.js
+    var import_react4 = __toESM(require("react"), 1);
+
+    // ../../../../../packages/contracts/dist/upload-policy.js
+    var MAX_UPLOAD_BYTES = 5 * 1024 ** 3;
+    var UPLOAD_SIZE_LABEL = `${MAX_UPLOAD_BYTES / 1024 ** 3} GB`;
+    var UPLOAD_TOO_LARGE_MESSAGE = `超过 ${UPLOAD_SIZE_LABEL}`;
+
+    // src/ui/labels.js
+    var valueLabels = {
+      builtin: "系统内置",
+      user: "用户添加",
+      market: "技能市场",
+      ready: "可用",
+      healthy: "运行正常",
+      unknown: "未知状态",
+      disabled: "已停用",
+      unavailable: "不可用",
+      none: "无需授权",
+      needs_auth: "需要授权",
+      needs_review: "需要确认",
+      pending: "等待中",
+      queued: "排队中",
+      running: "运行中",
+      completed: "已完成",
+      failed: "失败",
+      cancelled: "已取消",
+      independent_sessions: "独立会话",
+      harness: "通用引擎",
+      codex: "Codex",
+      kimi: "Kimi",
+      acp: "ACP 引擎",
+      "codex-native": "Codex 原生模型",
+      "harness-default": "通用默认模型",
+      "kimi-native": "Kimi 原生模型",
+      "team.updated": "团队已更新",
+      "member.added": "已添加成员",
+      "task.queued": "任务已排队",
+      "task.started": "任务已开始",
+      "task.completed": "任务已完成",
+      "task.failed": "任务失败",
+      "task.cancelled": "任务已取消",
+      "mail.received": "收到团队消息",
+    };
+    var displayValue = (value, fallback = "") =>
+      valueLabels[value] || value || fallback;
+    var displayPresetName = (name) => (name === "General" ? "DSH" : name);
+    var displayWorkspaceName = (name) => {
+      if (name === "Personal workspace") return "个人项目";
+      const qa = /^QA wa3acc-([a-z])$/i.exec(name);
+      return qa ? `测试项目 ${qa[1].toUpperCase()}` : name;
+    };
+    var displaySessionTitle = (title) =>
+      title === "General" ? "通用会话" : title;
+    var plainSessionTitle = (value) =>
+      String(value).replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+    var friendlyError = (value) => {
+      const message = String(value || "");
+      if (/high demand|overloaded|server.*busy/i.test(message))
+        return "模型服务当前繁忙，请稍后重试，或在模型设置中选择其他模型。";
+      if (message.startsWith("credential_needs_auth:codex"))
+        return "Codex 尚未完成登录，请先在设置中连接 Codex。";
+      if (message.startsWith("credential_needs_auth:kimi"))
+        return "Kimi 尚未完成登录，请先在设置中连接 Kimi。";
+      if (message.startsWith("unsupported_preset_approval_policy:"))
+        return "此引擎无法执行助手要求的审批策略，请调整助手配置或选择明确支持的权限。";
+      const labels = {
+        session_close_failed: "对话暂时无法删除，请稍后重试。",
+        engine_unavailable: "所选助手当前不可用，请检查引擎设置。",
+        engine_start_failed: "助手启动失败，请检查引擎状态后重试。",
+        engine_turn_rejected: "助手没有接受这条消息，请稍后重试。",
+        quota_exceeded: "使用额度不足，请联系管理员调整额度，或等待下一周期。",
+        quota_usage_stale: "用量统计服务暂不可用，请稍后重试。",
+        quota_usage_pending: "上一轮用量正在结算，请稍后重试。",
+        quota_not_configured: "此模型尚未配置使用额度，请联系管理员。",
+        platform_quota_unconfigured: "额度服务尚未配置，请联系管理员。",
+        engine_steer_rejected:
+          "追加指令未被接受；任务可能已结束，请检查状态后重新发送。",
+        no_active_turn: "当前任务已结束，请直接发送消息。",
+        queued_message_not_found: "这条排队消息已发送或移除，请刷新列表。",
+        session_input_pending: "当前会话正在处理另一条指令，请稍候。",
+        edit_stop_timeout: "原任务仍在停止中，请等它结束后重试编辑。",
+        fork_message_not_found: "找不到这条消息，请刷新会话后重试。",
+        session_resume_failed: "恢复会话失败，请重新开始一个会话。",
+        workspace_not_found: "所选项目不存在，请重新选择。",
+        invalid_session: "会话参数无效，请重新选择助手和项目。",
+        unsupported_preset_tool_allowlist:
+          "此引擎无法执行助手的工具限制，任务尚未启动，请调整助手配置。",
+        preset_workspace_required: "此助手要求指定项目，请先选择一个项目。",
+        engine_permission_unavailable:
+          "此引擎无法提供所选权限，任务尚未启动，请调整权限或更换引擎。",
+        personal_task_already_deleted:
+          "此个人任务已删除，请重新提交以创建新任务。",
+        personal_task_retry_pending: "任务操作已记录，服务恢复后会继续处理。",
+        content_required: "请输入要发送的内容。",
+        invalid_move: "不能移入自身或子文件夹，也不能移动系统目录。",
+        ambiguous_file_reference:
+          "此旧路径对应多份历史文件，请从项目文件中选择所需文件。",
+        move_not_pending: "此移动已处理，请刷新查看。",
+        move_not_completed: "此移动尚未完成，暂时不能撤销。",
+        destination_exists: "同名文件已存在，请换一个名称。",
+        workspace_directory_exists:
+          "工作区中已存在同名文件夹，请换一个项目名称。",
+        invalid_workspace_name:
+          "项目名称不能包含路径或特殊字符，也不能使用系统保留名称。",
+        file_changed: "文件已被其他操作修改。请重新打开文件，确认后再编辑。",
+        unsupported_text_encoding:
+          "在线编辑仅支持 UTF-8 文本，请下载后使用对应编码的编辑器修改。",
+        file_not_found: "文件已不存在，请刷新列表。",
+        invalid_relative_path: "文件名或路径无效。",
+        workspace_operation_failed: "文件操作失败，请刷新后重试。",
+        request_too_large: UPLOAD_TOO_LARGE_MESSAGE,
+        path_outside_workspace: "文件路径必须位于当前项目内。",
+        reparse_point_rejected: "无法操作链接到项目外的文件。",
+        im_gateway_unavailable: "消息渠道服务暂未启用。",
+        market_unavailable: "市场暂时不可用，请稍后重试。",
+        market_version_exists: "这个名称和版本已经发布，请填写新的版本号。",
+        market_credentials_required: "请填写所需的连接凭据。",
+        market_source_not_found: "所选内容已不存在，请重新选择。",
+        market_builtin_dependency_unavailable:
+          "当前账号缺少内置依赖，请联系管理员配置后重试。",
+        market_skill_dependency_missing: "助手引用的技能不存在，请先修复绑定。",
+        market_mcp_dependency_missing: "引用的 MCP 服务不存在，请先修复绑定。",
+        market_mcp_url_contains_credentials:
+          "服务地址含有密钥或密码，请先改为使用独立连接凭据。",
+        market_mcp_command_not_portable:
+          "MCP 使用了本机绝对路径，请先改成可在其他成员环境中运行的命令。",
+        market_publish_own_assistant_only: "请发布自己创建的助手。",
+        market_publish_own_skill_only:
+          "内置技能无需重复发布，可以作为助手依赖共享。",
+        market_skill_snapshot_unavailable:
+          "此技能的原发布包不可用，请重新获取后再发布。",
+        market_bundle_too_large: "包含的技能文件超过 50 MB，请缩小发布包。",
+        invalid_market_publish:
+          "请完整填写发布内容和三段式版本号，例如 1.0.0。",
+      };
+      if (message?.startsWith("market_runtime_"))
+        return "安装或发布未完成，请检查依赖配置后重试；已经完成的安装步骤会保留。";
+      if (message?.startsWith("invalid_mcp_binding:"))
+        return "绑定的 MCP 尚未就绪，请先测试连接或完成授权。";
+      if (message?.startsWith("invalid_skill_binding:"))
+        return "绑定的技能尚未就绪，请先启用技能并检查依赖。";
+      return labels[message] || message || "操作失败，请稍后重试。";
+    };
+    var reasoningLabel = (option) =>
+      ({
+        none: "无",
+        minimal: "最低",
+        low: "低",
+        medium: "中",
+        high: "高",
+        xhigh: "极高",
+        max: "最高",
+        ultra: "极高",
+        off: "关闭",
+        thinking: "开启",
+        on: "开启",
+      })[option.id] ||
+      option.name ||
+      option.id;
+
+    // src/ui/elements.js
+    var import_react3 = require("react");
+    function Field({ label, children, className, ...props }) {
+      return (0, import_react3.createElement)(
+        "label",
+        {
+          ...props,
+          className: ["workagent-field", className].filter(Boolean).join(" "),
+        },
+        label,
+        children,
+      );
+    }
+    function Input({ className, ...props }) {
+      return (0, import_react3.createElement)("input", {
+        ...props,
+        "data-dialog-autofocus": props.autoFocus ? "" : void 0,
+        className: ["workagent-control", className].filter(Boolean).join(" "),
+      });
+    }
+    function Select({ options, heading, className, ...props }) {
+      const choices = options.map(([value, label]) =>
+        (0, import_react3.createElement)(
+          "option",
+          { value, key: value },
+          label,
+        ),
+      );
+      return (0, import_react3.createElement)(
+        "select",
+        {
+          ...props,
+          className: ["workagent-control", className].filter(Boolean).join(" "),
+        },
+        ...(heading
+          ? [
+              (0, import_react3.createElement)(
+                "optgroup",
+                { label: heading },
+                choices,
+              ),
+            ]
+          : choices),
+      );
+    }
+    function Button({ children, className, variant, ...props }) {
+      return (0, import_react3.createElement)(
+        "button",
+        {
+          type: "button",
+          ...props,
+          "data-dialog-autofocus": props.autoFocus ? "" : void 0,
+          className: ["workagent-button", variant && `is-${variant}`, className]
+            .filter(Boolean)
+            .join(" "),
+        },
+        children,
+      );
+    }
+    function Switch({ checked, onChange, className, ...props }) {
+      return (0, import_react3.createElement)("button", {
+        type: "button",
+        ...props,
+        role: "switch",
+        "aria-checked": checked,
+        className: ["workagent-switch", className].filter(Boolean).join(" "),
+        onClick: () => onChange(!checked),
+      });
+    }
+    function Status({ state }) {
+      if (state.loading)
+        return (0, import_react3.createElement)(
+          "p",
+          { className: "workagent-muted" },
+          "加载中…",
+        );
+      if (state.error)
+        return (0, import_react3.createElement)(
+          "p",
+          { role: "alert", className: "workagent-error" },
+          friendlyError(state.error),
+        );
+      if (state.rows.length === 0)
+        return (0, import_react3.createElement)(
+          "p",
+          { className: "workagent-muted" },
+          "暂无数据",
+        );
+      return null;
+    }
+    function Card({ title, detail, children, ...props }) {
+      return (0, import_react3.createElement)(
+        "article",
+        {
+          ...props,
+          className: ["workagent-card", props.className]
+            .filter(Boolean)
+            .join(" "),
+        },
+        (0, import_react3.createElement)("strong", null, title),
+        detail
+          ? (0, import_react3.createElement)(
+              "div",
+              { className: "workagent-muted" },
+              detail,
+            )
+          : null,
+        children
+          ? (0, import_react3.createElement)(
+              "div",
+              { className: "workagent-actions" },
+              children,
+            )
+          : null,
+      );
+    }
+    function Section({ title, children }) {
+      return (0, import_react3.createElement)(
+        "section",
+        { className: "workagent-section", "data-workagent-section": title },
+        (0, import_react3.createElement)("h2", null, title),
+        children,
+      );
+    }
+
+    // src/features/agents/acp.js
+    var useAcpCatalog = () =>
+      useResource(`${apiRoot}/acp-catalog`, (value) => {
+        if (
+          !value ||
+          !Array.isArray(value.entries) ||
+          value.entries.some(
+            (entry) =>
+              !entry ||
+              typeof entry.id !== "string" ||
+              typeof entry.label !== "string" ||
+              !Array.isArray(entry.credentialFields),
+          )
+        )
+          throw new Error("引擎目录格式不正确，请刷新后重试。");
+        return value.entries;
+      });
+    function AcpCredentialsRow({ entry, refresh }) {
+      const [error, setError] = import_react4.default.useState("");
+      const [notice, setNotice] = import_react4.default.useState("");
+      const [busy, setBusy] = import_react4.default.useState(false);
+      const save = async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = Object.fromEntries(
+          [...new FormData(form)].filter(([, value]) => value !== ""),
+        );
+        setBusy(true);
+        setError("");
+        setNotice("");
+        try {
+          await request(
+            `${apiRoot}/acp-catalog/${encodeURIComponent(entry.id)}/credentials`,
+            { method: "PUT", body: JSON.stringify({ values }) },
+          );
+          form.reset();
+          await refresh();
+          setNotice(
+            "连接信息已保存，将在引擎下次启动时使用。已有连接可在系统设置中重启运行环境。",
+          );
+        } catch (reason) {
+          setError(reason.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+      return (0, import_react4.createElement)(
+        "article",
+        { className: "workagent-card" },
+        (0, import_react4.createElement)("strong", null, entry.label),
+        (0, import_react4.createElement)(
+          "p",
+          null,
+          `${entry.enabled ? (entry.ready ? "可连接" : "需要填写连接信息") : "管理员已停用"} · 版本 ${entry.revision}`,
+        ),
+        (0, import_react4.createElement)(
+          "form",
+          { className: "workagent-form", onSubmit: save },
+          ...entry.credentialFields.map((field) =>
+            (0, import_react4.createElement)(
+              Field,
+              {
+                key: field.id,
+                label: `${field.label}${field.required ? "（必填）" : ""}`,
+              },
+              (0, import_react4.createElement)(Input, {
+                name: field.id,
+                type: "password",
+                autoComplete: "new-password",
+                placeholder: field.configured ? "已保存，留空保持" : "尚未填写",
+                required: field.required && !field.configured,
+                disabled: !entry.enabled,
+              }),
+              field.configured
+                ? (0, import_react4.createElement)(
+                    Button,
+                    {
+                      disabled: busy || !entry.enabled,
+                      onClick: async () => {
+                        setBusy(true);
+                        setError("");
+                        try {
+                          await request(
+                            `${apiRoot}/acp-catalog/${encodeURIComponent(entry.id)}/credentials`,
+                            {
+                              method: "PUT",
+                              body: JSON.stringify({
+                                values: { [field.id]: "" },
+                              }),
+                            },
+                          );
+                          await refresh();
+                        } catch (reason) {
+                          setError(reason.message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      },
+                    },
+                    "清除",
+                  )
+                : null,
+            ),
+          ),
+          entry.credentialFields.length
+            ? (0, import_react4.createElement)(
+                "button",
+                {
+                  type: "submit",
+                  className: "workagent-button",
+                  disabled: busy || !entry.enabled,
+                },
+                "保存连接信息",
+              )
+            : null,
+        ),
+        error
+          ? (0, import_react4.createElement)("p", { role: "alert" }, error)
+          : notice
+            ? (0, import_react4.createElement)("p", { role: "status" }, notice)
+            : null,
+      );
+    }
+    function AcpCredentials() {
+      const [state, refresh] = useAcpCatalog();
+      return (0, import_react4.createElement)(
+        "details",
+        null,
+        (0, import_react4.createElement)(
+          "summary",
+          null,
+          "管理员提供的 ACP 引擎",
+        ),
+        (0, import_react4.createElement)(
+          "p",
+          null,
+          "选择管理员提供的引擎，并填写自己的连接信息。连接信息仅保存在个人凭据库。",
+        ),
+        (0, import_react4.createElement)(Status, { state }),
+        ...state.rows.map((entry) =>
+          (0, import_react4.createElement)(AcpCredentialsRow, {
+            key: entry.id,
+            entry,
+            refresh,
+          }),
+        ),
+        !state.loading && !state.error && !state.rows.length
+          ? (0, import_react4.createElement)(
+              "p",
+              null,
+              "管理员尚未提供 ACP 引擎。",
+            )
+          : null,
+      );
+    }
+
     // src/host/navigation-controller.js
-    function createNavigation(React37, onNavigate = () => {}) {
+    function createNavigation(React40, onNavigate = () => {}) {
       let notificationReturn = "/?frontend=dsh";
       const subscribe = (notify) => {
         window.addEventListener("popstate", notify);
         return () => window.removeEventListener("popstate", notify);
       };
       const snapshot = () => location.search;
-      const useSearch = () => React37.useSyncExternalStore(subscribe, snapshot);
+      const useSearch = () => React40.useSyncExternalStore(subscribe, snapshot);
       function isAppURL(url) {
         return (
           url.origin === location.origin &&
@@ -338,7 +780,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/host/navigation.js
-    var import_react3 = __toESM(require("react"), 1);
+    var import_react5 = __toESM(require("react"), 1);
 
     // src/host/compatibility.js
     var selectors = {
@@ -607,7 +1049,7 @@ window.__ModuleLoader__.load({
       closeMobileSidebar(layout);
     }
     var navigation = createNavigation(
-      import_react3.default,
+      import_react5.default,
       closeMobileSidebar2,
     );
     function closeSidebar2() {
@@ -659,12 +1101,12 @@ window.__ModuleLoader__.load({
       }
     }
     function createAssistantAvatars({
-      React: React37,
+      React: React40,
       EngineMark: EngineMark2,
       request: request2,
       apiRoot: apiRoot2,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       const choices = [
         "✨",
         "🤖",
@@ -720,7 +1162,7 @@ window.__ModuleLoader__.load({
       };
       function AssistantAvatar2({ preset, size }) {
         const avatar = preset?.avatar;
-        const [failed, setFailed] = React37.useState(null);
+        const [failed, setFailed] = React40.useState(null);
         const style = {
           ...(size ? { width: size, height: size } : {}),
           overflow: "hidden",
@@ -732,7 +1174,7 @@ window.__ModuleLoader__.load({
             avatar,
           );
         if (image && failed !== avatar)
-          return h33("img", {
+          return h36("img", {
             className: "workagent-engine-mark workagent-assistant-avatar",
             style: { ...style, objectFit: "cover", background: "transparent" },
             src: avatar,
@@ -746,7 +1188,7 @@ window.__ModuleLoader__.load({
           "builtin-general",
         ].includes(preset?.id);
         if (!avatar && (builtinEngine || !preset?.name))
-          return h33(EngineMark2, { engine: preset?.engine || "harness" });
+          return h36(EngineMark2, { engine: preset?.engine || "harness" });
         const name = preset?.name || "助手";
         const text = avatar?.startsWith("emoji:")
           ? avatar.slice(6, 22)
@@ -754,7 +1196,7 @@ window.__ModuleLoader__.load({
             ? "✨"
             : Array.from(name.trim())[0];
         const color = colors[(name.codePointAt(0) || 0) % colors.length];
-        return h33(
+        return h36(
           "span",
           {
             className: "workagent-engine-mark workagent-assistant-avatar",
@@ -770,7 +1212,7 @@ window.__ModuleLoader__.load({
         );
       }
       function SessionAvatar2({ session }) {
-        const rows = React37.useSyncExternalStore(subscribe, () => presets);
+        const rows = React40.useSyncExternalStore(subscribe, () => presets);
         const snapshot = session?.preset?.resolvedSnapshot;
         const id = session?.preset?.presetId;
         const preset =
@@ -779,7 +1221,7 @@ window.__ModuleLoader__.load({
           rows.get(
             `builtin-${session?.engine === "harness" ? "general" : session?.engine}`,
           );
-        return h33(AssistantAvatar2, {
+        return h36(AssistantAvatar2, {
           preset: preset || { engine: session?.engine },
         });
       }
@@ -790,12 +1232,12 @@ window.__ModuleLoader__.load({
         disabled = false,
         onBusyChange,
       }) {
-        const [busy, setBusy] = React37.useState(false);
-        React37.useEffect(() => {
+        const [busy, setBusy] = React40.useState(false);
+        React40.useEffect(() => {
           onBusyChange?.(busy);
         }, [busy, onBusyChange]);
-        const [error, setError] = React37.useState("");
-        const input = React37.useRef();
+        const [error, setError] = React40.useState("");
+        const input = React40.useRef();
         const change = async (next) => {
           setBusy(true);
           setError("");
@@ -807,13 +1249,13 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         };
-        return h33(
+        return h36(
           "div",
           {
             className: "workagent-avatar-picker",
             style: { display: "grid", gap: 10 },
           },
-          h33(
+          h36(
             "div",
             {
               style: {
@@ -823,11 +1265,11 @@ window.__ModuleLoader__.load({
                 flexWrap: "wrap",
               },
             },
-            h33(AssistantAvatar2, {
+            h36(AssistantAvatar2, {
               preset: { ...preset, avatar: value },
               size: 48,
             }),
-            h33(
+            h36(
               "button",
               {
                 type: "button",
@@ -837,7 +1279,7 @@ window.__ModuleLoader__.load({
               },
               busy ? "正在处理…" : "上传头像",
             ),
-            h33(
+            h36(
               "button",
               {
                 type: "button",
@@ -847,7 +1289,7 @@ window.__ModuleLoader__.load({
               },
               "恢复默认",
             ),
-            h33("input", {
+            h36("input", {
               ref: input,
               type: "file",
               accept: "image/png,image/jpeg,image/webp,image/gif",
@@ -869,7 +1311,7 @@ window.__ModuleLoader__.load({
               },
             }),
           ),
-          h33(
+          h36(
             "div",
             {
               role: "group",
@@ -877,7 +1319,7 @@ window.__ModuleLoader__.load({
               style: { display: "flex", gap: 6, flexWrap: "wrap" },
             },
             ...choices.map((emoji) =>
-              h33(
+              h36(
                 "button",
                 {
                   key: emoji,
@@ -899,24 +1341,24 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          h33(
+          h36(
             "small",
             { className: "workagent-muted" },
             "支持 5 MB 以内的图片，自动居中裁为方形；GIF 使用静态画面。",
           ),
           error
-            ? h33("p", { role: "alert", className: "workagent-error" }, error)
+            ? h36("p", { role: "alert", className: "workagent-error" }, error)
             : null,
         );
       }
       function AvatarField2({ preset, onBusyChange }) {
-        const [value, setValue] = React37.useState(preset?.avatar || null);
-        return h33(
+        const [value, setValue] = React40.useState(preset?.avatar || null);
+        return h36(
           "div",
           null,
-          h33("div", null, "头像"),
-          h33("input", { type: "hidden", name: "avatar", value: value || "" }),
-          h33(AvatarPicker2, {
+          h36("div", null, "头像"),
+          h36("input", { type: "hidden", name: "avatar", value: value || "" }),
+          h36(AvatarPicker2, {
             preset: preset || { name: "新助手", source: "user" },
             value,
             onChange: setValue,
@@ -933,7 +1375,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/ui/icons.js
-    var import_react4 = require("react");
+    var import_react6 = require("react");
     var iconPaths = {
       settings: [
         "M8 12h10m8 0h14M8 24h22m8 0h2M8 36h4m8 0h20M18 7v10m12 2v10M12 31v10",
@@ -1024,7 +1466,7 @@ window.__ModuleLoader__.load({
       expand: ["M7 19V7H19M29 7H41V19M41 29V41H29M19 41H7V29"],
     };
     function Icon({ name, size = 18, className = "" }) {
-      return (0, import_react4.createElement)(
+      return (0, import_react6.createElement)(
         "svg",
         {
           className: ["workagent-icon", className].filter(Boolean).join(" "),
@@ -1039,39 +1481,39 @@ window.__ModuleLoader__.load({
           "aria-hidden": true,
         },
         ...(iconPaths[name] || iconPaths.harness).map((d, index) =>
-          (0, import_react4.createElement)("path", { d, key: index }),
+          (0, import_react6.createElement)("path", { d, key: index }),
         ),
       );
     }
     function EngineMark({ engine }) {
-      return (0, import_react4.createElement)(
+      return (0, import_react6.createElement)(
         "span",
         {
           className: `workagent-engine-mark is-${engine}`,
           "aria-hidden": true,
         },
         engine === "codex"
-          ? (0, import_react4.createElement)(
+          ? (0, import_react6.createElement)(
               "svg",
               { viewBox: "0 0 24 24", "aria-hidden": true },
-              (0, import_react4.createElement)("circle", {
+              (0, import_react6.createElement)("circle", {
                 cx: 12,
                 cy: 12,
                 r: 9,
               }),
-              (0, import_react4.createElement)("path", {
+              (0, import_react6.createElement)("path", {
                 d: "M8 9l3 3-3 3M13 15h3",
               }),
             )
           : engine === "kimi"
-            ? (0, import_react4.createElement)(
+            ? (0, import_react6.createElement)(
                 "svg",
                 { viewBox: "0 0 24 24", "aria-hidden": true },
-                (0, import_react4.createElement)("path", {
+                (0, import_react6.createElement)("path", {
                   d: "M6 4v16M18 4l-8 8 8 8M11 4l7 7",
                 }),
               )
-            : (0, import_react4.createElement)(
+            : (0, import_react6.createElement)(
                 "svg",
                 {
                   className: "workagent-deepseek-mark",
@@ -1079,7 +1521,7 @@ window.__ModuleLoader__.load({
                   "aria-hidden": true,
                 },
                 // DeepSeek mark from the bundled DSH frontend favicon.
-                (0, import_react4.createElement)("path", {
+                (0, import_react6.createElement)("path", {
                   d: "M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z",
                 }),
               ),
@@ -1087,300 +1529,18 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/agents/avatar-components.js
-    var import_react5 = __toESM(require("react"), 1);
+    var import_react7 = __toESM(require("react"), 1);
     var { AssistantAvatar, SessionAvatar, AvatarPicker, AvatarField } =
       createAssistantAvatars({
-        React: import_react5.default,
+        React: import_react7.default,
         EngineMark,
         request,
         apiRoot,
       });
 
-    // ../contracts/dist/upload-policy.js
-    var MAX_UPLOAD_BYTES = 5 * 1024 ** 3;
-    var UPLOAD_SIZE_LABEL = `${MAX_UPLOAD_BYTES / 1024 ** 3} GB`;
-    var UPLOAD_TOO_LARGE_MESSAGE = `超过 ${UPLOAD_SIZE_LABEL}`;
-
-    // src/ui/labels.js
-    var valueLabels = {
-      builtin: "系统内置",
-      user: "用户添加",
-      market: "技能市场",
-      ready: "可用",
-      healthy: "运行正常",
-      unknown: "未知状态",
-      disabled: "已停用",
-      unavailable: "不可用",
-      none: "无需授权",
-      needs_auth: "需要授权",
-      needs_review: "需要确认",
-      pending: "等待中",
-      queued: "排队中",
-      running: "运行中",
-      completed: "已完成",
-      failed: "失败",
-      cancelled: "已取消",
-      independent_sessions: "独立会话",
-      harness: "通用引擎",
-      codex: "Codex",
-      kimi: "Kimi",
-      "codex-native": "Codex 原生模型",
-      "harness-default": "通用默认模型",
-      "kimi-native": "Kimi 原生模型",
-      "team.updated": "团队已更新",
-      "member.added": "已添加成员",
-      "task.queued": "任务已排队",
-      "task.started": "任务已开始",
-      "task.completed": "任务已完成",
-      "task.failed": "任务失败",
-      "task.cancelled": "任务已取消",
-      "mail.received": "收到团队消息",
-    };
-    var displayValue = (value, fallback = "") =>
-      valueLabels[value] || value || fallback;
-    var displayPresetName = (name) => (name === "General" ? "DSH" : name);
-    var displayWorkspaceName = (name) => {
-      if (name === "Personal workspace") return "个人项目";
-      const qa = /^QA wa3acc-([a-z])$/i.exec(name);
-      return qa ? `测试项目 ${qa[1].toUpperCase()}` : name;
-    };
-    var displaySessionTitle = (title) =>
-      title === "General" ? "通用会话" : title;
-    var plainSessionTitle = (value) =>
-      String(value).replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
-    var friendlyError = (value) => {
-      const message = String(value || "");
-      if (/high demand|overloaded|server.*busy/i.test(message))
-        return "模型服务当前繁忙，请稍后重试，或在模型设置中选择其他模型。";
-      if (message.startsWith("credential_needs_auth:codex"))
-        return "Codex 尚未完成登录，请先在设置中连接 Codex。";
-      if (message.startsWith("credential_needs_auth:kimi"))
-        return "Kimi 尚未完成登录，请先在设置中连接 Kimi。";
-      if (message.startsWith("unsupported_preset_approval_policy:"))
-        return "此引擎无法执行助手要求的审批策略，请调整助手配置或选择明确支持的权限。";
-      const labels = {
-        session_close_failed: "对话暂时无法删除，请稍后重试。",
-        engine_unavailable: "所选助手当前不可用，请检查引擎设置。",
-        engine_start_failed: "助手启动失败，请检查引擎状态后重试。",
-        engine_turn_rejected: "助手没有接受这条消息，请稍后重试。",
-        quota_exceeded: "使用额度不足，请联系管理员调整额度，或等待下一周期。",
-        quota_usage_stale: "用量统计服务暂不可用，请稍后重试。",
-        quota_usage_pending: "上一轮用量正在结算，请稍后重试。",
-        quota_not_configured: "此模型尚未配置使用额度，请联系管理员。",
-        platform_quota_unconfigured: "额度服务尚未配置，请联系管理员。",
-        engine_steer_rejected:
-          "追加指令未被接受；任务可能已结束，请检查状态后重新发送。",
-        no_active_turn: "当前任务已结束，请直接发送消息。",
-        queued_message_not_found: "这条排队消息已发送或移除，请刷新列表。",
-        session_input_pending: "当前会话正在处理另一条指令，请稍候。",
-        edit_stop_timeout: "原任务仍在停止中，请等它结束后重试编辑。",
-        fork_message_not_found: "找不到这条消息，请刷新会话后重试。",
-        session_resume_failed: "恢复会话失败，请重新开始一个会话。",
-        workspace_not_found: "所选项目不存在，请重新选择。",
-        invalid_session: "会话参数无效，请重新选择助手和项目。",
-        unsupported_preset_tool_allowlist:
-          "此引擎无法执行助手的工具限制，任务尚未启动，请调整助手配置。",
-        preset_workspace_required: "此助手要求指定项目，请先选择一个项目。",
-        engine_permission_unavailable:
-          "此引擎无法提供所选权限，任务尚未启动，请调整权限或更换引擎。",
-        personal_task_already_deleted:
-          "此个人任务已删除，请重新提交以创建新任务。",
-        personal_task_retry_pending: "任务操作已记录，服务恢复后会继续处理。",
-        content_required: "请输入要发送的内容。",
-        invalid_move: "不能移入自身或子文件夹，也不能移动系统目录。",
-        ambiguous_file_reference:
-          "此旧路径对应多份历史文件，请从项目文件中选择所需文件。",
-        move_not_pending: "此移动已处理，请刷新查看。",
-        move_not_completed: "此移动尚未完成，暂时不能撤销。",
-        destination_exists: "同名文件已存在，请换一个名称。",
-        workspace_directory_exists:
-          "工作区中已存在同名文件夹，请换一个项目名称。",
-        invalid_workspace_name:
-          "项目名称不能包含路径或特殊字符，也不能使用系统保留名称。",
-        file_changed: "文件已被其他操作修改。请重新打开文件，确认后再编辑。",
-        unsupported_text_encoding:
-          "在线编辑仅支持 UTF-8 文本，请下载后使用对应编码的编辑器修改。",
-        file_not_found: "文件已不存在，请刷新列表。",
-        invalid_relative_path: "文件名或路径无效。",
-        workspace_operation_failed: "文件操作失败，请刷新后重试。",
-        request_too_large: UPLOAD_TOO_LARGE_MESSAGE,
-        path_outside_workspace: "文件路径必须位于当前项目内。",
-        reparse_point_rejected: "无法操作链接到项目外的文件。",
-        im_gateway_unavailable: "消息渠道服务暂未启用。",
-        market_unavailable: "市场暂时不可用，请稍后重试。",
-        market_version_exists: "这个名称和版本已经发布，请填写新的版本号。",
-        market_credentials_required: "请填写所需的连接凭据。",
-        market_source_not_found: "所选内容已不存在，请重新选择。",
-        market_builtin_dependency_unavailable:
-          "当前账号缺少内置依赖，请联系管理员配置后重试。",
-        market_skill_dependency_missing: "助手引用的技能不存在，请先修复绑定。",
-        market_mcp_dependency_missing: "引用的 MCP 服务不存在，请先修复绑定。",
-        market_mcp_url_contains_credentials:
-          "服务地址含有密钥或密码，请先改为使用独立连接凭据。",
-        market_mcp_command_not_portable:
-          "MCP 使用了本机绝对路径，请先改成可在其他成员环境中运行的命令。",
-        market_publish_own_assistant_only: "请发布自己创建的助手。",
-        market_publish_own_skill_only:
-          "内置技能无需重复发布，可以作为助手依赖共享。",
-        market_skill_snapshot_unavailable:
-          "此技能的原发布包不可用，请重新获取后再发布。",
-        market_bundle_too_large: "包含的技能文件超过 50 MB，请缩小发布包。",
-        invalid_market_publish:
-          "请完整填写发布内容和三段式版本号，例如 1.0.0。",
-      };
-      if (message?.startsWith("market_runtime_"))
-        return "安装或发布未完成，请检查依赖配置后重试；已经完成的安装步骤会保留。";
-      if (message?.startsWith("invalid_mcp_binding:"))
-        return "绑定的 MCP 尚未就绪，请先测试连接或完成授权。";
-      if (message?.startsWith("invalid_skill_binding:"))
-        return "绑定的技能尚未就绪，请先启用技能并检查依赖。";
-      return labels[message] || message || "操作失败，请稍后重试。";
-    };
-    var reasoningLabel = (option) =>
-      ({
-        none: "无",
-        minimal: "最低",
-        low: "低",
-        medium: "中",
-        high: "高",
-        xhigh: "极高",
-        max: "最高",
-        ultra: "极高",
-        off: "关闭",
-        thinking: "开启",
-        on: "开启",
-      })[option.id] ||
-      option.name ||
-      option.id;
-
-    // src/ui/elements.js
-    var import_react6 = require("react");
-    function Field({ label, children, className, ...props }) {
-      return (0, import_react6.createElement)(
-        "label",
-        {
-          ...props,
-          className: ["workagent-field", className].filter(Boolean).join(" "),
-        },
-        label,
-        children,
-      );
-    }
-    function Input({ className, ...props }) {
-      return (0, import_react6.createElement)("input", {
-        ...props,
-        "data-dialog-autofocus": props.autoFocus ? "" : void 0,
-        className: ["workagent-control", className].filter(Boolean).join(" "),
-      });
-    }
-    function Select({ options, heading, className, ...props }) {
-      const choices = options.map(([value, label]) =>
-        (0, import_react6.createElement)(
-          "option",
-          { value, key: value },
-          label,
-        ),
-      );
-      return (0, import_react6.createElement)(
-        "select",
-        {
-          ...props,
-          className: ["workagent-control", className].filter(Boolean).join(" "),
-        },
-        ...(heading
-          ? [
-              (0, import_react6.createElement)(
-                "optgroup",
-                { label: heading },
-                choices,
-              ),
-            ]
-          : choices),
-      );
-    }
-    function Button({ children, className, variant, ...props }) {
-      return (0, import_react6.createElement)(
-        "button",
-        {
-          type: "button",
-          ...props,
-          "data-dialog-autofocus": props.autoFocus ? "" : void 0,
-          className: ["workagent-button", variant && `is-${variant}`, className]
-            .filter(Boolean)
-            .join(" "),
-        },
-        children,
-      );
-    }
-    function Switch({ checked, onChange, className, ...props }) {
-      return (0, import_react6.createElement)("button", {
-        type: "button",
-        ...props,
-        role: "switch",
-        "aria-checked": checked,
-        className: ["workagent-switch", className].filter(Boolean).join(" "),
-        onClick: () => onChange(!checked),
-      });
-    }
-    function Status({ state }) {
-      if (state.loading)
-        return (0, import_react6.createElement)(
-          "p",
-          { className: "workagent-muted" },
-          "加载中…",
-        );
-      if (state.error)
-        return (0, import_react6.createElement)(
-          "p",
-          { role: "alert", className: "workagent-error" },
-          friendlyError(state.error),
-        );
-      if (state.rows.length === 0)
-        return (0, import_react6.createElement)(
-          "p",
-          { className: "workagent-muted" },
-          "暂无数据",
-        );
-      return null;
-    }
-    function Card({ title, detail, children, ...props }) {
-      return (0, import_react6.createElement)(
-        "article",
-        {
-          ...props,
-          className: ["workagent-card", props.className]
-            .filter(Boolean)
-            .join(" "),
-        },
-        (0, import_react6.createElement)("strong", null, title),
-        detail
-          ? (0, import_react6.createElement)(
-              "div",
-              { className: "workagent-muted" },
-              detail,
-            )
-          : null,
-        children
-          ? (0, import_react6.createElement)(
-              "div",
-              { className: "workagent-actions" },
-              children,
-            )
-          : null,
-      );
-    }
-    function Section({ title, children }) {
-      return (0, import_react6.createElement)(
-        "section",
-        { className: "workagent-section", "data-workagent-section": title },
-        (0, import_react6.createElement)("h2", null, title),
-        children,
-      );
-    }
-
     // src/ui/dialog.js
-    var import_react7 = __toESM(require("react"), 1);
-    var import_react8 = require("react");
+    var import_react8 = __toESM(require("react"), 1);
+    var import_react9 = require("react");
     var focusable =
       'button:not(:disabled),input:not(:disabled):not([type="hidden"]),select:not(:disabled),textarea:not(:disabled),a[href],summary,[contenteditable]:not([contenteditable="false"]),[tabindex]:not([tabindex="-1"])';
     var openDialogs = [];
@@ -1395,15 +1555,15 @@ window.__ModuleLoader__.load({
       role = "dialog",
       ...props
     }) {
-      const ref = import_react7.default.useRef(null);
-      const hostRef = import_react7.default.useRef(null);
-      const previousFocus = import_react7.default.useRef(
+      const ref = import_react8.default.useRef(null);
+      const hostRef = import_react8.default.useRef(null);
+      const previousFocus = import_react8.default.useRef(
         typeof document === "undefined" ? null : document.activeElement,
       );
-      const close = import_react7.default.useRef({ onClose, closeDisabled });
+      const close = import_react8.default.useRef({ onClose, closeDisabled });
       close.current = { onClose, closeDisabled };
-      const titleId = import_react7.default.useId();
-      import_react7.default.useEffect(() => {
+      const titleId = import_react8.default.useId();
+      import_react8.default.useEffect(() => {
         const previous = previousFocus.current;
         const surface = ref.current;
         const host = hostRef.current;
@@ -1493,7 +1653,7 @@ window.__ModuleLoader__.load({
           if (previous?.isConnected) previous.focus();
         };
       }, []);
-      return (0, import_react8.createElement)(
+      return (0, import_react9.createElement)(
         "dialog",
         {
           ref: hostRef,
@@ -1507,7 +1667,7 @@ window.__ModuleLoader__.load({
             }
           },
         },
-        (0, import_react8.createElement)(
+        (0, import_react9.createElement)(
           as,
           {
             ...props,
@@ -1526,11 +1686,11 @@ window.__ModuleLoader__.load({
               .filter(Boolean)
               .join(" "),
           },
-          (0, import_react8.createElement)(
+          (0, import_react9.createElement)(
             "header",
             { className: "workagent-dialog-header" },
-            (0, import_react8.createElement)("h2", { id: titleId }, title),
-            (0, import_react8.createElement)(
+            (0, import_react9.createElement)("h2", { id: titleId }, title),
+            (0, import_react9.createElement)(
               Button,
               {
                 className: "workagent-dialog-close",
@@ -1538,7 +1698,7 @@ window.__ModuleLoader__.load({
                 disabled: closeDisabled,
                 onClick: onClose,
               },
-              (0, import_react8.createElement)(Icon, {
+              (0, import_react9.createElement)(Icon, {
                 name: "close",
                 size: 18,
               }),
@@ -1549,7 +1709,7 @@ window.__ModuleLoader__.load({
       );
     }
     function ActionList({ children, className = "" }) {
-      return (0, import_react8.createElement)(
+      return (0, import_react9.createElement)(
         "div",
         {
           className: ["workagent-action-list", className]
@@ -1560,15 +1720,15 @@ window.__ModuleLoader__.load({
       );
     }
     function useConfirm() {
-      const [request2, setRequest] = import_react7.default.useState(null);
-      const pending = import_react7.default.useRef(null);
-      import_react7.default.useEffect(() => () => pending.current?.(false), []);
-      const finish = import_react7.default.useCallback((value) => {
+      const [request2, setRequest] = import_react8.default.useState(null);
+      const pending = import_react8.default.useRef(null);
+      import_react8.default.useEffect(() => () => pending.current?.(false), []);
+      const finish = import_react8.default.useCallback((value) => {
         pending.current?.(value);
         pending.current = null;
         setRequest(null);
       }, []);
-      const confirm = import_react7.default.useCallback(
+      const confirm = import_react8.default.useCallback(
         (options) =>
           new Promise((resolve) => {
             pending.current?.(false);
@@ -1580,23 +1740,23 @@ window.__ModuleLoader__.load({
         [],
       );
       const confirmation = request2
-        ? (0, import_react8.createElement)(
+        ? (0, import_react9.createElement)(
             Dialog,
             {
               title: request2.title || "确认操作",
               role: "alertdialog",
               onClose: () => finish(false),
             },
-            (0, import_react8.createElement)("p", null, request2.description),
-            (0, import_react8.createElement)(
+            (0, import_react9.createElement)("p", null, request2.description),
+            (0, import_react9.createElement)(
               "div",
               { className: "workagent-dialog-actions" },
-              (0, import_react8.createElement)(
+              (0, import_react9.createElement)(
                 Button,
                 { autoFocus: true, onClick: () => finish(false) },
                 request2.cancelLabel || "取消",
               ),
-              (0, import_react8.createElement)(
+              (0, import_react9.createElement)(
                 Button,
                 {
                   variant: request2.danger ? "danger" : "primary",
@@ -1615,8 +1775,8 @@ window.__ModuleLoader__.load({
     var HERO_AGENT_EVENT = "workagent:hero-agent";
 
     // src/features/agents/picker.js
-    var import_react9 = __toESM(require("react"), 1);
-    var import_react10 = require("react");
+    var import_react10 = __toESM(require("react"), 1);
+    var import_react11 = require("react");
     function useAgentOrder(presets) {
       const key = "workagent.agent-order.v1";
       const eventName = "workagent:agent-order-changed";
@@ -1630,8 +1790,8 @@ window.__ModuleLoader__.load({
           return [];
         }
       };
-      const [order, setOrder] = import_react9.default.useState(read);
-      import_react9.default.useEffect(() => {
+      const [order, setOrder] = import_react10.default.useState(read);
+      import_react10.default.useEffect(() => {
         const update = () => setOrder(read());
         window.addEventListener(eventName, update);
         window.addEventListener("storage", update);
@@ -1658,8 +1818,8 @@ window.__ModuleLoader__.load({
       const { rows, save } = useAgentOrder(
         presets.filter((row) => row.enabled),
       );
-      const [notice, setNotice] = import_react9.default.useState("");
-      const [error, setError] = import_react9.default.useState("");
+      const [notice, setNotice] = import_react10.default.useState("");
+      const [error, setError] = import_react10.default.useState("");
       const move = (index, delta) => {
         const ids = rows.map((row) => row.id);
         [ids[index], ids[index + delta]] = [ids[index + delta], ids[index]];
@@ -1671,23 +1831,23 @@ window.__ModuleLoader__.load({
           setError("浏览器未能保存显示顺序，请检查存储空间后重试。");
         }
       };
-      return (0, import_react10.createElement)(
+      return (0, import_react11.createElement)(
         "section",
         { className: "workagent-agent-order", "aria-label": "Agent 显示顺序" },
-        (0, import_react10.createElement)("h3", null, "主页 Agent 顺序"),
-        (0, import_react10.createElement)(
+        (0, import_react11.createElement)("h3", null, "主页 Agent 顺序"),
+        (0, import_react11.createElement)(
           "p",
           { className: "workagent-muted" },
           "前 3 个优先显示，其余收进「更多」。调整后立即生效，保存在当前浏览器。",
         ),
-        (0, import_react10.createElement)(
+        (0, import_react11.createElement)(
           "ol",
           null,
           ...rows.map((preset, index) =>
-            (0, import_react10.createElement)(
+            (0, import_react11.createElement)(
               "li",
               { key: preset.id },
-              (0, import_react10.createElement)(
+              (0, import_react11.createElement)(
                 "span",
                 {
                   className: "workagent-agent-order-index",
@@ -1695,13 +1855,13 @@ window.__ModuleLoader__.load({
                 },
                 index + 1,
               ),
-              (0, import_react10.createElement)(AssistantAvatar, { preset }),
-              (0, import_react10.createElement)(
+              (0, import_react11.createElement)(AssistantAvatar, { preset }),
+              (0, import_react11.createElement)(
                 "span",
                 { className: "workagent-agent-order-name" },
                 displayPresetName(preset.name),
               ),
-              (0, import_react10.createElement)(
+              (0, import_react11.createElement)(
                 "button",
                 {
                   type: "button",
@@ -1711,7 +1871,7 @@ window.__ModuleLoader__.load({
                 },
                 "↑",
               ),
-              (0, import_react10.createElement)(
+              (0, import_react11.createElement)(
                 "button",
                 {
                   type: "button",
@@ -1725,9 +1885,9 @@ window.__ModuleLoader__.load({
           ),
         ),
         error
-          ? (0, import_react10.createElement)("p", { role: "alert" }, error)
+          ? (0, import_react11.createElement)("p", { role: "alert" }, error)
           : notice
-            ? (0, import_react10.createElement)("p", { role: "status" }, notice)
+            ? (0, import_react11.createElement)("p", { role: "status" }, notice)
             : null,
       );
     }
@@ -1736,18 +1896,18 @@ window.__ModuleLoader__.load({
         (Array.isArray(value) ? value : []).filter((preset) => preset.enabled),
       );
       const { rows } = useAgentOrder(state.rows);
-      const [selected, setSelected] = import_react9.default.useState(
+      const [selected, setSelected] = import_react10.default.useState(
         () => localStorage.getItem(AGENT_PICK_KEY) || "builtin-general",
       );
-      const [open, setOpen] = import_react9.default.useState(false);
-      const root = import_react9.default.useRef(null),
-        more = import_react9.default.useRef(null);
-      import_react9.default.useEffect(() => {
+      const [open, setOpen] = import_react10.default.useState(false);
+      const root = import_react10.default.useRef(null),
+        more = import_react10.default.useRef(null);
+      import_react10.default.useEffect(() => {
         const update = (event) => setSelected(event.detail);
         window.addEventListener(HERO_AGENT_EVENT, update);
         return () => window.removeEventListener(HERO_AGENT_EVENT, update);
       }, []);
-      import_react9.default.useEffect(() => {
+      import_react10.default.useEffect(() => {
         if (!open) return;
         const outside = (event) => {
           if (!root.current?.contains(event.target)) setOpen(false);
@@ -1767,7 +1927,7 @@ window.__ModuleLoader__.load({
           node?.removeEventListener("keydown", escape);
         };
       }, [open]);
-      import_react9.default.useEffect(() => {
+      import_react10.default.useEffect(() => {
         if (state.loading || rows.length === 0) return;
         if (rows.some((preset) => preset.id === selected)) return;
         const fallback =
@@ -1790,7 +1950,7 @@ window.__ModuleLoader__.load({
         visible[visible.length - 1] = active;
       const hidden = rows.filter((row) => !visible.includes(row));
       const option = (preset, inMenu = false) =>
-        (0, import_react10.createElement)(
+        (0, import_react11.createElement)(
           "button",
           {
             key: preset.id,
@@ -1842,14 +2002,14 @@ window.__ModuleLoader__.load({
               );
             },
           },
-          (0, import_react10.createElement)(AssistantAvatar, { preset }),
-          (0, import_react10.createElement)(
+          (0, import_react11.createElement)(AssistantAvatar, { preset }),
+          (0, import_react11.createElement)(
             "span",
             { className: "workagent-agent-name" },
             displayPresetName(preset.name),
           ),
         );
-      return (0, import_react10.createElement)(
+      return (0, import_react11.createElement)(
         "div",
         {
           className: "workagent-agents",
@@ -1857,12 +2017,12 @@ window.__ModuleLoader__.load({
           "aria-label": "选择 Agent",
           ref: root,
         },
-        (0, import_react10.createElement)(
+        (0, import_react11.createElement)(
           "div",
           { className: "workagent-agent-strip" },
           ...visible.map((preset) => option(preset)),
           hidden.length
-            ? (0, import_react10.createElement)(
+            ? (0, import_react11.createElement)(
                 "button",
                 {
                   ref: more,
@@ -1873,7 +2033,7 @@ window.__ModuleLoader__.load({
                   onClick: () => setOpen((value) => !value),
                 },
                 "更多",
-                (0, import_react10.createElement)(Icon, {
+                (0, import_react11.createElement)(Icon, {
                   name: "chevronDown",
                   size: 14,
                 }),
@@ -1881,7 +2041,7 @@ window.__ModuleLoader__.load({
             : null,
         ),
         open && hidden.length
-          ? (0, import_react10.createElement)(
+          ? (0, import_react11.createElement)(
               "div",
               {
                 className: "workagent-agent-overflow",
@@ -1895,8 +2055,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/agents/settings.js
-    var import_react11 = __toESM(require("react"), 1);
-    var import_react12 = require("react");
+    var import_react12 = __toESM(require("react"), 1);
+    var import_react13 = require("react");
     var defaultPreset = {
       enabled: true,
       description: "",
@@ -1910,29 +2070,29 @@ window.__ModuleLoader__.load({
       approvalPolicy: "on_risk",
     };
     function CapabilityPicker({ name, label, state, selected = [] }) {
-      const [ids, setIds] = import_react11.default.useState(selected);
-      const [query, setQuery] = import_react11.default.useState("");
+      const [ids, setIds] = import_react12.default.useState(selected);
+      const [query, setQuery] = import_react12.default.useState("");
       const visible = state.rows.filter((row) =>
         `${row.name} ${row.id}`.toLowerCase().includes(query.toLowerCase()),
       );
-      return (0, import_react12.createElement)(
+      return (0, import_react13.createElement)(
         "fieldset",
         { className: "workagent-capability-picker" },
-        (0, import_react12.createElement)("legend", null, label),
-        (0, import_react12.createElement)("input", {
+        (0, import_react13.createElement)("legend", null, label),
+        (0, import_react13.createElement)("input", {
           type: "hidden",
           name,
           value: ids.join(","),
         }),
-        (0, import_react12.createElement)(
+        (0, import_react13.createElement)(
           "details",
           null,
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             "summary",
             null,
             ids.length ? `已选择 ${ids.length} 项` : `选择${label}`,
           ),
-          (0, import_react12.createElement)("input", {
+          (0, import_react13.createElement)("input", {
             type: "search",
             "aria-label": `搜索${label}`,
             placeholder: "按名称搜索",
@@ -1940,21 +2100,21 @@ window.__ModuleLoader__.load({
             onChange: (e) => setQuery(e.target.value),
           }),
           state.loading
-            ? (0, import_react12.createElement)("p", null, "正在加载…")
+            ? (0, import_react13.createElement)("p", null, "正在加载…")
             : state.error
-              ? (0, import_react12.createElement)(
+              ? (0, import_react13.createElement)(
                   "p",
                   { role: "alert" },
                   state.error,
                 )
-              : (0, import_react12.createElement)(
+              : (0, import_react13.createElement)(
                   "div",
                   { className: "workagent-capability-options" },
                   ...visible.map((row) =>
-                    (0, import_react12.createElement)(
+                    (0, import_react13.createElement)(
                       "label",
                       { key: row.id },
-                      (0, import_react12.createElement)("input", {
+                      (0, import_react13.createElement)("input", {
                         type: "checkbox",
                         checked: ids.includes(row.id),
                         onChange: (e) =>
@@ -1964,11 +2124,11 @@ window.__ModuleLoader__.load({
                               : ids.filter((id) => id !== row.id),
                           ),
                       }),
-                      (0, import_react12.createElement)("span", null, row.name),
+                      (0, import_react13.createElement)("span", null, row.name),
                     ),
                   ),
                   !visible.length
-                    ? (0, import_react12.createElement)(
+                    ? (0, import_react13.createElement)(
                         "p",
                         null,
                         "没有匹配项，可先从市场获取。",
@@ -1977,11 +2137,11 @@ window.__ModuleLoader__.load({
                 ),
         ),
         ids.length
-          ? (0, import_react12.createElement)(
+          ? (0, import_react13.createElement)(
               "div",
               { className: "workagent-capability-selected" },
               ...ids.map((id) =>
-                (0, import_react12.createElement)(
+                (0, import_react13.createElement)(
                   "button",
                   {
                     type: "button",
@@ -2002,14 +2162,15 @@ window.__ModuleLoader__.load({
       const [state, refresh] = usePresets();
       const [skills] = useResource(`${apiRoot}/skills`);
       const [servers] = useResource(`${apiRoot}/mcp-servers`);
-      const [editing, setEditing] = import_react11.default.useState(null);
-      const [formVersion, setFormVersion] = import_react11.default.useState(0);
+      const [acp] = useAcpCatalog();
+      const [editing, setEditing] = import_react12.default.useState(null);
+      const [formVersion, setFormVersion] = import_react12.default.useState(0);
       const [avatarEditing, setAvatarEditing] =
-        import_react11.default.useState(null);
+        import_react12.default.useState(null);
       const [avatarBusy, setAvatarBusy] =
-        import_react11.default.useState(false);
-      const [error, setError] = import_react11.default.useState("");
-      const [pendingId, setPendingId] = import_react11.default.useState(null);
+        import_react12.default.useState(false);
+      const [error, setError] = import_react12.default.useState("");
+      const [pendingId, setPendingId] = import_react12.default.useState(null);
       const toggle = async (row, enabled) => {
         setPendingId(row.id);
         await mutatePreset(
@@ -2043,9 +2204,18 @@ window.__ModuleLoader__.load({
             : {}),
           name: String(values.get("name")),
           avatar: String(values.get("avatar") || "") || null,
-          engine: String(values.get("engine")),
+          engine: String(values.get("engine")).startsWith("acp:")
+            ? "acp"
+            : String(values.get("engine")),
+          ...(String(values.get("engine")).startsWith("acp:")
+            ? { acpCatalogId: String(values.get("engine")).slice(4) }
+            : {}),
           modelId:
-            editing?.engine === values.get("engine") ? editing.modelId : null,
+            editing?.engine === values.get("engine") ||
+            (editing?.engine === "acp" &&
+              `acp:${editing.acpCatalogId}` === values.get("engine"))
+              ? editing.modelId
+              : null,
           systemPrompt: String(values.get("systemPrompt") || ""),
           skillIds: csv("skillIds"),
           mcpServerIds: csv("mcpServerIds"),
@@ -2063,76 +2233,88 @@ window.__ModuleLoader__.load({
         setEditing(null);
         setFormVersion((version) => version + 1);
       };
-      return (0, import_react12.createElement)(
+      return (0, import_react13.createElement)(
         Section,
         { title: "助手" },
-        (0, import_react12.createElement)(AgentDisplaySettings, {
+        (0, import_react13.createElement)(AcpCredentials),
+        (0, import_react13.createElement)(AgentDisplaySettings, {
           presets: state.rows,
         }),
-        (0, import_react12.createElement)(
+        (0, import_react13.createElement)(
           Button,
           { onClick: () => navigation.navigate("/?workagent=teams") },
           "AI 团队",
         ),
-        (0, import_react12.createElement)(
+        (0, import_react13.createElement)(
           "p",
           { className: "workagent-muted" },
           "在这里配置助手的引擎与能力；默认模型、思考强度和权限在「设置 → 模型」中调整。关闭助手后，已有对话仍可继续。",
         ),
-        (0, import_react12.createElement)(
+        (0, import_react13.createElement)(
           "form",
           {
             className: "workagent-form",
             onSubmit: submit,
             key: `preset-form-${editing?.id || "new"}-${formVersion}`,
           },
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             Field,
             { label: "名称" },
-            (0, import_react12.createElement)(Input, {
+            (0, import_react13.createElement)(Input, {
               name: "name",
               required: true,
               defaultValue: editing?.name || "",
             }),
           ),
-          (0, import_react12.createElement)(AvatarField, {
+          (0, import_react13.createElement)(AvatarField, {
             preset: editing,
             onBusyChange: setAvatarBusy,
           }),
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             Field,
             { label: "引擎" },
-            (0, import_react12.createElement)(Select, {
+            (0, import_react13.createElement)(Select, {
               name: "engine",
-              defaultValue: editing?.engine || "harness",
+              defaultValue:
+                editing?.engine === "acp"
+                  ? `acp:${editing.acpCatalogId}`
+                  : editing?.engine || "harness",
               options: [
                 ["harness", "通用引擎"],
                 ["codex", "Codex"],
                 ["kimi", "Kimi"],
+                ...acp.rows
+                  .filter(
+                    (row) => row.enabled || row.id === editing?.acpCatalogId,
+                  )
+                  .map((row) => [
+                    `acp:${row.id}`,
+                    `${row.label}${row.enabled ? "" : "（已停用）"}`,
+                  ]),
               ],
             }),
           ),
-          (0, import_react12.createElement)(CapabilityPicker, {
+          (0, import_react13.createElement)(CapabilityPicker, {
             name: "skillIds",
             label: "技能",
             state: skills,
             selected: editing?.skillIds,
           }),
-          (0, import_react12.createElement)(CapabilityPicker, {
+          (0, import_react13.createElement)(CapabilityPicker, {
             name: "mcpServerIds",
             label: "MCP 服务",
             state: servers,
             selected: editing?.mcpServerIds,
           }),
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             Field,
             { label: "系统提示词" },
-            (0, import_react12.createElement)("textarea", {
+            (0, import_react13.createElement)("textarea", {
               name: "systemPrompt",
               defaultValue: editing?.systemPrompt || "",
             }),
           ),
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             "button",
             {
               className: "workagent-button",
@@ -2142,7 +2324,7 @@ window.__ModuleLoader__.load({
             editing ? "保存助手" : "创建助手",
           ),
           editing
-            ? (0, import_react12.createElement)(
+            ? (0, import_react13.createElement)(
                 Button,
                 { onClick: () => setEditing(null) },
                 "取消编辑",
@@ -2150,46 +2332,46 @@ window.__ModuleLoader__.load({
             : null,
         ),
         error
-          ? (0, import_react12.createElement)(
+          ? (0, import_react13.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react12.createElement)(Status, { state }),
+        (0, import_react13.createElement)(Status, { state }),
         ...state.rows.map((row) =>
-          (0, import_react12.createElement)(
+          (0, import_react13.createElement)(
             "article",
             {
               key: row.id,
               className: "workagent-card workagent-assistant-card",
             },
-            (0, import_react12.createElement)(
+            (0, import_react13.createElement)(
               "div",
               { className: "workagent-assistant-info" },
-              (0, import_react12.createElement)(AssistantAvatar, {
+              (0, import_react13.createElement)(AssistantAvatar, {
                 preset: row,
                 size: 36,
               }),
-              (0, import_react12.createElement)(
+              (0, import_react13.createElement)(
                 "strong",
                 null,
                 displayPresetName(row.name),
               ),
-              (0, import_react12.createElement)(
+              (0, import_react13.createElement)(
                 "div",
                 { className: "workagent-muted" },
                 displayValue(row.engine),
               ),
             ),
-            (0, import_react12.createElement)(Switch, {
+            (0, import_react13.createElement)(Switch, {
               "aria-label": `${displayPresetName(row.name)} 开关`,
               checked: row.enabled,
               disabled: pendingId !== null,
               title: row.enabled ? "关闭助手" : "开启助手",
               onChange: (enabled) => toggle(row, enabled),
             }),
-            (0, import_react12.createElement)(
+            (0, import_react13.createElement)(
               Button,
               {
                 onClick: () =>
@@ -2199,10 +2381,10 @@ window.__ModuleLoader__.load({
               "更换头像",
             ),
             avatarEditing === row.id
-              ? (0, import_react12.createElement)(
+              ? (0, import_react13.createElement)(
                   "div",
                   { style: { gridColumn: "1 / -1", width: "100%" } },
-                  (0, import_react12.createElement)(AvatarPicker, {
+                  (0, import_react13.createElement)(AvatarPicker, {
                     preset: row,
                     value: row.avatar,
                     onChange: async (avatar) => {
@@ -2222,17 +2404,17 @@ window.__ModuleLoader__.load({
                 )
               : null,
             row.source === "user"
-              ? (0, import_react12.createElement)(
+              ? (0, import_react13.createElement)(
                   "div",
                   {
                     className: "workagent-actions workagent-assistant-actions",
                   },
-                  (0, import_react12.createElement)(
+                  (0, import_react13.createElement)(
                     Button,
                     { onClick: () => setEditing(row) },
                     "编辑",
                   ),
-                  (0, import_react12.createElement)(
+                  (0, import_react13.createElement)(
                     Button,
                     {
                       disabled: pendingId !== null,
@@ -2269,7 +2451,7 @@ window.__ModuleLoader__.load({
 
     // src/features/automations/automations.js
     function createAutomations({
-      React: React37,
+      React: React40,
       request: request2,
       apiRoot: apiRoot2,
       useResource: useResource2,
@@ -2283,31 +2465,33 @@ window.__ModuleLoader__.load({
       Status: Status2,
       friendlyError: friendlyError2,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       const endpoint2 = `${apiRoot2}/automations`;
       const runLabels = {
         pending: "等待",
+        waiting: "等待对话空闲",
+        skipped_busy: "对话持续忙碌，已跳过",
         running: "运行中",
         succeeded: "成功",
         failed: "失败",
         cancelled: "已取消",
       };
       function SkillSuggestion({ row, run, saved }) {
-        const [text, setText] = React37.useState(null);
-        const [name, setName] = React37.useState(`${row.name}执行流程`);
-        const [busy, setBusy] = React37.useState(false);
-        const [error, setError] = React37.useState("");
-        const [ignored, setIgnored] = React37.useState(false);
-        const [installedId, setInstalledId] = React37.useState(null);
+        const [text, setText] = React40.useState(null);
+        const [name, setName] = React40.useState(`${row.name}执行流程`);
+        const [busy, setBusy] = React40.useState(false);
+        const [error, setError] = React40.useState("");
+        const [ignored, setIgnored] = React40.useState(false);
+        const [installedId, setInstalledId] = React40.useState(null);
         if (ignored || row.skillId) return null;
-        return h33(
+        return h36(
           "section",
           {
             className: "workagent-skill-suggestion",
             "aria-label": "可复用技能建议",
           },
-          h33("strong", null, "本次执行生成了技能建议"),
-          h33(
+          h36("strong", null, "本次执行生成了技能建议"),
+          h36(
             Button2,
             {
               disabled: busy,
@@ -2329,13 +2513,13 @@ window.__ModuleLoader__.load({
             },
             "预览技能建议",
           ),
-          h33(
+          h36(
             Button2,
             { disabled: busy, onClick: () => setIgnored(true) },
             "忽略建议",
           ),
           text !== null
-            ? h33(
+            ? h36(
                 "form",
                 {
                   className: "workagent-form",
@@ -2392,11 +2576,11 @@ window.__ModuleLoader__.load({
                     }
                   },
                 },
-                h33(
+                h36(
                   "label",
                   null,
                   "建议技能名称",
-                  h33(Input2, {
+                  h36(Input2, {
                     "aria-label": "建议技能名称",
                     value: name,
                     onChange: (event) => setName(event.target.value),
@@ -2404,11 +2588,11 @@ window.__ModuleLoader__.load({
                     maxLength: 120,
                   }),
                 ),
-                h33(
+                h36(
                   "label",
                   null,
                   "建议技能内容",
-                  h33("textarea", {
+                  h36("textarea", {
                     "aria-label": "建议技能内容",
                     value: text,
                     onChange: (event) => setText(event.target.value),
@@ -2416,21 +2600,21 @@ window.__ModuleLoader__.load({
                     maxLength: 128 * 1024,
                   }),
                 ),
-                h33(
+                h36(
                   "p",
                   null,
                   installedId
                     ? "技能已保存；若任务版本冲突，请刷新任务后重新绑定。"
                     : "请检查适用范围和执行步骤。保存后，下次运行会使用此技能。",
                 ),
-                h33(
+                h36(
                   Button2,
                   { type: "submit", disabled: busy },
                   "保存技能并绑定任务",
                 ),
               )
             : null,
-          error ? h33("p", { role: "alert" }, error) : null,
+          error ? h36("p", { role: "alert" }, error) : null,
         );
       }
       function Editor({
@@ -2443,20 +2627,20 @@ window.__ModuleLoader__.load({
         saved,
         cancel,
       }) {
-        const [kind, setKind] = React37.useState(
+        const [kind, setKind] = React40.useState(
           row?.schedule.kind || "interval",
         );
-        const [mode, setMode] = React37.useState(
+        const [mode, setMode] = React40.useState(
           row?.executionMode || "new_conversation",
         );
-        const [presetId, setPresetId] = React37.useState(row?.presetId || "");
-        const [workspaceId, setWorkspaceId] = React37.useState(
+        const [presetId, setPresetId] = React40.useState(row?.presetId || "");
+        const [workspaceId, setWorkspaceId] = React40.useState(
           row?.workspaceId || "",
         );
         const [messageNotificationEnabled, setMessageNotificationEnabled] =
-          React37.useState(row?.messageNotificationEnabled === true);
-        const [error, setError] = React37.useState("");
-        const [busy, setBusy] = React37.useState(false);
+          React40.useState(row?.messageNotificationEnabled === true);
+        const [error, setError] = React40.useState("");
+        const [busy, setBusy] = React40.useState(false);
         const engine = presets.find((p) => p.id === presetId)?.engine;
         async function submit(event) {
           event.preventDefault();
@@ -2465,22 +2649,32 @@ window.__ModuleLoader__.load({
             .split(":")
             .map(Number);
           const timezone = String(form.get("timezone") || "UTC");
+          const onceAt =
+            kind === "once" ? new Date(String(form.get("onceAt"))) : null;
+          if (
+            onceAt &&
+            (!Number.isFinite(onceAt.getTime()) ||
+              (form.get("enabled") === "on" && onceAt.getTime() <= Date.now()))
+          )
+            return setError("请选择未来的执行时间");
           const schedule =
-            kind === "interval"
-              ? { kind, everyMinutes: Number(form.get("minutes")) }
-              : kind === "weekly"
-                ? {
-                    kind,
-                    daysOfWeek: form.getAll("days").map(Number),
-                    hour,
-                    minute,
-                    timezone,
-                  }
-                : {
-                    kind,
-                    expression: String(form.get("expression")).trim(),
-                    timezone,
-                  };
+            kind === "once"
+              ? { kind, at: onceAt.toISOString() }
+              : kind === "interval"
+                ? { kind, everyMinutes: Number(form.get("minutes")) }
+                : kind === "weekly"
+                  ? {
+                      kind,
+                      daysOfWeek: form.getAll("days").map(Number),
+                      hour,
+                      minute,
+                      timezone,
+                    }
+                  : {
+                      kind,
+                      expression: String(form.get("expression")).trim(),
+                      timezone,
+                    };
           if (kind === "weekly" && !schedule.daysOfWeek.length)
             return setError("请选择至少一个执行日");
           const messageNotificationTargetId = String(
@@ -2502,6 +2696,12 @@ window.__ModuleLoader__.load({
                   schedule,
                   presetId,
                   engine,
+                  ...(engine === "acp"
+                    ? {
+                        acpCatalogId: presets.find((p) => p.id === presetId)
+                          ?.acpCatalogId,
+                      }
+                    : {}),
                   workspaceId,
                   input: String(form.get("input")),
                   notificationPolicy: String(form.get("notificationPolicy")),
@@ -2525,21 +2725,21 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        const field = (label, child) => h33(Field2, { label }, child);
-        return h33(
+        const field = (label, child) => h36(Field2, { label }, child);
+        return h36(
           "form",
           {
             className: "workagent-form workagent-automation-form",
             onSubmit: submit,
           },
-          h33(
+          h36(
             "h3",
             { className: "workagent-automation-wide" },
             row ? "编辑定时任务" : "新建定时任务",
           ),
           field(
             "任务名称",
-            h33(Input2, {
+            h36(Input2, {
               name: "name",
               required: true,
               maxLength: 200,
@@ -2548,7 +2748,7 @@ window.__ModuleLoader__.load({
           ),
           field(
             "执行助手",
-            h33(Select2, {
+            h36(Select2, {
               name: "presetId",
               required: true,
               value: presetId,
@@ -2563,7 +2763,7 @@ window.__ModuleLoader__.load({
           ),
           field(
             "所属项目",
-            h33(Select2, {
+            h36(Select2, {
               name: "workspaceId",
               required: true,
               value: workspaceId,
@@ -2576,7 +2776,7 @@ window.__ModuleLoader__.load({
           ),
           field(
             "绑定技能",
-            h33(Select2, {
+            h36(Select2, {
               name: "skillId",
               defaultValue: row?.skillId || "",
               options: [
@@ -2589,7 +2789,7 @@ window.__ModuleLoader__.load({
           ),
           field(
             "任务内容",
-            h33("textarea", {
+            h36("textarea", {
               name: "input",
               required: true,
               rows: 4,
@@ -2599,90 +2799,111 @@ window.__ModuleLoader__.load({
           ),
           field(
             "执行频率",
-            h33(Select2, {
+            h36(Select2, {
               value: kind,
               onChange: (e) => setKind(e.target.value),
               options: [
+                ["once", "指定时间执行一次"],
                 ["interval", "固定间隔"],
                 ["weekly", "每周"],
                 ["cron", "Cron 表达式"],
               ],
             }),
           ),
-          kind === "interval"
+          kind === "once"
             ? field(
-                "执行间隔（分钟）",
-                h33(Input2, {
-                  name: "minutes",
-                  type: "number",
-                  min: 1,
-                  max: 525600,
+                `执行时间（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`,
+                h36(Input2, {
+                  key: "onceAt",
+                  name: "onceAt",
+                  type: "datetime-local",
                   required: true,
-                  defaultValue: row?.schedule.everyMinutes || 60,
+                  defaultValue:
+                    row?.schedule.kind === "once"
+                      ? new Date(
+                          new Date(row.schedule.at).getTime() -
+                            new Date(row.schedule.at).getTimezoneOffset() * 6e4,
+                        )
+                          .toISOString()
+                          .slice(0, 16)
+                      : "",
                 }),
               )
-            : h33(
-                React37.Fragment,
-                null,
-                field(
-                  "时区",
-                  h33(Input2, {
-                    name: "timezone",
+            : kind === "interval"
+              ? field(
+                  "执行间隔（分钟）",
+                  h36(Input2, {
+                    key: "minutes",
+                    name: "minutes",
+                    type: "number",
+                    min: 1,
+                    max: 525600,
                     required: true,
-                    defaultValue:
-                      row?.schedule.timezone ||
-                      Intl.DateTimeFormat().resolvedOptions().timeZone ||
-                      "UTC",
+                    defaultValue: row?.schedule.everyMinutes || 60,
                   }),
-                ),
-                kind === "cron"
-                  ? field(
-                      "Cron 表达式",
-                      h33(Input2, {
-                        name: "expression",
-                        required: true,
-                        placeholder: "0 9 * * 1-5",
-                        defaultValue: row?.schedule.expression || "",
-                      }),
-                    )
-                  : h33(
-                      React37.Fragment,
-                      null,
-                      h33(
-                        "fieldset",
+                )
+              : h36(
+                  React40.Fragment,
+                  null,
+                  field(
+                    "时区",
+                    h36(Input2, {
+                      name: "timezone",
+                      required: true,
+                      defaultValue:
+                        row?.schedule.timezone ||
+                        Intl.DateTimeFormat().resolvedOptions().timeZone ||
+                        "UTC",
+                    }),
+                  ),
+                  kind === "cron"
+                    ? field(
+                        "Cron 表达式",
+                        h36(Input2, {
+                          name: "expression",
+                          required: true,
+                          placeholder: "0 9 * * 1-5",
+                          defaultValue: row?.schedule.expression || "",
+                        }),
+                      )
+                    : h36(
+                        React40.Fragment,
                         null,
-                        h33("legend", null, "执行日"),
-                        ...["日", "一", "二", "三", "四", "五", "六"].map(
-                          (day, index) =>
-                            h33(
-                              "label",
-                              { key: day },
-                              h33("input", {
-                                type: "checkbox",
-                                name: "days",
-                                value: index,
-                                defaultChecked: (
-                                  row?.schedule.daysOfWeek || [1]
-                                ).includes(index),
-                              }),
-                              `周${day}`,
-                            ),
+                        h36(
+                          "fieldset",
+                          null,
+                          h36("legend", null, "执行日"),
+                          ...["日", "一", "二", "三", "四", "五", "六"].map(
+                            (day, index) =>
+                              h36(
+                                "label",
+                                { key: day },
+                                h36("input", {
+                                  type: "checkbox",
+                                  name: "days",
+                                  value: index,
+                                  defaultChecked: (
+                                    row?.schedule.daysOfWeek || [1]
+                                  ).includes(index),
+                                }),
+                                `周${day}`,
+                              ),
+                          ),
+                        ),
+                        field(
+                          "执行时间",
+                          h36(Input2, {
+                            type: "time",
+                            name: "time",
+                            required: true,
+                            defaultValue: `${String(row?.schedule.hour ?? 9).padStart(2, "0")}:${String(row?.schedule.minute ?? 0).padStart(2, "0")}`,
+                          }),
                         ),
                       ),
-                      field(
-                        "执行时间",
-                        h33(Input2, {
-                          type: "time",
-                          name: "time",
-                          required: true,
-                          defaultValue: `${String(row?.schedule.hour ?? 9).padStart(2, "0")}:${String(row?.schedule.minute ?? 0).padStart(2, "0")}`,
-                        }),
-                      ),
-                    ),
-              ),
+                ),
           field(
             "执行方式",
-            h33(Select2, {
+            h36(Select2, {
               value: mode,
               onChange: (e) => setMode(e.target.value),
               options: [
@@ -2694,7 +2915,7 @@ window.__ModuleLoader__.load({
           mode === "existing"
             ? field(
                 "继续的对话",
-                h33(Select2, {
+                h36(Select2, {
                   name: "conversationId",
                   required: true,
                   defaultValue: row?.conversationId || "",
@@ -2714,7 +2935,7 @@ window.__ModuleLoader__.load({
             : null,
           field(
             "结果通知",
-            h33(Select2, {
+            h36(Select2, {
               name: "notificationPolicy",
               defaultValue: row?.notificationPolicy || "always",
               options: [
@@ -2724,10 +2945,10 @@ window.__ModuleLoader__.load({
               ],
             }),
           ),
-          h33(
+          h36(
             "label",
             { className: "workagent-inline" },
-            h33("input", {
+            h36("input", {
               name: "messageNotificationEnabled",
               type: "checkbox",
               checked: messageNotificationEnabled,
@@ -2739,7 +2960,7 @@ window.__ModuleLoader__.load({
           messageNotificationEnabled
             ? field(
                 "消息提醒到",
-                h33(Select2, {
+                h36(Select2, {
                   name: "messageNotificationTargetId",
                   required: true,
                   defaultValue:
@@ -2756,16 +2977,16 @@ window.__ModuleLoader__.load({
               )
             : null,
           messageNotificationEnabled && !(notifications?.targets || []).length
-            ? h33(
+            ? h36(
                 "p",
                 { className: "workagent-muted workagent-automation-wide" },
                 "暂无可选聊天。请先到“消息渠道”连接账号，并在目标聊天中给机器人发送一条消息。",
               )
             : null,
-          h33(
+          h36(
             "label",
             null,
-            h33("input", {
+            h36("input", {
               name: "enabled",
               type: "checkbox",
               defaultChecked: row?.enabled ?? true,
@@ -2773,17 +2994,17 @@ window.__ModuleLoader__.load({
             "启用任务",
           ),
           error
-            ? h33("p", { role: "alert", className: "workagent-error" }, error)
+            ? h36("p", { role: "alert", className: "workagent-error" }, error)
             : null,
-          h33(
+          h36(
             "footer",
             { className: "workagent-automation-form-footer" },
-            h33(
+            h36(
               Button2,
               { type: "button", onClick: cancel, disabled: busy },
               "取消",
             ),
-            h33(
+            h36(
               Button2,
               {
                 type: "submit",
@@ -2805,11 +3026,11 @@ window.__ModuleLoader__.load({
         const [notifications] = useResource2(
           `${apiRoot2}/completion-notifications`,
         );
-        const [editing, setEditing] = React37.useState(void 0);
-        const [editorRevision, setEditorRevision] = React37.useState(0);
-        const [history2, setHistory] = React37.useState({});
-        const [error, setError] = React37.useState("");
-        const [busy, setBusy] = React37.useState(false);
+        const [editing, setEditing] = React40.useState(void 0);
+        const [editorRevision, setEditorRevision] = React40.useState(0);
+        const [history2, setHistory] = React40.useState({});
+        const [error, setError] = React40.useState("");
+        const [busy, setBusy] = React40.useState(false);
         async function action(path, method, body) {
           setBusy(true);
           setError("");
@@ -2835,22 +3056,26 @@ window.__ModuleLoader__.load({
             setError(friendlyError2(reason.message));
           }
         }
-        return h33(
+        return h36(
           Section2,
           { title: "定时任务" },
           confirmation,
-          h33(
+          h36(
             "header",
             { className: "workagent-automation-intro" },
-            h33(
+            h36(
               "div",
               null,
-              h33("h3", null, "让日常工作，自动进行"),
-              h33("p", null, "按间隔、每周或 Cron 执行，可持续使用同一对话。"),
+              h36("h3", null, "让日常工作，自动进行"),
+              h36(
+                "p",
+                null,
+                "按指定时间一次执行，或按间隔、每周、Cron 重复执行。",
+              ),
             ),
           ),
           editing !== null
-            ? h33(Editor, {
+            ? h36(Editor, {
                 key: editing?.id || `new-${editorRevision}`,
                 row: editing,
                 presets: presets.rows,
@@ -2865,7 +3090,7 @@ window.__ModuleLoader__.load({
                 },
                 cancel: () => setEditing(null),
               })
-            : h33(
+            : h36(
                 Button2,
                 {
                   className:
@@ -2874,27 +3099,27 @@ window.__ModuleLoader__.load({
                 },
                 "新建定时任务",
               ),
-          h33(Status2, { state }),
+          h36(Status2, { state }),
           error
-            ? h33("p", { role: "alert", className: "workagent-error" }, error)
+            ? h36("p", { role: "alert", className: "workagent-error" }, error)
             : null,
           ...state.rows.map((row) =>
-            h33(
+            h36(
               Card2,
               {
                 key: row.id,
                 className: "workagent-automation-card",
                 "data-enabled": row.enabled,
                 title: row.name,
-                detail: h33(
-                  React37.Fragment,
+                detail: h36(
+                  React40.Fragment,
                   null,
-                  h33(
+                  h36(
                     "span",
                     { className: "workagent-automation-state" },
                     row.enabled ? "已启用" : "已暂停",
                   ),
-                  h33(
+                  h36(
                     "span",
                     null,
                     row.nextRunAt
@@ -2903,12 +3128,12 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               },
-              h33(
+              h36(
                 Button2,
                 { disabled: busy, onClick: () => setEditing(row) },
                 "编辑任务",
               ),
-              h33(
+              h36(
                 Button2,
                 {
                   disabled: busy,
@@ -2925,7 +3150,7 @@ window.__ModuleLoader__.load({
                 },
                 row.enabled ? "暂停" : "启用",
               ),
-              h33(
+              h36(
                 Button2,
                 {
                   disabled: busy,
@@ -2940,7 +3165,7 @@ window.__ModuleLoader__.load({
                 },
                 "立即运行",
               ),
-              h33(
+              h36(
                 Button2,
                 {
                   className: "workagent-button workagent-automation-history",
@@ -2948,7 +3173,7 @@ window.__ModuleLoader__.load({
                 },
                 "运行记录",
               ),
-              h33(
+              h36(
                 Button2,
                 {
                   disabled: busy,
@@ -2970,23 +3195,30 @@ window.__ModuleLoader__.load({
                 "删除",
               ),
               history2[row.id]
-                ? h33(
+                ? h36(
                     "div",
                     { className: "workagent-run-history" },
                     history2[row.id].length
                       ? history2[row.id].map((run) =>
-                          h33(
+                          h36(
                             "article",
                             { key: run.id },
-                            h33(
+                            h36(
                               "strong",
                               null,
                               runLabels[run.status] || run.status,
                             ),
                             " · ",
                             new Date(run.createdAt).toLocaleString(),
+                            run.status === "waiting"
+                              ? h36(
+                                  "p",
+                                  { role: "status" },
+                                  `目标对话正在工作，${new Date(run.notBefore).toLocaleString()} 再尝试（${run.busyRetryCount}/3）。尚未发送请求。`,
+                                )
+                              : null,
                             run.sessionId
-                              ? h33(
+                              ? h36(
                                   "a",
                                   {
                                     href: `/?frontend=dsh&session=${encodeURIComponent(run.sessionId)}`,
@@ -2995,29 +3227,31 @@ window.__ModuleLoader__.load({
                                 )
                               : null,
                             run.error
-                              ? h33(
+                              ? h36(
                                   "p",
                                   { className: "workagent-error" },
                                   friendlyError2(run.error),
                                 )
                               : null,
                             run.result
-                              ? h33(
+                              ? h36(
                                   "details",
                                   null,
-                                  h33("summary", null, "执行结果"),
-                                  h33("pre", null, run.result),
+                                  h36("summary", null, "执行结果"),
+                                  h36("pre", null, run.result),
                                 )
                               : null,
                             run.skillSuggestionPath
-                              ? h33(SkillSuggestion, {
+                              ? h36(SkillSuggestion, {
                                   row,
                                   run,
                                   saved: refresh,
                                 })
                               : null,
-                            ["pending", "running"].includes(run.status)
-                              ? h33(
+                            ["pending", "waiting", "running"].includes(
+                              run.status,
+                            )
+                              ? h36(
                                   Button2,
                                   {
                                     disabled: busy,
@@ -3034,7 +3268,7 @@ window.__ModuleLoader__.load({
                               : null,
                           ),
                         )
-                      : h33("p", null, "暂无运行记录"),
+                      : h36("p", null, "暂无运行记录"),
                   )
                 : null,
             ),
@@ -3045,9 +3279,9 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/automations/page.js
-    var import_react13 = __toESM(require("react"), 1);
+    var import_react14 = __toESM(require("react"), 1);
     var AutomationsPage = createAutomations({
-      React: import_react13.default,
+      React: import_react14.default,
       request,
       apiRoot,
       useResource,
@@ -3063,12 +3297,12 @@ window.__ModuleLoader__.load({
     });
 
     // src/features/conversations/preferences.js
-    var import_react14 = __toESM(require("react"), 1);
-    var import_react15 = require("react");
+    var import_react15 = __toESM(require("react"), 1);
+    var import_react16 = require("react");
     var conversationSettings;
     var UPLOAD_PROJECT_KEY = "workagent.upload-to-project";
     function useUploadToProject() {
-      return import_react14.default.useSyncExternalStore(
+      return import_react15.default.useSyncExternalStore(
         (listener) => {
           window.addEventListener("workagent:upload-preference", listener);
           window.addEventListener("storage", listener);
@@ -3082,24 +3316,24 @@ window.__ModuleLoader__.load({
     }
     function UploadSettings() {
       const enabled = useUploadToProject();
-      return (0, import_react15.createElement)(
+      return (0, import_react16.createElement)(
         "label",
         { className: "workagent-busy-setting" },
-        (0, import_react15.createElement)(
+        (0, import_react16.createElement)(
           "div",
           null,
-          (0, import_react15.createElement)(
+          (0, import_react16.createElement)(
             "strong",
             null,
             "上传文件保存到当前项目",
           ),
-          (0, import_react15.createElement)(
+          (0, import_react16.createElement)(
             "p",
             { className: "workagent-muted" },
             "开启后保存到项目根目录；关闭后作为会话附件保留。仅影响之后的上传。",
           ),
         ),
-        (0, import_react15.createElement)(Switch, {
+        (0, import_react16.createElement)(Switch, {
           "aria-label": "上传文件保存到当前项目",
           checked: enabled,
           onChange: (checked) => {
@@ -3110,7 +3344,7 @@ window.__ModuleLoader__.load({
       );
     }
     function useBusyEnter() {
-      return import_react14.default.useSyncExternalStore(
+      return import_react15.default.useSyncExternalStore(
         (listener) => conversationSettings.subscribe(listener),
         () =>
           conversationSettings.getSnapshot().value?.busyEnter === "steer"
@@ -3120,24 +3354,24 @@ window.__ModuleLoader__.load({
     }
     function BusyEnterSettings() {
       const behavior = useBusyEnter();
-      return (0, import_react15.createElement)(
+      return (0, import_react16.createElement)(
         "div",
         { className: "workagent-busy-setting" },
-        (0, import_react15.createElement)(
+        (0, import_react16.createElement)(
           "div",
           null,
-          (0, import_react15.createElement)(
+          (0, import_react16.createElement)(
             "strong",
             null,
             "任务运行时的发送方式",
           ),
-          (0, import_react15.createElement)(
+          (0, import_react16.createElement)(
             "p",
             { className: "workagent-muted" },
             "发送按钮和 Enter 使用此设置；Ctrl/Cmd + Enter 临时使用另一种方式。",
           ),
         ),
-        (0, import_react15.createElement)(Select, {
+        (0, import_react16.createElement)(Select, {
           "aria-label": "任务运行时的发送方式",
           value: behavior,
           onChange: (event) =>
@@ -3154,7 +3388,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/conversations/message-delivery.js
-    function createMessageDelivery(React37) {
+    function createMessageDelivery(React40) {
       const sessions = /* @__PURE__ */ new Map();
       const listeners = /* @__PURE__ */ new Set();
       const key = (id) => `workagent.draft.delivery.${id}`;
@@ -3206,12 +3440,12 @@ window.__ModuleLoader__.load({
         if (remaining.length !== rows.length) set(id, remaining);
       }
       function useRows(id) {
-        return React37.useSyncExternalStore(
-          React37.useCallback((listener) => {
+        return React40.useSyncExternalStore(
+          React40.useCallback((listener) => {
             listeners.add(listener);
             return () => listeners.delete(listener);
           }, []),
-          React37.useCallback(() => get(id), [id]),
+          React40.useCallback(() => get(id), [id]),
         );
       }
       return { get, update, reconcile, useRows };
@@ -3256,15 +3490,15 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/conversations/state.js
-    var import_react16 = __toESM(require("react"), 1);
+    var import_react17 = __toESM(require("react"), 1);
     var conversationCache = createConversationCache();
-    var messageDelivery = createMessageDelivery(import_react16.default);
+    var messageDelivery = createMessageDelivery(import_react17.default);
     var SESSIONS_CHANGED_EVENT = "workagent:sessions-changed";
     var SESSION_SEEN_PREFIX = "workagent.session-seen.";
 
     // src/features/conversations/runtime.js
-    var import_react17 = __toESM(require("react"), 1);
-    var RuntimeServices = import_react17.default.createContext(null);
+    var import_react18 = __toESM(require("react"), 1);
+    var RuntimeServices = import_react18.default.createContext(null);
     var standardSessionApi = (ctx) => ctx.connection?.api?.sessions;
     var hasStandardSessions = (ctx) =>
       Boolean(ctx.sessions?.binding && standardSessionApi(ctx));
@@ -3312,17 +3546,17 @@ window.__ModuleLoader__.load({
       return rpcValue(await api[action](payload));
     }
     function useNativeConversation(ctx, sessionId2, enabled) {
-      const [state, setState] = import_react17.default.useState(() => ({
+      const [state, setState] = import_react18.default.useState(() => ({
         value: conversationCache.get(sessionId2, "native"),
         loading: !conversationCache.get(sessionId2, "native"),
         error: "",
       }));
-      const refresh = import_react17.default.useRef(async () => {});
-      const reload = import_react17.default.useCallback(
+      const refresh = import_react18.default.useRef(async () => {});
+      const reload = import_react18.default.useCallback(
         () => refresh.current(),
         [],
       );
-      import_react17.default.useEffect(() => {
+      import_react18.default.useEffect(() => {
         if (!enabled) return;
         let disposed = false;
         let revision = 0;
@@ -3480,13 +3714,13 @@ window.__ModuleLoader__.load({
       };
     }
     function createUploads({
-      React: React37,
+      React: React40,
       request: request2,
       apiRoot: apiRoot2,
       friendlyError: friendlyError2,
       workspaceEndpoint,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       const endpoint2 = (id) =>
         workspaceEndpoint
           ? `${workspaceEndpoint(id)}/uploads`
@@ -3589,11 +3823,11 @@ window.__ModuleLoader__.load({
       }
       const uploadFiles = createUploadBatch(uploadFile, friendlyError2);
       function Panel({ workspaceId, onChanged }) {
-        const [rows, setRows] = React37.useState([]);
-        const [progress, setProgress] = React37.useState({});
-        const [error, setError] = React37.useState("");
-        const [active, setActive] = React37.useState(null);
-        const control = React37.useRef(null);
+        const [rows, setRows] = React40.useState([]);
+        const [progress, setProgress] = React40.useState({});
+        const [error, setError] = React40.useState("");
+        const [active, setActive] = React40.useState(null);
+        const control = React40.useRef(null);
         async function refresh() {
           try {
             setRows(await request2(endpoint2(workspaceId)));
@@ -3602,7 +3836,7 @@ window.__ModuleLoader__.load({
             setError(friendlyError2(reason.message));
           }
         }
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           let live = true;
           request2(endpoint2(workspaceId))
             .then((rows2) => {
@@ -3647,38 +3881,38 @@ window.__ModuleLoader__.load({
           }
         }
         if (!rows.length && !error) return null;
-        return h33(
+        return h36(
           "details",
           { className: "workagent-upload-sessions" },
-          h33(
+          h36(
             "summary",
             null,
-            h33("span", null, "待继续上传"),
-            h33("small", null, rows.length),
+            h36("span", null, "待继续上传"),
+            h36("small", null, rows.length),
           ),
-          h33("button", { type: "button", onClick: refresh }, "刷新上传列表"),
-          h33("p", null, "重新选择原文件可继续；未完成上传保留 7 天。"),
-          error ? h33("p", { role: "alert" }, error) : null,
+          h36("button", { type: "button", onClick: refresh }, "刷新上传列表"),
+          h36("p", null, "重新选择原文件可继续；未完成上传保留 7 天。"),
+          error ? h36("p", { role: "alert" }, error) : null,
           ...rows.map((row) =>
-            h33(
+            h36(
               "article",
               { key: row.id },
-              h33("strong", null, row.name),
-              h33("progress", {
+              h36("strong", null, row.name),
+              h36("progress", {
                 max: row.size || 1,
                 value: progress[row.id] ?? row.offset,
                 "aria-label": `${row.name} 上传进度`,
               }),
-              h33(
+              h36(
                 "span",
                 null,
                 `${Math.round((100 * (progress[row.id] ?? row.offset)) / (row.size || 1))}%`,
               ),
-              h33(
+              h36(
                 "label",
                 null,
                 "继续上传",
-                h33("input", {
+                h36("input", {
                   type: "file",
                   className: "workagent-upload-resume-input",
                   "aria-label": `继续上传 ${row.name}`,
@@ -3690,12 +3924,12 @@ window.__ModuleLoader__.load({
                 }),
               ),
               active === row.id
-                ? h33(
+                ? h36(
                     "button",
                     { type: "button", onClick: () => control.current?.abort() },
                     "暂停上传",
                   )
-                : h33(
+                : h36(
                     "button",
                     {
                       type: "button",
@@ -3721,13 +3955,13 @@ window.__ModuleLoader__.load({
         );
       }
       function Area({ workspaceId, directory, onChanged, children, ...props }) {
-        const input = React37.useRef(null);
-        const control = React37.useRef(null);
-        const live = React37.useRef(true);
-        const [progress, setProgress] = React37.useState(null);
-        const [error, setError] = React37.useState("");
-        const [dragging, setDragging] = React37.useState(false);
-        React37.useEffect(() => {
+        const input = React40.useRef(null);
+        const control = React40.useRef(null);
+        const live = React40.useRef(true);
+        const [progress, setProgress] = React40.useState(null);
+        const [error, setError] = React40.useState("");
+        const [dragging, setDragging] = React40.useState(false);
+        React40.useEffect(() => {
           live.current = true;
           return () => {
             live.current = false;
@@ -3763,7 +3997,7 @@ window.__ModuleLoader__.load({
           event.dataTransfer.dropEffect = control.current ? "none" : "copy";
           setDragging(true);
         };
-        return h33(
+        return h36(
           "div",
           {
             ...props,
@@ -3782,10 +4016,10 @@ window.__ModuleLoader__.load({
               void add([...event.dataTransfer.files]);
             },
           },
-          h33(
+          h36(
             "div",
             { className: "workagent-file-toolbar" },
-            h33(
+            h36(
               "button",
               {
                 type: "button",
@@ -3795,14 +4029,14 @@ window.__ModuleLoader__.load({
               },
               "上传文件",
             ),
-            h33(
+            h36(
               "span",
               { role: "status" },
               dragging
                 ? "松开以上传到当前文件夹"
                 : `可拖入文件，单个最大 ${UPLOAD_SIZE_LABEL}`,
             ),
-            h33("input", {
+            h36("input", {
               ref: input,
               type: "file",
               hidden: true,
@@ -3816,24 +4050,24 @@ window.__ModuleLoader__.load({
             }),
           ),
           progress
-            ? h33(
+            ? h36(
                 "div",
                 { className: "workagent-upload-progress" },
                 progress.name,
-                h33("progress", {
+                h36("progress", {
                   max: progress.size || 1,
                   value: progress.bytes,
                   "aria-label": "上传进度",
                 }),
-                h33(
+                h36(
                   "button",
                   { type: "button", onClick: () => control.current?.abort() },
                   "暂停上传",
                 ),
               )
             : null,
-          error ? h33("p", { role: "alert" }, error) : null,
-          h33(Panel, { workspaceId, onChanged }),
+          error ? h36("p", { role: "alert" }, error) : null,
+          h36(Panel, { workspaceId, onChanged }),
           children,
         );
       }
@@ -3841,7 +4075,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/files/api.js
-    var import_react18 = __toESM(require("react"), 1);
+    var import_react19 = __toESM(require("react"), 1);
     var FILE_PROJECT_EVENT = "workagent:files-project";
     var FILES_CHANGED_EVENT = "workagent:files-changed";
     var fileParent = (path) => path.split("/").slice(0, -1).join("/");
@@ -3858,7 +4092,7 @@ window.__ModuleLoader__.load({
     ) =>
       `${workspaceFileRoot(workspaceId)}/content?path=${encodeURIComponent(path)}${preview ? "&preview=1" : ""}${fileId ? `&fileId=${encodeURIComponent(fileId)}` : ""}${historical ? "&reference=1" : ""}`;
     var uploads = createUploads({
-      React: import_react18.default,
+      React: import_react19.default,
       request,
       apiRoot,
       friendlyError,
@@ -3871,7 +4105,7 @@ window.__ModuleLoader__.load({
           ? `${(size / 1024).toFixed(1)} KB`
           : `${(size / 1024 / 1024).toFixed(1)} MB`;
 
-    // ../contracts/dist/file-reference.js
+    // ../../../../../packages/contracts/dist/file-reference.js
     function fileReferenceText(reference) {
       return `项目文件：${JSON.stringify(reference)}`;
     }
@@ -4007,11 +4241,11 @@ window.__ModuleLoader__.load({
       return text;
     }
     function createFileComposer({
-      React: React37,
+      React: React40,
       fileURL: fileURL2,
       openFile,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       function fragment(value, workspaceId) {
         const result = document.createDocumentFragment();
         for (const part of fileReferenceParts(value)) {
@@ -4073,11 +4307,11 @@ window.__ModuleLoader__.load({
         className = "",
         ...props
       }) {
-        const ref = React37.useRef(null);
-        const savedRange = React37.useRef(null);
-        const change = React37.useRef(onChange);
+        const ref = React40.useRef(null);
+        const savedRange = React40.useRef(null);
+        const change = React40.useRef(onChange);
         change.current = onChange;
-        const history2 = React37.useRef({
+        const history2 = React40.useRef({
           current: value,
           past: [],
           future: [],
@@ -4158,7 +4392,7 @@ window.__ModuleLoader__.load({
           remember();
           changed();
         }
-        React37.useLayoutEffect(() => {
+        React40.useLayoutEffect(() => {
           const editor = ref.current;
           if (history2.current.current !== value) {
             if (!value)
@@ -4179,7 +4413,7 @@ window.__ModuleLoader__.load({
           }
           editor.dataset.empty = String(!value);
         }, [value, workspaceId]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           const editor = ref.current;
           editor.workagentInsertReference = insert;
           const before = (event) => {
@@ -4194,10 +4428,10 @@ window.__ModuleLoader__.load({
             editor.removeEventListener("beforeinput", before);
           };
         });
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (autoFocus) ref.current.focus();
         }, []);
-        return h33("div", {
+        return h36("div", {
           ...props,
           ref,
           className: `workagent-composer-input ${className}`,
@@ -4305,7 +4539,7 @@ window.__ModuleLoader__.load({
 
     // src/features/content/workbench.js
     function createWorkbench({
-      React: React37,
+      React: React40,
       navigate = (href) => location.assign(href),
       friendlyError: friendlyError2 = (value) => value,
       reasoningLabel: reasoningLabel2 = (option) => option.name || option.id,
@@ -4320,9 +4554,9 @@ window.__ModuleLoader__.load({
       Icon: Icon2,
       useUploadToProject: useUploadToProject2 = () => true,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       const button = (label, onClick, props = {}) =>
-        h33("button", { type: "button", onClick, ...props }, label);
+        h36("button", { type: "button", onClick, ...props }, label);
       async function openFile(reference) {
         const entry = await request2(
           `${workspaceEndpoint(reference.workspaceId)}/locate?path=${encodeURIComponent(reference.path)}&reference=1${reference.fileId ? `&fileId=${encodeURIComponent(reference.fileId)}` : ""}`,
@@ -4334,7 +4568,7 @@ window.__ModuleLoader__.load({
         );
       }
       const FileComposer = createFileComposer({
-        React: React37,
+        React: React40,
         fileURL: fileURL2,
         openFile: (reference) =>
           openFile(reference).catch((error) =>
@@ -4355,7 +4589,7 @@ window.__ModuleLoader__.load({
       };
       function useDraft(sessionId2, authorized = true) {
         const key = authorized ? `workagent.draft.${sessionId2}` : null;
-        const [state, update] = React37.useState(() => ({
+        const [state, update] = React40.useState(() => ({
           key,
           text: key ? readStored(sessionStorage, key, "") : "",
         }));
@@ -4365,7 +4599,7 @@ window.__ModuleLoader__.load({
             : key
               ? readStored(sessionStorage, key, "")
               : "";
-        const set = React37.useCallback(
+        const set = React40.useCallback(
           (value) =>
             update((current) => {
               if (!key) return current;
@@ -4394,17 +4628,17 @@ window.__ModuleLoader__.load({
       }
       let mermaidPromise;
       function Mermaid({ code }) {
-        const [result, setResult] = React37.useState(null);
-        const [source, setSource] = React37.useState(false);
-        const [theme, setTheme] = React37.useState(() =>
+        const [result, setResult] = React40.useState(null);
+        const [source, setSource] = React40.useState(false);
+        const [theme, setTheme] = React40.useState(() =>
           isDarkTheme() ? "dark" : "default",
         );
-        React37.useEffect(
+        React40.useEffect(
           () => watchTheme((dark) => setTheme(dark ? "dark" : "default")),
           [],
         );
-        const id = React37.useId().replaceAll(":", "");
-        React37.useEffect(() => {
+        const id = React40.useId().replaceAll(":", "");
+        React40.useEffect(() => {
           let live = true;
           setResult(null);
           const mermaidURL =
@@ -4440,16 +4674,16 @@ window.__ModuleLoader__.load({
             live = false;
           };
         }, [code, id, theme]);
-        return h33(
+        return h36(
           "figure",
           { className: "workagent-diagram" },
           button(source ? "图表" : "Mermaid 源码", () => setSource(!source)),
           source || result?.error
-            ? h33(primitives2.CodeBlock, { code, lang: "mermaid" })
+            ? h36(primitives2.CodeBlock, { code, lang: "mermaid" })
             : result?.svg
-              ? h33("div", { dangerouslySetInnerHTML: { __html: result.svg } })
-              : h33("p", { role: "status" }, "正在绘制图表…"),
-          result?.error ? h33("figcaption", null, result.error) : null,
+              ? h36("div", { dangerouslySetInnerHTML: { __html: result.svg } })
+              : h36("p", { role: "status" }, "正在绘制图表…"),
+          result?.error ? h36("figcaption", null, result.error) : null,
         );
       }
       function workspaceDestination(value, workspaceId) {
@@ -4482,10 +4716,10 @@ window.__ModuleLoader__.load({
         ).href;
       }
       function Markdown2({ children, streaming = false, workspaceId }) {
-        const [error, setError] = React37.useState("");
-        const root = React37.useRef(null);
+        const [error, setError] = React40.useState("");
+        const root = React40.useRef(null);
         const text = String(children || "");
-        React37.useLayoutEffect(() => {
+        React40.useLayoutEffect(() => {
           for (const anchor of root.current.querySelectorAll("a[href]")) {
             const url = new URL(anchor.href, location.origin);
             if (
@@ -4508,7 +4742,7 @@ window.__ModuleLoader__.load({
                 chunk,
               );
             if (diagram && !streaming)
-              diagrams.push(h33(Mermaid, { key: index, code: diagram[2] }));
+              diagrams.push(h36(Mermaid, { key: index, code: diagram[2] }));
             if (index % 2) return chunk;
             return fileReferenceParts(chunk)
               .map((part) => {
@@ -4543,7 +4777,7 @@ window.__ModuleLoader__.load({
               );
           })
           .join("");
-        return h33(
+        return h36(
           "div",
           {
             className: "workagent-markdown",
@@ -4608,18 +4842,18 @@ window.__ModuleLoader__.load({
               }
             },
           },
-          h33(primitives2.MarkdownText, {
+          h36(primitives2.MarkdownText, {
             text: rendered,
             streaming,
             codeLabels: { copyLabel: "复制代码", copiedLabel: "已复制" },
           }),
           ...diagrams,
-          error ? h33("small", { role: "alert" }, error) : null,
+          error ? h36("small", { role: "alert" }, error) : null,
         );
       }
       function FileLocation({ workspaceId, path, line, fileId }) {
-        const [error, setError] = React37.useState("");
-        return h33(
+        const [error, setError] = React40.useState("");
+        return h36(
           "span",
           null,
           button(`${path}${line ? `:${line}` : ""}`, async () => {
@@ -4643,19 +4877,19 @@ window.__ModuleLoader__.load({
               setError(friendlyError2(reason.message));
             }
           }),
-          error ? h33("small", { role: "alert" }, error) : null,
+          error ? h36("small", { role: "alert" }, error) : null,
         );
       }
       function Artifacts({ sessionId: sessionId2, workspaceId, revision }) {
-        const [rows, setRows] = React37.useState([]);
-        const [fileRevision, setFileRevision] = React37.useState(0);
-        React37.useEffect(() => {
+        const [rows, setRows] = React40.useState([]);
+        const [fileRevision, setFileRevision] = React40.useState(0);
+        React40.useEffect(() => {
           const update = () => setFileRevision((value) => value + 1);
           window.addEventListener("workagent:files-changed", update);
           return () =>
             window.removeEventListener("workagent:files-changed", update);
         }, []);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!workspaceId || !sessionId2) return;
           const controller = new AbortController();
           request2(
@@ -4670,20 +4904,20 @@ window.__ModuleLoader__.load({
           return () => controller.abort();
         }, [sessionId2, workspaceId, revision, fileRevision]);
         return rows.length
-          ? h33(
+          ? h36(
               "details",
               { className: "workagent-artifacts" },
-              h33("summary", null, `会话产物 · ${rows.length}`),
+              h36("summary", null, `会话产物 · ${rows.length}`),
               ...rows.map((row) =>
-                h33(
+                h36(
                   "div",
                   { key: row.id },
-                  h33(FileLocation, {
+                  h36(FileLocation, {
                     workspaceId,
                     path: row.path,
                     fileId: row.fileId,
                   }),
-                  h33(
+                  h36(
                     "a",
                     {
                       href: fileURL2(
@@ -4705,15 +4939,15 @@ window.__ModuleLoader__.load({
       function Tools({ tools = {}, workspaceId }) {
         const rows = Object.values(tools);
         if (!rows.length) return null;
-        return h33(
+        return h36(
           "details",
           { className: "workagent-tool-history" },
-          h33("summary", null, `工具过程 · ${rows.length}`),
+          h36("summary", null, `工具过程 · ${rows.length}`),
           rows.map((tool) =>
-            h33(
+            h36(
               "details",
               { key: tool.toolCallId },
-              h33(
+              h36(
                 "summary",
                 null,
                 `${tool.tool || "工具"} · ${tool.type === "tool.completed" ? (tool.failed ? "失败" : "完成") : "未返回完成结果"}`,
@@ -4722,7 +4956,7 @@ window.__ModuleLoader__.load({
                 ? tool.locations
                     .filter((item) => typeof item?.path === "string")
                     .map((item, index) =>
-                      h33(FileLocation, {
+                      h36(FileLocation, {
                         key: index,
                         workspaceId,
                         path: item.path,
@@ -4733,11 +4967,11 @@ window.__ModuleLoader__.load({
               ["input", "output", "result", "locations", "raw"]
                 .filter((key) => tool[key] !== void 0)
                 .map((key) =>
-                  h33(
+                  h36(
                     "section",
                     { key },
-                    h33("strong", null, key),
-                    h33(primitives2.CodeBlock, {
+                    h36("strong", null, key),
+                    h36(primitives2.CodeBlock, {
                       code:
                         typeof tool[key] === "string"
                           ? tool[key]
@@ -4753,15 +4987,15 @@ window.__ModuleLoader__.load({
       function Process({ items }) {
         const rows = Object.values(items || {});
         if (!rows.length) return null;
-        return h33(
+        return h36(
           "details",
           { className: "workagent-process" },
-          h33("summary", null, "计划与过程"),
+          h36("summary", null, "计划与过程"),
           ...rows.map((row) =>
-            h33(
+            h36(
               "section",
               { key: row.processId },
-              h33(
+              h36(
                 "h4",
                 null,
                 row.kind === "plan"
@@ -4771,14 +5005,14 @@ window.__ModuleLoader__.load({
                     : "引擎过程摘要",
               ),
               row.text
-                ? h33("p", { style: { whiteSpace: "pre-wrap" } }, row.text)
+                ? h36("p", { style: { whiteSpace: "pre-wrap" } }, row.text)
                 : null,
               Array.isArray(row.data)
-                ? h33(
+                ? h36(
                     "ol",
                     null,
                     ...row.data.map((entry, index) =>
-                      h33(
+                      h36(
                         "li",
                         { key: index },
                         `${{ pending: "待开始", in_progress: "进行中", completed: "已完成" }[entry.status] || entry.status || ""} · ${entry.step || entry.content || ""}`,
@@ -4798,11 +5032,11 @@ window.__ModuleLoader__.load({
         answered = false,
         disabled = false,
       }) {
-        const heading = React37.useId();
+        const heading = React40.useId();
         const [reply, setReply] = useDraft(`${sessionId2}:question:${id}`);
-        const [pending, setPending] = React37.useState(false);
-        const [status, setStatus] = React37.useState("");
-        const sending = React37.useRef(false);
+        const [pending, setPending] = React40.useState(false);
+        const [status, setStatus] = React40.useState("");
+        const sending = React40.useRef(false);
         const submit = async (event) => {
           event.preventDefault();
           const content = reply.trim();
@@ -4822,7 +5056,7 @@ window.__ModuleLoader__.load({
           }
         };
         if (answered)
-          return h33(
+          return h36(
             "article",
             {
               id: `workagent-question-${id}`,
@@ -4830,14 +5064,14 @@ window.__ModuleLoader__.load({
               "data-message-id": id,
               "aria-label": "补充问题",
             },
-            h33(
+            h36(
               "details",
               null,
-              h33("summary", null, "✓ 已补充"),
-              ...React37.Children.toArray(children),
+              h36("summary", null, "✓ 已补充"),
+              ...React40.Children.toArray(children),
             ),
           );
-        return h33(
+        return h36(
           "article",
           {
             id: `workagent-question-${id}`,
@@ -4845,10 +5079,10 @@ window.__ModuleLoader__.load({
             "data-message-id": id,
             "aria-labelledby": heading,
           },
-          h33(
+          h36(
             "header",
             { className: "workagent-question-heading" },
-            h33(
+            h36(
               "svg",
               {
                 width: 18,
@@ -4861,21 +5095,21 @@ window.__ModuleLoader__.load({
                 strokeLinejoin: "round",
                 "aria-hidden": true,
               },
-              h33("path", {
+              h36("path", {
                 d: "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z",
               }),
-              h33("path", {
+              h36("path", {
                 d: "M10 8.5a2 2 0 0 1 4 .5c0 1.3-2 1.5-2 3M12 15h.01",
               }),
             ),
-            h33("span", { id: heading }, "补充问题"),
+            h36("span", { id: heading }, "补充问题"),
           ),
-          ...React37.Children.toArray(children),
+          ...React40.Children.toArray(children),
           onReply &&
-            h33(
+            h36(
               "form",
               { className: "workagent-question-reply", onSubmit: submit },
-              h33("textarea", {
+              h36("textarea", {
                 "aria-label": "回复补充问题",
                 placeholder: "在这里补充你的回答…",
                 rows: 2,
@@ -4886,11 +5120,11 @@ window.__ModuleLoader__.load({
                   setStatus("");
                 },
               }),
-              h33(
+              h36(
                 "div",
                 { className: "workagent-question-reply-footer" },
-                h33("span", { role: "status" }, status),
-                h33(
+                h36("span", { role: "status" }, status),
+                h36(
                   "button",
                   {
                     type: "submit",
@@ -4903,11 +5137,11 @@ window.__ModuleLoader__.load({
         );
       }
       function SessionReminder({ sessionId: sessionId2, onSaved }) {
-        const [state, setState] = React37.useState(null);
-        const [draft, setDraft] = React37.useState(null);
-        const [busy, setBusy] = React37.useState(false);
-        const [error, setError] = React37.useState("");
-        React37.useEffect(() => {
+        const [state, setState] = React40.useState(null);
+        const [draft, setDraft] = React40.useState(null);
+        const [busy, setBusy] = React40.useState(false);
+        const [error, setError] = React40.useState("");
+        React40.useEffect(() => {
           const controller = new AbortController();
           request2(`${apiRoot2}/completion-notifications`, {
             signal: controller.signal,
@@ -4940,11 +5174,11 @@ window.__ModuleLoader__.load({
           return () => controller.abort();
         }, [sessionId2]);
         if (!draft) return null;
-        return h33(
+        return h36(
           "div",
           { className: "workagent-session-reminder" },
-          h33("small", null, "提醒渠道"),
-          h33(
+          h36("small", null, "提醒渠道"),
+          h36(
             "select",
             {
               "aria-label": "当前会话接收聊天",
@@ -4956,21 +5190,21 @@ window.__ModuleLoader__.load({
                   targetId: event.target.value,
                 })),
             },
-            h33("option", { value: "" }, "选择接收聊天"),
+            h36("option", { value: "" }, "选择接收聊天"),
             ...(state?.targets || [])
               .filter((target) => target.connected)
               .map((target) =>
-                h33(
+                h36(
                   "option",
                   { key: target.id, value: target.id },
                   target.label,
                 ),
               ),
           ),
-          h33(
+          h36(
             "div",
             { className: "workagent-actions" },
-            h33(
+            h36(
               "button",
               {
                 type: "button",
@@ -5004,7 +5238,7 @@ window.__ModuleLoader__.load({
               busy ? "保存中…" : draft.enabled ? "确认" : "开启消息提醒",
             ),
             draft.enabled
-              ? h33(
+              ? h36(
                   "button",
                   {
                     type: "button",
@@ -5039,29 +5273,29 @@ window.__ModuleLoader__.load({
               : null,
           ),
           !(state?.targets || []).some((target) => target.connected)
-            ? h33(
+            ? h36(
                 "small",
                 null,
                 "暂无可选聊天，请先在消息渠道中连接账号，并从目标聊天给机器人发送一条消息。",
               )
             : null,
-          error ? h33("small", { role: "alert" }, error) : null,
+          error ? h36("small", { role: "alert" }, error) : null,
         );
       }
       function Controls({ ctx, session, busy, cancel }) {
-        const [permission, setPermission] = React37.useState(
+        const [permission, setPermission] = React40.useState(
           session?.permissionMode || "",
         );
-        React37.useEffect(
+        React40.useEffect(
           () => setPermission(session?.permissionMode || ""),
           [session?.permissionMode, session?.id],
         );
-        const [catalog, setCatalog] = React37.useState(null);
-        const [pending, setPending] = React37.useState([]);
-        const [saving, setSaving] = React37.useState(false);
-        const [error, setError] = React37.useState("");
+        const [catalog, setCatalog] = React40.useState(null);
+        const [pending, setPending] = React40.useState([]);
+        const [saving, setSaving] = React40.useState(false);
+        const [error, setError] = React40.useState("");
         const sessionId2 = session?.id;
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!sessionId2 || !ctx?.sessions?.binding) return;
           let live = true;
           Promise.all([
@@ -5085,7 +5319,7 @@ window.__ModuleLoader__.load({
             live = false;
           };
         }, [ctx, sessionId2, busy, session?.permissionMode]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!sessionId2) return;
           let live = true,
             timer;
@@ -5130,7 +5364,13 @@ window.__ModuleLoader__.load({
           try {
             await request2(
               `${apiRoot2}/interactions/${encodeURIComponent(item.id)}/respond`,
-              { method: "POST", body: JSON.stringify({ decision }) },
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  sessionId: sessionId2,
+                  ...(typeof decision === "string" ? { decision } : decision),
+                }),
+              },
             );
             setPending((rows) => rows.filter((row) => row.id !== item.id));
           } catch (reason) {
@@ -5144,14 +5384,14 @@ window.__ModuleLoader__.load({
         const model = groups
           .flatMap((group) => group.models)
           .find((row) => row.id === current?.model);
-        return h33(
+        return h36(
           "div",
           { className: "workagent-session-controls" },
           current
-            ? h33(
+            ? h36(
                 "label",
                 { className: "workagent-model-choice", title: model?.name },
-                h33(
+                h36(
                   "span",
                   {
                     className: "workagent-model-choice-label",
@@ -5159,7 +5399,7 @@ window.__ModuleLoader__.load({
                   },
                   model?.name || current.model,
                 ),
-                h33(
+                h36(
                   "select",
                   {
                     "aria-label": "当前会话模型",
@@ -5171,11 +5411,11 @@ window.__ModuleLoader__.load({
                     },
                   },
                   groups.map((group) =>
-                    h33(
+                    h36(
                       "optgroup",
                       { key: group.id, label: group.name },
                       group.models.map((row) =>
-                        h33(
+                        h36(
                           "option",
                           { key: row.id, value: `${group.id}/${row.id}` },
                           row.name,
@@ -5187,10 +5427,10 @@ window.__ModuleLoader__.load({
               )
             : null,
           model?.reasoning
-            ? h33(
+            ? h36(
                 "label",
                 null,
-                h33(
+                h36(
                   "select",
                   {
                     "aria-label": "当前会话思考强度",
@@ -5210,17 +5450,17 @@ window.__ModuleLoader__.load({
                     },
                   },
                   !current.reasoningEffort && !model.reasoning.defaultEffort
-                    ? h33(
+                    ? h36(
                         "option",
                         { value: "", disabled: true, hidden: true },
                         "思考强度",
                       )
                     : null,
-                  h33(
+                  h36(
                     "optgroup",
                     { label: "思考强度" },
                     model.reasoning.efforts.map((row) =>
-                      h33(
+                      h36(
                         "option",
                         { key: row.id, value: row.id },
                         reasoningLabel2(row),
@@ -5230,10 +5470,10 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          h33(
+          h36(
             "label",
             null,
-            h33(
+            h36(
               "select",
               {
                 "aria-label": "当前会话权限",
@@ -5264,66 +5504,97 @@ window.__ModuleLoader__.load({
                 },
               },
               !permission
-                ? h33(
+                ? h36(
                     "option",
                     { value: "", disabled: true, hidden: true },
                     "权限",
                   )
                 : null,
               permission === "manual_approval"
-                ? h33(
+                ? h36(
                     "option",
                     { value: "manual_approval", disabled: true, hidden: true },
                     "逐次确认",
                   )
                 : null,
-              h33(
+              h36(
                 "optgroup",
                 { label: "权限" },
-                h33("option", { value: "read_only" }, "只读"),
-                h33("option", { value: "workspace_write" }, "项目内读写"),
-                h33("option", { value: "full_access" }, "完全访问"),
+                ...[
+                  ["read_only", "只读"],
+                  ["workspace_write", "项目内读写"],
+                  ["full_access", "完全访问"],
+                ]
+                  .filter(
+                    ([id]) =>
+                      session?.engine !== "acp" ||
+                      session.acpSnapshot?.permissionModes?.[id],
+                  )
+                  .map(([id, label]) =>
+                    h36("option", { key: id, value: id }, label),
+                  ),
               ),
             ),
           ),
           pending.map((item) =>
-            h33(
+            h36(
               "section",
               {
                 className: "workagent-approval",
                 key: item.id,
                 "aria-label": "等待授权",
               },
-              h33("strong", null, `需要授权 · ${item.tool}`),
-              h33("p", null, item.summary),
+              h36("strong", null, `需要授权 · ${item.tool}`),
+              h36("p", null, item.summary),
               item.input !== void 0
-                ? h33(
+                ? h36(
                     "details",
                     null,
-                    h33("summary", null, "操作详情"),
-                    h33(primitives2.CodeBlock, {
+                    h36("summary", null, "操作详情"),
+                    h36(primitives2.CodeBlock, {
                       code: JSON.stringify(item.input, null, 2),
                       lang: "json",
                     }),
                   )
                 : null,
-              button("允许本次", () => void decide(item, "allow"), {
-                disabled: saving,
-              }),
-              button("拒绝", () => void decide(item, "reject"), {
-                disabled: saving,
-              }),
+              item.choices?.length
+                ? item.choices.map((choice) =>
+                    button(
+                      choice.label,
+                      () => void decide(item, { optionId: choice.id }),
+                      {
+                        key: choice.id,
+                        disabled: saving,
+                        title: {
+                          once: "仅本次操作",
+                          session: "在此会话中生效",
+                          rule: "保存此操作的授权规则",
+                          remember: "由引擎按选项说明记住此选择",
+                        }[choice.scope],
+                      },
+                    ),
+                  )
+                : [
+                    button("允许本次", () => void decide(item, "allow"), {
+                      key: "allow",
+                      disabled: saving,
+                    }),
+                    button("拒绝", () => void decide(item, "reject"), {
+                      key: "reject",
+                      disabled: saving,
+                    }),
+                  ],
               button("停止任务", cancel, { disabled: saving }),
             ),
           ),
-          error ? h33("span", { role: "alert" }, error) : null,
+          error ? h36("span", { role: "alert" }, error) : null,
         );
       }
       function usePins(key = "workagent.session-pins.v1") {
-        const [pins, setPins] = React37.useState(() =>
+        const [pins, setPins] = React40.useState(() =>
           readStored(localStorage, key, []),
         );
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           const update = (event) => {
             if (event.key === key || event.key === null)
               setPins(readStored(localStorage, key, []));
@@ -5353,12 +5624,12 @@ window.__ModuleLoader__.load({
         };
       }
       function Notifications({ sessions = [], settings = true }) {
-        const [enabled, setEnabled] = React37.useState(() =>
+        const [enabled, setEnabled] = React40.useState(() =>
           readStored(localStorage, "workagent.browser-notifications", false),
         );
-        const [error, setError] = React37.useState("");
-        const known = React37.useRef(/* @__PURE__ */ new Map());
-        React37.useEffect(() => {
+        const [error, setError] = React40.useState("");
+        const known = React40.useRef(/* @__PURE__ */ new Map());
+        React40.useEffect(() => {
           const sync = () =>
             setEnabled(
               readStored(
@@ -5374,7 +5645,7 @@ window.__ModuleLoader__.load({
             window.removeEventListener("workagent:notifications-changed", sync);
           };
         }, []);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!enabled || settings) return;
           let live = true,
             timer;
@@ -5415,7 +5686,7 @@ window.__ModuleLoader__.load({
             clearTimeout(timer);
           };
         }, [enabled, settings]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           for (const session of sessions) {
             const turn = session.lastTurn;
             const previous = known.current.get(session.id);
@@ -5452,7 +5723,7 @@ window.__ModuleLoader__.load({
           }
         }, [sessions, enabled]);
         if (!settings) return null;
-        return h33(
+        return h36(
           "div",
           { className: "workagent-browser-notifications" },
           button(enabled ? "关闭桌面提醒" : "开启桌面提醒", async () => {
@@ -5490,7 +5761,7 @@ window.__ModuleLoader__.load({
               setError("无法开启桌面提醒。");
             }
           }),
-          error ? h33("small", { role: "status" }, error) : null,
+          error ? h36("small", { role: "status" }, error) : null,
         );
       }
       function ComposerTools({
@@ -5501,41 +5772,128 @@ window.__ModuleLoader__.load({
         disabled,
         onBusyChange,
       }) {
-        const uploadInput = React37.useRef(null);
+        const uploadInput = React40.useRef(null);
         const uploadToProject = useUploadToProject2();
-        const uploadControl = React37.useRef(null);
-        const [uploadProgress, setUploadProgress] = React37.useState(null);
-        const [uploading, setUploading] = React37.useState(false);
-        const [directory, setDirectory] = React37.useState("");
-        const [entries, setEntries] = React37.useState([]);
-        const [filesOpen, setFilesOpen] = React37.useState(false);
-        const [commandsOpen, setCommandsOpen] = React37.useState(false);
+        const uploadControl = React40.useRef(null);
+        const [uploadProgress, setUploadProgress] = React40.useState(null);
+        const [uploading, setUploading] = React40.useState(false);
+        const [directory, setDirectory] = React40.useState("");
+        const [entries, setEntries] = React40.useState([]);
+        const [filesOpen, setFilesOpen] = React40.useState(false);
+        const [commandsOpen, setCommandsOpen] = React40.useState(false);
+        const [nativeCommands, setNativeCommands] = React40.useState([]);
+        const [fileCursor, setFileCursor] = React40.useState(null);
+        const [findingFiles, setFindingFiles] = React40.useState(false);
         const mention = /(?:^|\s)@([^\s]*)$/.exec(input)?.[1];
+        const slash = /^\/([^\s]*)$/.exec(input);
         const showingFiles = filesOpen || mention !== void 0;
         const workspaceId = session?.workspaceId;
-        const live = React37.useRef(true);
-        React37.useEffect(() => {
+        const fileSearchKey = React40.useRef("");
+        const fileSearch = React40.useRef(null);
+        const pageRequest = React40.useRef(null);
+        fileSearchKey.current = `${workspaceId}:${mention ?? ""}:${directory}`;
+        const live = React40.useRef(true);
+        React40.useEffect(() => {
           live.current = true;
           return () => {
             live.current = false;
             uploadControl.current?.abort();
           };
         }, []);
-        React37.useEffect(() => {
+        const releaseSearch = (workspace, cursor) => {
+          if (cursor)
+            void request2(
+              `${workspaceEndpoint(workspace)}/search?cursor=${encodeURIComponent(cursor)}`,
+              { method: "DELETE" },
+            ).catch(() => {});
+        };
+        React40.useEffect(() => {
           if (!showingFiles || !workspaceId) return;
           const abort = new AbortController();
+          const search = { workspaceId, cursor: null };
+          fileSearch.current = search;
+          setFindingFiles(true);
+          setFileCursor(null);
           request2(
-            `${workspaceEndpoint(workspaceId)}/files?path=${encodeURIComponent(directory)}`,
+            mention === void 0
+              ? `${workspaceEndpoint(workspaceId)}/files?path=${encodeURIComponent(directory)}`
+              : `${workspaceEndpoint(workspaceId)}/search?q=${encodeURIComponent(mention)}&limit=50`,
             { signal: abort.signal },
           )
             .then((rows) => {
-              if (!abort.signal.aborted) setEntries(rows);
+              if (abort.signal.aborted) {
+                releaseSearch(workspaceId, rows.nextCursor);
+              } else {
+                setEntries(Array.isArray(rows) ? rows : rows.items);
+                search.cursor = rows.nextCursor || null;
+                setFileCursor(rows.nextCursor || null);
+              }
             })
             .catch((error) => {
               if (!abort.signal.aborted) onError(error.message);
+            })
+            .finally(() => {
+              if (!abort.signal.aborted) setFindingFiles(false);
             });
-          return () => abort.abort();
-        }, [workspaceId, showingFiles, directory]);
+          return () => {
+            abort.abort();
+            pageRequest.current?.abort();
+            if (fileSearch.current === search) fileSearch.current = null;
+            releaseSearch(search.workspaceId, search.cursor);
+          };
+        }, [workspaceId, showingFiles, directory, mention]);
+        const nextFilePage = async () => {
+          const query = mention,
+            key = fileSearchKey.current,
+            search = fileSearch.current;
+          if (!search?.cursor) return;
+          pageRequest.current?.abort();
+          const abort = new AbortController();
+          pageRequest.current = abort;
+          setFindingFiles(true);
+          try {
+            const rows = await request2(
+              `${workspaceEndpoint(workspaceId)}/search?q=${encodeURIComponent(query || "")}&limit=50&cursor=${encodeURIComponent(search.cursor)}`,
+              { signal: abort.signal },
+            );
+            if (abort.signal.aborted || fileSearch.current !== search) {
+              releaseSearch(search.workspaceId, rows.nextCursor);
+              return;
+            }
+            setEntries((items) => [...items, ...rows.items]);
+            search.cursor = rows.nextCursor || null;
+            setFileCursor(rows.nextCursor || null);
+          } catch (error) {
+            if (!abort.signal.aborted) onError(friendlyError2(error.message));
+          } finally {
+            if (key === fileSearchKey.current) setFindingFiles(false);
+          }
+        };
+        React40.useEffect(() => {
+          setNativeCommands([]);
+          if ((!slash && !commandsOpen) || !session?.id) return;
+          const abort = new AbortController();
+          let timer;
+          const refresh = async () => {
+            try {
+              const catalog = await request2(
+                `${apiRoot2}/sessions/${encodeURIComponent(session.id)}/commands`,
+                { signal: abort.signal },
+              );
+              if (!abort.signal.aborted) setNativeCommands(catalog.items || []);
+            } catch (error) {
+              if (!abort.signal.aborted && error.status !== 404)
+                onError(friendlyError2(error.message));
+            } finally {
+              if (!abort.signal.aborted) timer = setTimeout(refresh, 2e3);
+            }
+          };
+          void refresh();
+          return () => {
+            abort.abort();
+            clearTimeout(timer);
+          };
+        }, [session?.id, Boolean(slash), commandsOpen]);
         const insert = async (path, savedEntry) => {
           let entry = savedEntry;
           try {
@@ -5608,7 +5966,7 @@ window.__ModuleLoader__.load({
             }
           }
         };
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           return bindComposerFiles(
             uploadInput.current,
             upload,
@@ -5623,9 +5981,16 @@ window.__ModuleLoader__.load({
           mention,
         ]);
         const skills = session?.preset?.resolvedSnapshot?.skillIds || [];
-        const slash = /^\/([^\s]*)$/.exec(input);
         const commands = [
           { id: "btw", label: "发起侧聊", text: "/btw " },
+          ...nativeCommands
+            .filter((row) => row.id !== "btw")
+            .map((row) => ({
+              id: row.id,
+              label: row.description || row.label,
+              text: `/${row.id} `,
+              inputHint: row.inputHint,
+            })),
           ...skills.map((id) => ({
             id,
             label: `使用已加载技能 ${id}`,
@@ -5636,7 +6001,7 @@ window.__ModuleLoader__.load({
           (row) =>
             !slash || row.id.toLowerCase().includes(slash[1].toLowerCase()),
         );
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           const form = uploadInput.current?.closest("form");
           if (!form) return;
           const navigate2 = (event) => {
@@ -5658,10 +6023,10 @@ window.__ModuleLoader__.load({
           form.addEventListener("keydown", navigate2, true);
           return () => form.removeEventListener("keydown", navigate2, true);
         }, []);
-        return h33(
+        return h36(
           "div",
           { className: "workagent-composer-tools" },
-          h33("input", {
+          h36("input", {
             ref: uploadInput,
             type: "file",
             multiple: true,
@@ -5674,7 +6039,7 @@ window.__ModuleLoader__.load({
             },
           }),
           button(
-            Icon2 ? h33(Icon2, { name: "plus", size: 18 }) : "+",
+            Icon2 ? h36(Icon2, { name: "plus", size: 18 }) : "+",
             () => uploadInput.current.click(),
             {
               disabled: disabled || uploading || !workspaceId,
@@ -5685,13 +6050,13 @@ window.__ModuleLoader__.load({
                 : "添加会话附件；支持粘贴和拖放",
             },
           ),
-          h33(Voice, { setInput, onError, disabled: disabled || uploading }),
+          h36(Voice, { setInput, onError, disabled: disabled || uploading }),
           uploadProgress
-            ? h33(
+            ? h36(
                 "div",
                 null,
                 uploadProgress.name,
-                h33("progress", {
+                h36("progress", {
                   max: uploadProgress.size || 1,
                   value: uploadProgress.bytes,
                 }),
@@ -5699,13 +6064,13 @@ window.__ModuleLoader__.load({
               )
             : null,
           showingFiles
-            ? h33(
+            ? h36(
                 "div",
                 {
                   className: "workagent-composer-menu",
                   "aria-label": "引用项目文件",
                 },
-                directory
+                directory && mention === void 0
                   ? button("上级目录", () =>
                       setDirectory(directory.split("/").slice(0, -1).join("/")),
                     )
@@ -5714,27 +6079,45 @@ window.__ModuleLoader__.load({
                   .filter(
                     (entry) =>
                       mention === void 0 ||
-                      entry.name.toLowerCase().includes(mention.toLowerCase()),
+                      entry.path.toLowerCase().includes(mention.toLowerCase()),
                   )
                   .map((entry) =>
                     button(
-                      `${entry.kind === "directory" ? "▸ " : ""}${entry.name}`,
+                      `${entry.kind === "directory" ? "▸ " : ""}${mention === void 0 ? entry.name : entry.path}`,
                       () => {
                         if (entry.kind === "directory")
                           setDirectory(entry.path);
                         else {
-                          insert(entry.path);
+                          insert(entry.path, entry);
                           setFilesOpen(false);
                         }
                       },
                       { key: entry.path },
                     ),
                   ),
-                entries.length ? null : h33("span", null, "此目录没有文件"),
+                findingFiles
+                  ? h36("span", { role: "status" }, "正在搜索…")
+                  : null,
+                fileCursor
+                  ? button("继续搜索", () => void nextFilePage(), {
+                      disabled: findingFiles,
+                    })
+                  : null,
+                entries.length || findingFiles
+                  ? null
+                  : h36(
+                      "span",
+                      null,
+                      mention === void 0
+                        ? "此目录没有文件"
+                        : fileCursor
+                          ? "已搜索部分目录，可继续搜索"
+                          : "没有匹配文件",
+                    ),
               )
             : null,
           slash || commandsOpen
-            ? h33(
+            ? h36(
                 "div",
                 {
                   className: "workagent-composer-menu",
@@ -5759,11 +6142,11 @@ window.__ModuleLoader__.load({
         );
       }
       function Voice({ setInput, onError, disabled }) {
-        const [capability, setCapability] = React37.useState(null);
-        const [state, setState] = React37.useState("idle");
-        const recording = React37.useRef(null);
-        const live = React37.useRef(true);
-        React37.useEffect(() => {
+        const [capability, setCapability] = React40.useState(null);
+        const [state, setState] = React40.useState("idle");
+        const recording = React40.useRef(null);
+        const live = React40.useRef(true);
+        React40.useEffect(() => {
           live.current = true;
           request2("/api/speech/capability")
             .then((value) => {
@@ -5891,17 +6274,17 @@ window.__ModuleLoader__.load({
       }) {
         const key = `workagent.file-draft.${workspaceId}.${fileId || path}`;
         const { confirm, confirmation } = useConfirm();
-        const [draft] = React37.useState(() =>
+        const [draft] = React40.useState(() =>
           readStored(sessionStorage, key, null),
         );
-        const [base] = React37.useState(draft?.base ?? original);
-        const [text, setText] = React37.useState(draft?.text ?? original);
-        const [diff, setDiff] = React37.useState(false);
-        const [busy, setBusy] = React37.useState(false);
-        const [error, setError] = React37.useState("");
+        const [base] = React40.useState(draft?.base ?? original);
+        const [text, setText] = React40.useState(draft?.text ?? original);
+        const [diff, setDiff] = React40.useState(false);
+        const [busy, setBusy] = React40.useState(false);
+        const [error, setError] = React40.useState("");
         const dirty = text !== base;
-        const leaseOwner = React37.useRef(crypto.randomUUID());
-        React37.useEffect(() => {
+        const leaseOwner = React40.useRef(crypto.randomUUID());
+        React40.useEffect(() => {
           if (!dirty) return;
           const url = `${workspaceEndpoint(workspaceId)}/move`;
           const hold = () =>
@@ -5926,12 +6309,12 @@ window.__ModuleLoader__.load({
             }).catch(() => {});
           };
         }, [workspaceId, path, dirty]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (dirty) saveStored(sessionStorage, key, { base, text });
           else sessionStorage.removeItem(key);
           onDirty?.(dirty);
         }, [key, base, text, dirty, onDirty]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!dirty) return;
           const warn = (event) => {
             event.preventDefault();
@@ -5940,32 +6323,32 @@ window.__ModuleLoader__.load({
           window.addEventListener("beforeunload", warn);
           return () => window.removeEventListener("beforeunload", warn);
         }, [dirty]);
-        return h33(
+        return h36(
           "div",
           { className: "workagent-text-editor" },
           confirmation,
-          h33(
+          h36(
             "p",
             { role: "status" },
             dirty ? "有未保存修改 · 草稿保存在当前浏览器标签页" : "尚无修改",
           ),
           base !== original
-            ? h33(
+            ? h36(
                 "p",
                 { role: "alert" },
                 "文件已在其他位置修改。保留了你的草稿；保存时会检查冲突。",
               )
             : null,
-          h33(
+          h36(
             "div",
             { className: "workagent-editor-body" },
             diff
-              ? h33(primitives2.DiffBlock, {
+              ? h36(primitives2.DiffBlock, {
                   diffs: [{ path, oldText: base, newText: text }],
                   maxLines: 80,
                 })
               : null,
-            h33("textarea", {
+            h36("textarea", {
               hidden: diff,
               "aria-label": "编辑文件内容",
               value: text,
@@ -5973,7 +6356,7 @@ window.__ModuleLoader__.load({
               spellCheck: false,
             }),
           ),
-          h33(
+          h36(
             "div",
             { className: "workagent-editor-actions" },
             button(diff ? "返回编辑" : "查看修改对比", () => setDiff(!diff)),
@@ -6018,7 +6401,7 @@ window.__ModuleLoader__.load({
               { disabled: busy },
             ),
           ),
-          error ? h33("p", { role: "alert" }, error) : null,
+          error ? h36("p", { role: "alert" }, error) : null,
         );
       }
       return {
@@ -6045,7 +6428,7 @@ window.__ModuleLoader__.load({
       require("@deepseek-ai/dsh-client-ui-primitives"),
       1,
     );
-    var import_react19 = __toESM(require("react"), 1);
+    var import_react20 = __toESM(require("react"), 1);
     var workbench = createWorkbench({
       navigate: navigation.navigate,
       reasoningLabel,
@@ -6053,7 +6436,7 @@ window.__ModuleLoader__.load({
       uploadFiles: uploads.uploadFiles,
       useUploadToProject,
       friendlyError,
-      React: import_react19.default,
+      React: import_react20.default,
       primitives,
       request,
       apiRoot,
@@ -6064,7 +6447,7 @@ window.__ModuleLoader__.load({
     var Markdown = workbench.Markdown;
 
     // src/ui/conversation-management.js
-    var import_react20 = require("react");
+    var import_react21 = require("react");
     function ConversationMenu({
       title,
       projectName,
@@ -6076,46 +6459,46 @@ window.__ModuleLoader__.load({
       busy = false,
       error,
     }) {
-      return (0, import_react20.createElement)(
+      return (0, import_react21.createElement)(
         Dialog,
         { title, "aria-label": "对话操作", onClose, closeDisabled: busy },
         projectName
-          ? (0, import_react20.createElement)(
+          ? (0, import_react21.createElement)(
               "small",
               null,
               `项目：${projectName}`,
             )
           : null,
-        (0, import_react20.createElement)(
+        (0, import_react21.createElement)(
           ActionList,
           null,
           onPin
-            ? (0, import_react20.createElement)(
+            ? (0, import_react21.createElement)(
                 Button,
                 { onClick: onPin, disabled: busy },
-                (0, import_react20.createElement)(Icon, { name: "pin" }),
+                (0, import_react21.createElement)(Icon, { name: "pin" }),
                 pinned ? "取消置顶" : "置顶对话",
               )
             : null,
           onReminder
-            ? (0, import_react20.createElement)(
+            ? (0, import_react21.createElement)(
                 Button,
                 { onClick: onReminder, disabled: busy },
-                (0, import_react20.createElement)(Icon, {
+                (0, import_react21.createElement)(Icon, {
                   name: "notifications",
                 }),
                 "消息提醒",
               )
             : null,
-          (0, import_react20.createElement)(
+          (0, import_react21.createElement)(
             Button,
             { onClick: onManage, disabled: busy },
-            (0, import_react20.createElement)(Icon, { name: "edit" }),
+            (0, import_react21.createElement)(Icon, { name: "edit" }),
             "管理对话",
           ),
         ),
         error
-          ? (0, import_react20.createElement)(
+          ? (0, import_react21.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
@@ -6136,7 +6519,7 @@ window.__ModuleLoader__.load({
       deleting = false,
       deleteDescription = "删除后，这个对话将不再显示。",
     }) {
-      return (0, import_react20.createElement)(
+      return (0, import_react21.createElement)(
         Dialog,
         {
           title: title || (deleting ? "确认删除" : "管理对话"),
@@ -6151,8 +6534,8 @@ window.__ModuleLoader__.load({
           },
         },
         deleting
-          ? (0, import_react20.createElement)("p", null, deleteDescription)
-          : (0, import_react20.createElement)(Input, {
+          ? (0, import_react21.createElement)("p", null, deleteDescription)
+          : (0, import_react21.createElement)(Input, {
               "aria-label": "对话名称",
               autoFocus: true,
               value: name,
@@ -6162,16 +6545,16 @@ window.__ModuleLoader__.load({
               maxLength: 120,
             }),
         error
-          ? (0, import_react20.createElement)(
+          ? (0, import_react21.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react20.createElement)(
+        (0, import_react21.createElement)(
           "div",
           { className: "workagent-dialog-actions" },
-          (0, import_react20.createElement)(
+          (0, import_react21.createElement)(
             Button,
             {
               type: "submit",
@@ -6181,13 +6564,13 @@ window.__ModuleLoader__.load({
             deleting ? (busy ? "删除中…" : "删除") : busy ? "保存中…" : "保存",
           ),
           !deleting
-            ? (0, import_react20.createElement)(
+            ? (0, import_react21.createElement)(
                 Button,
                 { variant: "danger", onClick: onRequestDelete, disabled: busy },
                 "删除",
               )
             : null,
-          (0, import_react20.createElement)(
+          (0, import_react21.createElement)(
             Button,
             { onClick: onClose, disabled: busy },
             "取消",
@@ -6197,16 +6580,16 @@ window.__ModuleLoader__.load({
     }
 
     // src/ui/sidebar.js
-    var import_react21 = require("react");
+    var import_react22 = require("react");
     function SidebarPin({ pinned = true }) {
-      return (0, import_react21.createElement)(Icon, {
+      return (0, import_react22.createElement)(Icon, {
         name: "pin",
         size: 14,
         className: `workagent-sidebar-pin${pinned ? " is-pinned" : ""}`,
       });
     }
     function SidebarAction({ label, icon = "more", children, ...props }) {
-      return (0, import_react21.createElement)(
+      return (0, import_react22.createElement)(
         "button",
         {
           type: "button",
@@ -6217,10 +6600,10 @@ window.__ModuleLoader__.load({
         },
         children ||
           (icon === "pin"
-            ? (0, import_react21.createElement)(SidebarPin, {
+            ? (0, import_react22.createElement)(SidebarPin, {
                 pinned: props["aria-pressed"] === true,
               })
-            : (0, import_react21.createElement)(Icon, {
+            : (0, import_react22.createElement)(Icon, {
                 name: icon,
                 size: 14,
               })),
@@ -6228,7 +6611,7 @@ window.__ModuleLoader__.load({
     }
     function SidebarStatus({ running, unread, label }) {
       if (!running && !unread) return null;
-      return (0, import_react21.createElement)("span", {
+      return (0, import_react22.createElement)("span", {
         className: `workagent-session-status ${running ? "is-running" : "is-unread"}`,
         role: "img",
         "aria-label": label || (running ? "正在运行" : "未读"),
@@ -6238,7 +6621,7 @@ window.__ModuleLoader__.load({
     function SidebarRow({
       title,
       subtitle,
-      icon = (0, import_react21.createElement)(Icon, {
+      icon = (0, import_react22.createElement)(Icon, {
         name: "chat",
         size: 16,
       }),
@@ -6254,7 +6637,7 @@ window.__ModuleLoader__.load({
       kind = "session",
       children,
     }) {
-      return (0, import_react21.createElement)(
+      return (0, import_react22.createElement)(
         "div",
         {
           ...rowProps,
@@ -6268,7 +6651,7 @@ window.__ModuleLoader__.load({
             .join(" "),
         },
         leading,
-        (0, import_react21.createElement)(
+        (0, import_react22.createElement)(
           "button",
           {
             type: "button",
@@ -6284,16 +6667,16 @@ window.__ModuleLoader__.load({
               .join(" "),
           },
           icon,
-          (0, import_react21.createElement)(
+          (0, import_react22.createElement)(
             "span",
             { className: "workagent-sidebar-label" },
-            (0, import_react21.createElement)(
+            (0, import_react22.createElement)(
               "span",
               { className: "workagent-session-title" },
               title,
             ),
             subtitle
-              ? (0, import_react21.createElement)(
+              ? (0, import_react22.createElement)(
                   "span",
                   { className: "workagent-sidebar-subtitle" },
                   subtitle,
@@ -6302,11 +6685,11 @@ window.__ModuleLoader__.load({
           ),
           status,
           meta || pinned
-            ? (0, import_react21.createElement)(
+            ? (0, import_react22.createElement)(
                 "span",
                 { className: "workagent-sidebar-meta" },
                 meta,
-                pinned ? (0, import_react21.createElement)(SidebarPin) : null,
+                pinned ? (0, import_react22.createElement)(SidebarPin) : null,
               )
             : null,
         ),
@@ -6325,7 +6708,7 @@ window.__ModuleLoader__.load({
       children,
       ...props
     }) {
-      return (0, import_react21.createElement)(
+      return (0, import_react22.createElement)(
         "section",
         {
           ...props,
@@ -6333,13 +6716,13 @@ window.__ModuleLoader__.load({
             .filter(Boolean)
             .join(" "),
         },
-        (0, import_react21.createElement)(SidebarRow, {
+        (0, import_react22.createElement)(SidebarRow, {
           kind: "project",
           title,
-          icon: (0, import_react21.createElement)(
+          icon: (0, import_react22.createElement)(
             "span",
             { className: "workagent-sidebar-group-icons" },
-            (0, import_react21.createElement)(Icon, {
+            (0, import_react22.createElement)(Icon, {
               name: expanded ? "chevronDown" : "chevronRight",
               size: 13,
             }),
@@ -6352,7 +6735,7 @@ window.__ModuleLoader__.load({
           actions,
         }),
         expanded
-          ? (0, import_react21.createElement)(
+          ? (0, import_react22.createElement)(
               "div",
               { className: "workagent-sidebar-project-sessions" },
               children,
@@ -6368,12 +6751,12 @@ window.__ModuleLoader__.load({
       actions,
       children,
     }) {
-      return (0, import_react21.createElement)(
+      return (0, import_react22.createElement)(
         "div",
         { className: "workagent-sidebar-heading" },
         heading ||
           (onToggle
-            ? (0, import_react21.createElement)(
+            ? (0, import_react22.createElement)(
                 "button",
                 {
                   type: "button",
@@ -6382,18 +6765,18 @@ window.__ModuleLoader__.load({
                   "aria-label": `${expanded ? "收起" : "展开"}${title}`,
                   onClick: onToggle,
                 },
-                (0, import_react21.createElement)(Icon, {
+                (0, import_react22.createElement)(Icon, {
                   name: expanded ? "chevronDown" : "chevronRight",
                   size: 13,
                 }),
-                (0, import_react21.createElement)("span", null, title),
+                (0, import_react22.createElement)("span", null, title),
               )
-            : (0, import_react21.createElement)(
+            : (0, import_react22.createElement)(
                 "span",
                 { className: "workagent-sidebar-section-label" },
                 title,
               )),
-        (0, import_react21.createElement)(
+        (0, import_react22.createElement)(
           "div",
           { className: "workagent-sidebar-heading-actions" },
           actions,
@@ -6402,7 +6785,7 @@ window.__ModuleLoader__.load({
       );
     }
     function SidebarSearch(props) {
-      return (0, import_react21.createElement)("input", {
+      return (0, import_react22.createElement)("input", {
         type: "text",
         ...props,
         className: "workagent-sidebar-search",
@@ -6410,10 +6793,10 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/files/preview.js
-    var import_react22 = __toESM(require("react"), 1);
-    var import_react23 = require("react");
+    var import_react23 = __toESM(require("react"), 1);
+    var import_react24 = require("react");
     function FileIconButton({ name, label, ...props }) {
-      return (0, import_react23.createElement)(
+      return (0, import_react24.createElement)(
         "button",
         {
           type: "button",
@@ -6422,11 +6805,11 @@ window.__ModuleLoader__.load({
           "aria-label": label,
           ...props,
         },
-        (0, import_react23.createElement)(Icon, { name, size: 17 }),
+        (0, import_react24.createElement)(Icon, { name, size: 17 }),
       );
     }
     function FileTreeRow({ depth = 0, className = "", ...props }) {
-      return (0, import_react23.createElement)("div", {
+      return (0, import_react24.createElement)("div", {
         ...props,
         className: `workagent-file-tree-row ${className}`,
         style: { "--file-depth": depth, ...props.style },
@@ -6458,8 +6841,8 @@ window.__ModuleLoader__.load({
       return documentPreviewTemplate;
     }
     function DocxPreview({ title, html, data }) {
-      const frame = import_react22.default.useRef(null);
-      const sendTypography = import_react22.default.useCallback(() => {
+      const frame = import_react23.default.useRef(null);
+      const sendTypography = import_react23.default.useCallback(() => {
         const size = document.documentElement.dataset.workagentFontSize;
         frame.current.contentWindow.postMessage(
           {
@@ -6469,7 +6852,7 @@ window.__ModuleLoader__.load({
           "*",
         );
       }, []);
-      import_react22.default.useEffect(() => {
+      import_react23.default.useEffect(() => {
         const observer = new MutationObserver(sendTypography);
         observer.observe(document.documentElement, {
           attributes: true,
@@ -6477,7 +6860,7 @@ window.__ModuleLoader__.load({
         });
         return () => observer.disconnect();
       }, [sendTypography]);
-      return (0, import_react23.createElement)("iframe", {
+      return (0, import_react24.createElement)("iframe", {
         ref: frame,
         title,
         sandbox: "allow-scripts",
@@ -6504,26 +6887,26 @@ window.__ModuleLoader__.load({
       resolveOfficePreview,
       editable = true,
     }) {
-      const [state, setState] = import_react22.default.useState({
+      const [state, setState] = import_react23.default.useState({
         loading: true,
       });
-      const [source, setSource] = import_react22.default.useState(false);
+      const [source, setSource] = import_react23.default.useState(false);
       const [editingFile, setEditingFile] =
-        import_react22.default.useState(false);
-      const [maximized, setMaximized] = import_react22.default.useState(false);
-      const locatedLine = import_react22.default.useRef(null);
-      import_react22.default.useEffect(() => {
+        import_react23.default.useState(false);
+      const [maximized, setMaximized] = import_react23.default.useState(false);
+      const locatedLine = import_react23.default.useRef(null);
+      import_react23.default.useEffect(() => {
         if (active) locatedLine.current?.scrollIntoView?.({ block: "center" });
       }, [entry.line, state.text, active]);
-      import_react22.default.useEffect(() => {
+      import_react23.default.useEffect(() => {
         if (!active) setMaximized(false);
       }, [active]);
-      const reportDirty = import_react22.default.useCallback(
+      const reportDirty = import_react23.default.useCallback(
         (value) => onDirty?.(entry.path, value),
         [onDirty, entry.path],
       );
       const extension = entry.name.toLowerCase().split(".").pop();
-      import_react22.default.useEffect(() => {
+      import_react23.default.useEffect(() => {
         if (active === false) return;
         const controller = new AbortController();
         let objectURL;
@@ -6698,7 +7081,7 @@ window.__ModuleLoader__.load({
         };
       }, [workspace.id, entry.path, revision, active]);
       const html = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">${state.text || ""}`;
-      return (0, import_react23.createElement)(
+      return (0, import_react24.createElement)(
         "section",
         {
           className: `workagent-file-preview-pane${maximized ? " is-maximized" : ""}`,
@@ -6710,39 +7093,39 @@ window.__ModuleLoader__.load({
             }
           },
         },
-        (0, import_react23.createElement)(
+        (0, import_react24.createElement)(
           "header",
           null,
-          (0, import_react23.createElement)(FileIconButton, {
+          (0, import_react24.createElement)(FileIconButton, {
             name: "back",
             label: "返回文件列表",
             onClick: onClose,
           }),
-          (0, import_react23.createElement)(
+          (0, import_react24.createElement)(
             "strong",
             { title: entry.path },
             entry.name,
           ),
           editable && state.text !== void 0 && !editingFile
-            ? (0, import_react23.createElement)(
+            ? (0, import_react24.createElement)(
                 "button",
                 { type: "button", onClick: () => setEditingFile(true) },
                 "编辑文件",
               )
             : null,
           ["markdown", "html"].includes(state.media)
-            ? (0, import_react23.createElement)(
+            ? (0, import_react24.createElement)(
                 "button",
                 { type: "button", onClick: () => setSource(!source) },
                 source ? "预览" : "源码",
               )
             : null,
-          (0, import_react23.createElement)(FileIconButton, {
+          (0, import_react24.createElement)(FileIconButton, {
             name: "expand",
             label: maximized ? "还原文件预览" : "最大化文件预览",
             onClick: () => setMaximized(!maximized),
           }),
-          (0, import_react23.createElement)(
+          (0, import_react24.createElement)(
             "a",
             {
               href: contentURL(workspace.id, entry.path),
@@ -6750,22 +7133,22 @@ window.__ModuleLoader__.load({
               "aria-label": `下载 ${entry.name}`,
               title: "下载原文件",
             },
-            (0, import_react23.createElement)(Icon, {
+            (0, import_react24.createElement)(Icon, {
               name: "download",
               size: 17,
             }),
           ),
-          (0, import_react23.createElement)(FileIconButton, {
+          (0, import_react24.createElement)(FileIconButton, {
             name: "close",
             label: dismissLabel,
             onClick: onDismiss,
           }),
         ),
-        (0, import_react23.createElement)(
+        (0, import_react24.createElement)(
           "div",
           { className: "workagent-file-preview-body" },
           editingFile && state.text !== void 0
-            ? (0, import_react23.createElement)(workbench.TextEditor, {
+            ? (0, import_react24.createElement)(workbench.TextEditor, {
                 key: entry.path,
                 workspaceId: workspace.id,
                 path: entry.path,
@@ -6779,53 +7162,53 @@ window.__ModuleLoader__.load({
                 },
               })
             : state.loading
-              ? (0, import_react23.createElement)(
+              ? (0, import_react24.createElement)(
                   "p",
                   { role: "status" },
                   "正在加载预览…",
                 )
               : state.error
-                ? (0, import_react23.createElement)(
+                ? (0, import_react24.createElement)(
                     "p",
                     { role: "alert" },
                     state.error,
                   )
                 : state.media === "docx"
-                  ? (0, import_react23.createElement)(DocxPreview, {
+                  ? (0, import_react24.createElement)(DocxPreview, {
                       key: `${entry.path}:${revision}`,
                       title: entry.name,
                       html: state.html,
                       data: state.data,
                     })
                   : state.media === "image"
-                    ? (0, import_react23.createElement)("img", {
+                    ? (0, import_react24.createElement)("img", {
                         src: state.url,
                         alt: entry.name,
                       })
                     : state.media === "pdf"
-                      ? (0, import_react23.createElement)("iframe", {
+                      ? (0, import_react24.createElement)("iframe", {
                           src: state.url,
                           title: entry.name,
                         })
                       : state.media === "html" && !source && !entry.line
-                        ? (0, import_react23.createElement)("iframe", {
+                        ? (0, import_react24.createElement)("iframe", {
                             srcDoc: html,
                             sandbox: "",
                             title: entry.name,
                           })
                         : state.media === "markdown" && !source && !entry.line
-                          ? (0, import_react23.createElement)(
+                          ? (0, import_react24.createElement)(
                               Markdown,
                               null,
                               state.text,
                             )
                           : state.text !== void 0
-                            ? (0, import_react23.createElement)(
+                            ? (0, import_react24.createElement)(
                                 "pre",
                                 null,
                                 entry.line
                                   ? state.text.split("\n").map((line, index) =>
-                                      (0, import_react23.createElement)(
+                                      (0, import_react24.createElement)(
                                         "span",
                                         {
                                           key: index,
@@ -6844,7 +7227,7 @@ window.__ModuleLoader__.load({
                                     )
                                   : state.text,
                               )
-                            : (0, import_react23.createElement)(
+                            : (0, import_react24.createElement)(
                                 "p",
                                 null,
                                 "此格式暂不支持在线预览，请下载后查看。",
@@ -6914,7 +7297,7 @@ window.__ModuleLoader__.load({
         );
     }
     function createShared({
-      React: React37,
+      React: React40,
       request: request2,
       apiRoot: apiRoot2,
       useResource: useResource2,
@@ -6934,7 +7317,7 @@ window.__ModuleLoader__.load({
       SessionReminder,
       closeSidebar: closeSidebar3,
     }) {
-      const h33 = React37.createElement,
+      const h36 = React40.createElement,
         root = "/api/portal",
         enc = encodeURIComponent;
       const uid = () => crypto.randomUUID();
@@ -6956,10 +7339,10 @@ window.__ModuleLoader__.load({
       const route = (project, discussion) =>
         `/?workagent=shared${project ? `&project=${enc(project)}` : ""}${discussion ? `&discussion=${enc(discussion)}` : ""}`;
       const icon = (name, size = 18) =>
-        Icon2 ? h33(Icon2, { name, size }) : null;
+        Icon2 ? h36(Icon2, { name, size }) : null;
       const assistantAvatar = (backend, fallback) =>
         EngineMark2
-          ? h33(EngineMark2, { engine: backend || "harness" })
+          ? h36(EngineMark2, { engine: backend || "harness" })
           : fallback;
       const errorText = (error) =>
         ({
@@ -6995,7 +7378,7 @@ window.__ModuleLoader__.load({
       const fileURL2 = (id, path, preview = false) =>
         `${fileRoot(id)}/content?path=${enc(path)}${preview ? "&preview=1" : ""}`;
       const uploads2 = createUploads2?.({
-        React: React37,
+        React: React40,
         request: request2,
         apiRoot: apiRoot2,
         friendlyError: errorText,
@@ -7074,7 +7457,7 @@ window.__ModuleLoader__.load({
         };
       }
       const useShared = () =>
-        React37.useSyncExternalStore(subscribe, () => snapshot);
+        React40.useSyncExternalStore(subscribe, () => snapshot);
       async function mutate2(path, body, method = "POST") {
         const value = await request2(
           `${root}/${path}`,
@@ -7085,7 +7468,7 @@ window.__ModuleLoader__.load({
         return value;
       }
       function PersonalTaskButton({ project, onClose }) {
-        return h33(
+        return h36(
           Button2,
           {
             className: "workagent-button workagent-personal-task-entry",
@@ -7097,11 +7480,11 @@ window.__ModuleLoader__.load({
             },
           },
           icon("workspace", 20),
-          h33(
+          h36(
             "span",
             null,
-            h33("strong", null, "个人任务"),
-            h33("small", null, "仅自己可见 · 在项目共享文件夹中运行"),
+            h36("strong", null, "个人任务"),
+            h36("small", null, "仅自己可见 · 在项目共享文件夹中运行"),
           ),
           icon("chevronRight", 18),
         );
@@ -7126,11 +7509,11 @@ window.__ModuleLoader__.load({
         go(route(projectId, discussion));
       }
       const Feedback = ({ error, notice }) =>
-        h33(
-          React37.Fragment,
+        h36(
+          React40.Fragment,
           null,
           error
-            ? h33(
+            ? h36(
                 "p",
                 {
                   role: "alert",
@@ -7140,7 +7523,7 @@ window.__ModuleLoader__.load({
               )
             : null,
           notice
-            ? h33(
+            ? h36(
                 "p",
                 { role: "status", className: "workagent-collab-feedback" },
                 notice,
@@ -7148,8 +7531,8 @@ window.__ModuleLoader__.load({
             : null,
         );
       function useMembers(project, revision) {
-        const [members, setMembers] = React37.useState([]);
-        React37.useEffect(() => {
+        const [members, setMembers] = React40.useState([]);
+        React40.useEffect(() => {
           if (!project) {
             setMembers([]);
             return;
@@ -7172,8 +7555,8 @@ window.__ModuleLoader__.load({
         return members;
       }
       function MoreMenu({ children }) {
-        const ref = React37.useRef(null);
-        React37.useEffect(() => {
+        const ref = React40.useRef(null);
+        React40.useEffect(() => {
           const close = (event) => {
             if (event.type === "keydown" && event.key !== "Escape") return;
             if (
@@ -7194,11 +7577,11 @@ window.__ModuleLoader__.load({
             document.removeEventListener("keydown", close);
           };
         }, []);
-        return h33(
+        return h36(
           "details",
           { className: "workagent-collab-more", ref },
-          h33("summary", { "aria-label": "项目更多操作" }, icon("more", 16)),
-          h33(
+          h36("summary", { "aria-label": "项目更多操作" }, icon("more", 16)),
+          h36(
             "div",
             {
               className: "workagent-collab-menu-popover",
@@ -7211,10 +7594,10 @@ window.__ModuleLoader__.load({
         );
       }
       function UserSearch({ onSelect, selected = [] }) {
-        const [query, setQuery] = React37.useState(""),
-          [results, setResults] = React37.useState([]),
-          [error, setError] = React37.useState("");
-        React37.useEffect(() => {
+        const [query, setQuery] = React40.useState(""),
+          [results, setResults] = React40.useState([]),
+          [error, setError] = React40.useState("");
+        React40.useEffect(() => {
           setResults([]);
           if (!query.trim()) return;
           const abort = new AbortController();
@@ -7239,17 +7622,17 @@ window.__ModuleLoader__.load({
             abort.abort();
           };
         }, [query]);
-        return h33(
+        return h36(
           "div",
           { className: "workagent-collab-search" },
-          h33(Input2, {
+          h36(Input2, {
             "aria-label": "搜索员工",
             placeholder: "搜索姓名或用户名",
             value: query,
             onChange: (event) => setQuery(event.target.value),
           }),
           query
-            ? h33(
+            ? h36(
                 "div",
                 { className: "workagent-collab-search-results" },
                 ...results
@@ -7257,7 +7640,7 @@ window.__ModuleLoader__.load({
                     (user) => !selected.some((item) => item.id === user.id),
                   )
                   .map((user) =>
-                    h33(
+                    h36(
                       Button2,
                       {
                         key: user.id,
@@ -7267,21 +7650,21 @@ window.__ModuleLoader__.load({
                         },
                       },
                       user.display_name || user.username,
-                      h33("small", null, ` @${user.username}`),
+                      h36("small", null, ` @${user.username}`),
                     ),
                   ),
               )
             : null,
-          h33(Feedback, { error }),
+          h36(Feedback, { error }),
         );
       }
       function CreateProject({ onClose, onCreated }) {
-        const [name, setName] = React37.useState(""),
-          [invitees, setInvitees] = React37.useState([]);
-        const [busy, setBusy] = React37.useState(false),
-          [error, setError] = React37.useState("");
-        const operation = React37.useRef(uid()),
-          created = React37.useRef(null);
+        const [name, setName] = React40.useState(""),
+          [invitees, setInvitees] = React40.useState([]);
+        const [busy, setBusy] = React40.useState(false),
+          [error, setError] = React40.useState("");
+        const operation = React40.useRef(uid()),
+          created = React40.useRef(null);
         async function create(event) {
           event.preventDefault();
           if (busy || !name.trim()) return;
@@ -7338,7 +7721,7 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           Dialog,
           {
             title: "新建协作项目",
@@ -7346,14 +7729,14 @@ window.__ModuleLoader__.load({
               if (!busy) onClose();
             },
           },
-          h33(
+          h36(
             "form",
             { onSubmit: create, className: "workagent-collab-form" },
-            h33(
+            h36(
               "label",
               null,
               "项目名称",
-              h33(Input2, {
+              h36(Input2, {
                 "aria-label": "共享项目名称",
                 value: name,
                 disabled: !!created.current,
@@ -7363,16 +7746,16 @@ window.__ModuleLoader__.load({
                 onChange: (event) => setName(event.target.value),
               }),
             ),
-            h33("label", null, "邀请同事 · 可稍后添加"),
-            h33(UserSearch, {
+            h36("label", null, "邀请同事 · 可稍后添加"),
+            h36(UserSearch, {
               selected: invitees,
               onSelect: (user) => setInvitees((rows) => [...rows, user]),
             }),
-            h33(
+            h36(
               "div",
               { className: "workagent-collab-chips" },
               ...invitees.map((user) =>
-                h33(
+                h36(
                   Button2,
                   {
                     key: user.id,
@@ -7386,12 +7769,12 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            h33(Feedback, { error }),
-            h33(
+            h36(Feedback, { error }),
+            h36(
               "footer",
               null,
-              h33(Button2, { onClick: onClose, disabled: busy }, "取消"),
-              h33(
+              h36(Button2, { onClick: onClose, disabled: busy }, "取消"),
+              h36(
                 Button2,
                 {
                   type: "submit",
@@ -7408,8 +7791,8 @@ window.__ModuleLoader__.load({
         const state = useShared(),
           params = new URLSearchParams(useSearch()),
           token = params.get("token");
-        const [busy, setBusy] = React37.useState(""),
-          [error, setError] = React37.useState("");
+        const [busy, setBusy] = React40.useState(""),
+          [error, setError] = React40.useState("");
         const pending = state.invites.filter((row) => row.status === "pending");
         async function act(invite, accept) {
           setBusy(invite?.id || "link");
@@ -7432,23 +7815,23 @@ window.__ModuleLoader__.load({
             setBusy("");
           }
         }
-        return h33(
+        return h36(
           Dialog,
           { title: "项目邀请", onClose },
-          h33(
+          h36(
             "div",
             { className: "workagent-collab-form" },
-            h33(Feedback, { error }),
+            h36(Feedback, { error }),
             token
-              ? h33(
+              ? h36(
                   "div",
                   null,
-                  h33(
+                  h36(
                     "p",
                     null,
                     "接受后，你将加入此共享项目并看到项目文件和讨论。",
                   ),
-                  h33(
+                  h36(
                     Button2,
                     { disabled: !!busy, onClick: () => act(null, true) },
                     busy ? "正在加入…" : "接受邀请",
@@ -7456,29 +7839,29 @@ window.__ModuleLoader__.load({
                 )
               : null,
             ...pending.map((invite) =>
-              h33(
+              h36(
                 "article",
                 { key: invite.id, className: "workagent-collab-invite" },
-                h33(
+                h36(
                   "div",
                   null,
-                  h33("strong", null, invite.projectName),
-                  h33("p", null, `${invite.inviterName} 邀请你加入`),
-                  h33(
+                  h36("strong", null, invite.projectName),
+                  h36("p", null, `${invite.inviterName} 邀请你加入`),
+                  h36(
                     "small",
                     null,
                     `有效期至 ${new Date(invite.expiresAt).toLocaleString()}`,
                   ),
                 ),
-                h33(
+                h36(
                   "div",
                   { className: "workagent-collab-actions" },
-                  h33(
+                  h36(
                     Button2,
                     { disabled: !!busy, onClick: () => act(invite, false) },
                     "拒绝",
                   ),
-                  h33(
+                  h36(
                     Button2,
                     {
                       disabled: !!busy,
@@ -7491,7 +7874,7 @@ window.__ModuleLoader__.load({
               ),
             ),
             !pending.length && !token
-              ? h33(
+              ? h36(
                   "p",
                   { className: "workagent-collab-empty" },
                   "暂时没有待处理的邀请。",
@@ -7501,12 +7884,12 @@ window.__ModuleLoader__.load({
         );
       }
       function useAssistantMembers(project, revision) {
-        const [state, setState] = React37.useState({
+        const [state, setState] = React40.useState({
           members: [],
           options: [],
           error: "",
         });
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           const abort = new AbortController();
           Promise.all([
             request2(`${root}/shared-projects/${enc(project.id)}/assistants`, {
@@ -7540,10 +7923,10 @@ window.__ModuleLoader__.load({
       }
       function AssistantMembers({ project, revision }) {
         const state = useAssistantMembers(project, revision);
-        const [selected, setSelected] = React37.useState(""),
-          [busy, setBusy] = React37.useState(false),
-          [notice, setNotice] = React37.useState(""),
-          [error, setError] = React37.useState("");
+        const [selected, setSelected] = React40.useState(""),
+          [busy, setBusy] = React40.useState(false),
+          [notice, setNotice] = React40.useState(""),
+          [error, setError] = React40.useState("");
         const available = state.options.filter(
           (row) =>
             !state.members.some((member) => member.assistant_id === row.id),
@@ -7562,15 +7945,15 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           "section",
           { "aria-label": "助手成员", className: "workagent-collab-form" },
-          h33("strong", null, "助手成员"),
+          h36("strong", null, "助手成员"),
           project.currentRole === "owner"
-            ? h33(
+            ? h36(
                 "div",
                 { className: "workagent-collab-actions" },
-                h33(
+                h36(
                   "select",
                   {
                     "aria-label": "邀请助手",
@@ -7578,12 +7961,12 @@ window.__ModuleLoader__.load({
                     value: selected,
                     onChange: (event) => setSelected(event.target.value),
                   },
-                  h33("option", { value: "" }, "选择要邀请的助手"),
+                  h36("option", { value: "" }, "选择要邀请的助手"),
                   ...available.map((row) =>
-                    h33("option", { key: row.id, value: row.id }, row.name),
+                    h36("option", { key: row.id, value: row.id }, row.name),
                   ),
                 ),
-                h33(
+                h36(
                   Button2,
                   {
                     disabled: busy || !selected,
@@ -7601,27 +7984,27 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          h33(Feedback, { error: error || state.error, notice }),
+          h36(Feedback, { error: error || state.error, notice }),
           ...state.members.map((member) =>
-            h33(
+            h36(
               "div",
               {
                 key: member.assistant_id,
                 className: "workagent-collab-member",
               },
-              h33(
+              h36(
                 "span",
                 { className: "workagent-collab-avatar", "aria-hidden": true },
                 assistantAvatar(member.assistant_backend, icon("assistant")),
               ),
-              h33(
+              h36(
                 "div",
                 null,
-                h33("strong", null, member.name),
-                h33("small", null, `${member.assistant_backend} · 已加入`),
+                h36("strong", null, member.name),
+                h36("small", null, `${member.assistant_backend} · 已加入`),
               ),
               project.currentRole === "owner"
-                ? h33(
+                ? h36(
                     Button2,
                     {
                       disabled: busy || member.running,
@@ -7643,17 +8026,17 @@ window.__ModuleLoader__.load({
             ),
           ),
           !state.members.length
-            ? h33("p", null, "邀请助手加入后，成员才能 @ 它。")
+            ? h36("p", null, "邀请助手加入后，成员才能 @ 它。")
             : null,
         );
       }
       function AssistantSettingsRow({ project, member, options }) {
-        const [model, setModel] = React37.useState(member.model_id),
-          [effort, setEffort] = React37.useState(member.thinking_effort),
-          [busy, setBusy] = React37.useState(false),
-          [error, setError] = React37.useState(""),
-          [notice, setNotice] = React37.useState("");
-        React37.useEffect(() => {
+        const [model, setModel] = React40.useState(member.model_id),
+          [effort, setEffort] = React40.useState(member.thinking_effort),
+          [busy, setBusy] = React40.useState(false),
+          [error, setError] = React40.useState(""),
+          [notice, setNotice] = React40.useState("");
+        React40.useEffect(() => {
           setModel(member.model_id);
           setEffort(member.thinking_effort);
         }, [member.model_id, member.thinking_effort]);
@@ -7681,7 +8064,7 @@ window.__ModuleLoader__.load({
           max: "最高",
           minimal: "最低",
         };
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (
             selectedModel?.reasoning &&
             !levels.some((row) => row.id === effort)
@@ -7692,7 +8075,7 @@ window.__ModuleLoader__.load({
           selectedModel?.defaultReasoning,
           JSON.stringify(selectedModel?.reasoning),
         ]);
-        return h33(
+        return h36(
           "form",
           {
             className: "workagent-collab-form",
@@ -7717,17 +8100,17 @@ window.__ModuleLoader__.load({
               }
             },
           },
-          h33(
+          h36(
             "div",
             null,
-            h33("strong", null, member.name),
-            h33("small", null, ` · ${member.assistant_backend}`),
+            h36("strong", null, member.name),
+            h36("small", null, ` · ${member.assistant_backend}`),
           ),
-          h33(
+          h36(
             "label",
             null,
             "模型",
-            h33(
+            h36(
               "select",
               {
                 "aria-label": `${member.name} 模型`,
@@ -7737,15 +8120,15 @@ window.__ModuleLoader__.load({
                 onChange: (event) => setModel(event.target.value),
               },
               ...choices.map((row) =>
-                h33("option", { key: row.id, value: row.id }, row.name),
+                h36("option", { key: row.id, value: row.id }, row.name),
               ),
             ),
           ),
-          h33(
+          h36(
             "label",
             null,
             "思考强度",
-            h33(
+            h36(
               "select",
               {
                 "aria-label": `${member.name} 思考强度`,
@@ -7755,15 +8138,15 @@ window.__ModuleLoader__.load({
                 onChange: (event) => setEffort(event.target.value),
               },
               ...levels.map(({ id, name }) =>
-                h33("option", { key: id, value: id }, levelLabels[id] || name),
+                h36("option", { key: id, value: id }, levelLabels[id] || name),
               ),
             ),
           ),
           member.running
-            ? h33("p", null, "助手正在执行，结束后可调整设置。")
+            ? h36("p", null, "助手正在执行，结束后可调整设置。")
             : null,
-          h33(Feedback, { error, notice }),
-          h33(
+          h36(Feedback, { error, notice }),
+          h36(
             Button2,
             {
               type: "submit",
@@ -7776,20 +8159,20 @@ window.__ModuleLoader__.load({
       }
       function AssistantSettings({ project, revision, onClose }) {
         const state = useAssistantMembers(project, revision);
-        return h33(
+        return h36(
           Dialog,
           { title: "助手设置", onClose },
-          h33(
+          h36(
             "div",
             { className: "workagent-collab-form" },
-            h33(
+            h36(
               "p",
               null,
               "分别调整群内助手的模型和思考强度，已有会话继续保留。",
             ),
-            h33(Feedback, { error: state.error }),
+            h36(Feedback, { error: state.error }),
             ...state.members.map((member) =>
-              h33(AssistantSettingsRow, {
+              h36(AssistantSettingsRow, {
                 key: member.assistant_id,
                 project,
                 member,
@@ -7797,21 +8180,21 @@ window.__ModuleLoader__.load({
               }),
             ),
             !state.members.length
-              ? h33("p", null, "请先在项目成员中邀请助手加入。")
+              ? h36("p", null, "请先在项目成员中邀请助手加入。")
               : null,
           ),
         );
       }
       function Members({ project, members, revision, onClose }) {
         const { confirm, confirmation } = useConfirm();
-        const [outgoing, setOutgoing] = React37.useState([]),
-          [selected, setSelected] = React37.useState(null),
-          [busy, setBusy] = React37.useState(false);
-        const [notice, setNotice] = React37.useState(""),
-          [error, setError] = React37.useState(""),
-          [link, setLink] = React37.useState(null);
+        const [outgoing, setOutgoing] = React40.useState([]),
+          [selected, setSelected] = React40.useState(null),
+          [busy, setBusy] = React40.useState(false);
+        const [notice, setNotice] = React40.useState(""),
+          [error, setError] = React40.useState(""),
+          [link, setLink] = React40.useState(null);
         const owner = project.currentRole === "owner";
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!owner) return;
           const abort = new AbortController();
           request2(`${root}/shared-projects/${enc(project.id)}/invites`, {
@@ -7847,28 +8230,28 @@ window.__ModuleLoader__.load({
           expired: "已过期",
           revoked: "已撤销",
         };
-        return h33(
+        return h36(
           Dialog,
           { title: "项目成员", onClose },
           confirmation,
-          h33(
+          h36(
             "div",
             { className: "workagent-collab-form" },
             owner
-              ? h33(
-                  React37.Fragment,
+              ? h36(
+                  React40.Fragment,
                   null,
-                  h33(UserSearch, { onSelect: setSelected }),
+                  h36(UserSearch, { onSelect: setSelected }),
                   selected
-                    ? h33(
+                    ? h36(
                         "div",
                         { className: "workagent-collab-actions" },
-                        h33(
+                        h36(
                           "span",
                           null,
                           selected.display_name || selected.username,
                         ),
-                        h33(
+                        h36(
                           Button2,
                           {
                             disabled: busy,
@@ -7892,7 +8275,7 @@ window.__ModuleLoader__.load({
                         ),
                       )
                     : null,
-                  h33(
+                  h36(
                     Button2,
                     {
                       disabled: busy,
@@ -7925,16 +8308,16 @@ window.__ModuleLoader__.load({
                     "复制邀请链接",
                   ),
                   link
-                    ? h33(
+                    ? h36(
                         "div",
                         { className: "workagent-collab-link" },
-                        h33(Input2, {
+                        h36(Input2, {
                           "aria-label": "邀请链接",
                           readOnly: true,
                           value: `${location.origin}/?frontend=dsh&workagent=shared&token=${enc(link.token)}`,
                           onFocus: (event) => event.target.select(),
                         }),
-                        h33(
+                        h36(
                           Button2,
                           {
                             disabled: busy,
@@ -7954,16 +8337,16 @@ window.__ModuleLoader__.load({
                     : null,
                 )
               : null,
-            h33(Feedback, { notice, error }),
-            h33(AssistantMembers, { project, revision }),
-            h33(
+            h36(Feedback, { notice, error }),
+            h36(AssistantMembers, { project, revision }),
+            h36(
               "div",
               { className: "workagent-collab-member-list" },
               ...members.map((member) =>
-                h33(
+                h36(
                   "div",
                   { key: member.userId, className: "workagent-collab-member" },
-                  h33(
+                  h36(
                     "span",
                     {
                       className: "workagent-collab-avatar",
@@ -7973,28 +8356,28 @@ window.__ModuleLoader__.load({
                       (member.displayName || member.username || "员").trim(),
                     )[0].toLocaleUpperCase(),
                   ),
-                  h33(
+                  h36(
                     "div",
                     null,
-                    h33("strong", null, member.displayName || member.username),
-                    h33(
+                    h36("strong", null, member.displayName || member.username),
+                    h36(
                       "small",
                       null,
                       member.role === "owner" ? "负责人" : "成员",
                     ),
                   ),
                   owner && member.role !== "owner"
-                    ? h33(
+                    ? h36(
                         "details",
                         { className: "workagent-collab-member-menu" },
-                        h33(
+                        h36(
                           "summary",
                           {
                             "aria-label": `管理${member.displayName || member.username}`,
                           },
                           icon("more", 15),
                         ),
-                        h33(
+                        h36(
                           Button2,
                           {
                             disabled: busy,
@@ -8017,7 +8400,7 @@ window.__ModuleLoader__.load({
                           },
                           "移除成员",
                         ),
-                        h33(
+                        h36(
                           Button2,
                           {
                             disabled: busy,
@@ -8045,25 +8428,25 @@ window.__ModuleLoader__.load({
               ),
             ),
             owner && outgoing.length
-              ? h33(
+              ? h36(
                   "section",
                   null,
-                  h33("h3", null, "邀请记录"),
+                  h36("h3", null, "邀请记录"),
                   ...outgoing.map((invite) =>
-                    h33(
+                    h36(
                       "div",
                       {
                         key: invite.id,
                         className: "workagent-collab-invite-row",
                       },
-                      h33("span", null, invite.displayName || invite.username),
-                      h33(
+                      h36("span", null, invite.displayName || invite.username),
+                      h36(
                         "small",
                         null,
                         statuses[invite.status] || invite.status,
                       ),
                       invite.status === "pending"
-                        ? h33(
+                        ? h36(
                             Button2,
                             {
                               disabled: busy,
@@ -8095,24 +8478,24 @@ window.__ModuleLoader__.load({
         onSend,
         projectId,
       }) {
-        const [body, setBody] = React37.useState(initial),
-          [mentions, setMentions] = React37.useState([]),
-          [caret, setCaret] = React37.useState(initial.length),
-          [choice, setChoice] = React37.useState(0);
-        const [busy, setBusy] = React37.useState(false),
-          [uploading, setUploading] = React37.useState(false),
-          [attachments, setAttachments] = React37.useState([]),
-          [error, setError] = React37.useState(""),
-          [notice, setNotice] = React37.useState("");
-        const messageID = React37.useRef(null),
-          textarea = React37.useRef(null);
-        React37.useLayoutEffect(() => {
+        const [body, setBody] = React40.useState(initial),
+          [mentions, setMentions] = React40.useState([]),
+          [caret, setCaret] = React40.useState(initial.length),
+          [choice, setChoice] = React40.useState(0);
+        const [busy, setBusy] = React40.useState(false),
+          [uploading, setUploading] = React40.useState(false),
+          [attachments, setAttachments] = React40.useState([]),
+          [error, setError] = React40.useState(""),
+          [notice, setNotice] = React40.useState("");
+        const messageID = React40.useRef(null),
+          textarea = React40.useRef(null);
+        React40.useLayoutEffect(() => {
           const input = textarea.current;
           input.style.height = "auto";
           input.style.height = `${Math.min(input.scrollHeight, 144)}px`;
         }, [body]);
-        const uploadControl = React37.useRef(null);
-        React37.useEffect(() => () => uploadControl.current?.abort(), []);
+        const uploadControl = React40.useRef(null);
+        React40.useEffect(() => () => uploadControl.current?.abort(), []);
         async function upload(files) {
           if (
             !uploads2 ||
@@ -8150,7 +8533,7 @@ window.__ModuleLoader__.load({
             if (!controller.signal.aborted) setUploading(false);
           }
         }
-        React37.useEffect(
+        React40.useEffect(
           () =>
             bindComposerFiles(
               textarea.current,
@@ -8260,7 +8643,7 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           ComposerForm2,
           {
             className:
@@ -8268,12 +8651,12 @@ window.__ModuleLoader__.load({
             onSubmit: send,
             ...(ComposerForm2 !== "form" ? { showSettings: false } : {}),
           },
-          h33(Feedback, { error, notice }),
-          h33(
-            React37.Fragment,
+          h36(Feedback, { error, notice }),
+          h36(
+            React40.Fragment,
             null,
             candidates.length
-              ? h33(
+              ? h36(
                   "div",
                   {
                     role: "listbox",
@@ -8281,7 +8664,7 @@ window.__ModuleLoader__.load({
                     className: "workagent-collab-mentions",
                   },
                   ...candidates.map((candidate, index) =>
-                    h33(
+                    h36(
                       "button",
                       {
                         key: `${candidate.kind}:${candidate.id}`,
@@ -8292,8 +8675,8 @@ window.__ModuleLoader__.load({
                         onMouseDown: (event) => event.preventDefault(),
                         onClick: () => select(candidate),
                       },
-                      h33("strong", null, candidate.name),
-                      h33(
+                      h36("strong", null, candidate.name),
+                      h36(
                         "small",
                         null,
                         candidate.kind === "assistant"
@@ -8305,17 +8688,17 @@ window.__ModuleLoader__.load({
                 )
               : null,
             attachments.length
-              ? h33(
+              ? h36(
                   "div",
                   { className: "workagent-composer-attachments" },
                   ...attachments.map((path) =>
-                    h33(
+                    h36(
                       "span",
                       {
                         key: path,
                         className: `workagent-file-reference${isComposerImage(path) ? " workagent-image-reference" : ""}`,
                       },
-                      h33(
+                      h36(
                         "a",
                         {
                           href: fileURL2(projectId, path, true),
@@ -8324,14 +8707,14 @@ window.__ModuleLoader__.load({
                           "aria-label": `预览 ${path.split("/").at(-1)}`,
                         },
                         isComposerImage(path)
-                          ? h33("img", {
+                          ? h36("img", {
                               src: fileURL2(projectId, path, true),
                               alt: path.split("/").at(-1),
                               draggable: false,
                             })
                           : path.split("/").at(-1),
                       ),
-                      h33(
+                      h36(
                         "button",
                         {
                           type: "button",
@@ -8350,7 +8733,7 @@ window.__ModuleLoader__.load({
                   ),
                 )
               : null,
-            h33("textarea", {
+            h36("textarea", {
               ref: textarea,
               "aria-label": "共享消息",
               value: body,
@@ -8399,18 +8782,18 @@ window.__ModuleLoader__.load({
                 if (event.key === "Enter" && !event.shiftKey) void send(event);
               },
             }),
-            h33(
+            h36(
               "div",
               {
                 className:
                   "workagent-conversation-composer-bar workagent-collab-composer-bar",
               },
               projectId && uploads2
-                ? h33(
+                ? h36(
                     "label",
                     { className: "workagent-collab-attach", title: "添加附件" },
                     icon("plus", 20),
-                    h33("input", {
+                    h36("input", {
                       type: "file",
                       multiple: true,
                       "aria-label": "添加共享附件",
@@ -8423,7 +8806,7 @@ window.__ModuleLoader__.load({
                     }),
                   )
                 : null,
-              h33(
+              h36(
                 "small",
                 null,
                 uploading
@@ -8432,7 +8815,7 @@ window.__ModuleLoader__.load({
                     ? "只有 @ 助手才会执行"
                     : "与项目成员讨论",
               ),
-              h33(
+              h36(
                 "button",
                 {
                   type: "submit",
@@ -8447,14 +8830,14 @@ window.__ModuleLoader__.load({
         );
       }
       function Chat({ conversation, project, members, revision }) {
-        const [messages, setMessages] = React37.useState([]),
-          [error, setError] = React37.useState(""),
-          [local, setLocal] = React37.useState(0);
+        const [messages, setMessages] = React40.useState([]),
+          [error, setError] = React40.useState(""),
+          [local, setLocal] = React40.useState(0);
         const targetMessage = new URLSearchParams(useSearch()).get("message"),
-          located = React37.useRef("");
-        const list = React37.useRef(null),
-          bottom = React37.useRef(true);
-        React37.useEffect(() => {
+          located = React40.useRef("");
+        const list = React40.useRef(null),
+          bottom = React40.useRef(true);
+        React40.useEffect(() => {
           const abort = new AbortController();
           (async () => {
             const rows = [];
@@ -8483,7 +8866,7 @@ window.__ModuleLoader__.load({
           });
           return () => abort.abort();
         }, [conversation.id, revision, local]);
-        React37.useLayoutEffect(() => {
+        React40.useLayoutEffect(() => {
           const key = `${conversation.id}:${targetMessage}`;
           if (targetMessage && located.current !== key && list.current) {
             const target = [
@@ -8503,11 +8886,11 @@ window.__ModuleLoader__.load({
           )?.assistant_backend ||
           conversation.assistant_backend ||
           "harness";
-        return h33(
+        return h36(
           "section",
           { className: "workagent-collab-chat", "aria-label": "共享对话" },
-          h33(Feedback, { error }),
-          h33(
+          h36(Feedback, { error }),
+          h36(
             "div",
             {
               className: "workagent-collab-messages",
@@ -8519,26 +8902,26 @@ window.__ModuleLoader__.load({
               },
             },
             !messages.length
-              ? h33(
+              ? h36(
                   "div",
                   { className: "workagent-collab-chat-empty" },
                   icon("chat", 32),
-                  h33("h2", null, "一起把事情做好"),
-                  h33("p", null, "在这里讨论、分享文件，需要助手时再 @ 它。"),
+                  h36("h2", null, "一起把事情做好"),
+                  h36("p", null, "在这里讨论、分享文件，需要助手时再 @ 它。"),
                 )
               : null,
             ...messages.map((message) =>
-              h33(
+              h36(
                 "article",
                 {
                   key: message.id,
                   "data-shared-message-id": message.id,
                   className: `workagent-message workagent-collab-message is-${message.kind}${message.is_current_user ? " is-user is-mine" : ""}${message.id === targetMessage ? " workagent-message-highlight" : ""}`,
                 },
-                h33(
+                h36(
                   "header",
                   null,
-                  h33(
+                  h36(
                     "span",
                     {
                       className:
@@ -8556,7 +8939,7 @@ window.__ModuleLoader__.load({
                             (message.author_name || "?").trim(),
                           )[0]?.toLocaleUpperCase(),
                   ),
-                  h33(
+                  h36(
                     "strong",
                     null,
                     message.kind === "assistant"
@@ -8565,7 +8948,7 @@ window.__ModuleLoader__.load({
                         ? "项目动态"
                         : message.author_name,
                   ),
-                  h33(
+                  h36(
                     "time",
                     { dateTime: message.created_at },
                     new Date(message.created_at).toLocaleTimeString([], {
@@ -8574,7 +8957,7 @@ window.__ModuleLoader__.load({
                     }),
                   ),
                 ),
-                h33(
+                h36(
                   "div",
                   {
                     onClick: (event) => {
@@ -8599,14 +8982,14 @@ window.__ModuleLoader__.load({
                       }
                     },
                   },
-                  h33(Markdown2, null, message.body),
+                  h36(Markdown2, null, message.body),
                 ),
                 message.attachments?.length
-                  ? h33(
+                  ? h36(
                       "div",
                       { className: "workagent-collab-chips" },
                       ...message.attachments.map((path) =>
-                        h33(
+                        h36(
                           "a",
                           {
                             key: path,
@@ -8624,15 +9007,15 @@ window.__ModuleLoader__.load({
           ...(conversation.assistants || [])
             .filter((agent) => agent.active)
             .map((agent) =>
-              h33(
+              h36(
                 "div",
                 {
                   key: agent.assistant_id,
                   role: "status",
                   className: "workagent-collab-running",
                 },
-                h33("span", null, `${agent.name} 正在处理…`),
-                h33(
+                h36("span", null, `${agent.name} 正在处理…`),
+                h36(
                   Button2,
                   {
                     "aria-label": `停止 ${agent.name}`,
@@ -8651,7 +9034,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-          h33(Composer, {
+          h36(Composer, {
             key: conversation.id,
             conversation,
             members,
@@ -8672,7 +9055,7 @@ window.__ModuleLoader__.load({
         );
       }
       function Files({ project, onClose, revision }) {
-        const [wide, setWide] = React37.useState(false);
+        const [wide, setWide] = React40.useState(false);
         const resolveOfficePreview = async (_workspace, entry, signal) => {
           const result = await request2(`${root}/shared-office-preview`, {
             ...json({ project_id: project.id, path: entry.path }),
@@ -8689,34 +9072,34 @@ window.__ModuleLoader__.load({
           if (result.failures.length)
             throw new Error(result.failures.join("；"));
         };
-        return h33(
+        return h36(
           "aside",
           {
             className: `workagent-collab-files is-unified${wide ? " is-wide" : ""}`,
             "aria-label": "项目文件侧栏",
           },
-          h33(
+          h36(
             "header",
             { className: "workagent-files-panel-header" },
-            h33("strong", null, "项目文件"),
-            h33(FileIconButton, {
+            h36("strong", null, "项目文件"),
+            h36(FileIconButton, {
               name: "expand",
               label: wide ? "缩小文件侧栏" : "放大文件侧栏",
               onClick: () => setWide(!wide),
             }),
-            h33(FileIconButton, {
+            h36(FileIconButton, {
               name: "close",
               label: "关闭文件侧栏",
               onClick: onClose,
             }),
           ),
-          h33(
+          h36(
             "div",
             { className: "workagent-files-project", title: project.name },
             project.name,
           ),
           FileManager
-            ? h33(FileManager, {
+            ? h36(FileManager, {
                 key: project.id,
                 workspace: project,
                 root: fileRoot(project.id),
@@ -8728,7 +9111,7 @@ window.__ModuleLoader__.load({
                 createEmptyFile,
                 onDismiss: onClose,
               })
-            : h33(
+            : h36(
                 "div",
                 { className: "workagent-file-panel-empty" },
                 "文件管理器暂不可用。",
@@ -8747,29 +9130,29 @@ window.__ModuleLoader__.load({
         const [sessionState, reloadSessions] = useResource2(
           hasPersonalTasks ? `${apiRoot2}/sessions` : null,
         );
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (hasPersonalTasks) void reloadSessions();
         }, [state.revision, hasPersonalTasks]);
         const taskSessions = new Map(
           sessionState.rows.map((row) => [row.id, row]),
         );
-        const [creating2, setCreating] = React37.useState(false),
-          [invites, setInvites] = React37.useState(false),
-          [searching, setSearching] = React37.useState(false),
-          [collapsed, setCollapsed] = React37.useState({}),
-          [sectionClosed, setSectionClosed] = React37.useState(false),
-          [menu, setMenu] = React37.useState(null),
-          [action, setAction] = React37.useState(null),
-          [name, setName] = React37.useState(""),
-          [busy, setBusy] = React37.useState(false),
-          [query, setQuery] = React37.useState(""),
-          [hidden, setHidden] = React37.useState(false),
-          [error, setError] = React37.useState("");
+        const [creating2, setCreating] = React40.useState(false),
+          [invites, setInvites] = React40.useState(false),
+          [searching, setSearching] = React40.useState(false),
+          [collapsed, setCollapsed] = React40.useState({}),
+          [sectionClosed, setSectionClosed] = React40.useState(false),
+          [menu, setMenu] = React40.useState(null),
+          [action, setAction] = React40.useState(null),
+          [name, setName] = React40.useState(""),
+          [busy, setBusy] = React40.useState(false),
+          [query, setQuery] = React40.useState(""),
+          [hidden, setHidden] = React40.useState(false),
+          [error, setError] = React40.useState("");
         const members = useMembers(
           action?.kind === "members" ? action.project : null,
           state.revision,
         );
-        const operation = React37.useRef(uid());
+        const operation = React40.useRef(uid());
         const rows = sortProjectsByChat(
             state.projects,
             state.conversations,
@@ -8788,7 +9171,7 @@ window.__ModuleLoader__.load({
           count = state.invites.filter(
             (row) => row.status === "pending",
           ).length;
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           const close = (event) => {
             if (event.defaultPrevented) return;
             if (event.key === "Escape") {
@@ -8832,7 +9215,7 @@ window.__ModuleLoader__.load({
             "PATCH",
           );
         const more = (label, target) =>
-          h33(SidebarAction, {
+          h36(SidebarAction, {
             label,
             "aria-haspopup": "dialog",
             onClick: () => {
@@ -8841,28 +9224,28 @@ window.__ModuleLoader__.load({
             },
           });
         const menuItem = (label, glyph, onClick) =>
-          h33(Button2, { disabled: busy, onClick }, icon(glyph, 16), label);
-        return h33(
+          h36(Button2, { disabled: busy, onClick }, icon(glyph, 16), label);
+        return h36(
           "section",
           {
             className: "workagent-sidebar-browser workagent-collab-sidebar",
             "aria-label": "协作项目",
           },
-          h33("button", {
+          h36("button", {
             type: "button",
             className: "workagent-mobile-backdrop",
             "aria-label": "收起导航菜单",
             tabIndex: -1,
             onClick: closeMobileSidebar3,
           }),
-          h33(SidebarHeader, {
+          h36(SidebarHeader, {
             title: hidden ? "已隐藏项目" : "项目",
             expanded: !sectionClosed,
             onToggle: () => setSectionClosed(!sectionClosed),
-            actions: h33(
-              React37.Fragment,
+            actions: h36(
+              React40.Fragment,
               null,
-              h33(SidebarAction, {
+              h36(SidebarAction, {
                 label: searching ? "关闭搜索" : "搜索共享项目",
                 icon: searching ? "close" : "search",
                 "aria-pressed": searching,
@@ -8871,7 +9254,7 @@ window.__ModuleLoader__.load({
                   setQuery("");
                 },
               }),
-              h33(SidebarAction, {
+              h36(SidebarAction, {
                 label: "新建协作项目",
                 icon: "plus",
                 onClick: () => setCreating(true),
@@ -8880,7 +9263,7 @@ window.__ModuleLoader__.load({
             ),
           }),
           searching
-            ? h33(SidebarSearch, {
+            ? h36(SidebarSearch, {
                 autoFocus: true,
                 "aria-label": "搜索共享项目",
                 placeholder: "搜索项目",
@@ -8889,18 +9272,18 @@ window.__ModuleLoader__.load({
               })
             : null,
           count
-            ? h33(
+            ? h36(
                 Button2,
                 {
                   className: "workagent-collab-invite-entry",
                   onClick: () => setInvites(true),
                 },
                 "项目邀请",
-                h33("span", { className: "workagent-badge" }, count),
+                h36("span", { className: "workagent-badge" }, count),
               )
             : null,
-          h33(Feedback, { error: error || state.error }),
-          h33(
+          h36(Feedback, { error: error || state.error }),
+          h36(
             "div",
             { className: "workagent-sidebar-projects" },
             ...(sectionClosed ? [] : rows).map((project) => {
@@ -8910,7 +9293,7 @@ window.__ModuleLoader__.load({
               const firstDiscussion = discussions.find(
                 (row) => row.kind !== "personal_task",
               );
-              return h33(
+              return h36(
                 SidebarGroup,
                 {
                   key: project.id,
@@ -8923,10 +9306,10 @@ window.__ModuleLoader__.load({
                       ...value,
                       [project.id]: !value[project.id],
                     })),
-                  actions: h33(
-                    React37.Fragment,
+                  actions: h36(
+                    React40.Fragment,
                     null,
-                    h33(SidebarAction, {
+                    h36(SidebarAction, {
                       label: `在 ${project.name} 中新建讨论`,
                       icon: "plus",
                       onClick: () => begin("discussion", project),
@@ -8942,13 +9325,13 @@ window.__ModuleLoader__.load({
                       (!params.get("discussion") &&
                         !params.get("session") &&
                         firstDiscussion === discussion);
-                  return h33(SidebarRow, {
+                  return h36(SidebarRow, {
                     key: discussion.id,
                     title: discussion.name,
                     selected: selected === project.id && active,
                     icon: personalTask
                       ? SessionAvatar2
-                        ? h33(SessionAvatar2, {
+                        ? h36(SessionAvatar2, {
                             session: taskSessions.get(
                               discussion.runtime_session_id,
                             ),
@@ -8956,10 +9339,10 @@ window.__ModuleLoader__.load({
                         : assistantAvatar(null, icon("chat", 16))
                       : icon("teams", 16),
                     meta: personalTask
-                      ? h33("span", { className: "workagent-badge" }, "个人")
+                      ? h36("span", { className: "workagent-badge" }, "个人")
                       : null,
                     pinned: personalTask && !!discussion.pinned,
-                    status: h33(SidebarStatus, {
+                    status: h36(SidebarStatus, {
                       running: discussion.state === "running",
                       label: "助手正在运行",
                     }),
@@ -8977,7 +9360,7 @@ window.__ModuleLoader__.load({
                           project,
                           discussion,
                         })
-                      : h33(SidebarAction, {
+                      : h36(SidebarAction, {
                           label: `${discussion.pinned ? "取消置顶" : "置顶"} ${discussion.name}`,
                           icon: "pin",
                           disabled: busy,
@@ -8992,7 +9375,7 @@ window.__ModuleLoader__.load({
                   });
                 }),
                 !discussions.length
-                  ? h33(
+                  ? h36(
                       "button",
                       {
                         type: "button",
@@ -9010,7 +9393,7 @@ window.__ModuleLoader__.load({
             }),
           ),
           !rows.length && !sectionClosed
-            ? h33(
+            ? h36(
                 "p",
                 { className: "workagent-collab-empty" },
                 state.loading
@@ -9023,7 +9406,7 @@ window.__ModuleLoader__.load({
               )
             : null,
           menu?.discussion?.kind === "personal_task"
-            ? h33(ConversationMenu, {
+            ? h36(ConversationMenu, {
                 title: menu.discussion.name,
                 projectName: menu.project.name,
                 pinned: !!menu.discussion.pinned,
@@ -9042,19 +9425,19 @@ window.__ModuleLoader__.load({
                 },
               })
             : menu
-              ? h33(
+              ? h36(
                   Dialog,
                   {
                     title:
                       menu.discussion?.name || menu.project?.name || "协作",
                     onClose: () => setMenu(null),
                   },
-                  h33(
+                  h36(
                     ActionList,
                     null,
                     menu.discussion
-                      ? h33(
-                          React37.Fragment,
+                      ? h36(
+                          React40.Fragment,
                           null,
                           menuItem(
                             menu.discussion.pinned ? "取消置顶" : "置顶讨论",
@@ -9075,8 +9458,8 @@ window.__ModuleLoader__.load({
                           ),
                         )
                       : menu.project
-                        ? h33(
-                            React37.Fragment,
+                        ? h36(
+                            React40.Fragment,
                             null,
                             menuItem(
                               pins.pins.includes(menu.project.id)
@@ -9121,8 +9504,8 @@ window.__ModuleLoader__.load({
                                 ),
                             ),
                           )
-                        : h33(
-                            React37.Fragment,
+                        : h36(
+                            React40.Fragment,
                             null,
                             menuItem(
                               count ? `项目邀请 · ${count}` : "项目邀请",
@@ -9142,11 +9525,11 @@ window.__ModuleLoader__.load({
                             ),
                           ),
                   ),
-                  h33(Feedback, { error }),
+                  h36(Feedback, { error }),
                 )
               : null,
           action?.kind === "members"
-            ? h33(Members, {
+            ? h36(Members, {
                 project: action.project,
                 members,
                 revision: state.revision,
@@ -9154,13 +9537,13 @@ window.__ModuleLoader__.load({
               })
             : null,
           action?.kind === "manage-discussions"
-            ? h33(
+            ? h36(
                 Dialog,
                 {
                   title: "管理讨论",
                   onClose: () => setAction(null),
                 },
-                h33(
+                h36(
                   "div",
                   { className: "workagent-collab-discussion-manager" },
                   ...state.conversations
@@ -9171,19 +9554,19 @@ window.__ModuleLoader__.load({
                         discussion.kind !== "personal_task",
                     )
                     .map((discussion) =>
-                      h33(
+                      h36(
                         "div",
                         { key: discussion.id, className: "workagent-file-row" },
                         icon("teams", 16),
-                        h33(
+                        h36(
                           "span",
                           { className: "workagent-file-name" },
                           discussion.name,
                         ),
-                        h33(
+                        h36(
                           "div",
                           { className: "workagent-file-actions" },
-                          h33(
+                          h36(
                             Button2,
                             {
                               onClick: () =>
@@ -9195,7 +9578,7 @@ window.__ModuleLoader__.load({
                             },
                             "重命名",
                           ),
-                          h33(
+                          h36(
                             Button2,
                             {
                               className: "workagent-button is-danger",
@@ -9215,7 +9598,7 @@ window.__ModuleLoader__.load({
               )
             : null,
           action?.discussion?.kind === "personal_task"
-            ? h33(ConversationManagementDialog, {
+            ? h36(ConversationManagementDialog, {
                 name,
                 onNameChange: setName,
                 busy,
@@ -9251,7 +9634,7 @@ window.__ModuleLoader__.load({
                 },
               })
             : action && !["members", "manage-discussions"].includes(action.kind)
-              ? h33(
+              ? h36(
                   Dialog,
                   {
                     title:
@@ -9266,7 +9649,7 @@ window.__ModuleLoader__.load({
                       if (!busy) setAction(null);
                     },
                   },
-                  h33(
+                  h36(
                     "form",
                     {
                       className: "workagent-collab-form",
@@ -9318,12 +9701,12 @@ window.__ModuleLoader__.load({
                       },
                     },
                     action.kind === "delete-discussion"
-                      ? h33(
+                      ? h36(
                           "p",
                           null,
                           `确定删除“${action.discussion.name}”及其全部消息？此操作无法撤销。`,
                         )
-                      : h33(Input2, {
+                      : h36(Input2, {
                           "aria-label": "名称",
                           required: true,
                           maxLength: 120,
@@ -9331,21 +9714,21 @@ window.__ModuleLoader__.load({
                           onChange: (event) => setName(event.target.value),
                         }),
                     action.kind === "discussion"
-                      ? h33(PersonalTaskButton, {
+                      ? h36(PersonalTaskButton, {
                           project: action.project,
                           onClose: () => setAction(null),
                         })
                       : null,
-                    h33(Feedback, { error }),
-                    h33(
+                    h36(Feedback, { error }),
+                    h36(
                       "footer",
                       null,
-                      h33(
+                      h36(
                         Button2,
                         { onClick: () => setAction(null), disabled: busy },
                         "取消",
                       ),
-                      h33(
+                      h36(
                         Button2,
                         {
                           type: "submit",
@@ -9369,10 +9752,10 @@ window.__ModuleLoader__.load({
                 )
               : null,
           creating2
-            ? h33(CreateProject, { onClose: () => setCreating(false) })
+            ? h36(CreateProject, { onClose: () => setCreating(false) })
             : null,
           invites
-            ? h33(Invitations, { onClose: () => setInvites(false) })
+            ? h36(Invitations, { onClose: () => setInvites(false) })
             : null,
           confirmation,
         );
@@ -9395,14 +9778,14 @@ window.__ModuleLoader__.load({
             discussions.find((row) => row.id === params.get("discussion")) ||
             discussions[0],
           members = useMembers(project, state.revision);
-        const [modal, setModal] = React37.useState(""),
-          [files, setFiles] = React37.useState(false),
-          [error, setError] = React37.useState(""),
-          [notice, setNotice] = React37.useState(""),
-          [name, setName] = React37.useState(""),
-          [busy, setBusy] = React37.useState(false);
-        const discussionOperation = React37.useRef(uid());
-        React37.useEffect(() => {
+        const [modal, setModal] = React40.useState(""),
+          [files, setFiles] = React40.useState(false),
+          [error, setError] = React40.useState(""),
+          [notice, setNotice] = React40.useState(""),
+          [name, setName] = React40.useState(""),
+          [busy, setBusy] = React40.useState(false);
+        const discussionOperation = React40.useRef(uid());
+        React40.useEffect(() => {
           setModal(
             params.has("token") ||
               params.has("invite") ||
@@ -9412,7 +9795,7 @@ window.__ModuleLoader__.load({
           );
           setError("");
         }, [search]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           setFiles(false);
           const key = `workagent.shared.notice.${project?.id}`;
           setNotice(sessionStorage.getItem(key) || "");
@@ -9436,22 +9819,22 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           "div",
           { className: "workagent-collab-page" },
           confirmation,
           project
-            ? h33(
-                React37.Fragment,
+            ? h36(
+                React40.Fragment,
                 null,
-                h33(
+                h36(
                   "header",
                   { className: "workagent-collab-project-header" },
-                  h33(
+                  h36(
                     "div",
                     { className: "workagent-collab-project-title" },
-                    h33("h1", null, project.name),
-                    h33(
+                    h36("h1", null, project.name),
+                    h36(
                       "select",
                       {
                         "aria-label": "切换讨论",
@@ -9460,21 +9843,21 @@ window.__ModuleLoader__.load({
                           go(route(project.id, event.target.value)),
                       },
                       ...discussions.map((row) =>
-                        h33("option", { key: row.id, value: row.id }, row.name),
+                        h36("option", { key: row.id, value: row.id }, row.name),
                       ),
                     ),
                   ),
-                  h33(
+                  h36(
                     "div",
                     { className: "workagent-collab-actions" },
                     conversation && SessionReminder
-                      ? h33(
+                      ? h36(
                           "details",
                           {
                             className: "workagent-collab-reminder",
                             key: conversation.id,
                           },
-                          h33(
+                          h36(
                             "summary",
                             {
                               className: "workagent-button",
@@ -9482,21 +9865,21 @@ window.__ModuleLoader__.load({
                             },
                             "消息提醒",
                           ),
-                          h33(
+                          h36(
                             "div",
                             { className: "workagent-collab-reminder-popover" },
-                            h33(
+                            h36(
                               "small",
                               null,
                               "仅接收 Agent 完成提醒和产物文件。",
                             ),
-                            h33(SessionReminder, {
+                            h36(SessionReminder, {
                               sessionId: `collaboration:${conversation.id}`,
                             }),
                           ),
                         )
                       : null,
-                    h33(
+                    h36(
                       Button2,
                       {
                         onClick: () => setModal("members"),
@@ -9504,11 +9887,11 @@ window.__ModuleLoader__.load({
                         title: `${members.length} 位成员`,
                         className: "workagent-collab-members-button",
                       },
-                      h33(
+                      h36(
                         "span",
                         { className: "workagent-collab-avatars" },
                         ...members.slice(0, 3).map((member) =>
-                          h33(
+                          h36(
                             "span",
                             {
                               key: member.userId,
@@ -9525,7 +9908,7 @@ window.__ModuleLoader__.load({
                         ),
                       ),
                     ),
-                    h33(
+                    h36(
                       Button2,
                       {
                         "aria-pressed": files,
@@ -9536,17 +9919,17 @@ window.__ModuleLoader__.load({
                       },
                       icon("workspace"),
                     ),
-                    h33(
+                    h36(
                       MoreMenu,
                       null,
-                      h33(
+                      h36(
                         Button2,
                         { onClick: () => setModal("members") },
                         project.currentRole === "owner"
                           ? "邀请与成员"
                           : "项目成员",
                       ),
-                      h33(
+                      h36(
                         Button2,
                         {
                           onClick: () =>
@@ -9556,7 +9939,7 @@ window.__ModuleLoader__.load({
                         },
                         "项目能力与版本",
                       ),
-                      h33(
+                      h36(
                         Button2,
                         {
                           onClick: () => {
@@ -9568,7 +9951,7 @@ window.__ModuleLoader__.load({
                         "新建讨论",
                       ),
                       project.currentRole === "owner"
-                        ? h33(
+                        ? h36(
                             Button2,
                             {
                               onClick: () => {
@@ -9580,7 +9963,7 @@ window.__ModuleLoader__.load({
                           )
                         : null,
                       project.currentRole === "owner" && conversation
-                        ? h33(
+                        ? h36(
                             Button2,
                             {
                               onClick: () => {
@@ -9590,7 +9973,7 @@ window.__ModuleLoader__.load({
                             "助手设置",
                           )
                         : null,
-                      h33(
+                      h36(
                         Button2,
                         {
                           onClick: () =>
@@ -9609,7 +9992,7 @@ window.__ModuleLoader__.load({
                         project.hidden ? "显示项目" : "隐藏项目",
                       ),
                       project.currentRole !== "owner"
-                        ? h33(
+                        ? h36(
                             Button2,
                             {
                               onClick: async () => {
@@ -9634,21 +10017,21 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                 ),
-                h33(Feedback, { error: error || state.error, notice }),
-                h33(
+                h36(Feedback, { error: error || state.error, notice }),
+                h36(
                   "div",
                   { className: "workagent-collab-workspace" },
                   conversation
-                    ? h33(Chat, {
+                    ? h36(Chat, {
                         key: conversation.id,
                         conversation,
                         project,
                         members,
                         revision: state.revision,
                       })
-                    : h33("p", null, "正在准备讨论…"),
+                    : h36("p", null, "正在准备讨论…"),
                   files
-                    ? h33(Files, {
+                    ? h36(Files, {
                         key: project.id,
                         project,
                         revision: state.revision,
@@ -9657,23 +10040,23 @@ window.__ModuleLoader__.load({
                     : null,
                 ),
               )
-            : h33(
+            : h36(
                 "div",
                 { className: "workagent-collab-welcome" },
                 icon("teams", 42),
-                h33("h1", null, "一起协作"),
-                h33(
+                h36("h1", null, "一起协作"),
+                h36(
                   "p",
                   null,
                   params.get("project") && !state.loading
                     ? "项目不存在，或你已没有访问权限。"
                     : "共享项目、讨论和文件，需要助手时再 @ 它。",
                 ),
-                h33(Feedback, { error: error || state.error }),
-                h33(
+                h36(Feedback, { error: error || state.error }),
+                h36(
                   "div",
                   { className: "workagent-collab-actions" },
-                  h33(
+                  h36(
                     Button2,
                     {
                       className: "workagent-button is-primary",
@@ -9681,20 +10064,20 @@ window.__ModuleLoader__.load({
                     },
                     "新建协作项目",
                   ),
-                  h33(
+                  h36(
                     Button2,
                     { onClick: () => setModal("invites") },
                     "查看邀请",
                   ),
                 ),
                 state.projects.some((row) => !row.hidden)
-                  ? h33(
+                  ? h36(
                       "div",
                       { className: "workagent-collab-project-grid" },
                       ...state.projects
                         .filter((row) => !row.hidden)
                         .map((row) =>
-                          h33(
+                          h36(
                             Button2,
                             {
                               key: row.id,
@@ -9711,10 +10094,10 @@ window.__ModuleLoader__.load({
                   : null,
               ),
           modal === "create"
-            ? h33(CreateProject, { onClose: () => setModal("") })
+            ? h36(CreateProject, { onClose: () => setModal("") })
             : null,
           modal === "invites"
-            ? h33(Invitations, {
+            ? h36(Invitations, {
                 onClose: () => {
                   setModal("");
                   if (
@@ -9727,7 +10110,7 @@ window.__ModuleLoader__.load({
               })
             : null,
           modal === "members" && project
-            ? h33(Members, {
+            ? h36(Members, {
                 project,
                 members,
                 revision: state.revision,
@@ -9735,20 +10118,20 @@ window.__ModuleLoader__.load({
               })
             : null,
           modal === "assistant" && project
-            ? h33(AssistantSettings, {
+            ? h36(AssistantSettings, {
                 project,
                 revision: state.revision,
                 onClose: () => setModal(""),
               })
             : null,
           ["rename", "discussion"].includes(modal) && project
-            ? h33(
+            ? h36(
                 Dialog,
                 {
                   title: modal === "rename" ? "重命名项目" : "新建讨论",
                   onClose: () => setModal(""),
                 },
-                h33(
+                h36(
                   "form",
                   {
                     className: "workagent-collab-form",
@@ -9772,11 +10155,11 @@ window.__ModuleLoader__.load({
                       }, "已保存。");
                     },
                   },
-                  h33(
+                  h36(
                     "label",
                     null,
                     "名称",
-                    h33(Input2, {
+                    h36(Input2, {
                       "aria-label":
                         modal === "rename" ? "项目名称" : "讨论名称",
                       value: name,
@@ -9786,16 +10169,16 @@ window.__ModuleLoader__.load({
                     }),
                   ),
                   modal === "discussion"
-                    ? h33(PersonalTaskButton, {
+                    ? h36(PersonalTaskButton, {
                         project,
                         onClose: () => setModal(""),
                       })
                     : null,
-                  h33(
+                  h36(
                     "footer",
                     null,
-                    h33(Button2, { onClick: () => setModal("") }, "取消"),
-                    h33(
+                    h36(Button2, { onClick: () => setModal("") }, "取消"),
+                    h36(
                       Button2,
                       {
                         type: "submit",
@@ -9812,9 +10195,9 @@ window.__ModuleLoader__.load({
       }
       function Hero({ onExit, initial = "" }) {
         const state = useShared(),
-          [projectId, setProjectId] = React37.useState(""),
-          [creating2, setCreating] = React37.useState(false),
-          [pending, setPending] = React37.useState(null);
+          [projectId, setProjectId] = React40.useState(""),
+          [creating2, setCreating] = React40.useState(false),
+          [pending, setPending] = React40.useState(null);
         const project = state.projects.find((row) => row.id === projectId),
           conversation = state.conversations.find(
             (row) =>
@@ -9838,10 +10221,10 @@ window.__ModuleLoader__.load({
           go(route(project.id, target.id));
           return result;
         }
-        return h33(
+        return h36(
           "div",
           { className: "workagent-collab-hero" },
-          h33(Composer, {
+          h36(Composer, {
             key: projectId || "new",
             conversation,
             members,
@@ -9849,28 +10232,28 @@ window.__ModuleLoader__.load({
             projectId,
             onSend: send,
           }),
-          h33(
+          h36(
             "div",
             { className: "workagent-project-row" },
-            h33(
+            h36(
               "select",
               {
                 "aria-label": "协作项目",
                 value: projectId,
                 onChange: (event) => setProjectId(event.target.value),
               },
-              h33("option", { value: "" }, "新建协作项目…"),
+              h36("option", { value: "" }, "新建协作项目…"),
               ...state.projects
                 .filter((row) => !row.hidden)
                 .map((row) =>
-                  h33("option", { key: row.id, value: row.id }, row.name),
+                  h36("option", { key: row.id, value: row.id }, row.name),
                 ),
             ),
-            h33(Button2, { onClick: () => setCreating(true) }, "创建项目"),
-            h33(
+            h36(Button2, { onClick: () => setCreating(true) }, "创建项目"),
+            h36(
               "label",
               { className: "workagent-team-toggle" },
-              h33("input", {
+              h36("input", {
                 type: "checkbox",
                 checked: true,
                 onChange: onExit,
@@ -9879,7 +10262,7 @@ window.__ModuleLoader__.load({
             ),
           ),
           creating2
-            ? h33(CreateProject, {
+            ? h36(CreateProject, {
                 onClose: () => setCreating(false),
                 onCreated: async (value) => {
                   if (pending) {
@@ -9911,8 +10294,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/conversations/composer.js
-    var import_react24 = __toESM(require("react"), 1);
-    var import_react25 = require("react");
+    var import_react25 = __toESM(require("react"), 1);
+    var import_react26 = require("react");
     function submitComposerOnEnter(event, submit) {
       if (
         event.key !== "Enter" ||
@@ -9928,7 +10311,7 @@ window.__ModuleLoader__.load({
       )?.requestSubmit();
     }
     function ComposerInput(props) {
-      return (0, import_react25.createElement)(workbench.FileComposer, props);
+      return (0, import_react26.createElement)(workbench.FileComposer, props);
     }
     function ComposerForm({
       children,
@@ -9936,9 +10319,9 @@ window.__ModuleLoader__.load({
       showSettings = true,
       ...props
     }) {
-      const [expanded, setExpanded] = import_react24.default.useState(false);
-      const formRef = import_react24.default.useRef(null);
-      import_react24.default.useLayoutEffect(() => {
+      const [expanded, setExpanded] = import_react25.default.useState(false);
+      const formRef = import_react25.default.useRef(null);
+      import_react25.default.useLayoutEffect(() => {
         const form = formRef.current;
         const container = form.parentElement;
         const measure = () =>
@@ -9978,7 +10361,7 @@ window.__ModuleLoader__.load({
           container.style.removeProperty("--workagent-keyboard-offset");
         };
       }, []);
-      return (0, import_react25.createElement)(
+      return (0, import_react26.createElement)(
         "form",
         {
           ...props,
@@ -9988,7 +10371,7 @@ window.__ModuleLoader__.load({
         },
         children,
         showSettings
-          ? (0, import_react25.createElement)(
+          ? (0, import_react26.createElement)(
               "button",
               {
                 type: "button",
@@ -10001,7 +10384,7 @@ window.__ModuleLoader__.load({
                 },
                 onClick: () => setExpanded(!expanded),
               },
-              (0, import_react25.createElement)(Icon, {
+              (0, import_react26.createElement)(Icon, {
                 name: "settings",
                 size: 18,
               }),
@@ -10012,9 +10395,9 @@ window.__ModuleLoader__.load({
 
     // src/features/files/moves.js
     function createFileMoves({
-      React: React37,
+      React: React40,
       request: request2,
-      h: h33,
+      h: h36,
       friendlyError: friendlyError2,
     }) {
       const mime = "application/x-workagent-project-files";
@@ -10030,19 +10413,19 @@ window.__ModuleLoader__.load({
         onCompleted,
         onError,
       }) {
-        const [checked, setChecked] = React37.useState([]);
-        const [picker, setPicker] = React37.useState(null);
-        const [target, setTarget] = React37.useState("");
-        const [folders, setFolders] = React37.useState([]);
-        const [folderName, setFolderName] = React37.useState("");
-        const [hover, setHover] = React37.useState(null);
-        const [operations, setOperations] = React37.useState([]);
-        const [conflict, setConflict] = React37.useState(null);
-        const [busy, setBusy] = React37.useState(false);
-        const seen = React37.useRef(null);
-        const callback = React37.useRef(onCompleted);
+        const [checked, setChecked] = React40.useState([]);
+        const [picker, setPicker] = React40.useState(null);
+        const [target, setTarget] = React40.useState("");
+        const [folders, setFolders] = React40.useState([]);
+        const [folderName, setFolderName] = React40.useState("");
+        const [hover, setHover] = React40.useState(null);
+        const [operations, setOperations] = React40.useState([]);
+        const [conflict, setConflict] = React40.useState(null);
+        const [busy, setBusy] = React40.useState(false);
+        const seen = React40.useRef(null);
+        const callback = React40.useRef(onCompleted);
         callback.current = onCompleted;
-        const drag = React37.useRef(null);
+        const drag = React40.useRef(null);
         const accept = (op) => {
           const key = `${op.state}:${op.applied}`;
           if (seen.current?.get(op.id) !== key && op.applied)
@@ -10053,7 +10436,7 @@ window.__ModuleLoader__.load({
             op,
           ]);
         };
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           let live = true;
           const poll = async () => {
             try {
@@ -10082,7 +10465,7 @@ window.__ModuleLoader__.load({
             clearInterval(timer);
           };
         }, [root]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!picker) return;
           const controller = new AbortController();
           request2(`${root}/files?path=${encodeURIComponent(target)}`, {
@@ -10195,7 +10578,7 @@ window.__ModuleLoader__.load({
           );
         };
         const button = (label, onClick, disabled = false) =>
-          h33(
+          h36(
             "button",
             {
               type: "button",
@@ -10234,7 +10617,7 @@ window.__ModuleLoader__.load({
           }),
           destinationProps,
           checkbox: (entry) =>
-            h33("input", {
+            h36("input", {
               type: "checkbox",
               "aria-label": `选择 ${entry.name}`,
               checked: checked.some((row) => row.path === entry.path),
@@ -10245,11 +10628,11 @@ window.__ModuleLoader__.load({
                     : rows.filter((row) => row.path !== entry.path),
                 ),
             }),
-          controls: h33(
-            React37.Fragment,
+          controls: h36(
+            React40.Fragment,
             null,
             checked.length
-              ? h33(
+              ? h36(
                   "div",
                   { className: "workagent-move-selection" },
                   `已选择 ${checked.length} 项`,
@@ -10258,19 +10641,19 @@ window.__ModuleLoader__.load({
                 )
               : null,
             ...pending.map((op) =>
-              h33(
+              h36(
                 "div",
                 {
                   key: op.id,
                   role: "status",
                   className: "workagent-file-notice",
                 },
-                h33("span", null, "已安排移动，等待任务结束或文件编辑保存。"),
+                h36("span", null, "已安排移动，等待任务结束或文件编辑保存。"),
                 button("取消移动", () => action(op, "cancel")),
               ),
             ),
             last
-              ? h33(
+              ? h36(
                   "div",
                   { role: "status", className: "workagent-file-notice" },
                   `已移动 ${last.moves.length} 项到 ${last.moves[0].destination.split("/").slice(0, -1).join(" / ") || "根目录"}`,
@@ -10281,14 +10664,14 @@ window.__ModuleLoader__.load({
               .filter((op) => op.state === "failed")
               .slice(-1)
               .map((op) =>
-                h33(
+                h36(
                   "p",
                   { role: "alert", key: op.id },
                   `移动未完成（已移动 ${op.applied}/${op.moves.length} 项）：${friendlyError2(op.error)}`,
                 ),
               ),
             conflict
-              ? h33(
+              ? h36(
                   "div",
                   { role: "alert", className: "workagent-file-action-form" },
                   "目标文件夹已有同名文件，原文件会保留。",
@@ -10297,15 +10680,15 @@ window.__ModuleLoader__.load({
                 )
               : null,
             picker
-              ? h33(
+              ? h36(
                   "section",
                   {
                     role: "dialog",
                     "aria-label": "移动到文件夹",
                     className: "workagent-move-picker",
                   },
-                  h33("strong", null, `移动 ${picker.length} 项到…`),
-                  h33(
+                  h36("strong", null, `移动 ${picker.length} 项到…`),
+                  h36(
                     "nav",
                     { "aria-label": "目标文件夹" },
                     button("根目录", () => setTarget("")),
@@ -10318,7 +10701,7 @@ window.__ModuleLoader__.load({
                         ),
                       ),
                   ),
-                  h33(
+                  h36(
                     "div",
                     { className: "workagent-move-folder-list" },
                     ...folders.map((folder) =>
@@ -10331,10 +10714,10 @@ window.__ModuleLoader__.load({
                       ),
                     ),
                   ),
-                  h33(
+                  h36(
                     "div",
                     { className: "workagent-move-new-folder" },
-                    h33("input", {
+                    h36("input", {
                       "aria-label": "新文件夹名称",
                       value: folderName,
                       placeholder: "新文件夹名称",
@@ -10361,7 +10744,7 @@ window.__ModuleLoader__.load({
                     }),
                   ),
                   dirtyFiles.size
-                    ? h33(
+                    ? h36(
                         "p",
                         null,
                         "有未保存编辑时，移动将在保存或关闭编辑后进行。",
@@ -10382,11 +10765,367 @@ window.__ModuleLoader__.load({
       return { useFileMoves: useFileMoves2 };
     }
 
+    // src/features/files/published-apps.js
+    var import_react27 = __toESM(require("react"), 1);
+    function PublishedApps({ workspace, entry = "index.html" }) {
+      const workspaceId =
+        workspace.currentRole && !workspace.id.startsWith("shared:")
+          ? `shared:${workspace.id}`
+          : workspace.id;
+      const [apps, setApps] = import_react27.default.useState([]),
+        [name, setName] = import_react27.default.useState(
+          workspace.name || "应用",
+        ),
+        [kind, setKind] = import_react27.default.useState("static"),
+        [entryPath, setEntry] = import_react27.default.useState(entry),
+        [origins, setOrigins] = import_react27.default.useState(""),
+        [error, setError] = import_react27.default.useState(""),
+        [busy, setBusy] = import_react27.default.useState(false),
+        [preview, setPreview] = import_react27.default.useState(null),
+        [access, setAccess] = import_react27.default.useState("owner"),
+        [members, setMembers] = import_react27.default.useState("");
+      const [statuses, setStatuses] = import_react27.default.useState({});
+      const acting = import_react27.default.useRef(false);
+      const frameName = import_react27.default.useId().replaceAll(":", "");
+      const ticketForm = import_react27.default.useRef(null);
+      const load = () =>
+        request("/api/portal/apps")
+          .then((result) =>
+            setApps(result.items.filter((a) => a.workspaceId === workspaceId)),
+          )
+          .catch((reason) => setError(reason.message));
+      import_react27.default.useEffect(() => {
+        void load();
+      }, [workspaceId]);
+      const act = async (action) => {
+        if (acting.current) return;
+        acting.current = true;
+        setBusy(true);
+        setError("");
+        try {
+          await action();
+        } catch (reason) {
+          setError(reason.message);
+        } finally {
+          await load();
+          acting.current = false;
+          setBusy(false);
+        }
+      };
+      const post = (url, body) =>
+        request(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+      const showPreview = async (app) => {
+        await post(`/api/portal/apps/${app.id}/previews`);
+        const ticket = await post(
+          `/api/portal/apps/${app.id}/access-ticket?preview=true`,
+        );
+        setPreview(ticket);
+      };
+      import_react27.default.useEffect(() => {
+        if (!preview) return;
+        const frame = requestAnimationFrame(() => ticketForm.current?.submit());
+        return () => cancelAnimationFrame(frame);
+      }, [preview, frameName]);
+      return (0, import_react27.createElement)(
+        "section",
+        { className: "workagent-section" },
+        (0, import_react27.createElement)("h3", null, "应用预览与发布"),
+        (0, import_react27.createElement)(
+          "p",
+          null,
+          "发布会保存入口所在目录的快照。请先把要公开的网页和依赖放入独立目录；应用只使用自己的数据空间。服务器资源计入你的额度。",
+        ),
+        (0, import_react27.createElement)(
+          "form",
+          {
+            className: "workagent-form",
+            onSubmit: (event) => {
+              event.preventDefault();
+              void act(async () => {
+                const app = await post("/api/portal/apps", {
+                  workspaceId,
+                  name,
+                  kind,
+                  entry: entryPath,
+                  allowedOrigins: origins.split(/[,\s]+/).filter(Boolean),
+                });
+                await showPreview(app);
+              });
+            },
+          },
+          (0, import_react27.createElement)(
+            Field,
+            { label: "应用名称" },
+            (0, import_react27.createElement)(Input, {
+              value: name,
+              required: true,
+              onChange: (e) => setName(e.target.value),
+            }),
+          ),
+          (0, import_react27.createElement)(
+            Field,
+            { label: "运行方式" },
+            (0, import_react27.createElement)(
+              "select",
+              { value: kind, onChange: (e) => setKind(e.target.value) },
+              (0, import_react27.createElement)(
+                "option",
+                { value: "static" },
+                "HTML / JavaScript",
+              ),
+              (0, import_react27.createElement)(
+                "option",
+                { value: "node" },
+                "Node.js",
+              ),
+              (0, import_react27.createElement)(
+                "option",
+                { value: "python" },
+                "Python",
+              ),
+            ),
+          ),
+          (0, import_react27.createElement)(
+            Field,
+            { label: "项目内入口路径" },
+            (0, import_react27.createElement)(Input, {
+              value: entryPath,
+              required: true,
+              onChange: (e) => setEntry(e.target.value),
+            }),
+          ),
+          (0, import_react27.createElement)(
+            Field,
+            { label: "允许访问的外部 API 来源（可选）" },
+            (0, import_react27.createElement)(Input, {
+              value: origins,
+              placeholder: "https://api.example.com",
+              onChange: (e) => setOrigins(e.target.value),
+            }),
+          ),
+          (0, import_react27.createElement)(
+            Button,
+            { type: "submit", disabled: busy },
+            busy ? "处理中…" : "创建并预览",
+          ),
+        ),
+        (0, import_react27.createElement)(
+          Field,
+          { label: "发布访问范围" },
+          (0, import_react27.createElement)(
+            "select",
+            { value: access, onChange: (e) => setAccess(e.target.value) },
+            (0, import_react27.createElement)(
+              "option",
+              { value: "owner" },
+              "仅自己",
+            ),
+            (0, import_react27.createElement)(
+              "option",
+              { value: "members" },
+              "指定成员",
+            ),
+            (0, import_react27.createElement)(
+              "option",
+              { value: "authenticated" },
+              "全站登录用户",
+            ),
+            (0, import_react27.createElement)(
+              "option",
+              { value: "public" },
+              "公开免登录",
+            ),
+          ),
+        ),
+        access === "members"
+          ? (0, import_react27.createElement)(
+              Field,
+              { label: "成员用户名（逗号分隔）" },
+              (0, import_react27.createElement)(Input, {
+                value: members,
+                onChange: (e) => setMembers(e.target.value),
+              }),
+            )
+          : null,
+        ...apps.map((app) =>
+          (0, import_react27.createElement)(
+            "article",
+            { key: app.id },
+            (0, import_react27.createElement)("strong", null, app.name),
+            (0, import_react27.createElement)(
+              "span",
+              null,
+              app.enabled ? " · 已发布" : " · 未上线",
+            ),
+            (0, import_react27.createElement)(
+              Button,
+              {
+                disabled: busy,
+                onClick: () =>
+                  act(async () => {
+                    const status = await request(
+                      `/api/portal/apps/${app.id}/status?latest=true`,
+                    );
+                    setStatuses((current) => ({
+                      ...current,
+                      [app.id]: status,
+                    }));
+                  }),
+              },
+              "运行状态与日志",
+            ),
+            statuses[app.id]
+              ? (0, import_react27.createElement)(
+                  "div",
+                  null,
+                  (0, import_react27.createElement)(
+                    "p",
+                    null,
+                    `运行状态：${{ running: "运行中", stopped: "已停止", starting: "启动中", failed: "启动失败", idle: "空闲" }[statuses[app.id].state] || statuses[app.id].state}`,
+                  ),
+                  statuses[app.id].error
+                    ? (0, import_react27.createElement)(
+                        "p",
+                        { role: "alert" },
+                        statuses[app.id].error,
+                      )
+                    : null,
+                  (0, import_react27.createElement)(
+                    "pre",
+                    {
+                      style: {
+                        whiteSpace: "pre-wrap",
+                        maxHeight: "240px",
+                        overflow: "auto",
+                      },
+                    },
+                    statuses[app.id].logTail || "暂无日志",
+                  ),
+                )
+              : null,
+            (0, import_react27.createElement)(
+              Button,
+              { disabled: busy, onClick: () => act(() => showPreview(app)) },
+              "预览",
+            ),
+            (0, import_react27.createElement)(
+              Button,
+              {
+                disabled: busy,
+                onClick: () =>
+                  act(async () => {
+                    const updated = await post(
+                      `/api/portal/apps/${app.id}/versions`,
+                    );
+                    await post(`/api/portal/apps/${app.id}/publish`, {
+                      version: updated.versions.at(-1),
+                      access,
+                      memberUsernames: members.split(/[,\s]+/).filter(Boolean),
+                    });
+                  }),
+              },
+              "发布新版本",
+            ),
+            app.enabled
+              ? (0, import_react27.createElement)(
+                  "a",
+                  {
+                    href: `/apps/${app.id}`,
+                    target: "_blank",
+                    rel: "noopener",
+                  },
+                  "打开应用",
+                )
+              : null,
+            app.enabled
+              ? (0, import_react27.createElement)(Input, {
+                  readOnly: true,
+                  value: `${location.origin}/apps/${app.id}`,
+                  "aria-label": "应用分享链接",
+                  onFocus: (event) => event.target.select(),
+                })
+              : null,
+            (0, import_react27.createElement)(
+              Button,
+              {
+                disabled: busy,
+                onClick: () =>
+                  act(() => post(`/api/portal/apps/${app.id}/unpublish`)),
+              },
+              "停止并下线",
+            ),
+            app.versions.length > 1
+              ? (0, import_react27.createElement)(
+                  "select",
+                  {
+                    "aria-label": `${app.name}版本`,
+                    value: app.version || "",
+                    onChange: (e) =>
+                      act(() =>
+                        post(`/api/portal/apps/${app.id}/publish`, {
+                          version: e.target.value,
+                          access: app.access,
+                          members: app.members,
+                        }),
+                      ),
+                  },
+                  (0, import_react27.createElement)(
+                    "option",
+                    { value: "", disabled: true },
+                    "选择版本",
+                  ),
+                  ...app.versions.map((version) =>
+                    (0, import_react27.createElement)(
+                      "option",
+                      { key: version, value: version },
+                      version,
+                    ),
+                  ),
+                )
+              : null,
+          ),
+        ),
+        error
+          ? (0, import_react27.createElement)("p", { role: "alert" }, error)
+          : null,
+        preview
+          ? (0, import_react27.createElement)(
+              "form",
+              {
+                ref: ticketForm,
+                method: "POST",
+                action: preview.url,
+                target: frameName,
+                hidden: true,
+              },
+              (0, import_react27.createElement)("input", {
+                type: "hidden",
+                name: "ticket",
+                value: preview.ticket,
+              }),
+            )
+          : null,
+        preview
+          ? (0, import_react27.createElement)("iframe", {
+              name: frameName,
+              title: "交互式应用预览",
+              sandbox:
+                "allow-scripts allow-same-origin allow-forms allow-downloads",
+              style: { width: "100%", height: "60vh", border: 0 },
+            })
+          : null,
+      );
+    }
+
     // src/features/files/trash.js
     function createFileTrash({
-      React: React37,
+      React: React40,
       request: request2,
-      h: h33,
+      h: h36,
       Icon: Icon2,
       Button: Button2,
       FileIconButton: FileIconButton2,
@@ -10417,16 +11156,16 @@ window.__ModuleLoader__.load({
       const originalLocation = (entry) =>
         entry.legacy ? "项目根目录（旧版记录）" : entry.path;
       function useFileTrash2({ root, enabled }) {
-        const [data, setData] = React37.useState(null);
-        const [loading, setLoading] = React37.useState(false);
-        const [busy, setBusy] = React37.useState(false);
-        const [error, setError] = React37.useState("");
-        const [notice, setNotice] = React37.useState("");
-        const [menu, setMenu] = React37.useState(null);
-        const [action, setAction] = React37.useState(null);
-        const pending = React37.useRef(null);
-        const live = React37.useRef(false);
-        const refresh = React37.useCallback(async () => {
+        const [data, setData] = React40.useState(null);
+        const [loading, setLoading] = React40.useState(false);
+        const [busy, setBusy] = React40.useState(false);
+        const [error, setError] = React40.useState("");
+        const [notice, setNotice] = React40.useState("");
+        const [menu, setMenu] = React40.useState(null);
+        const [action, setAction] = React40.useState(null);
+        const pending = React40.useRef(null);
+        const live = React40.useRef(false);
+        const refresh = React40.useCallback(async () => {
           pending.current?.abort();
           const controller = new AbortController();
           pending.current = controller;
@@ -10442,7 +11181,7 @@ window.__ModuleLoader__.load({
             if (!controller.signal.aborted) setLoading(false);
           }
         }, [root]);
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           if (!enabled) return;
           live.current = true;
           setData(null);
@@ -10509,41 +11248,41 @@ window.__ModuleLoader__.load({
             if (live.current) setBusy(false);
           }
         };
-        const content = h33(
-          React37.Fragment,
+        const content = h36(
+          React40.Fragment,
           null,
-          h33(
+          h36(
             "section",
             {
               className: "workagent-trash-summary",
               "aria-label": "回收站保留规则",
             },
-            h33(
+            h36(
               "div",
               { className: "workagent-trash-summary-heading" },
-              h33("strong", null, "文件恢复"),
-              h33("span", null, `保留 ${data?.retentionDays || 7} 天`),
+              h36("strong", null, "文件恢复"),
+              h36("span", null, `保留 ${data?.retentionDays || 7} 天`),
             ),
-            h33(
+            h36(
               "p",
               null,
               `删除后最多保留 ${data?.retentionDays || 7} 天。共享空间不足时，按删除时间从早到晚自动清理。`,
             ),
             data
-              ? h33(
-                  React37.Fragment,
+              ? h36(
+                  React40.Fragment,
                   null,
-                  h33(
+                  h36(
                     "div",
                     { className: "workagent-trash-capacity" },
-                    h33("span", null, "所有成员共享回收空间"),
-                    h33(
+                    h36("span", null, "所有成员共享回收空间"),
+                    h36(
                       "span",
                       null,
                       `${storageSize(data.usedBytes)} / ${storageSize(data.limitBytes)}`,
                     ),
                   ),
-                  h33("progress", {
+                  h36("progress", {
                     "aria-label": "共享回收空间使用量",
                     value: data.usedBytes,
                     max: data.limitBytes,
@@ -10552,21 +11291,21 @@ window.__ModuleLoader__.load({
               : null,
           ),
           error
-            ? h33(
+            ? h36(
                 "p",
                 { role: "alert", className: "workagent-file-notice is-error" },
                 error,
               )
             : null,
           notice
-            ? h33(
+            ? h36(
                 "p",
                 { role: "status", className: "workagent-file-notice" },
                 notice,
               )
             : null,
           action
-            ? h33(
+            ? h36(
                 "form",
                 {
                   className: "workagent-file-action-form",
@@ -10574,12 +11313,12 @@ window.__ModuleLoader__.load({
                     action.kind === "restore" ? "恢复文件" : "永久删除文件",
                   onSubmit: mutate2,
                 },
-                h33(
+                h36(
                   "strong",
                   null,
                   action.kind === "restore" ? "恢复文件" : "永久删除文件",
                 ),
-                h33(
+                h36(
                   "p",
                   null,
                   action.kind === "restore"
@@ -10587,21 +11326,21 @@ window.__ModuleLoader__.load({
                     : `永久删除“${action.entry.name}”${action.entry.kind === "directory" ? "及其内容" : ""}？此操作无法撤销。`,
                 ),
                 action.kind === "restore"
-                  ? h33(
+                  ? h36(
                       "p",
                       { className: "workagent-trash-restore-path" },
                       originalLocation(action.entry),
                     )
                   : null,
-                h33(
+                h36(
                   "div",
                   null,
-                  h33(
+                  h36(
                     Button2,
                     { disabled: busy, onClick: () => setAction(null) },
                     "取消",
                   ),
-                  h33(
+                  h36(
                     Button2,
                     {
                       type: "submit",
@@ -10620,14 +11359,14 @@ window.__ModuleLoader__.load({
               )
             : null,
           data
-            ? h33(
+            ? h36(
                 "div",
                 { className: "workagent-trash-list-heading" },
-                h33("strong", null, `本项目 · ${data.entries.length} 项`),
-                h33("span", null, storageSize(data.projectUsedBytes)),
+                h36("strong", null, `本项目 · ${data.entries.length} 项`),
+                h36("span", null, storageSize(data.projectUsedBytes)),
               )
             : null,
-          h33(
+          h36(
             "div",
             {
               className: "workagent-file-tree workagent-trash-list",
@@ -10636,36 +11375,36 @@ window.__ModuleLoader__.load({
             },
             !data
               ? error
-                ? h33(
+                ? h36(
                     "div",
                     { className: "workagent-file-panel-empty" },
-                    h33(Icon2, { name: "trash", size: 32 }),
-                    h33("strong", null, "暂时无法读取回收站"),
-                    h33(
+                    h36(Icon2, { name: "trash", size: 32 }),
+                    h36("strong", null, "暂时无法读取回收站"),
+                    h36(
                       Button2,
                       { onClick: refresh, disabled: loading },
                       "重新加载",
                     ),
                   )
-                : h33(
+                : h36(
                     "p",
                     { role: "status", className: "workagent-file-notice" },
                     "正在加载回收站…",
                   )
               : data.entries.length
-                ? h33(
+                ? h36(
                     "ul",
                     { className: "workagent-file-tree-list" },
                     ...data.entries.map((entry) =>
-                      h33(
+                      h36(
                         "li",
                         { key: entry.id },
-                        h33(
+                        h36(
                           FileTreeRow2,
                           {
                             className: `workagent-trash-row${menu === entry.id ? " is-selected" : ""}`,
                           },
-                          h33(
+                          h36(
                             "button",
                             {
                               type: "button",
@@ -10677,18 +11416,18 @@ window.__ModuleLoader__.load({
                               onClick: () =>
                                 setMenu(menu === entry.id ? null : entry.id),
                             },
-                            h33(Icon2, {
+                            h36(Icon2, {
                               name:
                                 entry.kind === "directory"
                                   ? "workspace"
                                   : "file",
                               size: 17,
                             }),
-                            h33(
+                            h36(
                               "span",
                               { className: "workagent-trash-file-label" },
-                              h33("span", null, entry.name),
-                              h33(
+                              h36("span", null, entry.name),
+                              h36(
                                 "small",
                                 null,
                                 entry.legacy
@@ -10697,8 +11436,8 @@ window.__ModuleLoader__.load({
                               ),
                             ),
                           ),
-                          h33("small", null, storageSize(entry.size)),
-                          h33(FileIconButton2, {
+                          h36("small", null, storageSize(entry.size)),
+                          h36(FileIconButton2, {
                             name: "more",
                             label: `操作 ${entry.name}`,
                             "aria-expanded": menu === entry.id,
@@ -10707,28 +11446,28 @@ window.__ModuleLoader__.load({
                               setMenu(menu === entry.id ? null : entry.id),
                           }),
                         ),
-                        h33(
+                        h36(
                           "div",
                           { className: "workagent-trash-file-time" },
-                          h33(
+                          h36(
                             "time",
                             { dateTime: entry.deletedAt },
                             `${dateLabel(entry.deletedAt)} 删除`,
                           ),
-                          h33(
+                          h36(
                             "span",
                             { title: `${dateLabel(entry.expiresAt)} 自动清理` },
                             expiresLabel(entry.expiresAt),
                           ),
                         ),
                         menu === entry.id
-                          ? h33(
+                          ? h36(
                               "div",
                               {
                                 className: "workagent-file-row-menu",
                                 "aria-label": `${entry.name} 的操作`,
                               },
-                              h33(
+                              h36(
                                 "button",
                                 {
                                   type: "button",
@@ -10737,7 +11476,7 @@ window.__ModuleLoader__.load({
                                 },
                                 "恢复",
                               ),
-                              h33(
+                              h36(
                                 "button",
                                 {
                                   type: "button",
@@ -10752,12 +11491,12 @@ window.__ModuleLoader__.load({
                       ),
                     ),
                   )
-                : h33(
+                : h36(
                     "div",
                     { className: "workagent-file-panel-empty" },
-                    h33(Icon2, { name: "trash", size: 32 }),
-                    h33("strong", null, "本项目回收站为空"),
-                    h33(
+                    h36(Icon2, { name: "trash", size: 32 }),
+                    h36("strong", null, "本项目回收站为空"),
+                    h36(
                       "p",
                       null,
                       "项目中删除的文件会暂存在这里，可在清理前恢复。",
@@ -10771,18 +11510,18 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/files/manager.js
-    var import_react26 = __toESM(require("react"), 1);
-    var import_react27 = require("react");
+    var import_react28 = __toESM(require("react"), 1);
+    var import_react29 = require("react");
     var { useFileMoves } = createFileMoves({
-      React: import_react26.default,
+      React: import_react28.default,
       request,
-      h: import_react27.createElement,
+      h: import_react29.createElement,
       friendlyError,
     });
     var { useFileTrash } = createFileTrash({
-      React: import_react26.default,
+      React: import_react28.default,
       request,
-      h: import_react27.createElement,
+      h: import_react29.createElement,
       Icon,
       Button,
       FileIconButton,
@@ -10802,20 +11541,87 @@ window.__ModuleLoader__.load({
       createEmptyFile,
       trashRoot,
     }) {
-      const [tree, setTree] = import_react26.default.useState({});
+      const [tree, setTree] = import_react28.default.useState({});
+      const [applicationsOpen, setApplicationsOpen] =
+        import_react28.default.useState(false);
+      const [searchQuery, setSearchQuery] = import_react28.default.useState("");
+      const [searchRows, setSearchRows] = import_react28.default.useState([]);
+      const [searchCursor, setSearchCursor] =
+        import_react28.default.useState(null);
+      const [searchBusy, setSearchBusy] =
+        import_react28.default.useState(false);
+      const searchAbort = import_react28.default.useRef(null);
+      const searchLease = import_react28.default.useRef(null);
+      const releaseSearch = () => {
+        const lease = searchLease.current;
+        searchLease.current = null;
+        if (lease)
+          void request(
+            `${lease.root}/search?cursor=${encodeURIComponent(lease.cursor)}`,
+            { method: "DELETE" },
+          ).catch(() => {});
+      };
+      const searchFiles = async (cursor = null) => {
+        searchAbort.current?.abort();
+        if (!cursor) releaseSearch();
+        const controller = new AbortController();
+        searchAbort.current = controller;
+        setSearchBusy(true);
+        try {
+          const result = await request(
+            `${root}/search?q=${encodeURIComponent(searchQuery)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+            { signal: controller.signal },
+          );
+          if (!controller.signal.aborted) {
+            searchLease.current = result.nextCursor
+              ? { root, cursor: result.nextCursor }
+              : null;
+            setSearchRows((rows) =>
+              cursor ? [...rows, ...result.items] : result.items,
+            );
+            setSearchCursor(result.nextCursor);
+          } else if (result.nextCursor) {
+            void request(
+              `${root}/search?cursor=${encodeURIComponent(result.nextCursor)}`,
+              { method: "DELETE" },
+            ).catch(() => {});
+          }
+        } catch (reason) {
+          if (!controller.signal.aborted)
+            setError(friendlyError(reason.message));
+        } finally {
+          if (!controller.signal.aborted) setSearchBusy(false);
+        }
+      };
+      import_react28.default.useEffect(() => {
+        searchAbort.current?.abort();
+        releaseSearch();
+        setSearchRows([]);
+        setSearchCursor(null);
+        if (!searchQuery.trim()) {
+          setSearchBusy(false);
+          return;
+        }
+        const timer = setTimeout(() => searchFiles(), 200);
+        return () => {
+          clearTimeout(timer);
+          searchAbort.current?.abort();
+          releaseSearch();
+        };
+      }, [root, searchQuery]);
       const { confirm, confirmation } = useConfirm();
-      const [trashOpen, setTrashOpen] = import_react26.default.useState(false);
+      const [trashOpen, setTrashOpen] = import_react28.default.useState(false);
       const trash = useFileTrash({ root: trashRoot, enabled: trashOpen });
-      const [expanded, setExpanded] = import_react26.default.useState(
+      const [expanded, setExpanded] = import_react28.default.useState(
         /* @__PURE__ */ new Set([""]),
       );
-      const [directory, setDirectory] = import_react26.default.useState("");
-      const [selected, setSelected] = import_react26.default.useState(null);
-      const [tabs, setTabs] = import_react26.default.useState([]);
-      const [dirtyFiles, setDirtyFiles] = import_react26.default.useState(
+      const [directory, setDirectory] = import_react28.default.useState("");
+      const [selected, setSelected] = import_react28.default.useState(null);
+      const [tabs, setTabs] = import_react28.default.useState([]);
+      const [dirtyFiles, setDirtyFiles] = import_react28.default.useState(
         /* @__PURE__ */ new Set(),
       );
-      const reportDirty = import_react26.default.useCallback(
+      const reportDirty = import_react28.default.useCallback(
         (path, value) =>
           setDirtyFiles((current) => {
             if (current.has(path) === value) return current;
@@ -10840,19 +11646,19 @@ window.__ModuleLoader__.load({
         if (selected?.path === entry.path) setSelected(null);
         reportDirty(entry.path, false);
       };
-      const [menu, setMenu] = import_react26.default.useState(null);
-      const [action, setAction] = import_react26.default.useState(null);
-      const [name, setName] = import_react26.default.useState("");
-      const [busy, setBusy] = import_react26.default.useState(false);
-      const [loading, setLoading] = import_react26.default.useState(false);
-      const [error, setError] = import_react26.default.useState("");
-      const [notice, setNotice] = import_react26.default.useState("");
-      const [revision, setRevision] = import_react26.default.useState(0);
-      const uploadInput = import_react26.default.useRef(null);
-      const uploadControl = import_react26.default.useRef(null);
+      const [menu, setMenu] = import_react28.default.useState(null);
+      const [action, setAction] = import_react28.default.useState(null);
+      const [name, setName] = import_react28.default.useState("");
+      const [busy, setBusy] = import_react28.default.useState(false);
+      const [loading, setLoading] = import_react28.default.useState(false);
+      const [error, setError] = import_react28.default.useState("");
+      const [notice, setNotice] = import_react28.default.useState("");
+      const [revision, setRevision] = import_react28.default.useState(0);
+      const uploadInput = import_react28.default.useRef(null);
+      const uploadControl = import_react28.default.useRef(null);
       const [uploadProgress, setUploadProgress] =
-        import_react26.default.useState(null);
-      import_react26.default.useEffect(() => {
+        import_react28.default.useState(null);
+      import_react28.default.useEffect(() => {
         const openFile = (event) => {
           if (event.detail?.workspaceId !== workspace.id) return;
           setTrashOpen(false);
@@ -10867,15 +11673,15 @@ window.__ModuleLoader__.load({
         return () =>
           window.removeEventListener("workagent:file-open", openFile);
       }, [workspace.id]);
-      import_react26.default.useEffect(
+      import_react28.default.useEffect(
         () => () => uploadControl.current?.abort(),
         [],
       );
-      const requests = import_react26.default.useRef(/* @__PURE__ */ new Map());
-      const live = import_react26.default.useRef(true);
-      const expandedRef = import_react26.default.useRef(expanded);
+      const requests = import_react28.default.useRef(/* @__PURE__ */ new Map());
+      const live = import_react28.default.useRef(true);
+      const expandedRef = import_react28.default.useRef(expanded);
       expandedRef.current = expanded;
-      const loadDirectory = import_react26.default.useCallback(
+      const loadDirectory = import_react28.default.useCallback(
         async (path) => {
           requests.current.get(path)?.abort();
           const controller = new AbortController();
@@ -10897,12 +11703,12 @@ window.__ModuleLoader__.load({
         },
         [root],
       );
-      const refresh = import_react26.default.useCallback(async () => {
+      const refresh = import_react28.default.useCallback(async () => {
         setLoading(true);
         await Promise.all([...expandedRef.current].map(loadDirectory));
         if (live.current) setLoading(false);
       }, [loadDirectory]);
-      import_react26.default.useEffect(() => {
+      import_react28.default.useEffect(() => {
         live.current = true;
         void refresh();
         const update = () => {
@@ -11096,14 +11902,14 @@ window.__ModuleLoader__.load({
         if (!tree[entry.path]) void loadDirectory(entry.path);
       };
       const renderDirectory = (path, depth = 0) =>
-        (0, import_react27.createElement)(
+        (0, import_react29.createElement)(
           "ul",
           { className: "workagent-file-tree-list", key: path },
           ...(tree[path] || []).map((entry) =>
-            (0, import_react27.createElement)(
+            (0, import_react29.createElement)(
               "li",
               { key: entry.path },
-              (0, import_react27.createElement)(
+              (0, import_react29.createElement)(
                 FileTreeRow,
                 {
                   ...movement.rowProps(entry),
@@ -11111,7 +11917,7 @@ window.__ModuleLoader__.load({
                   depth,
                 },
                 movement.checkbox(entry),
-                (0, import_react27.createElement)(
+                (0, import_react29.createElement)(
                   "button",
                   {
                     type: "button",
@@ -11135,7 +11941,7 @@ window.__ModuleLoader__.load({
                       }
                     },
                   },
-                  (0, import_react27.createElement)(Icon, {
+                  (0, import_react29.createElement)(Icon, {
                     name:
                       entry.kind === "directory"
                         ? expanded.has(entry.path)
@@ -11144,16 +11950,16 @@ window.__ModuleLoader__.load({
                         : "file",
                     size: 16,
                   }),
-                  (0, import_react27.createElement)("span", null, entry.name),
+                  (0, import_react29.createElement)("span", null, entry.name),
                 ),
                 entry.kind === "file"
-                  ? (0, import_react27.createElement)(
+                  ? (0, import_react29.createElement)(
                       "small",
                       null,
                       fileSize(entry.size),
                     )
                   : null,
-                (0, import_react27.createElement)(FileIconButton, {
+                (0, import_react29.createElement)(FileIconButton, {
                   name: "more",
                   label: `操作 ${entry.name}`,
                   "aria-expanded": menu?.path === entry.path,
@@ -11162,14 +11968,14 @@ window.__ModuleLoader__.load({
                 }),
               ),
               menu?.path === entry.path
-                ? (0, import_react27.createElement)(
+                ? (0, import_react29.createElement)(
                     "div",
                     {
                       className: "workagent-file-row-menu",
                       "aria-label": `${entry.name} 的操作`,
                     },
                     entry.kind === "file"
-                      ? (0, import_react27.createElement)(
+                      ? (0, import_react29.createElement)(
                           "a",
                           {
                             href: contentURL(workspace.id, entry.path),
@@ -11178,7 +11984,7 @@ window.__ModuleLoader__.load({
                           "下载",
                         )
                       : null,
-                    (0, import_react27.createElement)(
+                    (0, import_react29.createElement)(
                       "button",
                       {
                         type: "button",
@@ -11186,7 +11992,7 @@ window.__ModuleLoader__.load({
                       },
                       "重命名",
                     ),
-                    (0, import_react27.createElement)(
+                    (0, import_react29.createElement)(
                       "button",
                       {
                         type: "button",
@@ -11194,7 +12000,7 @@ window.__ModuleLoader__.load({
                       },
                       "移动到…",
                     ),
-                    (0, import_react27.createElement)(
+                    (0, import_react29.createElement)(
                       "button",
                       {
                         type: "button",
@@ -11208,12 +12014,12 @@ window.__ModuleLoader__.load({
                 ? tree[entry.path]
                   ? tree[entry.path].length
                     ? renderDirectory(entry.path, depth + 1)
-                    : (0, import_react27.createElement)(
+                    : (0, import_react29.createElement)(
                         "p",
                         { className: "workagent-file-tree-empty" },
                         "空文件夹",
                       )
-                  : (0, import_react27.createElement)(
+                  : (0, import_react29.createElement)(
                       "p",
                       { className: "workagent-file-tree-empty" },
                       "正在加载…",
@@ -11234,7 +12040,7 @@ window.__ModuleLoader__.load({
         setTrashOpen(false);
         void refresh();
       };
-      return (0, import_react27.createElement)(
+      return (0, import_react29.createElement)(
         "div",
         {
           className: `workagent-file-manager${selected && !trashOpen ? " has-preview" : ""}`,
@@ -11257,62 +12063,62 @@ window.__ModuleLoader__.load({
           },
         },
         confirmation,
-        (0, import_react27.createElement)(
+        (0, import_react29.createElement)(
           "div",
           {
             className: "workagent-file-manager-content",
             hidden: !!selected && !trashOpen,
           },
           uploadProgress
-            ? (0, import_react27.createElement)(
+            ? (0, import_react29.createElement)(
                 "div",
                 { className: "workagent-upload-progress" },
                 uploadProgress.name,
-                (0, import_react27.createElement)("progress", {
+                (0, import_react29.createElement)("progress", {
                   max: uploadProgress.size || 1,
                   value: uploadProgress.bytes,
                 }),
-                (0, import_react27.createElement)(
+                (0, import_react29.createElement)(
                   Button,
                   { onClick: () => uploadControl.current?.abort() },
                   "暂停上传",
                 ),
               )
             : null,
-          (0, import_react27.createElement)(
+          (0, import_react29.createElement)(
             "div",
             { className: "workagent-file-toolbar" },
             trashOpen
-              ? (0, import_react27.createElement)(FileIconButton, {
+              ? (0, import_react29.createElement)(FileIconButton, {
                   name: "back",
                   label: "返回项目文件",
                   disabled: trash.busy,
                   onClick: leaveTrash,
                 })
-              : (0, import_react27.createElement)(
-                  import_react26.default.Fragment,
+              : (0, import_react29.createElement)(
+                  import_react28.default.Fragment,
                   null,
-                  (0, import_react27.createElement)(FileIconButton, {
+                  (0, import_react29.createElement)(FileIconButton, {
                     name: "upload",
                     label: "上传文件",
                     title: `上传文件 · 单个最大 ${UPLOAD_SIZE_LABEL}，也可拖入文件`,
                     disabled: busy,
                     onClick: () => uploadInput.current.click(),
                   }),
-                  (0, import_react27.createElement)(FileIconButton, {
+                  (0, import_react29.createElement)(FileIconButton, {
                     name: "file",
                     label: "新建文件",
                     disabled: busy,
                     onClick: () => beginAction("file"),
                   }),
-                  (0, import_react27.createElement)(FileIconButton, {
+                  (0, import_react29.createElement)(FileIconButton, {
                     name: "plus",
                     label: "新建文件夹",
                     disabled: busy,
                     onClick: () => beginAction("folder"),
                   }),
                   trashRoot
-                    ? (0, import_react27.createElement)(FileIconButton, {
+                    ? (0, import_react29.createElement)(FileIconButton, {
                         name: "trash",
                         label: "打开项目回收站",
                         disabled: busy,
@@ -11324,12 +12130,12 @@ window.__ModuleLoader__.load({
                       })
                     : null,
                 ),
-            (0, import_react27.createElement)(
+            (0, import_react29.createElement)(
               "span",
               null,
               (trashOpen ? trash.busy : busy) ? "正在处理…" : "",
             ),
-            (0, import_react27.createElement)(FileIconButton, {
+            (0, import_react29.createElement)(FileIconButton, {
               name: "refresh",
               label: trashOpen ? "刷新回收站" : "刷新文件",
               disabled: trashOpen ? trash.loading || trash.busy : loading,
@@ -11343,7 +12149,7 @@ window.__ModuleLoader__.load({
                 setRevision((value) => value + 1);
               },
             }),
-            (0, import_react27.createElement)("input", {
+            (0, import_react29.createElement)("input", {
               ref: uploadInput,
               hidden: true,
               type: "file",
@@ -11357,18 +12163,18 @@ window.__ModuleLoader__.load({
             }),
           ),
           !trashOpen
-            ? (0, import_react27.createElement)(uploadClient.Panel, {
+            ? (0, import_react29.createElement)(uploadClient.Panel, {
                 workspaceId: workspace.id,
                 onChanged: refresh,
               })
             : null,
-          (0, import_react27.createElement)(
+          (0, import_react29.createElement)(
             "nav",
             {
               className: "workagent-file-breadcrumb",
               "aria-label": "当前文件目录",
             },
-            (0, import_react27.createElement)(
+            (0, import_react29.createElement)(
               "button",
               {
                 type: "button",
@@ -11381,7 +12187,7 @@ window.__ModuleLoader__.load({
               trashOpen ? "项目文件" : "根目录",
             ),
             trashOpen
-              ? (0, import_react27.createElement)(
+              ? (0, import_react29.createElement)(
                   "span",
                   { "aria-current": "page" },
                   " / 回收站",
@@ -11391,7 +12197,7 @@ window.__ModuleLoader__.load({
               .split("/")
               .filter(Boolean)
               .map((part, index, parts) =>
-                (0, import_react27.createElement)(
+                (0, import_react29.createElement)(
                   "button",
                   {
                     key: index,
@@ -11405,14 +12211,14 @@ window.__ModuleLoader__.load({
               ),
           ),
           !trashOpen && error
-            ? (0, import_react27.createElement)(
+            ? (0, import_react29.createElement)(
                 "p",
                 { role: "alert", className: "workagent-file-notice is-error" },
                 error,
               )
             : null,
           !trashOpen && notice
-            ? (0, import_react27.createElement)(
+            ? (0, import_react29.createElement)(
                 "p",
                 { role: "status", className: "workagent-file-notice" },
                 notice,
@@ -11420,16 +12226,16 @@ window.__ModuleLoader__.load({
             : null,
           !trashOpen ? movement.controls : null,
           !trashOpen && action
-            ? (0, import_react27.createElement)(
+            ? (0, import_react29.createElement)(
                 "form",
                 {
                   className: "workagent-file-action-form",
                   onSubmit: mutate2,
                   "aria-label": actionLabel,
                 },
-                (0, import_react27.createElement)("strong", null, actionLabel),
+                (0, import_react29.createElement)("strong", null, actionLabel),
                 action.kind === "delete"
-                  ? (0, import_react27.createElement)(
+                  ? (0, import_react29.createElement)(
                       "p",
                       null,
                       `确认删除“${action.entry.name}”${action.entry.kind === "directory" ? "及其内容" : ""}？`,
@@ -11437,7 +12243,7 @@ window.__ModuleLoader__.load({
                         ? "文件将移入项目回收站，最多保留 7 天；共享空间不足时将按删除时间从早到晚清理。"
                         : "",
                     )
-                  : (0, import_react27.createElement)(Input, {
+                  : (0, import_react29.createElement)(Input, {
                       autoFocus: true,
                       "aria-label": "文件名",
                       placeholder: "输入名称",
@@ -11445,15 +12251,15 @@ window.__ModuleLoader__.load({
                       onChange: (event) => setName(event.target.value),
                       required: true,
                     }),
-                (0, import_react27.createElement)(
+                (0, import_react29.createElement)(
                   "div",
                   null,
-                  (0, import_react27.createElement)(
+                  (0, import_react29.createElement)(
                     Button,
                     { disabled: busy, onClick: () => setAction(null) },
                     "取消",
                   ),
-                  (0, import_react27.createElement)(
+                  (0, import_react29.createElement)(
                     Button,
                     { type: "submit", disabled: busy },
                     busy
@@ -11465,51 +12271,115 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
+          !workspace.currentRole || workspace.currentRole === "owner"
+            ? (0, import_react29.createElement)(
+                Button,
+                { onClick: () => setApplicationsOpen((value) => !value) },
+                applicationsOpen ? "关闭应用发布" : "应用预览与发布",
+              )
+            : null,
+          applicationsOpen &&
+            (!workspace.currentRole || workspace.currentRole === "owner")
+            ? (0, import_react29.createElement)(PublishedApps, {
+                workspace,
+                entry: selected?.path || "index.html",
+              })
+            : null,
           trashOpen
             ? trash.content
-            : (0, import_react27.createElement)(
+            : (0, import_react29.createElement)(
                 "div",
                 {
                   className: "workagent-file-tree",
                   "aria-label": "项目文件树",
                 },
-                tree[""]
-                  ? tree[""].length
-                    ? renderDirectory("")
-                    : (0, import_react27.createElement)(
-                        "div",
-                        { className: "workagent-file-panel-empty" },
-                        (0, import_react27.createElement)(Icon, {
-                          name: "workspace",
-                          size: 32,
-                        }),
-                        (0, import_react27.createElement)(
-                          "strong",
-                          null,
-                          "此项目还没有文件",
+                (0, import_react29.createElement)(Input, {
+                  "aria-label": "搜索整个项目",
+                  placeholder: "搜索整个项目的文件名或路径",
+                  value: searchQuery,
+                  onChange: (event) => setSearchQuery(event.target.value),
+                }),
+                searchQuery.trim()
+                  ? (0, import_react29.createElement)(
+                      "div",
+                      { "aria-label": "项目搜索结果" },
+                      ...searchRows.map((entry) =>
+                        (0, import_react29.createElement)(
+                          "button",
+                          {
+                            key: entry.path,
+                            type: "button",
+                            className: "workagent-file-tree-row",
+                            onClick: () => {
+                              setTabs((rows) => [
+                                ...rows.filter(
+                                  (item) => item.path !== entry.path,
+                                ),
+                                entry,
+                              ]);
+                              setSelected(entry);
+                            },
+                          },
+                          entry.path,
                         ),
-                        (0, import_react27.createElement)(
-                          "p",
-                          null,
-                          "拖入文件，或让助手在项目中创建文件。",
-                        ),
-                      )
-                  : (0, import_react27.createElement)(
-                      "p",
-                      { role: "status" },
-                      "正在加载文件…",
-                    ),
+                      ),
+                      searchBusy
+                        ? (0, import_react29.createElement)(
+                            "p",
+                            { role: "status" },
+                            "正在搜索…",
+                          )
+                        : searchCursor
+                          ? (0, import_react29.createElement)(
+                              Button,
+                              { onClick: () => searchFiles(searchCursor) },
+                              "继续搜索",
+                            )
+                          : !searchRows.length
+                            ? (0, import_react29.createElement)(
+                                "p",
+                                null,
+                                "没有匹配的文件",
+                              )
+                            : null,
+                    )
+                  : tree[""]
+                    ? tree[""].length
+                      ? renderDirectory("")
+                      : (0, import_react29.createElement)(
+                          "div",
+                          { className: "workagent-file-panel-empty" },
+                          (0, import_react29.createElement)(Icon, {
+                            name: "workspace",
+                            size: 32,
+                          }),
+                          (0, import_react29.createElement)(
+                            "strong",
+                            null,
+                            "此项目还没有文件",
+                          ),
+                          (0, import_react29.createElement)(
+                            "p",
+                            null,
+                            "拖入文件，或让助手在项目中创建文件。",
+                          ),
+                        )
+                    : (0, import_react29.createElement)(
+                        "p",
+                        { role: "status" },
+                        "正在加载文件…",
+                      ),
               ),
         ),
         tabs.length && !trashOpen
-          ? (0, import_react27.createElement)(
+          ? (0, import_react29.createElement)(
               "nav",
               { className: "workagent-file-tabs", "aria-label": "已打开文件" },
               ...tabs.map((entry) =>
-                (0, import_react27.createElement)(
+                (0, import_react29.createElement)(
                   "span",
                   { key: entry.path },
-                  (0, import_react27.createElement)(
+                  (0, import_react29.createElement)(
                     "button",
                     {
                       type: "button",
@@ -11520,7 +12390,7 @@ window.__ModuleLoader__.load({
                     },
                     `${entry.name}${dirtyFiles.has(entry.path) ? " •" : ""}`,
                   ),
-                  (0, import_react27.createElement)(
+                  (0, import_react29.createElement)(
                     "button",
                     {
                       type: "button",
@@ -11534,14 +12404,14 @@ window.__ModuleLoader__.load({
             )
           : null,
         ...tabs.map((entry) =>
-          (0, import_react27.createElement)(
+          (0, import_react29.createElement)(
             "div",
             {
               key: entry.path,
               hidden: trashOpen || selected?.path !== entry.path,
               className: "workagent-file-tab-content",
             },
-            (0, import_react27.createElement)(WorkspaceFilePreview, {
+            (0, import_react29.createElement)(WorkspaceFilePreview, {
               workspace,
               entry,
               active: !trashOpen && selected?.path === entry.path,
@@ -11560,9 +12430,9 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/collaboration/page.js
-    var import_react28 = __toESM(require("react"), 1);
+    var import_react30 = __toESM(require("react"), 1);
     var SharedPage = createShared({
-      React: import_react28.default,
+      React: import_react30.default,
       ComposerForm,
       closeMobileSidebar: closeMobileSidebar2,
       usePins: workbench.usePins,
@@ -11586,8 +12456,8 @@ window.__ModuleLoader__.load({
     });
 
     // src/ui/resize.js
-    var import_react29 = __toESM(require("react"), 1);
-    var import_react30 = require("react");
+    var import_react31 = __toESM(require("react"), 1);
+    var import_react32 = require("react");
     function ResizeHandle({
       orientation,
       value,
@@ -11598,13 +12468,13 @@ window.__ModuleLoader__.load({
       max,
       className = "workagent-file-resizer",
     }) {
-      const start = import_react29.default.useRef(null);
+      const start = import_react31.default.useRef(null);
       const vertical = orientation === "vertical";
       const finish = () => {
         start.current = null;
         document.body.classList.remove("workagent-resizing");
       };
-      import_react29.default.useEffect(
+      import_react31.default.useEffect(
         () => () => {
           if (start.current) finish();
         },
@@ -11614,7 +12484,7 @@ window.__ModuleLoader__.load({
         if (event.currentTarget.hasPointerCapture(event.pointerId))
           event.currentTarget.releasePointerCapture(event.pointerId);
       };
-      return (0, import_react30.createElement)("div", {
+      return (0, import_react32.createElement)("div", {
         className: `${className} ${vertical ? "is-vertical" : "is-horizontal"}`,
         role: "separator",
         tabIndex: 0,
@@ -11713,8 +12583,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/ui/message-actions.js
-    var import_react31 = __toESM(require("react"), 1);
-    var import_react32 = require("react");
+    var import_react33 = __toESM(require("react"), 1);
+    var import_react34 = require("react");
     async function copyMessageText(text) {
       if (navigator.clipboard && window.isSecureContext)
         return navigator.clipboard.writeText(text);
@@ -11730,14 +12600,14 @@ window.__ModuleLoader__.load({
       if (!copied) throw new Error("复制失败，请重试");
     }
     function MessageActions({ message, disabled, onEdit, onFork }) {
-      const [copyState, setCopyState] = import_react31.default.useState("");
-      import_react31.default.useEffect(() => {
+      const [copyState, setCopyState] = import_react33.default.useState("");
+      import_react33.default.useEffect(() => {
         if (!copyState) return;
         const timer = setTimeout(() => setCopyState(""), 2e3);
         return () => clearTimeout(timer);
       }, [copyState]);
       const action = (name, icon, onClick, unavailable = false) =>
-        (0, import_react32.createElement)(
+        (0, import_react34.createElement)(
           Button,
           {
             className: "workagent-button workagent-message-action",
@@ -11746,9 +12616,9 @@ window.__ModuleLoader__.load({
             "data-tooltip": name,
             onClick,
           },
-          (0, import_react32.createElement)(Icon, { name: icon, size: 16 }),
+          (0, import_react34.createElement)(Icon, { name: icon, size: 16 }),
         );
-      return (0, import_react32.createElement)(
+      return (0, import_react34.createElement)(
         "footer",
         { className: "workagent-message-actions" },
         onEdit ? action("编辑", "edit", onEdit, disabled) : null,
@@ -11765,7 +12635,7 @@ window.__ModuleLoader__.load({
             }
           },
         ),
-        (0, import_react32.createElement)(
+        (0, import_react34.createElement)(
           "span",
           { className: "workagent-sr-only", role: "status" },
           copyState,
@@ -11774,11 +12644,11 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/conversations/page.js
-    var import_react33 = __toESM(require("react"), 1);
-    var import_react34 = require("react");
+    var import_react35 = __toESM(require("react"), 1);
+    var import_react36 = require("react");
     function ConversationMessageTarget({ sessionId: sessionId2 }) {
       const routeSearch = navigation.useSearch();
-      const locateMessage = import_react33.default.useCallback((messageId) => {
+      const locateMessage = import_react35.default.useCallback((messageId) => {
         const escaped = globalThis.CSS?.escape
           ? globalThis.CSS.escape(messageId)
           : messageId.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -11794,7 +12664,7 @@ window.__ModuleLoader__.load({
         );
         return true;
       }, []);
-      import_react33.default.useEffect(() => {
+      import_react35.default.useEffect(() => {
         const messageId = new URLSearchParams(routeSearch).get("message");
         if (!messageId) return;
         let attempts = 0;
@@ -11814,14 +12684,15 @@ window.__ModuleLoader__.load({
       sideHeader,
     }) {
       const busyEnter = useBusyEnter();
-      const submitGesture = import_react33.default.useRef(false);
+      const submitGesture = import_react35.default.useRef(false);
       const routeParams = new URLSearchParams(navigation.useSearch());
       const id = encodeURIComponent(sessionId2);
       const [sessionState] = useSessionResource(`${apiRoot}/sessions/${id}`);
-      const ctx = import_react33.default.useContext(RuntimeServices);
+      const ctx = import_react35.default.useContext(RuntimeServices);
       const standard = hasStandardSessions(ctx);
       const native =
-        standard && ["codex", "kimi"].includes(sessionState.rows[0]?.engine);
+        standard &&
+        ["codex", "kimi", "acp"].includes(sessionState.rows[0]?.engine);
       const legacy = !standard || sessionState.rows[0]?.engine === "harness";
       const nativeState = useNativeConversation(ctx, sessionId2, native);
       const [legacyQueueState, reloadQueue] = useSessionResource(
@@ -11836,8 +12707,8 @@ window.__ModuleLoader__.load({
             rows: nativeState.value?.messages ?? [],
           }
         : legacyMessageState;
-      const messageList = import_react33.default.useRef(null);
-      import_react33.default.useLayoutEffect(() => {
+      const messageList = import_react35.default.useRef(null);
+      import_react35.default.useLayoutEffect(() => {
         if (messageState.loading) return;
         const list = messageList.current;
         if (!list) return;
@@ -11853,7 +12724,7 @@ window.__ModuleLoader__.load({
         ? { rows: nativeState.value?.metadata?.queue ?? [] }
         : legacyQueueState;
       const receipts = messageDelivery.useRows(sessionId2);
-      const scrollReceipt = import_react33.default.useRef(null);
+      const scrollReceipt = import_react35.default.useRef(null);
       const knownIds = /* @__PURE__ */ new Set([
         ...messageState.rows.map((row) => row.id),
         ...queueState.rows.map((row) => row.messageId),
@@ -11869,14 +12740,14 @@ window.__ModuleLoader__.load({
           .filter((row) => row.queued)
           .map((row) => ({ ...row, messageId: row.id, content: row.text })),
       ];
-      import_react33.default.useEffect(() => {
+      import_react35.default.useEffect(() => {
         messageDelivery.reconcile(
           sessionId2,
           messageState.rows,
           queueState.rows,
         );
       }, [sessionId2, messageState.rows, queueState.rows, receipts]);
-      import_react33.default.useLayoutEffect(() => {
+      import_react35.default.useLayoutEffect(() => {
         if (!scrollReceipt.current) return;
         const target = messageList.current?.querySelector(
           `[data-message-id="${scrollReceipt.current}"]`,
@@ -11890,29 +12761,29 @@ window.__ModuleLoader__.load({
         sessionId2,
         sessionState.rows[0]?.id === sessionId2,
       );
-      const historyCursor = import_react33.default.useRef({
+      const historyCursor = import_react35.default.useRef({
         index: -1,
         saved: "",
       });
-      const retryDraft = import_react33.default.useRef(null);
-      const currentInput = import_react33.default.useRef(input);
+      const retryDraft = import_react35.default.useRef(null);
+      const currentInput = import_react35.default.useRef(input);
       currentInput.current = input;
-      const [draft, setDraft] = import_react33.default.useState("");
-      const [busy, setBusy] = import_react33.default.useState(false);
-      const [progress, setProgress] = import_react33.default.useState("");
-      const [error, setError] = import_react33.default.useState("");
+      const [draft, setDraft] = import_react35.default.useState("");
+      const [busy, setBusy] = import_react35.default.useState(false);
+      const [progress, setProgress] = import_react35.default.useState("");
+      const [error, setError] = import_react35.default.useState("");
       const [submitting, setSubmitting] =
-        import_react33.default.useState(false);
-      const [forkTarget, setForkTarget] = import_react33.default.useState(null);
+        import_react35.default.useState(false);
+      const [forkTarget, setForkTarget] = import_react35.default.useState(null);
       const [attachmentsBusy, setAttachmentsBusy] =
-        import_react33.default.useState(false);
-      const [editing, setEditing] = import_react33.default.useState(null);
-      const [editContent, setEditContent] = import_react33.default.useState("");
+        import_react35.default.useState(false);
+      const [editing, setEditing] = import_react35.default.useState(null);
+      const [editContent, setEditContent] = import_react35.default.useState("");
       const session = native
         ? { ...sessionState.rows[0], ...nativeState.value?.metadata }
         : sessionState.rows[0];
-      const activityRevision = import_react33.default.useRef(0);
-      import_react33.default.useEffect(() => {
+      const activityRevision = import_react35.default.useRef(0);
+      import_react35.default.useEffect(() => {
         if (!native) return;
         const value = nativeState.value;
         if (value) {
@@ -11942,7 +12813,7 @@ window.__ModuleLoader__.load({
         }
         if (nativeState.error) setError(friendlyError(nativeState.error));
       }, [native, nativeState.value, nativeState.error]);
-      const syncActivity = import_react33.default.useCallback(async () => {
+      const syncActivity = import_react35.default.useCallback(async () => {
         if (native) return nativeState.reload();
         if (!legacy) return;
         const revision = activityRevision.current;
@@ -11968,12 +12839,12 @@ window.__ModuleLoader__.load({
           setProgress("连接中断，正在重新连接…");
         }
       }, [id, reloadMessages, native, legacy, nativeState.reload]);
-      import_react33.default.useEffect(() => {
+      import_react35.default.useEffect(() => {
         if (!busy || !legacy) return;
         const timer = setInterval(() => void syncActivity(), 5e3);
         return () => clearInterval(timer);
       }, [busy, syncActivity, legacy]);
-      import_react33.default.useEffect(() => {
+      import_react35.default.useEffect(() => {
         if (!legacy || typeof EventSource === "undefined") return void 0;
         const stream = new EventSource(`${apiRoot}/sessions/${id}/events`);
         stream.onopen = () => void syncActivity();
@@ -12044,7 +12915,7 @@ window.__ModuleLoader__.load({
         return () => stream.close();
       }, [id, legacy]);
       const [questionReplies, setQuestionReplies] =
-        import_react33.default.useState({
+        import_react35.default.useState({
           sessionId: sessionId2,
           rows: [],
         });
@@ -12253,37 +13124,37 @@ window.__ModuleLoader__.load({
         !sessionState.loading &&
         Boolean(sessionState.error) &&
         !sessionState.rows.length;
-      return (0, import_react34.createElement)(
+      return (0, import_react36.createElement)(
         "section",
         { className: `workagent-conversation${side ? " is-side-chat" : ""}` },
         forkTarget
-          ? (0, import_react34.createElement)(
+          ? (0, import_react36.createElement)(
               Dialog,
               {
                 title: "从这里创建分支？",
                 onClose: () => setForkTarget(null),
               },
-              (0, import_react34.createElement)(
+              (0, import_react36.createElement)(
                 "div",
                 { className: "workagent-fork-content" },
-                (0, import_react34.createElement)(Icon, {
+                (0, import_react36.createElement)(Icon, {
                   name: "branch",
                   size: 28,
                 }),
-                (0, import_react34.createElement)(
+                (0, import_react36.createElement)(
                   "p",
                   null,
                   "将保留到这条消息为止的上下文，在新对话中继续探索。当前对话会保留。",
                 ),
-                (0, import_react34.createElement)(
+                (0, import_react36.createElement)(
                   "div",
                   { className: "workagent-actions" },
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     Button,
                     { autoFocus: true, onClick: () => setForkTarget(null) },
                     "继续当前对话",
                   ),
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     Button,
                     {
                       className: "workagent-button is-primary",
@@ -12305,28 +13176,28 @@ window.__ModuleLoader__.load({
           : null,
         side
           ? sideHeader
-          : (0, import_react34.createElement)(
+          : (0, import_react36.createElement)(
               "header",
               { className: "workagent-conversation-title" },
               session
-                ? (0, import_react34.createElement)(SessionAvatar, { session })
+                ? (0, import_react36.createElement)(SessionAvatar, { session })
                 : null,
-              (0, import_react34.createElement)(
+              (0, import_react36.createElement)(
                 "div",
                 null,
-                (0, import_react34.createElement)(
+                (0, import_react36.createElement)(
                   "strong",
                   null,
                   session
                     ? session.workspaceId?.startsWith("shared:")
-                      ? (0, import_react34.createElement)(PersonalTaskTitle, {
+                      ? (0, import_react36.createElement)(PersonalTaskTitle, {
                           session,
                         })
                       : displaySessionTitle(session.title)
                     : "正在加载会话…",
                 ),
                 session
-                  ? (0, import_react34.createElement)(
+                  ? (0, import_react36.createElement)(
                       "span",
                       null,
                       `${displayPresetName(session.preset?.resolvedSnapshot?.name || session.preset?.presetId || session.engine)} · 当前会话`,
@@ -12335,46 +13206,46 @@ window.__ModuleLoader__.load({
               ),
             ),
         staleSharedTask
-          ? (0, import_react34.createElement)(StalePersonalTask, {
+          ? (0, import_react36.createElement)(StalePersonalTask, {
               sessionId: sessionId2,
             })
           : null,
-        (0, import_react34.createElement)(
+        (0, import_react36.createElement)(
           "div",
           {
             className: "workagent-message-list",
             "aria-live": "polite",
             ref: messageList,
           },
-          (0, import_react34.createElement)(ConversationMessageTarget, {
+          (0, import_react36.createElement)(ConversationMessageTarget, {
             sessionId: sessionId2,
           }),
           messageState.loading
-            ? (0, import_react34.createElement)(
+            ? (0, import_react36.createElement)(
                 "p",
                 { className: "workagent-muted" },
                 "正在加载消息…",
               )
             : visibleMessages.length === 0 && !visibleQueue.length && !draft
-              ? (0, import_react34.createElement)(
+              ? (0, import_react36.createElement)(
                   "div",
                   { className: "workagent-conversation-empty" },
                   side
-                    ? (0, import_react34.createElement)(
+                    ? (0, import_react36.createElement)(
                         "div",
                         { className: "workagent-side-empty-icon" },
-                        (0, import_react34.createElement)(Icon, {
+                        (0, import_react36.createElement)(Icon, {
                           name: "chatgpt",
                           size: 24,
                         }),
                       )
                     : null,
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     "strong",
                     null,
                     side ? "顺便问一句" : "从这里继续对话",
                   ),
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     "span",
                     null,
                     side
@@ -12385,7 +13256,7 @@ window.__ModuleLoader__.load({
               : null,
           ...questionMessages.map((message) =>
             message.role === "assistant" && message.kind === "question"
-              ? (0, import_react34.createElement)(
+              ? (0, import_react36.createElement)(
                   workbench.Question,
                   {
                     key: message.id,
@@ -12398,17 +13269,17 @@ window.__ModuleLoader__.load({
                     disabled: submitting || attachmentsBusy,
                     onReply: (content) => answerQuestion(message, content),
                   },
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     Markdown,
                     { workspaceId: session?.workspaceId },
                     message.text,
                   ),
-                  (0, import_react34.createElement)(MessageActions, {
+                  (0, import_react36.createElement)(MessageActions, {
                     message,
                     disabled: submitting,
                   }),
                 )
-              : (0, import_react34.createElement)(
+              : (0, import_react36.createElement)(
                   "article",
                   {
                     key: message.id,
@@ -12416,12 +13287,12 @@ window.__ModuleLoader__.load({
                     "data-message-id": message.id,
                   },
                   message.role === "assistant"
-                    ? (0, import_react34.createElement)(SessionAvatar, {
+                    ? (0, import_react36.createElement)(SessionAvatar, {
                         session,
                       })
                     : null,
                   message.replyTo
-                    ? (0, import_react34.createElement)(
+                    ? (0, import_react36.createElement)(
                         "button",
                         {
                           type: "button",
@@ -12443,13 +13314,13 @@ window.__ModuleLoader__.load({
                         `↩ 回复补充问题 · ${message.replyTo.text}`,
                       )
                     : null,
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     Markdown,
                     { workspaceId: session?.workspaceId },
                     message.text,
                   ),
                   message.status
-                    ? (0, import_react34.createElement)(
+                    ? (0, import_react36.createElement)(
                         "footer",
                         {
                           className: "workagent-message-delivery",
@@ -12462,15 +13333,15 @@ window.__ModuleLoader__.load({
                             ? "发送失败"
                             : null,
                         message.status === "failed"
-                          ? (0, import_react34.createElement)(
-                              import_react33.default.Fragment,
+                          ? (0, import_react36.createElement)(
+                              import_react35.default.Fragment,
                               null,
-                              (0, import_react34.createElement)(
+                              (0, import_react36.createElement)(
                                 "span",
                                 null,
                                 message.error,
                               ),
-                              (0, import_react34.createElement)(
+                              (0, import_react36.createElement)(
                                 Button,
                                 {
                                   disabled: submitting,
@@ -12482,7 +13353,7 @@ window.__ModuleLoader__.load({
                             )
                           : null,
                       )
-                    : (0, import_react34.createElement)(MessageActions, {
+                    : (0, import_react36.createElement)(MessageActions, {
                         message,
                         disabled: submitting,
                         onEdit:
@@ -12498,7 +13369,7 @@ window.__ModuleLoader__.load({
                             : void 0,
                       }),
                   editing === message.id
-                    ? (0, import_react34.createElement)(
+                    ? (0, import_react36.createElement)(
                         "form",
                         {
                           className: "workagent-message-editor",
@@ -12508,7 +13379,7 @@ window.__ModuleLoader__.load({
                               void fork(message.id, editContent.trim());
                           },
                         },
-                        (0, import_react34.createElement)(ComposerInput, {
+                        (0, import_react36.createElement)(ComposerInput, {
                           "aria-label": "编辑消息",
                           workspaceId: session?.workspaceId,
                           autoFocus: true,
@@ -12517,15 +13388,15 @@ window.__ModuleLoader__.load({
                             setEditContent(event.target.value),
                           onKeyDown: submitComposerOnEnter,
                         }),
-                        (0, import_react34.createElement)(
+                        (0, import_react36.createElement)(
                           "small",
                           null,
                           `${busy ? "运行中的原任务会先停止。" : ""}从这条消息前重新继续，原会话保留。此操作不会回滚已修改的文件。`,
                         ),
-                        (0, import_react34.createElement)(
+                        (0, import_react36.createElement)(
                           "div",
                           { className: "workagent-actions" },
-                          (0, import_react34.createElement)(
+                          (0, import_react36.createElement)(
                             Button,
                             {
                               type: "submit",
@@ -12533,7 +13404,7 @@ window.__ModuleLoader__.load({
                             },
                             submitting ? "正在重发…" : "保存并重发",
                           ),
-                          (0, import_react34.createElement)(
+                          (0, import_react36.createElement)(
                             Button,
                             {
                               disabled: submitting,
@@ -12547,19 +13418,19 @@ window.__ModuleLoader__.load({
                 ),
           ),
           visibleQueue.length
-            ? (0, import_react34.createElement)(
+            ? (0, import_react36.createElement)(
                 "div",
                 {
                   className: "workagent-message-queue",
                   "aria-label": "待发送消息",
                 },
-                (0, import_react34.createElement)(
+                (0, import_react36.createElement)(
                   "small",
                   null,
                   `排队消息（${visibleQueue.length}）`,
                 ),
                 ...visibleQueue.map((row) =>
-                  (0, import_react34.createElement)(
+                  (0, import_react36.createElement)(
                     "article",
                     {
                       key: row.messageId,
@@ -12567,15 +13438,15 @@ window.__ModuleLoader__.load({
                         "workagent-message is-user workagent-queued-message",
                       "data-message-id": row.messageId,
                     },
-                    (0, import_react34.createElement)(
+                    (0, import_react36.createElement)(
                       "div",
                       null,
-                      (0, import_react34.createElement)(
+                      (0, import_react36.createElement)(
                         Markdown,
                         { workspaceId: session?.workspaceId },
                         row.content,
                       ),
-                      (0, import_react34.createElement)(
+                      (0, import_react36.createElement)(
                         "small",
                         { "data-delivery-status": row.status || "queued" },
                         row.status === "sending"
@@ -12585,7 +13456,7 @@ window.__ModuleLoader__.load({
                             : "排队中",
                       ),
                       row.error
-                        ? (0, import_react34.createElement)(
+                        ? (0, import_react36.createElement)(
                             "small",
                             { className: "workagent-error" },
                             friendlyError(row.error),
@@ -12593,7 +13464,7 @@ window.__ModuleLoader__.load({
                         : null,
                     ),
                     row.status === "failed"
-                      ? (0, import_react34.createElement)(
+                      ? (0, import_react36.createElement)(
                           Button,
                           {
                             disabled: submitting,
@@ -12602,7 +13473,7 @@ window.__ModuleLoader__.load({
                           "重试发送",
                         )
                       : null,
-                    (0, import_react34.createElement)(
+                    (0, import_react36.createElement)(
                       Button,
                       {
                         className: "workagent-queue-icon",
@@ -12615,11 +13486,11 @@ window.__ModuleLoader__.load({
                             busy ? "steer" : "send",
                           ),
                       },
-                      (0, import_react34.createElement)(Icon, {
+                      (0, import_react36.createElement)(Icon, {
                         name: busy ? "steer" : "send",
                       }),
                     ),
-                    (0, import_react34.createElement)(
+                    (0, import_react36.createElement)(
                       Button,
                       {
                         className: "workagent-queue-icon",
@@ -12629,7 +13500,7 @@ window.__ModuleLoader__.load({
                         onClick: () =>
                           void updateQueue(row.messageId, "remove"),
                       },
-                      (0, import_react34.createElement)(Icon, {
+                      (0, import_react36.createElement)(Icon, {
                         name: "close",
                       }),
                     ),
@@ -12637,40 +13508,40 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          (0, import_react34.createElement)(workbench.Tools, {
+          (0, import_react36.createElement)(workbench.Tools, {
             tools: nativeState.value?.tools,
             workspaceId: session?.workspaceId,
           }),
-          (0, import_react34.createElement)(workbench.Artifacts, {
+          (0, import_react36.createElement)(workbench.Artifacts, {
             sessionId: id,
             workspaceId: session?.workspaceId,
             revision: messageState.rows.length,
           }),
-          (0, import_react34.createElement)(workbench.Process, {
+          (0, import_react36.createElement)(workbench.Process, {
             items: nativeState.value?.processes,
           }),
           draft
-            ? (0, import_react34.createElement)(
+            ? (0, import_react36.createElement)(
                 "article",
                 { className: "workagent-message is-assistant is-streaming" },
-                (0, import_react34.createElement)(SessionAvatar, { session }),
-                (0, import_react34.createElement)(
+                (0, import_react36.createElement)(SessionAvatar, { session }),
+                (0, import_react36.createElement)(
                   Markdown,
                   { workspaceId: session?.workspaceId, streaming: true },
                   draft,
                 ),
               )
             : busy
-              ? (0, import_react34.createElement)(
+              ? (0, import_react36.createElement)(
                   "div",
                   {
                     className: "workagent-thinking",
                     role: "status",
                     "aria-live": "polite",
                   },
-                  (0, import_react34.createElement)("span", null),
-                  (0, import_react34.createElement)("span", null),
-                  (0, import_react34.createElement)("span", null),
+                  (0, import_react36.createElement)("span", null),
+                  (0, import_react36.createElement)("span", null),
+                  (0, import_react36.createElement)("span", null),
                   progress ||
                     (pending.some(
                       (row) => row.status === "sending" && !row.queued,
@@ -12680,10 +13551,10 @@ window.__ModuleLoader__.load({
                 )
               : null,
         ),
-        (0, import_react34.createElement)(
+        (0, import_react36.createElement)(
           ComposerForm,
           { className: "workagent-conversation-composer", onSubmit: send },
-          (0, import_react34.createElement)(workbench.ComposerTools, {
+          (0, import_react36.createElement)(workbench.ComposerTools, {
             onBusyChange: setAttachmentsBusy,
             key: sessionId2,
             session,
@@ -12692,7 +13563,7 @@ window.__ModuleLoader__.load({
             onError: setError,
             disabled: submitting,
           }),
-          (0, import_react34.createElement)(ComposerInput, {
+          (0, import_react36.createElement)(ComposerInput, {
             "aria-label": side ? "侧聊消息" : "继续对话",
             workspaceId: session?.workspaceId,
             disabled: sessionState.rows[0]?.id !== sessionId2,
@@ -12735,23 +13606,23 @@ window.__ModuleLoader__.load({
                 ? "顺便问一句…"
                 : "继续聊聊…",
           }),
-          (0, import_react34.createElement)(
+          (0, import_react36.createElement)(
             "div",
             { className: "workagent-conversation-composer-bar" },
-            (0, import_react34.createElement)(workbench.Controls, {
+            (0, import_react36.createElement)(workbench.Controls, {
               ctx,
               session,
               busy,
               cancel,
             }),
             error
-              ? (0, import_react34.createElement)(
+              ? (0, import_react36.createElement)(
                   "span",
                   { role: "alert", className: "workagent-error" },
                   error,
                 )
               : busy
-                ? (0, import_react34.createElement)(
+                ? (0, import_react36.createElement)(
                     "span",
                     { className: "workagent-muted" },
                     busyEnter === "queue"
@@ -12762,7 +13633,7 @@ window.__ModuleLoader__.load({
                   )
                 : null,
             busy
-              ? (0, import_react34.createElement)(
+              ? (0, import_react36.createElement)(
                   "button",
                   {
                     type: "button",
@@ -12771,13 +13642,13 @@ window.__ModuleLoader__.load({
                     title: "停止当前任务",
                     onClick: () => void cancel(),
                   },
-                  (0, import_react34.createElement)(Icon, {
+                  (0, import_react36.createElement)(Icon, {
                     name: "stop",
                     size: 20,
                   }),
                 )
               : null,
-            (0, import_react34.createElement)(
+            (0, import_react36.createElement)(
               "button",
               {
                 type: "submit",
@@ -12792,7 +13663,7 @@ window.__ModuleLoader__.load({
                     : "发送",
                 disabled: !input.trim() || submitting || attachmentsBusy,
               },
-              (0, import_react34.createElement)(Icon, {
+              (0, import_react36.createElement)(Icon, {
                 name: "send",
                 size: 20,
               }),
@@ -12812,7 +13683,7 @@ window.__ModuleLoader__.load({
     }
     function StalePersonalTask({ sessionId: sessionId2 }) {
       const state = SharedPage.useShared();
-      const [busy, setBusy] = import_react33.default.useState(false);
+      const [busy, setBusy] = import_react35.default.useState(false);
       const row = state.conversations.find(
         (item) =>
           item.kind === "personal_task" &&
@@ -12832,12 +13703,12 @@ window.__ModuleLoader__.load({
           setBusy(false);
         }
       };
-      return (0, import_react34.createElement)(
+      return (0, import_react36.createElement)(
         "p",
         { role: "alert", className: "workagent-error" },
         "这个个人任务的会话已删除或不可用。",
         row
-          ? (0, import_react34.createElement)(
+          ? (0, import_react36.createElement)(
               Button,
               { disabled: busy, onClick: remove },
               busy ? "正在移除…" : "移除该记录",
@@ -12847,17 +13718,17 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/conversations/workspace.js
-    var import_react35 = __toESM(require("react"), 1);
-    var import_react36 = require("react");
+    var import_react37 = __toESM(require("react"), 1);
+    var import_react38 = require("react");
     function ConversationWorkspace({ sessionId: sessionId2 }) {
-      const ctx = import_react35.default.useContext(RuntimeServices);
-      const workspaceRef = import_react35.default.useRef(null);
+      const ctx = import_react37.default.useContext(RuntimeServices);
+      const workspaceRef = import_react37.default.useRef(null);
       const [workspaceWidth, setWorkspaceWidth] =
-        import_react35.default.useState(0);
-      const [sideWidth, setSideWidth] = import_react35.default.useState(
+        import_react37.default.useState(0);
+      const [sideWidth, setSideWidth] = import_react37.default.useState(
         () => Number(localStorage.getItem("workagent.side-chat.width")) || null,
       );
-      import_react35.default.useLayoutEffect(() => {
+      import_react37.default.useLayoutEffect(() => {
         const workspace = workspaceRef.current;
         const measure = () =>
           setWorkspaceWidth(workspace.getBoundingClientRect().width);
@@ -12879,16 +13750,16 @@ window.__ModuleLoader__.load({
         setSideWidth(next);
         localStorage.setItem("workagent.side-chat.width", String(next));
       };
-      const [sideId, setSideId] = import_react35.default.useState(() =>
+      const [sideId, setSideId] = import_react37.default.useState(() =>
         localStorage.getItem(`workagent.side-chat.${sessionId2}`),
       );
-      const [opening, setOpening] = import_react35.default.useState(false);
-      const [sideError, setSideError] = import_react35.default.useState("");
+      const [opening, setOpening] = import_react37.default.useState(false);
+      const [sideError, setSideError] = import_react37.default.useState("");
       const [deleteTarget, setDeleteTarget] =
-        import_react35.default.useState(null);
-      const [deleting, setDeleting] = import_react35.default.useState(false);
-      const deletingRef = import_react35.default.useRef(false);
-      const openingRef = import_react35.default.useRef(false);
+        import_react37.default.useState(null);
+      const [deleting, setDeleting] = import_react37.default.useState(false);
+      const deletingRef = import_react37.default.useRef(false);
+      const openingRef = import_react37.default.useRef(false);
       const [sideState, reloadSides] = useResource(
         `${apiRoot}/sessions`,
         (rows) =>
@@ -12898,7 +13769,7 @@ window.__ModuleLoader__.load({
               row.branchKind === "side_chat",
           ),
       );
-      import_react35.default.useEffect(() => {
+      import_react37.default.useEffect(() => {
         if (
           !sideId ||
           sideState.loading ||
@@ -12963,7 +13834,7 @@ window.__ModuleLoader__.load({
             );
             if (
               hasStandardSessions(ctx) &&
-              ["codex", "kimi"].includes(current.engine)
+              ["codex", "kimi", "acp"].includes(current.engine)
             )
               await nativeSessionAction(
                 ctx,
@@ -12989,27 +13860,27 @@ window.__ModuleLoader__.load({
           setOpening(false);
         }
       };
-      return (0, import_react36.createElement)(
+      return (0, import_react38.createElement)(
         "div",
         {
           className: `workagent-conversation-workspace${sideId ? " has-side-chat" : ""}`,
           ref: workspaceRef,
           style: { "--workagent-side-chat-width": `${visibleSideWidth}px` },
         },
-        (0, import_react36.createElement)(RuntimeConversation, {
+        (0, import_react38.createElement)(RuntimeConversation, {
           key: sessionId2,
           sessionId: sessionId2,
           onSideChat: openSideChat,
         }),
         opening
-          ? (0, import_react36.createElement)(
+          ? (0, import_react38.createElement)(
               "span",
               { role: "status", className: "workagent-side-opening" },
               "正在打开侧聊…",
             )
           : null,
         sideId
-          ? (0, import_react36.createElement)(ResizeHandle, {
+          ? (0, import_react38.createElement)(ResizeHandle, {
               orientation: "vertical",
               label: "调整侧聊宽度",
               className: "workagent-side-resizer",
@@ -13027,39 +13898,39 @@ window.__ModuleLoader__.load({
             })
           : null,
         sideId
-          ? (0, import_react36.createElement)(
+          ? (0, import_react38.createElement)(
               "aside",
               { className: "workagent-side-chat", "aria-label": "侧聊 BTW" },
-              (0, import_react36.createElement)(RuntimeConversation, {
+              (0, import_react38.createElement)(RuntimeConversation, {
                 key: sideId,
                 sessionId: sideId,
                 side: true,
-                sideHeader: (0, import_react36.createElement)(
+                sideHeader: (0, import_react38.createElement)(
                   "header",
                   {
                     className:
                       "workagent-conversation-title workagent-side-header",
                   },
-                  (0, import_react36.createElement)(
+                  (0, import_react38.createElement)(
                     "div",
                     { className: "workagent-side-toolbar" },
-                    (0, import_react36.createElement)(
+                    (0, import_react38.createElement)(
                       "div",
                       { className: "workagent-side-heading" },
-                      (0, import_react36.createElement)("strong", null, "侧聊"),
-                      (0, import_react36.createElement)(
+                      (0, import_react38.createElement)("strong", null, "侧聊"),
+                      (0, import_react38.createElement)(
                         "span",
                         { className: "workagent-side-badge" },
                         "BTW",
                       ),
                     ),
-                    (0, import_react36.createElement)(
+                    (0, import_react38.createElement)(
                       "nav",
                       {
                         className: "workagent-side-actions",
                         "aria-label": "侧聊操作",
                       },
-                      (0, import_react36.createElement)(
+                      (0, import_react38.createElement)(
                         Button,
                         {
                           className: "workagent-side-action",
@@ -13073,12 +13944,12 @@ window.__ModuleLoader__.load({
                             );
                           },
                         },
-                        (0, import_react36.createElement)(Icon, {
+                        (0, import_react38.createElement)(Icon, {
                           name: "plus",
                           size: 17,
                         }),
                       ),
-                      (0, import_react36.createElement)(
+                      (0, import_react38.createElement)(
                         Button,
                         {
                           className: "workagent-side-action is-delete",
@@ -13090,7 +13961,7 @@ window.__ModuleLoader__.load({
                             setDeleteTarget(sideId);
                           },
                         },
-                        (0, import_react36.createElement)(Icon, {
+                        (0, import_react38.createElement)(Icon, {
                           name: "trash",
                           size: 17,
                         }),
@@ -13098,10 +13969,10 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                   sideState.rows.length > 1
-                    ? (0, import_react36.createElement)(
+                    ? (0, import_react38.createElement)(
                         "div",
                         { className: "workagent-side-picker" },
-                        (0, import_react36.createElement)(Select, {
+                        (0, import_react38.createElement)(Select, {
                           "aria-label": "选择侧聊",
                           disabled: opening || deleting,
                           value: sideId,
@@ -13117,18 +13988,18 @@ window.__ModuleLoader__.load({
                             `${index + 1}. ${displaySessionTitle(row.title)}`,
                           ]),
                         }),
-                        (0, import_react36.createElement)(Icon, {
+                        (0, import_react38.createElement)(Icon, {
                           name: "chevronDown",
                           size: 14,
                         }),
                       )
-                    : (0, import_react36.createElement)(
+                    : (0, import_react38.createElement)(
                         "span",
                         { className: "workagent-side-caption" },
                         "和主对话分开记录",
                       ),
                   sideError && !deleteTarget
-                    ? (0, import_react36.createElement)(
+                    ? (0, import_react38.createElement)(
                         "span",
                         { role: "alert", className: "workagent-error" },
                         sideError,
@@ -13139,7 +14010,7 @@ window.__ModuleLoader__.load({
             )
           : null,
         deleteTarget
-          ? (0, import_react36.createElement)(
+          ? (0, import_react38.createElement)(
               Dialog,
               {
                 as: "form",
@@ -13153,22 +14024,22 @@ window.__ModuleLoader__.load({
                   setSideError("");
                 },
               },
-              (0, import_react36.createElement)(
+              (0, import_react38.createElement)(
                 "p",
                 null,
                 "侧聊及其消息将被删除，主对话不受影响。再次打开会创建新的侧聊。",
               ),
               sideError
-                ? (0, import_react36.createElement)(
+                ? (0, import_react38.createElement)(
                     "p",
                     { role: "alert", className: "workagent-error" },
                     sideError,
                   )
                 : null,
-              (0, import_react36.createElement)(
+              (0, import_react38.createElement)(
                 "div",
                 { className: "workagent-actions" },
-                (0, import_react36.createElement)(
+                (0, import_react38.createElement)(
                   Button,
                   {
                     autoFocus: true,
@@ -13180,7 +14051,7 @@ window.__ModuleLoader__.load({
                   },
                   "取消",
                 ),
-                (0, import_react36.createElement)(
+                (0, import_react38.createElement)(
                   Button,
                   {
                     type: "submit",
@@ -13196,7 +14067,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/marketplace/detail.js
-    var import_react37 = __toESM(require("react"), 1);
+    var import_react39 = __toESM(require("react"), 1);
     var sourceLabels = {
       stock_finance_data: "沪深股票财务数据",
       yahoo_finance: "雅虎财经",
@@ -13225,13 +14096,13 @@ window.__ModuleLoader__.load({
       caixin: "财新",
     };
     function MarketplaceDetail({ row, request: request2, explain, onClose }) {
-      const [state, setState] = import_react37.default.useState({
+      const [state, setState] = import_react39.default.useState({
         loading: true,
         value: null,
         error: "",
       });
-      const [revision, setRevision] = import_react37.default.useState(0);
-      import_react37.default.useEffect(() => {
+      const [revision, setRevision] = import_react39.default.useState(0);
+      import_react39.default.useEffect(() => {
         const controller = new AbortController();
         setState({ loading: true, value: null, error: "" });
         request2(`/api/portal/marketplace?id=${encodeURIComponent(row.id)}`, {
@@ -13254,7 +14125,7 @@ window.__ModuleLoader__.load({
       }, [row.id, revision]);
       const entry = state.value?.entry;
       const quota = state.value?.professionalDatabase;
-      return (0, import_react37.createElement)(
+      return (0, import_react39.createElement)(
         Dialog,
         {
           title: `${row.name} · 详情`,
@@ -13262,35 +14133,35 @@ window.__ModuleLoader__.load({
           className: "workagent-market-detail",
         },
         state.loading
-          ? (0, import_react37.createElement)(
+          ? (0, import_react39.createElement)(
               "p",
               { role: "status" },
               "正在加载详情与调用次数…",
             )
           : null,
         state.error
-          ? (0, import_react37.createElement)(
+          ? (0, import_react39.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               `详情加载失败：${state.error}`,
             )
           : null,
         entry
-          ? (0, import_react37.createElement)(
-              import_react37.default.Fragment,
+          ? (0, import_react39.createElement)(
+              import_react39.default.Fragment,
               null,
-              (0, import_react37.createElement)(
+              (0, import_react39.createElement)(
                 "p",
                 { className: "workagent-muted" },
                 `版本 ${entry.version} · ${entry.publisher}`,
               ),
-              (0, import_react37.createElement)(
+              (0, import_react39.createElement)(
                 "p",
                 { className: "workagent-release-notes" },
                 entry.description,
               ),
               entry.releaseNotes
-                ? (0, import_react37.createElement)(
+                ? (0, import_react39.createElement)(
                     "p",
                     { className: "workagent-release-notes" },
                     `更新说明：${entry.releaseNotes}`,
@@ -13299,32 +14170,32 @@ window.__ModuleLoader__.load({
             )
           : null,
         quota
-          ? (0, import_react37.createElement)(
+          ? (0, import_react39.createElement)(
               "section",
               { "aria-label": "我的专业数据库调用次数" },
-              (0, import_react37.createElement)("h3", null, "我的调用次数"),
-              (0, import_react37.createElement)(
+              (0, import_react39.createElement)("h3", null, "我的调用次数"),
+              (0, import_react39.createElement)(
                 "p",
                 { className: "workagent-muted" },
                 "数据通过 Kimi 专业数据服务查询，实际可用数据取决于上游授权。",
               ),
               quota.configured && quota.upstream_ready === false
-                ? (0, import_react37.createElement)(
+                ? (0, import_react39.createElement)(
                     "div",
                     { role: "status" },
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "strong",
                       null,
                       "服务待授权",
                     ),
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "p",
                       null,
                       "管理员尚需完成 Kimi 服务授权。授权完成前无法查询，不扣调用次数；账户额度可预先配置。",
                     ),
                   )
                 : null,
-              (0, import_react37.createElement)(
+              (0, import_react39.createElement)(
                 "p",
                 { className: "workagent-muted" },
                 !quota.configured
@@ -13334,10 +14205,10 @@ window.__ModuleLoader__.load({
                     : "已开通 · 所有项目共用当前账户的调用次数。",
               ),
               quota.configured
-                ? (0, import_react37.createElement)(
-                    import_react37.default.Fragment,
+                ? (0, import_react39.createElement)(
+                    import_react39.default.Fragment,
                     null,
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "div",
                       { className: "workagent-market-quota-grid" },
                       ...[
@@ -13354,23 +14225,23 @@ window.__ModuleLoader__.load({
                           quota.monthly_used,
                         ],
                       ].map(([period, remaining, total, used]) =>
-                        (0, import_react37.createElement)(
+                        (0, import_react39.createElement)(
                           "section",
                           {
                             key: period,
                             className: "workagent-market-quota",
                             "aria-label": `${period}调用次数`,
                           },
-                          (0, import_react37.createElement)("h4", null, period),
-                          (0, import_react37.createElement)(
+                          (0, import_react39.createElement)("h4", null, period),
+                          (0, import_react39.createElement)(
                             "p",
                             null,
                             "剩余调用次数 / 总可调用次数",
                           ),
-                          (0, import_react37.createElement)(
+                          (0, import_react39.createElement)(
                             "p",
                             { className: "workagent-market-quota-count" },
-                            (0, import_react37.createElement)(
+                            (0, import_react39.createElement)(
                               "strong",
                               null,
                               remaining,
@@ -13378,7 +14249,7 @@ window.__ModuleLoader__.load({
                             " / ",
                             total,
                           ),
-                          (0, import_react37.createElement)(
+                          (0, import_react39.createElement)(
                             "p",
                             { className: "workagent-muted" },
                             `已用 ${used} 次`,
@@ -13389,28 +14260,28 @@ window.__ModuleLoader__.load({
                     quota.enabled &&
                       (quota.daily_remaining === 0 ||
                         quota.monthly_remaining === 0)
-                      ? (0, import_react37.createElement)(
+                      ? (0, import_react39.createElement)(
                           "p",
                           null,
                           "当前可用次数为 0，暂时无法调用。可等待额度重置或联系管理员调整次数。",
                         )
                       : null,
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "p",
                       { className: "workagent-muted" },
                       "每日 00:00、每月 1 日 00:00 按北京时间（Asia/Shanghai）重置对应周期的已用次数；每日与每月上限同时生效。",
                     ),
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "p",
                       { className: "workagent-muted" },
                       quota.counting_rule,
                     ),
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "h4",
                       null,
                       "允许的数据源",
                     ),
-                    (0, import_react37.createElement)(
+                    (0, import_react39.createElement)(
                       "p",
                       { className: "workagent-market-sources" },
                       quota.allowed_sources.length
@@ -13423,10 +14294,10 @@ window.__ModuleLoader__.load({
                 : null,
             )
           : null,
-        (0, import_react37.createElement)(
+        (0, import_react39.createElement)(
           "div",
           { className: "workagent-dialog-actions" },
-          (0, import_react37.createElement)(
+          (0, import_react39.createElement)(
             Button,
             {
               disabled: state.loading,
@@ -13440,8 +14311,8 @@ window.__ModuleLoader__.load({
 
     // src/features/marketplace/marketplace.js
     function createMarketplace({
-      React: React37,
-      h: h33,
+      React: React40,
+      h: h36,
       request: request2,
       Section: Section2,
       Button: Button2,
@@ -13479,20 +14350,20 @@ window.__ModuleLoader__.load({
             (v) => v.projects || [],
           );
         const [personalProjects] = useResource2("/api/runtime/v1/workspaces");
-        const [project, setProject] = React37.useState(
+        const [project, setProject] = React40.useState(
           () => new URLSearchParams(location.search).get("marketProject") || "",
         );
-        const [subscriptions, setSubscriptions] = React37.useState([]),
-          [canManage, setCanManage] = React37.useState(false);
-        const [query, setQuery] = React37.useState(""),
-          [kind, setKind] = React37.useState("all"),
-          [busy, setBusy] = React37.useState(""),
-          [error, setError] = React37.useState(""),
-          [notice, setNotice] = React37.useState("");
-        const [publishing, setPublishing] = React37.useState(null),
-          [history2, setHistory] = React37.useState(null),
-          [detail, setDetail] = React37.useState(null),
-          [credentials, setCredentials] = React37.useState(null);
+        const [subscriptions, setSubscriptions] = React40.useState([]),
+          [canManage, setCanManage] = React40.useState(false);
+        const [query, setQuery] = React40.useState(""),
+          [kind, setKind] = React40.useState("all"),
+          [busy, setBusy] = React40.useState(""),
+          [error, setError] = React40.useState(""),
+          [notice, setNotice] = React40.useState("");
+        const [publishing, setPublishing] = React40.useState(null),
+          [history2, setHistory] = React40.useState(null),
+          [detail, setDetail] = React40.useState(null),
+          [credentials, setCredentials] = React40.useState(null);
         const projectURL = project
           ? project.startsWith("personal:")
             ? `/api/portal/projects/${encodeURIComponent(project.slice(9))}/capabilities`
@@ -13508,7 +14379,7 @@ window.__ModuleLoader__.load({
           setSubscriptions(value.subscriptions || []);
           setCanManage(value.canManage);
         }
-        React37.useEffect(() => {
+        React40.useEffect(() => {
           let alive = true;
           setError("");
           setSubscriptions([]);
@@ -13660,7 +14531,7 @@ window.__ModuleLoader__.load({
           : catalog.rows.filter((r) => r.updateAvailable).length;
         const action = (row) => {
           const current = currentFor(row);
-          return h33(
+          return h36(
             Button2,
             {
               disabled: !!busy || !canManage,
@@ -13689,30 +14560,30 @@ window.__ModuleLoader__.load({
                     : "获取",
           );
         };
-        return h33(
+        return h36(
           Section2,
           { title: "市场" },
-          h33(
+          h36(
             "div",
             { className: "workagent-market-toolbar" },
-            h33("input", {
+            h36("input", {
               type: "search",
               "aria-label": "搜索市场",
               placeholder: "搜索技能、MCP 或助手",
               value: query,
               onChange: (e) => setQuery(e.target.value),
             }),
-            h33(
+            h36(
               Button2,
               { onClick: () => setPublishing(publishing ? null : {}) },
               publishing ? "收起发布" : "发布到市场",
             ),
           ),
-          h33(
+          h36(
             "label",
             { className: "workagent-market-scope" },
             "能力使用范围",
-            h33(
+            h36(
               "select",
               {
                 "aria-label": "能力使用范围",
@@ -13724,8 +14595,8 @@ window.__ModuleLoader__.load({
                   setCredentials(null);
                 },
               },
-              h33("option", { value: "" }, "我的能力"),
-              h33(
+              h36("option", { value: "" }, "我的能力"),
+              h36(
                 "option",
                 { value: "personal:default" },
                 "个人项目 · 默认项目",
@@ -13733,14 +14604,14 @@ window.__ModuleLoader__.load({
               ...personalProjects.rows
                 .filter((p) => p.id !== "default")
                 .map((p) =>
-                  h33(
+                  h36(
                     "option",
                     { key: `personal:${p.id}`, value: `personal:${p.id}` },
                     `个人项目 · ${p.name}`,
                   ),
                 ),
               ...projects.rows.map((p) =>
-                h33(
+                h36(
                   "option",
                   { key: p.id, value: p.id },
                   `协作项目 · ${p.name}`,
@@ -13748,14 +14619,14 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          h33(
+          h36(
             "p",
             { className: "workagent-muted" },
             project
               ? "项目固定使用订阅时选定的版本，不会自动升级。所有成员可查看，负责人可更新。这里订阅技能与 MCP；助手可在项目成员中添加。"
               : "新版本只会提示，由你决定是否升级；可在版本记录中回退。管理员安全处置除外。",
           ),
-          h33(
+          h36(
             Button2,
             {
               disabled: !!busy || !canManage || !updateCount,
@@ -13765,12 +14636,12 @@ window.__ModuleLoader__.load({
               ? "正在更新…"
               : `一键更新${updateCount ? `（${updateCount}）` : ""}`,
           ),
-          h33(
+          h36(
             "nav",
             { className: "workagent-tabs", "aria-label": "市场分类" },
             ...[["all", "全部"], ...Object.entries(kinds)].map(
               ([value, label]) =>
-                h33(
+                h36(
                   Button2,
                   {
                     key: value,
@@ -13782,7 +14653,7 @@ window.__ModuleLoader__.load({
             ),
           ),
           publishing
-            ? h33(PublishForm, {
+            ? h36(PublishForm, {
                 entry: publishing.id ? publishing : void 0,
                 onPublished: async () => {
                   setPublishing(null);
@@ -13792,21 +14663,21 @@ window.__ModuleLoader__.load({
               })
             : null,
           error
-            ? h33("p", { role: "alert", className: "workagent-error" }, error)
+            ? h36("p", { role: "alert", className: "workagent-error" }, error)
             : null,
-          notice ? h33("p", { role: "status" }, notice) : null,
-          h33(Status2, { state: catalog }),
+          notice ? h36("p", { role: "status" }, notice) : null,
+          h36(Status2, { state: catalog }),
           ...rows.map((row) => {
             const current = currentFor(row);
-            return h33(
+            return h36(
               Card2,
               {
                 key: row.id,
                 title: row.name,
                 detail: `${kinds[row.kind]} · 最新 ${row.version} · ${row.publisher}`,
               },
-              h33("p", null, row.description),
-              h33(
+              h36("p", null, row.description),
+              h36(
                 "p",
                 null,
                 current
@@ -13814,43 +14685,43 @@ window.__ModuleLoader__.load({
                   : "尚未获取",
               ),
               row.releaseNotes
-                ? h33(
+                ? h36(
                     "p",
                     { className: "workagent-release-notes" },
                     row.releaseNotes,
                   )
                 : null,
               row.skills?.length
-                ? h33("p", null, `包含技能：${row.skills.join("、")}`)
+                ? h36("p", null, `包含技能：${row.skills.join("、")}`)
                 : null,
               row.mcp?.length
-                ? h33("p", null, `包含 MCP：${row.mcp.join("、")}`)
+                ? h36("p", null, `包含 MCP：${row.mcp.join("、")}`)
                 : null,
               action(row),
               row.kind === "mcp"
-                ? h33(Button2, { onClick: () => setDetail(row) }, "详情")
+                ? h36(Button2, { onClick: () => setDetail(row) }, "详情")
                 : null,
-              h33(
+              h36(
                 Button2,
                 { disabled: !!busy, onClick: () => versions(row) },
                 "版本记录",
               ),
               project && current && canManage
-                ? h33(
+                ? h36(
                     Button2,
                     { disabled: !!busy, onClick: () => unsubscribe(row) },
                     "取消订阅",
                   )
                 : null,
               row.canDelete
-                ? h33(
+                ? h36(
                     Button2,
                     { disabled: !!busy, onClick: () => setPublishing(row) },
                     "发布新版本",
                   )
                 : null,
               row.canDelete
-                ? h33(
+                ? h36(
                     Button2,
                     {
                       disabled: !!busy,
@@ -13882,7 +14753,7 @@ window.__ModuleLoader__.load({
                     !catalog.rows.some((r) => r.seriesId === s.entry.seriesId),
                 )
                 .map((s) =>
-                  h33(
+                  h36(
                     Card2,
                     {
                       key: s.entry.id,
@@ -13890,7 +14761,7 @@ window.__ModuleLoader__.load({
                       detail: `项目订阅 ${s.entry.version}${s.entry.revoked ? " · 已撤销" : " · 已下架"}`,
                     },
                     canManage
-                      ? h33(
+                      ? h36(
                           Button2,
                           { onClick: () => unsubscribe(s.entry) },
                           "取消订阅",
@@ -13900,10 +14771,10 @@ window.__ModuleLoader__.load({
                 )
             : null,
           !catalog.loading && !rows.length
-            ? h33("p", null, "暂无匹配内容，可以发布自己的能力。")
+            ? h36("p", null, "暂无匹配内容，可以发布自己的能力。")
             : null,
           detail
-            ? h33(MarketplaceDetail, {
+            ? h36(MarketplaceDetail, {
                 key: `detail:${detail.id}`,
                 row: detail,
                 request: request2,
@@ -13912,32 +14783,32 @@ window.__ModuleLoader__.load({
               })
             : null,
           history2
-            ? h33(
+            ? h36(
                 "section",
                 {
                   className: "workagent-market-history",
                   "aria-label": "版本记录",
                 },
-                h33("h3", null, `${history2.row.name} · 版本记录`),
-                h33(
+                h36("h3", null, `${history2.row.name} · 版本记录`),
+                h36(
                   Button2,
                   { onClick: () => setHistory(null) },
                   "关闭版本记录",
                 ),
                 ...history2.versions.map((v) =>
-                  h33(
+                  h36(
                     Card2,
                     {
                       key: v.id,
                       title: v.version,
                       detail: new Date(v.createdAt).toLocaleString(),
                     },
-                    h33(
+                    h36(
                       "p",
                       { className: "workagent-release-notes" },
                       v.releaseNotes || "此版本尚未填写更新说明。",
                     ),
-                    h33(
+                    h36(
                       Button2,
                       {
                         disabled:
@@ -13959,7 +14830,7 @@ window.__ModuleLoader__.load({
               )
             : null,
           credentials
-            ? h33(
+            ? h36(
                 "form",
                 {
                   className: "workagent-market-credentials",
@@ -13977,13 +14848,13 @@ window.__ModuleLoader__.load({
                     apply2(credentials.row, credentials.operation, values);
                   },
                 },
-                h33("h3", null, `配置 ${credentials.row.name}`),
+                h36("h3", null, `配置 ${credentials.row.name}`),
                 ...credentials.bundle.mcp.flatMap((m) =>
                   m.credentialNames.map((name) =>
-                    h33(
+                    h36(
                       Field2,
                       { key: `${m.id}:${name}`, label: `${m.name} · ${name}` },
-                      h33(Input2, {
+                      h36(Input2, {
                         name: `${m.id}:${name}`,
                         type: "password",
                         autoComplete: "new-password",
@@ -13992,12 +14863,12 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                 ),
-                h33(
+                h36(
                   Button2,
                   { type: "submit", disabled: !!busy },
                   "保存并继续",
                 ),
-                h33(Button2, { onClick: () => setCredentials(null) }, "取消"),
+                h36(Button2, { onClick: () => setCredentials(null) }, "取消"),
               )
             : null,
         );
@@ -14006,12 +14877,12 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/marketplace/page.js
-    var import_react38 = __toESM(require("react"), 1);
-    var import_react39 = require("react");
+    var import_react40 = __toESM(require("react"), 1);
+    var import_react41 = require("react");
     var marketKinds = { skill: "技能", mcp: "MCP", assistant: "助手" };
     var market = createMarketplace({
-      React: import_react38.default,
-      h: import_react39.createElement,
+      React: import_react40.default,
+      h: import_react41.createElement,
       request,
       Section,
       Button,
@@ -14024,16 +14895,16 @@ window.__ModuleLoader__.load({
       PublishForm: MarketPublishForm,
     });
     function MarketplaceSection() {
-      return (0, import_react39.createElement)(market.MarketplaceSection);
+      return (0, import_react41.createElement)(market.MarketplaceSection);
     }
     function MarketPublishForm({ onPublished, entry }) {
-      const [kind, setKind] = import_react38.default.useState(
+      const [kind, setKind] = import_react40.default.useState(
         entry?.kind || "skill",
       );
-      const [sourceId, setSourceId] = import_react38.default.useState("");
-      const [query, setQuery] = import_react38.default.useState("");
-      const [error, setError] = import_react38.default.useState("");
-      const [busy, setBusy] = import_react38.default.useState(false);
+      const [sourceId, setSourceId] = import_react40.default.useState("");
+      const [query, setQuery] = import_react40.default.useState("");
+      const [error, setError] = import_react40.default.useState("");
+      const [busy, setBusy] = import_react40.default.useState(false);
       const [skills] = useResource(`${apiRoot}/skills`);
       const [mcp] = useResource(`${apiRoot}/mcp-servers`);
       const [assistants] = usePresets();
@@ -14045,7 +14916,7 @@ window.__ModuleLoader__.load({
           `${row.name} ${row.id}`.toLowerCase().includes(query.toLowerCase()),
       );
       const selected = state.rows.find((row) => row.id === sourceId);
-      return (0, import_react39.createElement)(
+      return (0, import_react41.createElement)(
         "form",
         {
           className: "workagent-market-publish",
@@ -14075,16 +14946,16 @@ window.__ModuleLoader__.load({
             }
           },
         },
-        (0, import_react39.createElement)("h3", null, "发布到共享市场"),
-        (0, import_react39.createElement)(
+        (0, import_react41.createElement)("h3", null, "发布到共享市场"),
+        (0, import_react41.createElement)(
           "p",
           null,
           "所选内容和助手绑定的技能、MCP 配置会随版本共享给其他成员。连接密钥由获取者自行填写。",
         ),
-        (0, import_react39.createElement)(
+        (0, import_react41.createElement)(
           Field,
           { label: "发布类型" },
-          (0, import_react39.createElement)(Select, {
+          (0, import_react41.createElement)(Select, {
             value: kind,
             disabled: !!entry || busy,
             onChange: (e) => {
@@ -14095,19 +14966,19 @@ window.__ModuleLoader__.load({
             options: Object.entries(marketKinds),
           }),
         ),
-        (0, import_react39.createElement)(
+        (0, import_react41.createElement)(
           Field,
           { label: "搜索已安装内容" },
-          (0, import_react39.createElement)(Input, {
+          (0, import_react41.createElement)(Input, {
             type: "search",
             value: query,
             onChange: (e) => setQuery(e.target.value),
           }),
         ),
-        (0, import_react39.createElement)(
+        (0, import_react41.createElement)(
           Field,
           { label: "发布内容" },
-          (0, import_react39.createElement)(Select, {
+          (0, import_react41.createElement)(Select, {
             value: sourceId,
             required: true,
             onChange: (e) => setSourceId(e.target.value),
@@ -14118,23 +14989,23 @@ window.__ModuleLoader__.load({
           }),
         ),
         selected
-          ? (0, import_react39.createElement)(
+          ? (0, import_react41.createElement)(
               "div",
               { key: selected.id, className: "workagent-market-fields" },
-              (0, import_react39.createElement)(
+              (0, import_react41.createElement)(
                 Field,
                 { label: "市场名称" },
-                (0, import_react39.createElement)(Input, {
+                (0, import_react41.createElement)(Input, {
                   name: "name",
                   required: true,
                   maxLength: 240,
                   defaultValue: entry?.name || selected.name,
                 }),
               ),
-              (0, import_react39.createElement)(
+              (0, import_react41.createElement)(
                 Field,
                 { label: "版本" },
-                (0, import_react39.createElement)(Input, {
+                (0, import_react41.createElement)(Input, {
                   name: "version",
                   required: true,
                   pattern: "[0-9]+\\.[0-9]+\\.[0-9]+",
@@ -14148,20 +15019,20 @@ window.__ModuleLoader__.load({
                     : "1.0.0",
                 }),
               ),
-              (0, import_react39.createElement)(
+              (0, import_react41.createElement)(
                 Field,
                 { label: "说明" },
-                (0, import_react39.createElement)("textarea", {
+                (0, import_react41.createElement)("textarea", {
                   name: "description",
                   required: true,
                   maxLength: 4096,
                   defaultValue: selected.description || "",
                 }),
               ),
-              (0, import_react39.createElement)(
+              (0, import_react41.createElement)(
                 Field,
                 { label: "本版本更新说明" },
-                (0, import_react39.createElement)("textarea", {
+                (0, import_react41.createElement)("textarea", {
                   name: "releaseNotes",
                   maxLength: 12e3,
                   required: true,
@@ -14169,7 +15040,7 @@ window.__ModuleLoader__.load({
                 }),
               ),
               kind === "assistant"
-                ? (0, import_react39.createElement)(
+                ? (0, import_react41.createElement)(
                     "p",
                     null,
                     `将一并打包 ${selected.skillIds?.length || 0} 个技能及其依赖、${selected.mcpServerIds?.length || 0} 个直接绑定的 MCP。`,
@@ -14178,13 +15049,13 @@ window.__ModuleLoader__.load({
             )
           : null,
         error
-          ? (0, import_react39.createElement)(
+          ? (0, import_react41.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react39.createElement)(
+        (0, import_react41.createElement)(
           Button,
           { type: "submit", disabled: busy || !selected },
           busy ? "正在发布…" : "发布",
@@ -14193,18 +15064,18 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/notifications/page.js
-    var import_react40 = __toESM(require("react"), 1);
-    var import_react41 = require("react");
+    var import_react42 = __toESM(require("react"), 1);
+    var import_react43 = require("react");
     function CompletionNotificationSettings() {
       const routeSearch = navigation.useSearch();
       const endpoint2 = `${apiRoot}/completion-notifications`;
       const [state, refresh] = useResource(endpoint2);
       const saved = state.rows[0];
-      const [draft, setDraft] = import_react40.default.useState(null);
-      const [error, setError] = import_react40.default.useState("");
-      const [saving, setSaving] = import_react40.default.useState(false);
-      const [notice, setNotice] = import_react40.default.useState("");
-      import_react40.default.useEffect(() => {
+      const [draft, setDraft] = import_react42.default.useState(null);
+      const [error, setError] = import_react42.default.useState("");
+      const [saving, setSaving] = import_react42.default.useState(false);
+      const [notice, setNotice] = import_react42.default.useState("");
+      import_react42.default.useEffect(() => {
         if (saved)
           setDraft({
             enabled: saved.enabled,
@@ -14248,42 +15119,42 @@ window.__ModuleLoader__.load({
           setSaving(false);
         }
       };
-      return (0, import_react41.createElement)(
+      return (0, import_react43.createElement)(
         Section,
         { title: "消息提醒" },
-        (0, import_react41.createElement)(workbench.Notifications),
+        (0, import_react43.createElement)(workbench.Notifications),
         new URLSearchParams(routeSearch).get("session")
-          ? (0, import_react41.createElement)(workbench.SessionReminder, {
+          ? (0, import_react43.createElement)(workbench.SessionReminder, {
               sessionId: new URLSearchParams(routeSearch).get("session"),
             })
           : null,
-        (0, import_react41.createElement)(
+        (0, import_react43.createElement)(
           "p",
           { className: "workagent-muted" },
           "开启后，网页对话和定时任务完成时，会把最终回复和产物下载链接推送到选定的 IM 聊天。渠道内的对话仍在原聊天回复，不重复提醒。",
         ),
-        (0, import_react41.createElement)(Status, { state }),
+        (0, import_react43.createElement)(Status, { state }),
         draft &&
-          (0, import_react41.createElement)(
+          (0, import_react43.createElement)(
             "form",
             {
               className: "workagent-form workagent-completion-form",
               onSubmit: save,
             },
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               "label",
               { className: "workagent-inline" },
-              (0, import_react41.createElement)(Switch, {
+              (0, import_react43.createElement)(Switch, {
                 "aria-label": "任务完成提醒",
                 checked: draft.enabled,
                 onChange: (enabled) => update({ enabled }),
               }),
               "任务完成提醒",
             ),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               "label",
               null,
-              (0, import_react41.createElement)("input", {
+              (0, import_react43.createElement)("input", {
                 type: "checkbox",
                 checked: draft.attachFiles,
                 onChange: (event) =>
@@ -14291,23 +15162,23 @@ window.__ModuleLoader__.load({
               }),
               "同时发送产物文件（支持文件的渠道，单个不超过 50 MiB）",
             ),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               Field,
               { label: "接收聊天" },
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 "select",
                 {
                   "aria-label": "接收聊天",
                   value: draft.targetId,
                   onChange: (event) => update({ targetId: event.target.value }),
                 },
-                (0, import_react41.createElement)(
+                (0, import_react43.createElement)(
                   "option",
                   { value: "" },
                   "请选择接收聊天",
                 ),
                 ...(saved?.targets || []).map((target) =>
-                  (0, import_react41.createElement)(
+                  (0, import_react43.createElement)(
                     "option",
                     {
                       key: target.id,
@@ -14321,7 +15192,7 @@ window.__ModuleLoader__.load({
                   !(saved?.targets || []).some(
                     (target) => target.id === draft.targetId,
                   )
-                  ? (0, import_react41.createElement)(
+                  ? (0, import_react43.createElement)(
                       "option",
                       { value: draft.targetId },
                       "原接收聊天已不可用，请重新选择",
@@ -14330,69 +15201,69 @@ window.__ModuleLoader__.load({
               ),
             ),
             !(saved?.targets || []).length &&
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 "p",
                 { className: "workagent-muted" },
                 "请先在“消息渠道”连接账号，并在接收聊天中给机器人发送一条消息，再刷新聊天列表。",
               ),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               Button,
               { type: "button", onClick: refresh },
               "刷新聊天列表",
             ),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               "p",
               { className: "workagent-muted" },
               "产物链接需要登录当前 WorkAgent 账号后下载。",
             ),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               Button,
               { type: "submit", disabled: saving },
               saving ? "保存中…" : "保存提醒设置",
             ),
             error &&
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 "p",
                 { role: "alert", className: "workagent-error" },
                 error,
               ),
             notice &&
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 "p",
                 { role: "status" },
                 notice,
               ),
           ),
-        (0, import_react41.createElement)("h3", null, "最近推送"),
-        (0, import_react41.createElement)(
+        (0, import_react43.createElement)("h3", null, "最近推送"),
+        (0, import_react43.createElement)(
           Button,
           { type: "button", onClick: refresh },
           "刷新推送记录",
         ),
         !(saved?.deliveries || []).length &&
-          (0, import_react41.createElement)(
+          (0, import_react43.createElement)(
             "p",
             { className: "workagent-muted" },
             "暂无推送记录",
           ),
         ...(saved?.deliveries || []).map((delivery) =>
-          (0, import_react41.createElement)(
+          (0, import_react43.createElement)(
             "div",
             { key: delivery.id, className: "workagent-card" },
-            (0, import_react41.createElement)("strong", null, delivery.title),
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)("strong", null, delivery.title),
+            (0, import_react43.createElement)(
               "p",
               null,
               `${delivery.targetLabel} · ${{ pending: "等待发送", sending: "发送中", sent: "已发送", failed: "发送失败", cancelled: "已取消" }[delivery.status]}`,
             ),
             delivery.error &&
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 "p",
                 { className: "workagent-error" },
                 delivery.error,
               ),
             delivery.status === "failed" &&
-              (0, import_react41.createElement)(
+              (0, import_react43.createElement)(
                 Button,
                 {
                   disabled: saving || !draft?.enabled,
@@ -14410,7 +15281,7 @@ window.__ModuleLoader__.load({
         endpoint2,
         (value) => value.notifications || [],
       );
-      const [error, setError] = import_react40.default.useState("");
+      const [error, setError] = import_react42.default.useState("");
       const unread = state.rows.filter((row) => !row.read_at).length;
       const open = async (row) => {
         try {
@@ -14430,27 +15301,27 @@ window.__ModuleLoader__.load({
           setError(reason.message);
         }
       };
-      return (0, import_react41.createElement)(
+      return (0, import_react43.createElement)(
         Section,
         { title: "通知" },
-        (0, import_react41.createElement)(
+        (0, import_react43.createElement)(
           "p",
           { className: "workagent-muted" },
           `未读 ${unread} 条`,
         ),
         error
-          ? (0, import_react41.createElement)(
+          ? (0, import_react43.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react41.createElement)(Status, { state }),
+        (0, import_react43.createElement)(Status, { state }),
         ...state.rows.map((row) =>
-          (0, import_react41.createElement)(
+          (0, import_react43.createElement)(
             Card,
             { key: row.id, title: row.title || row.kind, detail: row.message },
-            (0, import_react41.createElement)(
+            (0, import_react43.createElement)(
               Button,
               { onClick: () => open(row) },
               row.deep_link ? "打开并标记已读" : "标记已读",
@@ -14465,7 +15336,7 @@ window.__ModuleLoader__.load({
         (value) => value.notifications || [],
       );
       const unread = state.rows.filter((row) => !row.read_at).length;
-      return (0, import_react41.createElement)(
+      return (0, import_react43.createElement)(
         "button",
         {
           type: "button",
@@ -14474,12 +15345,12 @@ window.__ModuleLoader__.load({
           "aria-label": unread ? `通知，${unread} 条未读` : "通知",
           onClick: () => navigation.toggleNotifications(),
         },
-        (0, import_react41.createElement)(Icon, {
+        (0, import_react43.createElement)(Icon, {
           name: "notifications",
           size: 19,
         }),
         unread
-          ? (0, import_react41.createElement)(
+          ? (0, import_react43.createElement)(
               "span",
               { className: "workagent-badge" },
               unread,
@@ -14493,7 +15364,7 @@ window.__ModuleLoader__.load({
         (value) => value.notifications || [],
       );
       const unread = state.rows.filter((row) => !row.read_at).length;
-      return (0, import_react41.createElement)(
+      return (0, import_react43.createElement)(
         "button",
         {
           type: "button",
@@ -14503,10 +15374,10 @@ window.__ModuleLoader__.load({
           "aria-label": "通知",
           onClick: () => navigation.toggleNotifications(),
         },
-        (0, import_react41.createElement)(Icon, { name: "notifications" }),
-        wide ? (0, import_react41.createElement)("span", null, "通知") : null,
+        (0, import_react43.createElement)(Icon, { name: "notifications" }),
+        wide ? (0, import_react43.createElement)("span", null, "通知") : null,
         unread > 0
-          ? (0, import_react41.createElement)(
+          ? (0, import_react43.createElement)(
               "span",
               { className: "workagent-badge" },
               unread,
@@ -14529,23 +15400,23 @@ window.__ModuleLoader__.load({
       window.dispatchEvent(new window.Event(PROJECTS_CHANGED_EVENT));
 
     // src/features/projects/page.js
-    var import_react42 = __toESM(require("react"), 1);
-    var import_react43 = require("react");
+    var import_react44 = __toESM(require("react"), 1);
+    var import_react45 = require("react");
     function WorkspacesPage() {
       const endpoint2 = `${apiRoot}/workspaces`;
       const [state, refresh] = useResource(endpoint2);
-      const [selectedId, setSelectedId] = import_react42.default.useState(null);
-      const [error, setError] = import_react42.default.useState("");
-      const [query, setQuery] = import_react42.default.useState("");
-      const [creating2, setCreating] = import_react42.default.useState(false);
+      const [selectedId, setSelectedId] = import_react44.default.useState(null);
+      const [error, setError] = import_react44.default.useState("");
+      const [query, setQuery] = import_react44.default.useState("");
+      const [creating2, setCreating] = import_react44.default.useState(false);
       const [showCreate, setShowCreate] =
-        import_react42.default.useState(false);
+        import_react44.default.useState(false);
       const visibleProjects = state.rows.filter((workspace) =>
         displayWorkspaceName(workspace.name)
           .toLocaleLowerCase()
           .includes(query.trim().toLocaleLowerCase()),
       );
-      import_react42.default.useEffect(() => {
+      import_react44.default.useEffect(() => {
         const update = () => void refresh();
         window.addEventListener(PROJECTS_CHANGED_EVENT, update);
         return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
@@ -14579,56 +15450,56 @@ window.__ModuleLoader__.load({
           setCreating(false);
         }
       };
-      return (0, import_react43.createElement)(
+      return (0, import_react45.createElement)(
         Section,
         { title: "项目" },
-        (0, import_react43.createElement)(
+        (0, import_react45.createElement)(
           "div",
           { className: "workagent-project-intro" },
-          (0, import_react43.createElement)(
+          (0, import_react45.createElement)(
             "div",
             null,
-            (0, import_react43.createElement)("h2", null, "所有项目"),
-            (0, import_react43.createElement)(
+            (0, import_react45.createElement)("h2", null, "所有项目"),
+            (0, import_react45.createElement)(
               "p",
               null,
               "文件与对话，在这里井然有序。",
             ),
           ),
-          (0, import_react43.createElement)(
+          (0, import_react45.createElement)(
             "span",
             { className: "workagent-project-count" },
             `${state.rows.length} 个项目`,
           ),
         ),
-        (0, import_react43.createElement)(
+        (0, import_react45.createElement)(
           "div",
           { className: "workagent-project-toolbar" },
-          (0, import_react43.createElement)(
+          (0, import_react45.createElement)(
             "div",
             { className: "workagent-project-search" },
-            (0, import_react43.createElement)(Icon, {
+            (0, import_react45.createElement)(Icon, {
               name: "search",
               size: 18,
             }),
-            (0, import_react43.createElement)(Input, {
+            (0, import_react45.createElement)(Input, {
               "aria-label": "搜索项目",
               placeholder: "搜索项目名称…",
               value: query,
               onChange: (event) => setQuery(event.target.value),
             }),
             query
-              ? (0, import_react43.createElement)(
+              ? (0, import_react45.createElement)(
                   Button,
                   { "aria-label": "清除项目搜索", onClick: () => setQuery("") },
-                  (0, import_react43.createElement)(Icon, {
+                  (0, import_react45.createElement)(Icon, {
                     name: "close",
                     size: 16,
                   }),
                 )
               : null,
           ),
-          (0, import_react43.createElement)(
+          (0, import_react45.createElement)(
             Button,
             {
               className: "workagent-button workagent-project-new",
@@ -14638,21 +15509,21 @@ window.__ModuleLoader__.load({
                 setShowCreate(true);
               },
             },
-            (0, import_react43.createElement)(Icon, { name: "plus", size: 16 }),
+            (0, import_react45.createElement)(Icon, { name: "plus", size: 16 }),
             "新建项目",
           ),
         ),
         showCreate
-          ? (0, import_react43.createElement)(
+          ? (0, import_react45.createElement)(
               "form",
               {
                 className: "workagent-form workagent-project-create",
                 onSubmit: createProject,
               },
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 Field,
                 { label: "新项目名称" },
-                (0, import_react43.createElement)(Input, {
+                (0, import_react45.createElement)(Input, {
                   name: "name",
                   autoFocus: true,
                   required: true,
@@ -14666,12 +15537,12 @@ window.__ModuleLoader__.load({
                   },
                 }),
               ),
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 Button,
                 { disabled: creating2, onClick: () => setShowCreate(false) },
                 "取消",
               ),
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 Button,
                 {
                   className: "workagent-button workagent-project-new",
@@ -14684,28 +15555,28 @@ window.__ModuleLoader__.load({
             )
           : null,
         error
-          ? (0, import_react43.createElement)(
+          ? (0, import_react45.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
         state.loading || state.error
-          ? (0, import_react43.createElement)(Status, { state })
+          ? (0, import_react45.createElement)(Status, { state })
           : state.rows.length === 0
-            ? (0, import_react43.createElement)(
+            ? (0, import_react45.createElement)(
                 "div",
                 { className: "workagent-project-empty" },
-                (0, import_react43.createElement)(Icon, {
+                (0, import_react45.createElement)(Icon, {
                   name: "workspace",
                   size: 36,
                 }),
-                (0, import_react43.createElement)(
+                (0, import_react45.createElement)(
                   "strong",
                   null,
                   "创建你的第一个项目",
                 ),
-                (0, import_react43.createElement)(
+                (0, import_react45.createElement)(
                   "p",
                   null,
                   "给项目起个名字，将相关文件与对话放在一起。",
@@ -14713,41 +15584,41 @@ window.__ModuleLoader__.load({
               )
             : null,
         !state.loading && state.rows.length > 0 && visibleProjects.length === 0
-          ? (0, import_react43.createElement)(
+          ? (0, import_react45.createElement)(
               "div",
               { className: "workagent-project-empty" },
-              (0, import_react43.createElement)(Icon, {
+              (0, import_react45.createElement)(Icon, {
                 name: "search",
                 size: 28,
               }),
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 "strong",
                 null,
                 "没有找到匹配的项目",
               ),
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 "p",
                 null,
                 "试试其他名称，或清除搜索查看所有项目。",
               ),
             )
           : null,
-        (0, import_react43.createElement)(
+        (0, import_react45.createElement)(
           "div",
           { className: "workagent-grid workagent-workspace-grid" },
           ...visibleProjects.map((workspace) =>
-            (0, import_react43.createElement)(
-              import_react42.default.Fragment,
+            (0, import_react45.createElement)(
+              import_react44.default.Fragment,
               { key: workspace.id },
-              (0, import_react43.createElement)(
+              (0, import_react45.createElement)(
                 Card,
                 {
                   key: workspace.id,
                   className: `workagent-workspace-card${selectedId === workspace.id ? " is-selected" : ""}`,
-                  title: (0, import_react43.createElement)(
+                  title: (0, import_react45.createElement)(
                     "span",
                     null,
-                    (0, import_react43.createElement)(Icon, {
+                    (0, import_react45.createElement)(Icon, {
                       name: "workspace",
                       size: 18,
                     }),
@@ -14756,22 +15627,22 @@ window.__ModuleLoader__.load({
                   detail:
                     workspace.scope === "team" ? "团队共享项目" : "个人项目",
                 },
-                (0, import_react43.createElement)(
+                (0, import_react45.createElement)(
                   Button,
                   {
                     onClick: () => setSelectedId(workspace.id),
                     "aria-expanded": selectedId === workspace.id,
                   },
                   "管理文件",
-                  (0, import_react43.createElement)(Icon, {
+                  (0, import_react45.createElement)(Icon, {
                     name: "chevronRight",
                     size: 14,
                   }),
                 ),
-                (0, import_react43.createElement)(
+                (0, import_react45.createElement)(
                   Button,
                   { onClick: () => startProjectConversation(workspace) },
-                  (0, import_react43.createElement)(Icon, {
+                  (0, import_react45.createElement)(Icon, {
                     name: "plus",
                     size: 14,
                   }),
@@ -14779,27 +15650,27 @@ window.__ModuleLoader__.load({
                 ),
               ),
               selectedId === workspace.id
-                ? (0, import_react43.createElement)(
+                ? (0, import_react45.createElement)(
                     "section",
                     {
                       className: "workagent-project-files",
                       "aria-label": "项目文件",
                     },
-                    (0, import_react43.createElement)(
+                    (0, import_react45.createElement)(
                       "header",
                       { className: "workagent-files-panel-header" },
-                      (0, import_react43.createElement)(
+                      (0, import_react45.createElement)(
                         "strong",
                         null,
                         displayWorkspaceName(workspace.name),
                       ),
-                      (0, import_react43.createElement)(FileIconButton, {
+                      (0, import_react45.createElement)(FileIconButton, {
                         name: "close",
                         label: "收起项目文件",
                         onClick: () => setSelectedId(null),
                       }),
                     ),
-                    (0, import_react43.createElement)(WorkspaceFileManager, {
+                    (0, import_react45.createElement)(WorkspaceFileManager, {
                       key: workspace.id,
                       workspace,
                       onDismiss: () => setSelectedId(null),
@@ -14813,16 +15684,259 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // src/features/system/feedback.js
+    var import_react46 = __toESM(require("react"), 1);
+    var operationId = () =>
+      Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join("");
+    function FeedbackForm() {
+      const [description, setDescription] = import_react46.default.useState("");
+      const [steps, setSteps] = import_react46.default.useState("");
+      const [files, setFiles] = import_react46.default.useState([]);
+      const [notice, setNotice] = import_react46.default.useState("");
+      const [busy, setBusy] = import_react46.default.useState(false);
+      const [items, setItems] = import_react46.default.useState([]);
+      const [diagnostic, setDiagnostic] = import_react46.default.useState("");
+      const requestId = import_react46.default.useRef(operationId());
+      const submitting = import_react46.default.useRef(false);
+      const edit = (setter, value) => {
+        requestId.current = operationId();
+        setter(value);
+      };
+      const load = () =>
+        request("/api/system/feedback")
+          .then((result) => setItems(result.items))
+          .catch(() => {});
+      import_react46.default.useEffect(() => {
+        load();
+      }, []);
+      const [previews, setPreviews] = import_react46.default.useState([]);
+      import_react46.default.useEffect(() => {
+        const urls = files.map((file) =>
+          file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+        );
+        setPreviews(urls);
+        return () => urls.forEach((url) => url && URL.revokeObjectURL(url));
+      }, [files]);
+      const submit = async (event) => {
+        event.preventDefault();
+        if (submitting.current) return;
+        submitting.current = true;
+        setBusy(true);
+        setNotice("");
+        try {
+          const body = new FormData();
+          body.set("requestId", requestId.current);
+          body.set("module", "用户反馈");
+          body.set("description", description);
+          body.set("steps", steps);
+          files.forEach((file) => body.append("attachments", file));
+          const response = await fetch("/api/system/feedback", {
+            method: "POST",
+            body,
+            credentials: "same-origin",
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "提交失败");
+          setNotice(`已保存反馈 ${result.id}`);
+          setDescription("");
+          setSteps("");
+          setFiles([]);
+          requestId.current = operationId();
+          await load();
+        } catch (error) {
+          setNotice(error.message);
+        } finally {
+          submitting.current = false;
+          setBusy(false);
+        }
+      };
+      return (0, import_react46.createElement)(
+        Section,
+        { title: "问题反馈" },
+        (0, import_react46.createElement)(
+          "form",
+          { className: "workagent-form", onSubmit: submit },
+          (0, import_react46.createElement)(
+            Field,
+            { label: "问题描述" },
+            (0, import_react46.createElement)("textarea", {
+              required: true,
+              maxLength: 2e3,
+              value: description,
+              disabled: busy,
+              onChange: (e) => edit(setDescription, e.target.value),
+              "aria-label": "问题描述",
+              className: "workagent-control",
+            }),
+          ),
+          (0, import_react46.createElement)(
+            Field,
+            { label: "复现步骤（可选）" },
+            (0, import_react46.createElement)("textarea", {
+              maxLength: 4e3,
+              value: steps,
+              disabled: busy,
+              onChange: (e) => edit(setSteps, e.target.value),
+              "aria-label": "复现步骤",
+              className: "workagent-control",
+            }),
+          ),
+          (0, import_react46.createElement)(Input, {
+            type: "file",
+            multiple: true,
+            disabled: busy,
+            accept: "image/png,image/jpeg,image/webp,.json,.txt",
+            "aria-label": "反馈附件",
+            onChange: (e) => {
+              const chosen = [...e.target.files];
+              if (
+                chosen.length > 4 ||
+                chosen.filter((file) => file.type.startsWith("image/")).length >
+                  3 ||
+                chosen.filter((file) => !file.type.startsWith("image/"))
+                  .length > 1 ||
+                chosen.some((file) => file.size > 4 * 1024 * 1024)
+              ) {
+                setNotice("最多三张截图和一份诊断摘要，每份不超过 4 MiB。");
+                return;
+              }
+              edit(setFiles, chosen);
+            },
+          }),
+          ...files.map((file, index) =>
+            (0, import_react46.createElement)(
+              "div",
+              { key: index },
+              previews[index]
+                ? (0, import_react46.createElement)("img", {
+                    src: previews[index],
+                    alt: file.name,
+                    style: { maxWidth: "160px", maxHeight: "120px" },
+                  })
+                : null,
+              (0, import_react46.createElement)("span", null, file.name),
+              (0, import_react46.createElement)(
+                Button,
+                {
+                  type: "button",
+                  disabled: busy,
+                  onClick: () =>
+                    edit(
+                      setFiles,
+                      files.filter((_, i) => i !== index),
+                    ),
+                },
+                "移除",
+              ),
+            ),
+          ),
+          (0, import_react46.createElement)(
+            Button,
+            {
+              type: "button",
+              disabled: busy,
+              onClick: () =>
+                setDiagnostic(
+                  JSON.stringify(
+                    {
+                      capturedAt: /* @__PURE__ */ new Date().toISOString(),
+                      browser: navigator.userAgent,
+                      page: location.pathname,
+                      viewport: { width: innerWidth, height: innerHeight },
+                      language: navigator.language,
+                    },
+                    null,
+                    2,
+                  ),
+                ),
+            },
+            "预览诊断摘要",
+          ),
+          diagnostic
+            ? (0, import_react46.createElement)(
+                "div",
+                null,
+                (0, import_react46.createElement)(
+                  "p",
+                  null,
+                  "确认以下摘要后，可作为附件提交。",
+                ),
+                (0, import_react46.createElement)("textarea", {
+                  className: "workagent-control",
+                  "aria-label": "诊断摘要",
+                  value: diagnostic,
+                  disabled: busy,
+                  onChange: (e) => setDiagnostic(e.target.value),
+                }),
+                (0, import_react46.createElement)(
+                  Button,
+                  {
+                    type: "button",
+                    disabled: busy,
+                    onClick: () => {
+                      edit(setFiles, [
+                        ...files.filter((file) =>
+                          file.type.startsWith("image/"),
+                        ),
+                        new File([diagnostic], "diagnostic-summary.txt", {
+                          type: "text/plain",
+                        }),
+                      ]);
+                      setDiagnostic("");
+                    },
+                  },
+                  "附加这份摘要",
+                ),
+              )
+            : null,
+          (0, import_react46.createElement)(
+            Button,
+            { type: "submit", disabled: busy },
+            busy ? "提交中…" : "提交反馈",
+          ),
+        ),
+        notice
+          ? (0, import_react46.createElement)("p", { role: "status" }, notice)
+          : null,
+        ...items.map((item) =>
+          (0, import_react46.createElement)(
+            "details",
+            { key: item.id },
+            (0, import_react46.createElement)(
+              "summary",
+              null,
+              `${item.description.slice(0, 60)} · ${{ new: "待处理", in_progress: "处理中", resolved: "已解决" }[item.status]}`,
+            ),
+            (0, import_react46.createElement)("p", null, item.description),
+            (0, import_react46.createElement)("p", null, item.steps),
+            ...(item.attachments || []).map((a) =>
+              (0, import_react46.createElement)(
+                "a",
+                {
+                  key: a.id,
+                  href: `/api/system/feedback/${item.id}/attachments/${a.id}`,
+                  download: true,
+                },
+                a.name,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     // src/features/system/settings.js
-    var import_react44 = __toESM(require("react"), 1);
-    var import_react45 = require("react");
+    var import_react47 = __toESM(require("react"), 1);
+    var import_react48 = require("react");
     var CHAT_PAGE_KEY = "workagent.chat-page-url";
     function ChatPageSettings() {
-      const [address, setAddress] = import_react44.default.useState(
+      const [address, setAddress] = import_react47.default.useState(
         () => localStorage.getItem(CHAT_PAGE_KEY) || "",
       );
-      const [notice, setNotice] = import_react44.default.useState("");
-      const [error, setError] = import_react44.default.useState("");
+      const [notice, setNotice] = import_react47.default.useState("");
+      const [error, setError] = import_react47.default.useState("");
       const save = (event) => {
         event.preventDefault();
         setNotice("");
@@ -14848,22 +15962,22 @@ window.__ModuleLoader__.load({
           );
         }
       };
-      return (0, import_react45.createElement)(
-        import_react44.default.Fragment,
+      return (0, import_react48.createElement)(
+        import_react47.default.Fragment,
         null,
-        (0, import_react45.createElement)("h3", null, "聊天模式"),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)("h3", null, "聊天模式"),
+        (0, import_react48.createElement)(
           "p",
           null,
           "填写独立聊天网页的完整地址，例如旧版 WorkAgent 的 /chatgpt/ 地址。留空使用本站入口。此设置仅保存在当前浏览器。",
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "form",
           { className: "workagent-form", onSubmit: save },
-          (0, import_react45.createElement)(
+          (0, import_react48.createElement)(
             Field,
             { label: "聊天网页地址" },
-            (0, import_react45.createElement)(Input, {
+            (0, import_react48.createElement)(Input, {
               "aria-label": "聊天网页地址",
               value: address,
               placeholder: "/chatgpt/",
@@ -14874,17 +15988,17 @@ window.__ModuleLoader__.load({
               },
             }),
           ),
-          (0, import_react45.createElement)(
+          (0, import_react48.createElement)(
             Button,
             { type: "submit", style: { alignSelf: "end" } },
             "保存聊天地址",
           ),
         ),
         error
-          ? (0, import_react45.createElement)("p", { role: "alert" }, error)
+          ? (0, import_react48.createElement)("p", { role: "alert" }, error)
           : null,
         notice
-          ? (0, import_react45.createElement)("p", { role: "status" }, notice)
+          ? (0, import_react48.createElement)("p", { role: "status" }, notice)
           : null,
       );
     }
@@ -14902,61 +16016,61 @@ window.__ModuleLoader__.load({
         `${apiRoot}/runtime-settings`,
         (value) => [value],
       );
-      const [error, setError] = import_react44.default.useState("");
-      const [notice, setNotice] = import_react44.default.useState("");
-      const [busy, setBusy] = import_react44.default.useState(false);
-      return (0, import_react45.createElement)(
+      const [error, setError] = import_react47.default.useState("");
+      const [notice, setNotice] = import_react47.default.useState("");
+      const [busy, setBusy] = import_react47.default.useState(false);
+      return (0, import_react48.createElement)(
         Section,
         { title: "系统与帮助" },
         confirmation,
-        (0, import_react45.createElement)(ChatPageSettings),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(ChatPageSettings),
+        (0, import_react48.createElement)(
           "div",
           { className: "workagent-settings-heading" },
-          (0, import_react45.createElement)("h3", null, "存储空间"),
-          (0, import_react45.createElement)(
+          (0, import_react48.createElement)("h3", null, "存储空间"),
+          (0, import_react48.createElement)(
             Button,
             {
               onClick: refreshStorage,
               "aria-label": "刷新磁盘用量",
               title: "刷新磁盘用量",
             },
-            (0, import_react45.createElement)(Icon, {
+            (0, import_react48.createElement)(Icon, {
               name: "refresh",
               size: 16,
             }),
           ),
         ),
         storage.error
-          ? (0, import_react45.createElement)(
+          ? (0, import_react48.createElement)(
               "p",
               { role: "alert" },
               "暂时无法读取磁盘配额，请刷新或联系管理员。",
             )
           : null,
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "div",
           { className: "workagent-storage-grid" },
           ...["personal", "shared"].map((kind) => {
             const quota = storage.rows[0]?.[kind];
-            return (0, import_react45.createElement)(
+            return (0, import_react48.createElement)(
               "article",
               { key: kind, className: "workagent-storage-card" },
-              (0, import_react45.createElement)(Icon, {
+              (0, import_react48.createElement)(Icon, {
                 name: kind === "personal" ? "workspace" : "shared",
                 size: 20,
               }),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "span",
                 null,
                 kind === "personal" ? "个人空间" : "共享空间",
               ),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "strong",
                 null,
                 quota ? (quota.usedBytes / 1024 ** 3).toFixed(2) + " GiB" : "—",
               ),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "small",
                 null,
                 quota?.enabled
@@ -14964,7 +16078,7 @@ window.__ModuleLoader__.load({
                   : "尚未配置配额",
               ),
               quota?.enabled
-                ? (0, import_react45.createElement)("progress", {
+                ? (0, import_react48.createElement)("progress", {
                     max: quota.limitBytes || 1,
                     value: quota.usedBytes,
                     "aria-label":
@@ -14974,31 +16088,31 @@ window.__ModuleLoader__.load({
             );
           }),
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "div",
           { className: "workagent-settings-heading" },
-          (0, import_react45.createElement)("h3", null, "运行状态"),
-          (0, import_react45.createElement)(
+          (0, import_react48.createElement)("h3", null, "运行状态"),
+          (0, import_react48.createElement)(
             Button,
             {
               onClick: refreshStatus,
               "aria-label": "刷新运行状态",
               title: "刷新运行状态",
             },
-            (0, import_react45.createElement)(Icon, {
+            (0, import_react48.createElement)(Icon, {
               name: "refresh",
               size: 16,
             }),
           ),
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "div",
           { className: "workagent-system-status" },
           ...(status.rows[0]?.components || []).map((row) =>
-            (0, import_react45.createElement)(
+            (0, import_react48.createElement)(
               "div",
               { key: row.id },
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "span",
                 null,
                 {
@@ -15009,13 +16123,13 @@ window.__ModuleLoader__.load({
                   harness: "任务运行环境",
                 }[row.id] || row.id,
               ),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "span",
                 {
                   className: "workagent-status-label",
                   "data-status": row.status,
                 },
-                (0, import_react45.createElement)("i", { "aria-hidden": true }),
+                (0, import_react48.createElement)("i", { "aria-hidden": true }),
                 {
                   healthy: "正常",
                   unavailable: "暂不可用",
@@ -15027,12 +16141,13 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "a",
           { href: "/api/system/diagnostics", download: true },
           "下载诊断报告",
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(FeedbackForm),
+        (0, import_react48.createElement)(
           Button,
           {
             disabled: busy,
@@ -15060,7 +16175,7 @@ window.__ModuleLoader__.load({
           "重启运行环境",
         ),
         preferences.rows[0]
-          ? (0, import_react45.createElement)(
+          ? (0, import_react48.createElement)(
               "form",
               {
                 className: "workagent-form",
@@ -15081,10 +16196,10 @@ window.__ModuleLoader__.load({
                   if (ok) setNotice("已保存，从下一轮任务开始生效。");
                 },
               },
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 Field,
                 { label: "任务时限（秒）" },
-                (0, import_react45.createElement)(Input, {
+                (0, import_react48.createElement)(Input, {
                   name: "timeout",
                   type: "number",
                   min: 0,
@@ -15093,12 +16208,12 @@ window.__ModuleLoader__.load({
                   defaultValue: preferences.rows[0].turnTimeoutSeconds,
                 }),
               ),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 "p",
                 null,
                 "0 表示不限制。时限包含等待确认的时间；达到时限后停止当前轮任务，适用于网页、团队、定时和消息渠道任务。",
               ),
-              (0, import_react45.createElement)(
+              (0, import_react48.createElement)(
                 Button,
                 { type: "submit", disabled: busy },
                 "保存运行设置",
@@ -15106,27 +16221,27 @@ window.__ModuleLoader__.load({
             )
           : null,
         error || status.error || preferences.error
-          ? (0, import_react45.createElement)(
+          ? (0, import_react48.createElement)(
               "p",
               { role: "alert" },
               friendlyError(error || status.error || preferences.error),
             )
           : null,
         notice
-          ? (0, import_react45.createElement)("p", { role: "status" }, notice)
+          ? (0, import_react48.createElement)("p", { role: "status" }, notice)
           : null,
-        (0, import_react45.createElement)("h3", null, "使用帮助"),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)("h3", null, "使用帮助"),
+        (0, import_react48.createElement)(
           "p",
           null,
           "在项目中创建对话，使用附件或 @ 文件引用资料。Shift + Enter 换行，Alt + ↑/↓ 找回历史输入，/ 打开命令与技能菜单。",
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "p",
           null,
           "文件上传中断后，在文件栏的未完成上传中重新选择原文件继续。编辑冲突时保留你的草稿，重新打开文件核对后再保存。",
         ),
-        (0, import_react45.createElement)(
+        (0, import_react48.createElement)(
           "p",
           null,
           "任务需要确认时可允许本次、拒绝或停止。开启桌面提醒后，后台完成和待确认时会提醒；浏览器需要授予通知权限。",
@@ -15135,8 +16250,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/teams/page.js
-    var import_react46 = __toESM(require("react"), 1);
-    var import_react47 = require("react");
+    var import_react49 = __toESM(require("react"), 1);
+    var import_react50 = require("react");
     function TeamsPage() {
       const { confirm, confirmation } = useConfirm();
       const endpoint2 = `${apiRoot}/teams`;
@@ -15144,20 +16259,22 @@ window.__ModuleLoader__.load({
       const [presets] = usePresets();
       const [workspaces] = useResource(`${apiRoot}/workspaces`);
       const [sessions] = useResource(`${apiRoot}/sessions`);
-      const [details, setDetails] = import_react46.default.useState({});
+      const [details, setDetails] = import_react49.default.useState({});
       const [selectedTeam, setSelectedTeam] =
-        import_react46.default.useState(null);
-      const [teamAction, setTeamAction] = import_react46.default.useState(null);
+        import_react49.default.useState(null);
+      const [teamAction, setTeamAction] = import_react49.default.useState(null);
       const [teamActionValue, setTeamActionValue] =
-        import_react46.default.useState("");
+        import_react49.default.useState("");
+      const [operationId2, setOperationId] =
+        import_react49.default.useState("");
       const [memberEngine, setMemberEngine] =
-        import_react46.default.useState("codex");
+        import_react49.default.useState("codex");
       const [memberPresetId, setMemberPresetId] =
-        import_react46.default.useState("");
+        import_react49.default.useState("");
       const [targetMemberId, setTargetMemberId] =
-        import_react46.default.useState("");
-      const [error, setError] = import_react46.default.useState("");
-      import_react46.default.useEffect(() => {
+        import_react49.default.useState("");
+      const [error, setError] = import_react49.default.useState("");
+      import_react49.default.useEffect(() => {
         if (!selectedTeam || typeof EventSource === "undefined") return;
         const source = new EventSource(
           `${endpoint2}/${encodeURIComponent(selectedTeam.id)}/events`,
@@ -15195,6 +16312,9 @@ window.__ModuleLoader__.load({
           "task.completed",
           "task.failed",
           "task.cancelled",
+          "run.updated",
+          "dispatch.updated",
+          "task.updated",
           "mail.received",
         ])
           source.addEventListener(type, receive);
@@ -15212,20 +16332,28 @@ window.__ModuleLoader__.load({
               (row) => row.id === values.get("presetId"),
             )?.engine,
             presetId: String(values.get("presetId")),
+            ...(presets.rows.find((row) => row.id === values.get("presetId"))
+              ?.engine === "acp"
+              ? {
+                  acpCatalogId: presets.rows.find(
+                    (row) => row.id === values.get("presetId"),
+                  )?.acpCatalogId,
+                }
+              : {}),
           },
         });
       };
       const loadDetails = async (team) => {
         setSelectedTeam(team);
         try {
-          const [tasks, messages, events] = await Promise.all(
-            ["tasks", "messages", "events"].map((name) =>
+          const [tasks, messages, events, runs] = await Promise.all(
+            ["tasks", "messages", "events", "runs"].map((name) =>
               request(`${endpoint2}/${encodeURIComponent(team.id)}/${name}`),
             ),
           );
           setDetails((value) => ({
             ...value,
-            [team.id]: { tasks, messages, events },
+            [team.id]: { tasks, messages, events, runs },
           }));
         } catch (reason) {
           setError(reason.message);
@@ -15234,6 +16362,11 @@ window.__ModuleLoader__.load({
       const beginTeamAction = (kind, team) => {
         setTeamAction({ kind, team });
         setTeamActionValue("");
+        setOperationId(
+          Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
+            value.toString(16).padStart(2, "0"),
+          ).join(""),
+        );
         setMemberEngine("codex");
         setMemberPresetId(team.members[0].presetId);
         setTargetMemberId(team.members[0].id);
@@ -15244,6 +16377,11 @@ window.__ModuleLoader__.load({
         if (!value || !teamAction) return;
         const { kind, team } = teamAction;
         const action = {
+          run: {
+            suffix: "runs",
+            refresh: () => loadDetails(team),
+            body: { input: value, operationId: operationId2 },
+          },
           member: {
             suffix: "members",
             refresh,
@@ -15251,6 +16389,13 @@ window.__ModuleLoader__.load({
               name: value,
               engine: memberEngine,
               presetId: memberPresetId,
+              ...(memberEngine === "acp"
+                ? {
+                    acpCatalogId: presets.rows?.find(
+                      (preset) => preset.id === memberPresetId,
+                    )?.acpCatalogId,
+                  }
+                : {}),
             },
           },
           task: {
@@ -15284,30 +16429,30 @@ window.__ModuleLoader__.load({
           `${endpoint2}/${encodeURIComponent(team.id)}/tasks/${encodeURIComponent(taskEntry.id)}/cancel`,
           "POST",
         );
-      return (0, import_react47.createElement)(
+      return (0, import_react50.createElement)(
         Section,
         { title: "团队" },
         confirmation,
-        (0, import_react47.createElement)(
+        (0, import_react50.createElement)(
           "form",
           { className: "workagent-form", onSubmit: submit },
           ...[
             ["name", "团队名称"],
             ["lead", "负责人名称"],
           ].map(([name, label]) =>
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
               Field,
               { label, key: name },
-              (0, import_react47.createElement)(Input, {
+              (0, import_react50.createElement)(Input, {
                 name,
                 required: true,
               }),
             ),
           ),
-          (0, import_react47.createElement)(
+          (0, import_react50.createElement)(
             Field,
             { label: "团队项目" },
-            (0, import_react47.createElement)(Select, {
+            (0, import_react50.createElement)(Select, {
               name: "workspaceId",
               required: true,
               defaultValue: "",
@@ -15317,10 +16462,10 @@ window.__ModuleLoader__.load({
               ],
             }),
           ),
-          (0, import_react47.createElement)(
+          (0, import_react50.createElement)(
             Field,
             { label: "负责人助手" },
-            (0, import_react47.createElement)(Select, {
+            (0, import_react50.createElement)(Select, {
               name: "presetId",
               required: true,
               defaultValue: "",
@@ -15332,39 +16477,39 @@ window.__ModuleLoader__.load({
               ],
             }),
           ),
-          (0, import_react47.createElement)(
+          (0, import_react50.createElement)(
             "button",
             { type: "submit", className: "workagent-button" },
             "创建团队",
           ),
         ),
         error
-          ? (0, import_react47.createElement)(
+          ? (0, import_react50.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react47.createElement)(Status, { state }),
+        (0, import_react50.createElement)(Status, { state }),
         ...state.rows.map((team, teamIndex) =>
-          (0, import_react47.createElement)(
+          (0, import_react50.createElement)(
             Card,
             {
               key: `${team.id}-${teamIndex}`,
               title: team.name,
               detail: `${team.members.length} 位成员 · ${displayValue(team.sessionMode, "独立会话")}`,
             },
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
               "div",
               { className: "workagent-team-members" },
               ...team.members.map((member, memberIndex) => {
                 const session = sessions.rows.find(
                   (row) => row.id === member.sessionId,
                 );
-                return (0, import_react47.createElement)(
+                return (0, import_react50.createElement)(
                   "article",
                   { key: member.id },
-                  (0, import_react47.createElement)(
+                  (0, import_react50.createElement)(
                     "strong",
                     null,
                     member.name,
@@ -15374,7 +16519,7 @@ window.__ModuleLoader__.load({
                   " · ",
                   displayValue(session?.activity?.state || member.status),
                   member.sessionId
-                    ? (0, import_react47.createElement)(
+                    ? (0, import_react50.createElement)(
                         "a",
                         {
                           href: `/?frontend=dsh&session=${encodeURIComponent(member.sessionId)}`,
@@ -15382,7 +16527,7 @@ window.__ModuleLoader__.load({
                         "打开成员对话",
                       )
                     : null,
-                  (0, import_react47.createElement)(
+                  (0, import_react50.createElement)(
                     "form",
                     {
                       key: member.name,
@@ -15402,24 +16547,24 @@ window.__ModuleLoader__.load({
                           );
                       },
                     },
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       Field,
                       { label: "成员名称" },
-                      (0, import_react47.createElement)(Input, {
+                      (0, import_react50.createElement)(Input, {
                         name: "name",
                         defaultValue: member.name,
                         required: true,
                         maxLength: 120,
                       }),
                     ),
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       Button,
                       { type: "submit" },
                       "重命名成员",
                     ),
                   ),
                   member.role !== "lead"
-                    ? (0, import_react47.createElement)(
+                    ? (0, import_react50.createElement)(
                         Button,
                         {
                           disabled: member.status === "running",
@@ -15443,7 +16588,7 @@ window.__ModuleLoader__.load({
                       )
                     : null,
                   memberIndex > 1
-                    ? (0, import_react47.createElement)(
+                    ? (0, import_react50.createElement)(
                         Button,
                         {
                           onClick: () => {
@@ -15470,65 +16615,163 @@ window.__ModuleLoader__.load({
                 );
               }),
             ),
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
               Button,
               { onClick: () => beginTeamAction("member", team) },
               "添加成员",
             ),
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
+              Button,
+              { onClick: () => beginTeamAction("run", team) },
+              "交给团队自主完成",
+            ),
+            (0, import_react50.createElement)(
               Button,
               { onClick: () => beginTeamAction("task", team) },
               "分派任务",
             ),
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
               Button,
               { onClick: () => loadDetails(team) },
               "消息与动态",
             ),
-            (0, import_react47.createElement)(
+            (0, import_react50.createElement)(
               Button,
               { onClick: () => beginTeamAction("mail", team) },
               "发送团队消息",
             ),
             details[team.id]
-              ? (0, import_react47.createElement)(
+              ? (0, import_react50.createElement)(
                   "div",
                   { className: "workagent-stack" },
-                  (0, import_react47.createElement)(
+                  ...(details[team.id].runs || []).map((run) =>
+                    (0, import_react50.createElement)(
+                      "article",
+                      { key: run.id },
+                      (0, import_react50.createElement)(
+                        "strong",
+                        null,
+                        {
+                          running: "团队协作中",
+                          paused: "已暂停",
+                          paused_limit: "本段协作已达上限",
+                          completed: "已完成",
+                          cancelled: "已取消",
+                          interrupted: "已中断，等待恢复",
+                        }[run.status],
+                      ),
+                      (0, import_react50.createElement)("p", null, run.input),
+                      (0, import_react50.createElement)(
+                        "p",
+                        null,
+                        `第 ${run.segment} 段 · 已执行 ${run.dispatchCount}/64 个成员回合`,
+                      ),
+                      run.status === "paused_limit"
+                        ? (0, import_react50.createElement)(
+                            "p",
+                            null,
+                            "继续将开启新的运行预算段，保留成员、消息和待办。",
+                          )
+                        : null,
+                      run.reason === "dependency_failed"
+                        ? (0, import_react50.createElement)(
+                            "p",
+                            null,
+                            "前置任务未成功，后续任务已暂停。继续后由组长检查原因并调整分工。",
+                          )
+                        : null,
+                      run.result
+                        ? (0, import_react50.createElement)(
+                            Markdown,
+                            null,
+                            run.result,
+                          )
+                        : null,
+                      ...(["completed", "cancelled"].includes(run.status)
+                        ? []
+                        : [
+                            (0, import_react50.createElement)(
+                              Button,
+                              {
+                                key: "toggle",
+                                onClick: () =>
+                                  mutate(
+                                    () => loadDetails(team),
+                                    setError,
+                                    `${endpoint2}/${encodeURIComponent(team.id)}/runs/${encodeURIComponent(run.id)}/${run.status === "running" ? "pause" : "resume"}`,
+                                    "POST",
+                                    {},
+                                  ),
+                              },
+                              run.status === "running"
+                                ? "暂停后续协作"
+                                : "继续协作",
+                            ),
+                            (0, import_react50.createElement)(
+                              Button,
+                              {
+                                key: "cancel",
+                                onClick: () =>
+                                  mutate(
+                                    () => loadDetails(team),
+                                    setError,
+                                    `${endpoint2}/${encodeURIComponent(team.id)}/runs/${encodeURIComponent(run.id)}/cancel`,
+                                    "POST",
+                                    {},
+                                  ),
+                              },
+                              "取消本次协作",
+                            ),
+                            (0, import_react50.createElement)(
+                              "small",
+                              { key: "note" },
+                              "暂停停止后续分派；取消会中止运行中的回合，已发生的文件和网络操作不会自动撤销。",
+                            ),
+                          ]),
+                    ),
+                  ),
+                  (0, import_react50.createElement)(
                     "span",
                     null,
                     `${details[team.id].tasks.length} 个任务 · ${details[team.id].messages.length} 条消息 · ${details[team.id].events.length} 条动态`,
                   ),
                   ...details[team.id].tasks.map((taskEntry) =>
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       "article",
                       { key: taskEntry.id },
-                      (0, import_react47.createElement)(
+                      (0, import_react50.createElement)(
                         "strong",
                         null,
                         `${taskEntry.title} · ${displayValue(taskEntry.status)}`,
                       ),
-                      (0, import_react47.createElement)(
+                      (0, import_react50.createElement)(
                         "p",
                         null,
                         `执行成员：${team.members.find((member) => member.id === taskEntry.memberId)?.name || "已移除成员"}`,
                       ),
                       taskEntry.result
-                        ? (0, import_react47.createElement)(
+                        ? (0, import_react50.createElement)(
                             Markdown,
                             null,
                             taskEntry.result,
                           )
                         : null,
+                      taskEntry.dependsOnIds?.length
+                        ? (0, import_react50.createElement)(
+                            "p",
+                            null,
+                            `前置任务：${taskEntry.dependsOnIds.map((id) => details[team.id].tasks.find((task) => task.id === id)?.title || id).join("、")}`,
+                          )
+                        : null,
                       taskEntry.error
-                        ? (0, import_react47.createElement)(
+                        ? (0, import_react50.createElement)(
                             "p",
                             { role: "alert" },
                             friendlyError(taskEntry.error),
                           )
                         : null,
                       taskEntry.sessionId
-                        ? (0, import_react47.createElement)(
+                        ? (0, import_react50.createElement)(
                             "a",
                             {
                               href: `/?frontend=dsh&session=${encodeURIComponent(taskEntry.sessionId)}`,
@@ -15536,7 +16779,7 @@ window.__ModuleLoader__.load({
                             "查看执行对话",
                           )
                         : null,
-                      (0, import_react47.createElement)(
+                      (0, import_react50.createElement)(
                         Button,
                         {
                           key: `task-${taskEntry.id}`,
@@ -15550,14 +16793,14 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                   ...details[team.id].messages.map((message) =>
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       "span",
                       { key: `mail-${message.id}` },
                       message.body,
                     ),
                   ),
                   ...details[team.id].events.map((event) =>
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       "span",
                       {
                         key: `event-${event.id}`,
@@ -15571,40 +16814,41 @@ window.__ModuleLoader__.load({
           ),
         ),
         teamAction
-          ? (0, import_react47.createElement)(
+          ? (0, import_react50.createElement)(
               "form",
               { className: "workagent-form", onSubmit: submitTeamAction },
-              (0, import_react47.createElement)(
+              (0, import_react50.createElement)(
                 Field,
                 {
                   label: {
                     member: "成员名称",
                     task: "任务标题",
                     mail: "发送给团队的消息",
+                    run: "希望团队完成的目标",
                   }[teamAction.kind],
                 },
-                (0, import_react47.createElement)(Input, {
+                (0, import_react50.createElement)(Input, {
                   "aria-label": "团队操作内容",
                   value: teamActionValue,
                   onChange: (event) => setTeamActionValue(event.target.value),
                   required: true,
                 }),
               ),
-              (0, import_react47.createElement)(
+              (0, import_react50.createElement)(
                 Button,
                 { type: "submit" },
                 "确认",
               ),
-              (0, import_react47.createElement)(
+              (0, import_react50.createElement)(
                 Button,
                 { onClick: () => setTeamAction(null) },
                 "取消",
               ),
               teamAction.kind === "task"
-                ? (0, import_react47.createElement)(
+                ? (0, import_react50.createElement)(
                     Field,
                     { label: "执行成员" },
-                    (0, import_react47.createElement)(Select, {
+                    (0, import_react50.createElement)(Select, {
                       value: targetMemberId,
                       onChange: (event) =>
                         setTargetMemberId(event.target.value),
@@ -15616,13 +16860,13 @@ window.__ModuleLoader__.load({
                   )
                 : null,
               teamAction.kind === "member"
-                ? (0, import_react47.createElement)(
-                    import_react46.default.Fragment,
+                ? (0, import_react50.createElement)(
+                    import_react49.default.Fragment,
                     null,
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       Field,
                       { label: "成员引擎" },
-                      (0, import_react47.createElement)(Select, {
+                      (0, import_react50.createElement)(Select, {
                         "aria-label": "成员引擎",
                         value: memberEngine,
                         onChange: (event) => {
@@ -15633,13 +16877,14 @@ window.__ModuleLoader__.load({
                           ["harness", "通用引擎"],
                           ["codex", "Codex"],
                           ["kimi", "Kimi"],
+                          ["acp", "管理员提供的 ACP 引擎"],
                         ],
                       }),
                     ),
-                    (0, import_react47.createElement)(
+                    (0, import_react50.createElement)(
                       Field,
                       { label: "成员助手" },
-                      (0, import_react47.createElement)(Select, {
+                      (0, import_react50.createElement)(Select, {
                         "aria-label": "成员助手",
                         value: memberPresetId,
                         onChange: (event) =>
@@ -15664,10 +16909,10 @@ window.__ModuleLoader__.load({
     }
 
     // src/app/shell.js
-    var import_react48 = __toESM(require("react"), 1);
-    var import_react49 = require("react");
+    var import_react51 = __toESM(require("react"), 1);
+    var import_react52 = require("react");
     function BrandMark({ size = 28 }) {
-      return (0, import_react49.createElement)(
+      return (0, import_react52.createElement)(
         "span",
         {
           className: "workagent-brand-mark",
@@ -15676,7 +16921,7 @@ window.__ModuleLoader__.load({
             height: size,
           },
         },
-        (0, import_react49.createElement)(
+        (0, import_react52.createElement)(
           "svg",
           {
             viewBox: "0 0 32 32",
@@ -15684,7 +16929,7 @@ window.__ModuleLoader__.load({
             height: size,
             "aria-hidden": true,
           },
-          (0, import_react49.createElement)("path", {
+          (0, import_react52.createElement)("path", {
             d: "M7.2 7.4 10.5 23h3.2L16 13.5 18.3 23h3.2l3.3-15.6h-3.3l-1.9 10-2.2-10h-2.8l-2.2 10-1.9-10Z",
             fill: "currentColor",
           }),
@@ -15692,7 +16937,7 @@ window.__ModuleLoader__.load({
       );
     }
     function BrandName() {
-      return (0, import_react49.createElement)(
+      return (0, import_react52.createElement)(
         "strong",
         { className: "workagent-brand-name" },
         "WorkAgent",
@@ -15709,17 +16954,17 @@ window.__ModuleLoader__.load({
     };
     function WorkAgentOverlay() {
       const routeSearch = navigation.useSearch();
-      const ctx = import_react48.default.useContext(RuntimeServices);
+      const ctx = import_react51.default.useContext(RuntimeServices);
       const params = new URLSearchParams(routeSearch);
       const target = params.get("workagent");
       const sessionId2 = params.get("session");
       const personalDraft = sharedTaskProject(params);
-      import_react48.default.useEffect(() => {
+      import_react51.default.useEffect(() => {
         if (!sessionId2 && (!target || personalDraft)) ctx?.sessions?.clear?.();
       }, [ctx, sessionId2, target, personalDraft]);
       const Page = pages[target];
-      const pageRef = import_react48.default.useRef(null);
-      import_react48.default.useLayoutEffect(() => {
+      const pageRef = import_react51.default.useRef(null);
+      import_react51.default.useLayoutEffect(() => {
         if (!Page || sessionId2 || personalDraft) return;
         return trackConversationScroll(
           pageRef.current,
@@ -15740,7 +16985,7 @@ window.__ModuleLoader__.load({
         marketplace: "市场",
       };
       const label = sessionId2 || !Page ? "会话" : labels[target];
-      return (0, import_react49.createElement)(
+      return (0, import_react52.createElement)(
         "div",
         {
           role: "dialog",
@@ -15748,26 +16993,26 @@ window.__ModuleLoader__.load({
           className: `workagent-overlay${target === "shared" && !sessionId2 ? " is-collaboration" : ""}`,
           ref: pageRef,
         },
-        (0, import_react49.createElement)(
+        (0, import_react52.createElement)(
           "header",
           { className: "workagent-overlay-header" },
-          (0, import_react49.createElement)("h1", null, label),
+          (0, import_react52.createElement)("h1", null, label),
         ),
-        (0, import_react49.createElement)(
+        (0, import_react52.createElement)(
           "main",
           { className: "workagent-overlay-content" },
           sessionId2
-            ? (0, import_react49.createElement)(ConversationWorkspace, {
+            ? (0, import_react52.createElement)(ConversationWorkspace, {
                 key: sessionId2,
                 sessionId: sessionId2,
               })
-            : (0, import_react49.createElement)(Page, { key: target }),
+            : (0, import_react52.createElement)(Page, { key: target }),
         ),
       );
     }
     function FooterAction({ wide, kind, theme }) {
       if (kind === "notifications")
-        return (0, import_react49.createElement)(NotificationFooter, { wide });
+        return (0, import_react52.createElement)(NotificationFooter, { wide });
       const navigate = (page) => () =>
         navigation.navigate(`/?workagent=${page}`);
       const actions = {
@@ -15802,7 +17047,7 @@ window.__ModuleLoader__.load({
         ],
       };
       const [label, action] = actions[kind];
-      return (0, import_react49.createElement)(
+      return (0, import_react52.createElement)(
         "button",
         {
           type: "button",
@@ -15812,14 +17057,14 @@ window.__ModuleLoader__.load({
           "aria-label": label,
           onClick: action,
         },
-        (0, import_react49.createElement)(Icon, { name: kind }),
-        wide ? (0, import_react49.createElement)("span", null, label) : null,
+        (0, import_react52.createElement)(Icon, { name: kind }),
+        wide ? (0, import_react52.createElement)("span", null, label) : null,
       );
     }
 
     // src/features/conversations/sidebar.js
-    var import_react50 = __toESM(require("react"), 1);
-    var import_react51 = require("react");
+    var import_react53 = __toESM(require("react"), 1);
+    var import_react54 = require("react");
     function SidebarSessions() {
       const { confirm, confirmation } = useConfirm();
       const routeSearch = navigation.useSearch();
@@ -15838,10 +17083,10 @@ window.__ModuleLoader__.load({
       const [teamState, reloadTeams] = useResource(`${apiRoot}/teams`);
       const pins = workbench.usePins();
       const projectPins = workbench.usePins("workagent.project-pins.v1");
-      const [batchMode, setBatchMode] = import_react50.default.useState(false);
-      const [selectedIds, setSelectedIds] = import_react50.default.useState([]);
-      const [batchBusy, setBatchBusy] = import_react50.default.useState(false);
-      const [batchError, setBatchError] = import_react50.default.useState("");
+      const [batchMode, setBatchMode] = import_react53.default.useState(false);
+      const [selectedIds, setSelectedIds] = import_react53.default.useState([]);
+      const [batchBusy, setBatchBusy] = import_react53.default.useState(false);
+      const [batchError, setBatchError] = import_react53.default.useState("");
       async function deleteSelected() {
         if (
           !selectedIds.length ||
@@ -15878,11 +17123,11 @@ window.__ModuleLoader__.load({
         )
           navigation.navigate("/?frontend=dsh");
       }
-      const [query, setQuery] = import_react50.default.useState("");
-      const [searching, setSearching] = import_react50.default.useState(false);
-      const [collapsed, setCollapsed] = import_react50.default.useState({});
+      const [query, setQuery] = import_react53.default.useState("");
+      const [searching, setSearching] = import_react53.default.useState(false);
+      const [collapsed, setCollapsed] = import_react53.default.useState({});
       const [sectionsCollapsed, setSectionsCollapsed] =
-        import_react50.default.useState(() => ({
+        import_react53.default.useState(() => ({
           projects:
             localStorage.getItem("workagent.sidebar.projects-collapsed") ===
             "true",
@@ -15891,7 +17136,7 @@ window.__ModuleLoader__.load({
             "true",
         }));
       const sectionToggle = (section, label) =>
-        (0, import_react51.createElement)(
+        (0, import_react54.createElement)(
           "button",
           {
             type: "button",
@@ -15911,25 +17156,25 @@ window.__ModuleLoader__.load({
               }
             },
           },
-          (0, import_react51.createElement)(Icon, {
+          (0, import_react54.createElement)(Icon, {
             name: sectionsCollapsed[section] ? "chevronRight" : "chevronDown",
             size: 13,
           }),
-          (0, import_react51.createElement)("span", null, label),
+          (0, import_react54.createElement)("span", null, label),
         );
-      const [action, setAction] = import_react50.default.useState(null);
+      const [action, setAction] = import_react53.default.useState(null);
       const [actionBusy, setActionBusy] =
-        import_react50.default.useState(false);
+        import_react53.default.useState(false);
       const [sessionMenu, setSessionMenu] =
-        import_react50.default.useState(null);
+        import_react53.default.useState(null);
       const [projectMenu, setProjectMenu] =
-        import_react50.default.useState(null);
+        import_react53.default.useState(null);
       const [reminderSession, setReminderSession] =
-        import_react50.default.useState(null);
-      const [actionValue, setActionValue] = import_react50.default.useState("");
-      const [error, setError] = import_react50.default.useState("");
+        import_react53.default.useState(null);
+      const [actionValue, setActionValue] = import_react53.default.useState("");
+      const [error, setError] = import_react53.default.useState("");
       const activeSession = new URLSearchParams(routeSearch).get("session");
-      import_react50.default.useEffect(() => {
+      import_react53.default.useEffect(() => {
         const closeOnEscape = (event) => {
           if (
             event.key === "Escape" &&
@@ -15941,8 +17186,8 @@ window.__ModuleLoader__.load({
         window.addEventListener("keydown", closeOnEscape);
         return () => window.removeEventListener("keydown", closeOnEscape);
       }, []);
-      const [, setSeenRevision] = import_react50.default.useState(0);
-      const openedSession = import_react50.default.useRef(null);
+      const [, setSeenRevision] = import_react53.default.useState(0);
+      const openedSession = import_react53.default.useRef(null);
       const markSeen = (session) => {
         if (session.lastTurn)
           localStorage.setItem(
@@ -15951,7 +17196,7 @@ window.__ModuleLoader__.load({
           );
         setSeenRevision((value) => value + 1);
       };
-      import_react50.default.useEffect(() => {
+      import_react53.default.useEffect(() => {
         const session = sessionState.rows.find(
           (item) => item.id === activeSession,
         );
@@ -15959,7 +17204,7 @@ window.__ModuleLoader__.load({
         openedSession.current = activeSession;
         markSeen(session);
       }, [sessionState.rows, activeSession]);
-      import_react50.default.useEffect(() => {
+      import_react53.default.useEffect(() => {
         let disposed = false;
         let timer;
         let pending = false;
@@ -16000,7 +17245,7 @@ window.__ModuleLoader__.load({
           document.removeEventListener("visibilitychange", update);
         };
       }, [reloadSessions]);
-      import_react50.default.useEffect(() => {
+      import_react53.default.useEffect(() => {
         const update = () => void reloadWorkspaces();
         window.addEventListener(PROJECTS_CHANGED_EVENT, update);
         return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
@@ -16151,12 +17396,12 @@ window.__ModuleLoader__.load({
                 ? "已停止，未读"
                 : "已完成，未读"
             : "";
-        return (0, import_react51.createElement)(SidebarRow, {
+        return (0, import_react54.createElement)(SidebarRow, {
           key: session.id,
           title: displaySessionTitle(session.title),
-          icon: (0, import_react51.createElement)(SessionAvatar, { session }),
+          icon: (0, import_react54.createElement)(SessionAvatar, { session }),
           selected: session.id === activeSession,
-          status: (0, import_react51.createElement)(SidebarStatus, {
+          status: (0, import_react54.createElement)(SidebarStatus, {
             running,
             unread,
             label: status,
@@ -16181,7 +17426,7 @@ window.__ModuleLoader__.load({
             },
           },
           leading: batchMode
-            ? (0, import_react51.createElement)("input", {
+            ? (0, import_react54.createElement)("input", {
                 type: "checkbox",
                 "aria-label": `选择对话 ${displaySessionTitle(session.title)}`,
                 checked: selectedIds.includes(session.id),
@@ -16194,16 +17439,16 @@ window.__ModuleLoader__.load({
                   ),
               })
             : null,
-          actions: (0, import_react51.createElement)(
-            import_react50.default.Fragment,
+          actions: (0, import_react54.createElement)(
+            import_react53.default.Fragment,
             null,
-            (0, import_react51.createElement)(SidebarAction, {
+            (0, import_react54.createElement)(SidebarAction, {
               icon: "pin",
               label: `${pins.pins.includes(session.id) ? "取消置顶" : "置顶"} ${displaySessionTitle(session.title)}`,
               "aria-pressed": pins.pins.includes(session.id),
               onClick: () => pins.toggle(session.id),
             }),
-            (0, import_react51.createElement)(SidebarAction, {
+            (0, import_react54.createElement)(SidebarAction, {
               label: `编辑对话 ${displaySessionTitle(session.title)}`,
               title: "对话操作",
               "aria-haspopup": "dialog",
@@ -16212,28 +17457,28 @@ window.__ModuleLoader__.load({
           ),
         });
       };
-      return (0, import_react51.createElement)(
+      return (0, import_react54.createElement)(
         "div",
         { className: "workagent-sidebar-browser" },
         confirmation,
-        (0, import_react51.createElement)(workbench.Notifications, {
+        (0, import_react54.createElement)(workbench.Notifications, {
           sessions: sessionState.rows,
           settings: false,
         }),
-        (0, import_react51.createElement)("button", {
+        (0, import_react54.createElement)("button", {
           type: "button",
           className: "workagent-mobile-backdrop",
           "aria-label": "收起导航菜单",
           tabIndex: -1,
           onClick: closeMobileSidebar2,
         }),
-        (0, import_react51.createElement)(
+        (0, import_react54.createElement)(
           SidebarHeader,
           { heading: sectionToggle("projects", "项目") },
-          (0, import_react51.createElement)(
+          (0, import_react54.createElement)(
             "div",
             { className: "workagent-batch-actions" },
-            (0, import_react51.createElement)(
+            (0, import_react54.createElement)(
               Button,
               {
                 disabled: batchBusy,
@@ -16246,16 +17491,16 @@ window.__ModuleLoader__.load({
                   setBatchError("");
                 },
               },
-              (0, import_react51.createElement)(Icon, {
+              (0, import_react54.createElement)(Icon, {
                 name: batchMode ? "close" : "list",
                 size: 15,
               }),
             ),
             batchMode
-              ? (0, import_react51.createElement)(
-                  import_react50.default.Fragment,
+              ? (0, import_react54.createElement)(
+                  import_react53.default.Fragment,
                   null,
-                  (0, import_react51.createElement)(
+                  (0, import_react54.createElement)(
                     Button,
                     {
                       disabled: batchBusy,
@@ -16264,7 +17509,7 @@ window.__ModuleLoader__.load({
                     },
                     "全选当前列表",
                   ),
-                  (0, import_react51.createElement)(
+                  (0, import_react54.createElement)(
                     Button,
                     {
                       disabled: batchBusy || !selectedIds.length,
@@ -16275,7 +17520,7 @@ window.__ModuleLoader__.load({
                 )
               : null,
             batchError
-              ? (0, import_react51.createElement)(
+              ? (0, import_react54.createElement)(
                   "p",
                   { role: "alert", className: "workagent-error" },
                   batchError,
@@ -16284,10 +17529,10 @@ window.__ModuleLoader__.load({
           ),
           sectionsCollapsed.projects
             ? null
-            : (0, import_react51.createElement)(
+            : (0, import_react54.createElement)(
                 "div",
                 { className: "workagent-sidebar-heading-actions" },
-                (0, import_react51.createElement)(
+                (0, import_react54.createElement)(
                   "button",
                   {
                     type: "button",
@@ -16296,12 +17541,12 @@ window.__ModuleLoader__.load({
                     "aria-pressed": searching,
                     onClick: toggleSearch,
                   },
-                  (0, import_react51.createElement)(Icon, {
+                  (0, import_react54.createElement)(Icon, {
                     name: searching ? "close" : "search",
                     size: 15,
                   }),
                 ),
-                (0, import_react51.createElement)(
+                (0, import_react54.createElement)(
                   "button",
                   {
                     type: "button",
@@ -16310,7 +17555,7 @@ window.__ModuleLoader__.load({
                     onClick: () =>
                       navigation.navigate("/?workagent=workspaces"),
                   },
-                  (0, import_react51.createElement)(Icon, {
+                  (0, import_react54.createElement)(Icon, {
                     name: "plus",
                     size: 15,
                   }),
@@ -16318,7 +17563,7 @@ window.__ModuleLoader__.load({
               ),
         ),
         searching
-          ? (0, import_react51.createElement)(SidebarSearch, {
+          ? (0, import_react54.createElement)(SidebarSearch, {
               "aria-label": "搜索对话",
               value: query,
               onChange: (event) => setQuery(event.target.value),
@@ -16326,11 +17571,11 @@ window.__ModuleLoader__.load({
               autoFocus: true,
             })
           : null,
-        (0, import_react51.createElement)(
+        (0, import_react54.createElement)(
           "div",
           { className: "workagent-sidebar-projects" },
           workspaceState.loading && !sectionsCollapsed.projects
-            ? (0, import_react51.createElement)(
+            ? (0, import_react54.createElement)(
                 "span",
                 { className: "workagent-sidebar-empty" },
                 "加载中…",
@@ -16341,12 +17586,12 @@ window.__ModuleLoader__.load({
               (session) => session.workspaceId === project.id,
             );
             const isCollapsed = Boolean(collapsed[project.id]);
-            return (0, import_react51.createElement)(
+            return (0, import_react54.createElement)(
               SidebarGroup,
               {
                 key: project.id,
                 title: displayWorkspaceName(project.name),
-                icon: (0, import_react51.createElement)(Icon, {
+                icon: (0, import_react54.createElement)(Icon, {
                   name: "workspace",
                   size: 15,
                 }),
@@ -16361,18 +17606,18 @@ window.__ModuleLoader__.load({
                 pinned: projectPins.pins.includes(project.id),
                 badge:
                   project.scope === "team"
-                    ? (0, import_react51.createElement)("small", null, "共享")
+                    ? (0, import_react54.createElement)("small", null, "共享")
                     : null,
-                actions: (0, import_react51.createElement)(
-                  import_react50.default.Fragment,
+                actions: (0, import_react54.createElement)(
+                  import_react53.default.Fragment,
                   null,
-                  (0, import_react51.createElement)(SidebarAction, {
+                  (0, import_react54.createElement)(SidebarAction, {
                     icon: "plus",
                     label: `在 ${displayWorkspaceName(project.name)} 中新建会话`,
                     title: "在此项目中新建会话",
                     onClick: () => startProjectConversation(project),
                   }),
-                  (0, import_react51.createElement)(SidebarAction, {
+                  (0, import_react54.createElement)(SidebarAction, {
                     label: `项目操作 ${displayWorkspaceName(project.name)}`,
                     "aria-haspopup": "dialog",
                     title: "置顶或管理项目",
@@ -16381,7 +17626,7 @@ window.__ModuleLoader__.load({
                 ),
               },
               projectSessions.length === 0
-                ? (0, import_react51.createElement)(
+                ? (0, import_react54.createElement)(
                     "span",
                     { className: "workagent-sidebar-empty" },
                     query ? "没有匹配的对话" : "暂无对话",
@@ -16389,17 +17634,17 @@ window.__ModuleLoader__.load({
                 : projectSessions.map(renderSession),
             );
           }),
-          (0, import_react51.createElement)(
+          (0, import_react54.createElement)(
             "section",
             { className: "workagent-sidebar-unassigned" },
-            (0, import_react51.createElement)(
+            (0, import_react54.createElement)(
               "div",
               { className: "workagent-sidebar-subheading" },
               sectionToggle("sessions", "对话"),
             ),
             sectionsCollapsed.sessions
               ? null
-              : (0, import_react51.createElement)(
+              : (0, import_react54.createElement)(
                   "div",
                   {
                     className:
@@ -16410,21 +17655,21 @@ window.__ModuleLoader__.load({
           ),
         ),
         sessionState.loading && !sectionsCollapsed.sessions
-          ? (0, import_react51.createElement)(
+          ? (0, import_react54.createElement)(
               "span",
               { className: "workagent-sidebar-empty" },
               "加载中…",
             )
           : null,
         error && !action?.kind.endsWith("-session")
-          ? (0, import_react51.createElement)(
+          ? (0, import_react54.createElement)(
               "span",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
         sessionMenu
-          ? (0, import_react51.createElement)(ConversationMenu, {
+          ? (0, import_react54.createElement)(ConversationMenu, {
               title: displaySessionTitle(sessionMenu.title),
               projectName: displayWorkspaceName(
                 workspaceState.rows.find(
@@ -16449,17 +17694,17 @@ window.__ModuleLoader__.load({
             })
           : null,
         projectMenu
-          ? (0, import_react51.createElement)(
+          ? (0, import_react54.createElement)(
               Dialog,
               {
                 title: displayWorkspaceName(projectMenu.name),
                 "aria-label": "项目操作",
                 onClose: () => setProjectMenu(null),
               },
-              (0, import_react51.createElement)(
+              (0, import_react54.createElement)(
                 ActionList,
                 null,
-                (0, import_react51.createElement)(
+                (0, import_react54.createElement)(
                   Button,
                   {
                     onClick: () => {
@@ -16467,12 +17712,12 @@ window.__ModuleLoader__.load({
                       setProjectMenu(null);
                     },
                   },
-                  (0, import_react51.createElement)(Icon, { name: "pin" }),
+                  (0, import_react54.createElement)(Icon, { name: "pin" }),
                   projectPins.pins.includes(projectMenu.id)
                     ? "取消置顶"
                     : "置顶项目",
                 ),
-                (0, import_react51.createElement)(
+                (0, import_react54.createElement)(
                   Button,
                   {
                     onClick: () => {
@@ -16481,29 +17726,29 @@ window.__ModuleLoader__.load({
                       beginAction("rename-project", target);
                     },
                   },
-                  (0, import_react51.createElement)(Icon, { name: "edit" }),
+                  (0, import_react54.createElement)(Icon, { name: "edit" }),
                   "管理",
                 ),
               ),
             )
           : null,
         reminderSession
-          ? (0, import_react51.createElement)(
+          ? (0, import_react54.createElement)(
               Dialog,
               { title: "消息提醒", onClose: () => setReminderSession(null) },
-              (0, import_react51.createElement)(
+              (0, import_react54.createElement)(
                 "small",
                 null,
                 `项目：${displayWorkspaceName(workspaceState.rows.find((workspace) => workspace.id === reminderSession.workspaceId)?.name || "未归属")} · 对话：${displaySessionTitle(reminderSession.title)}`,
               ),
-              (0, import_react51.createElement)(workbench.SessionReminder, {
+              (0, import_react54.createElement)(workbench.SessionReminder, {
                 sessionId: reminderSession.id,
                 onSaved: () => setReminderSession(null),
               }),
             )
           : null,
         action?.kind.endsWith("-session")
-          ? (0, import_react51.createElement)(ConversationManagementDialog, {
+          ? (0, import_react54.createElement)(ConversationManagementDialog, {
               name: actionValue,
               onNameChange: setActionValue,
               onSave: submitAction,
@@ -16516,7 +17761,7 @@ window.__ModuleLoader__.load({
               deleting: action.kind === "delete-session",
             })
           : action
-            ? (0, import_react51.createElement)(
+            ? (0, import_react54.createElement)(
                 Dialog,
                 {
                   title: action.kind.startsWith("rename")
@@ -16527,24 +17772,24 @@ window.__ModuleLoader__.load({
                   onSubmit: submitAction,
                 },
                 action.kind.startsWith("rename")
-                  ? (0, import_react51.createElement)(Input, {
+                  ? (0, import_react54.createElement)(Input, {
                       autoFocus: true,
                       value: actionValue,
                       onChange: (event) => setActionValue(event.target.value),
                       required: true,
                       maxLength: 120,
                     })
-                  : (0, import_react51.createElement)(
+                  : (0, import_react54.createElement)(
                       "p",
                       null,
                       action.kind === "delete-project"
                         ? "项目及其对话将移入可恢复的回收目录。"
                         : "删除后，这个对话将不再显示。",
                     ),
-                (0, import_react51.createElement)(
+                (0, import_react54.createElement)(
                   "div",
                   { className: "workagent-actions" },
-                  (0, import_react51.createElement)(
+                  (0, import_react54.createElement)(
                     Button,
                     {
                       type: "submit",
@@ -16554,7 +17799,7 @@ window.__ModuleLoader__.load({
                     action.kind.startsWith("rename") ? "保存" : "删除",
                   ),
                   action.kind.startsWith("rename")
-                    ? (0, import_react51.createElement)(
+                    ? (0, import_react54.createElement)(
                         Button,
                         {
                           className: "workagent-button is-danger",
@@ -16569,7 +17814,7 @@ window.__ModuleLoader__.load({
                         "删除",
                       )
                     : null,
-                  (0, import_react51.createElement)(
+                  (0, import_react54.createElement)(
                     Button,
                     { onClick: () => setAction(null) },
                     "取消",
@@ -16581,8 +17826,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/app/sidebar.js
-    var import_react52 = __toESM(require("react"), 1);
-    var import_react53 = require("react");
+    var import_react55 = __toESM(require("react"), 1);
+    var import_react56 = require("react");
     var sidebarUI = {
       Row: SidebarRow,
       Group: SidebarGroup,
@@ -16621,7 +17866,7 @@ window.__ModuleLoader__.load({
     function CollaborationSidebar(props) {
       const search = navigation.useSearch();
       const state = SharedPage.useShared();
-      const tabs = import_react52.default.useSyncExternalStore(
+      const tabs = import_react55.default.useSyncExternalStore(
         sidebarTabs.subscribe,
         sidebarTabs.getTabs,
       );
@@ -16634,10 +17879,10 @@ window.__ModuleLoader__.load({
         (invite) => invite.status === "pending",
       ).length;
       const extra = tabs.find((item) => item.id === tab);
-      return (0, import_react53.createElement)(
+      return (0, import_react56.createElement)(
         "div",
         { className: "workagent-sidebar-sections" },
-        (0, import_react53.createElement)(
+        (0, import_react56.createElement)(
           "nav",
           { className: "workagent-sidebar-tabs", "aria-label": "工作区分类" },
           ...[
@@ -16645,7 +17890,7 @@ window.__ModuleLoader__.load({
             ...tabs,
             { id: "shared", label: `协作${count ? ` ${count}` : ""}` },
           ].map((item) =>
-            (0, import_react53.createElement)(
+            (0, import_react56.createElement)(
               "button",
               {
                 key: item.id,
@@ -16663,18 +17908,18 @@ window.__ModuleLoader__.load({
           ),
         ),
         tab === "shared"
-          ? (0, import_react53.createElement)(SharedPage.Sidebar)
+          ? (0, import_react56.createElement)(SharedPage.Sidebar)
           : extra
             ? extra.render({ ...props, sidebarUI })
-            : (0, import_react53.createElement)(SidebarSessions, props),
+            : (0, import_react56.createElement)(SidebarSessions, props),
       );
     }
     CollaborationSidebar.__dshNativeTabHost = true;
     CollaborationSidebar.__dshNativeTabs = sidebarTabs;
 
     // src/features/agents/model-defaults.js
-    var import_react54 = __toESM(require("react"), 1);
-    var import_react55 = require("react");
+    var import_react57 = __toESM(require("react"), 1);
+    var import_react58 = require("react");
     var MODEL_DEFAULTS_KEY = "workagent.model-defaults.v1";
     var MODEL_DEFAULTS_EVENT = "workagent:model-defaults";
     var permissionOptions = [
@@ -16703,7 +17948,7 @@ window.__ModuleLoader__.load({
       return {};
     }
     function useModelDefaults() {
-      const raw = import_react54.default.useSyncExternalStore(
+      const raw = import_react57.default.useSyncExternalStore(
         subscribeModelDefaults,
         readModelDefaults,
       );
@@ -16777,7 +18022,9 @@ window.__ModuleLoader__.load({
           ([id]) => id === saved?.permissionMode,
         )
           ? saved.permissionMode
-          : "workspace_write",
+          : group?.engine === "acp" || preset?.engine === "acp"
+            ? ""
+            : "workspace_write",
       };
     }
     function ModelDefaultsFields({ group, preset, defaults, save }) {
@@ -16789,16 +18036,16 @@ window.__ModuleLoader__.load({
         : displayValue(group.engine);
       const key = modelDefaultsKey(group, preset);
       const field = (label, props) =>
-        (0, import_react55.createElement)(
+        (0, import_react58.createElement)(
           "label",
           null,
-          (0, import_react55.createElement)("span", null, label),
-          (0, import_react55.createElement)(Select, {
+          (0, import_react58.createElement)("span", null, label),
+          (0, import_react58.createElement)(Select, {
             "aria-label": `${name} ${label}`,
             ...props,
           }),
         );
-      return (0, import_react55.createElement)(
+      return (0, import_react58.createElement)(
         "div",
         { className: "workagent-model-defaults" },
         field("默认模型", {
@@ -16834,7 +18081,15 @@ window.__ModuleLoader__.load({
         }),
         field("默认权限", {
           value: defaults.permissionMode,
-          options: permissionOptions,
+          options:
+            group.engine === "acp"
+              ? [
+                  ["", "使用引擎原生审批"],
+                  ...permissionOptions.filter(
+                    ([id]) => group.permissionModes?.[id],
+                  ),
+                ]
+              : permissionOptions,
           onChange: (event) =>
             save(key, {
               permissionMode: event.target.value,
@@ -16844,7 +18099,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/agents/models.js
-    var import_react56 = require("react");
+    var import_react59 = require("react");
     function ModelsSection() {
       const [state] = useResource(`${apiRoot}/model-options`);
       const [presets] = usePresets();
@@ -16855,7 +18110,9 @@ window.__ModuleLoader__.load({
           .map((preset) => ({
             preset,
             group: state.rows.find(
-              (group) => group.engine === preset.engine,
+              (group) =>
+                group.engine === preset.engine &&
+                group.acpCatalogId === preset.acpCatalogId,
             ) || {
               engine: preset.engine,
               state: "unavailable",
@@ -16864,37 +18121,37 @@ window.__ModuleLoader__.load({
           })),
         ...state.rows.map((group) => ({ group })),
       ];
-      return (0, import_react56.createElement)(
+      return (0, import_react59.createElement)(
         Section,
         { title: "模型" },
-        (0, import_react56.createElement)(
+        (0, import_react59.createElement)(
           "div",
           { className: "workagent-section-intro" },
-          (0, import_react56.createElement)(
+          (0, import_react59.createElement)(
             "p",
             null,
             "为各助手设置新对话的默认模型、思考强度和权限。更改自动保存在当前浏览器；输入框的临时选择不会修改默认值。模型列表每次打开网页时自动更新。",
           ),
         ),
-        (0, import_react56.createElement)(Status, { state }),
+        (0, import_react59.createElement)(Status, { state }),
         presets.loading || presets.error
-          ? (0, import_react56.createElement)(Status, { state: presets })
+          ? (0, import_react59.createElement)(Status, { state: presets })
           : null,
         ...groups.map(({ group, preset }) =>
-          (0, import_react56.createElement)(
+          (0, import_react59.createElement)(
             "section",
             {
-              key: preset?.id || group.engine,
+              key: preset?.id || group.acpCatalogId || group.engine,
               className: "workagent-model-group",
               "data-preset-id": preset?.id,
             },
-            (0, import_react56.createElement)(
+            (0, import_react59.createElement)(
               "header",
               null,
-              (0, import_react56.createElement)(AssistantAvatar, {
+              (0, import_react59.createElement)(AssistantAvatar, {
                 preset: preset || { engine: group.engine },
               }),
-              (0, import_react56.createElement)(
+              (0, import_react59.createElement)(
                 "strong",
                 null,
                 preset
@@ -16902,13 +18159,13 @@ window.__ModuleLoader__.load({
                   : displayValue(group.engine),
               ),
               preset
-                ? (0, import_react56.createElement)(
+                ? (0, import_react59.createElement)(
                     "span",
                     { className: "workagent-muted" },
                     `${displayValue(group.engine)}${preset.enabled ? "" : " · 已关闭"}`,
                   )
                 : null,
-              (0, import_react56.createElement)(
+              (0, import_react59.createElement)(
                 "span",
                 { className: `workagent-status-pill is-${group.state}` },
                 group.state === "ready"
@@ -16918,49 +18175,49 @@ window.__ModuleLoader__.load({
                     : "暂时无法获取",
               ),
             ),
-            (0, import_react56.createElement)(ModelDefaultsFields, {
+            (0, import_react59.createElement)(ModelDefaultsFields, {
               group,
               preset,
               defaults: resolveModelDefaults(group, preferences, preset),
               save,
             }),
             group.state !== "ready"
-              ? (0, import_react56.createElement)(
+              ? (0, import_react59.createElement)(
                   "p",
                   { className: "workagent-muted" },
                   "请检查助手的连接与授权后重新打开网页。",
                 )
               : null,
             ...(preset ? [] : group.models).map((model) =>
-              (0, import_react56.createElement)(
+              (0, import_react59.createElement)(
                 "article",
                 { key: model.id, className: "workagent-model-row" },
-                (0, import_react56.createElement)(
+                (0, import_react59.createElement)(
                   "div",
                   null,
-                  (0, import_react56.createElement)("strong", null, model.name),
+                  (0, import_react59.createElement)("strong", null, model.name),
                   model.id === resolveModelDefaults(group, preferences).modelId
-                    ? (0, import_react56.createElement)(
+                    ? (0, import_react59.createElement)(
                         "span",
                         { className: "workagent-default-tag" },
                         "默认",
                       )
                     : null,
-                  (0, import_react56.createElement)("small", null, model.id),
+                  (0, import_react59.createElement)("small", null, model.id),
                 ),
-                (0, import_react56.createElement)(
+                (0, import_react59.createElement)(
                   "div",
                   { className: "workagent-reasoning-tags" },
                   ...(model.reasoning.length
                     ? model.reasoning.map((option) =>
-                        (0, import_react56.createElement)(
+                        (0, import_react59.createElement)(
                           "span",
                           { key: option.id },
                           reasoningLabel(option),
                         ),
                       )
                     : [
-                        (0, import_react56.createElement)(
+                        (0, import_react59.createElement)(
                           "span",
                           { key: "none" },
                           "未提供思考选项",
@@ -16975,8 +18232,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/appearance/settings.js
-    var import_react57 = __toESM(require("react"), 1);
-    var import_react58 = require("react");
+    var import_react60 = __toESM(require("react"), 1);
+    var import_react61 = require("react");
     var FONT_SIZE_KEY = "workagent.font-size";
     var fontSizes = [
       ["13", "紧凑"],
@@ -17008,21 +18265,21 @@ window.__ModuleLoader__.load({
       };
     }
     function TypographySettings() {
-      const [size, setSize] = import_react57.default.useState(readFontSize);
-      return (0, import_react58.createElement)(
+      const [size, setSize] = import_react60.default.useState(readFontSize);
+      return (0, import_react61.createElement)(
         "section",
         { className: "workagent-typography", "aria-label": "字体" },
-        (0, import_react58.createElement)(
+        (0, import_react61.createElement)(
           "div",
           null,
-          (0, import_react58.createElement)("strong", null, "字体大小"),
-          (0, import_react58.createElement)(
+          (0, import_react61.createElement)("strong", null, "字体大小"),
+          (0, import_react61.createElement)(
             "p",
             null,
             "调整界面和对话文字，自动保存。",
           ),
         ),
-        (0, import_react58.createElement)(Select, {
+        (0, import_react61.createElement)(Select, {
           "aria-label": "字体大小",
           value: size,
           options: fontSizes,
@@ -17038,7 +18295,7 @@ window.__ModuleLoader__.load({
 
     // src/features/capabilities/imports.js
     function createImports({
-      React: React37,
+      React: React40,
       request: request2,
       apiRoot: apiRoot2,
       Field: Field2,
@@ -17047,13 +18304,13 @@ window.__ModuleLoader__.load({
       friendlyError: friendlyError2,
       useResource: useResource2,
     }) {
-      const h33 = React37.createElement;
+      const h36 = React40.createElement;
       function Results({ rows }) {
-        return h33(
+        return h36(
           "ul",
           null,
           ...rows.map((row, i) =>
-            h33(
+            h36(
               "li",
               { key: i },
               `${row.name || "未命名"}：${row.error ? friendlyError2(row.error) : "已导入"}`,
@@ -17062,10 +18319,10 @@ window.__ModuleLoader__.load({
         );
       }
       function SkillImport({ onImported }) {
-        const [format, setFormat] = React37.useState("directory");
-        const [busy, setBusy] = React37.useState(false);
-        const [error, setError] = React37.useState("");
-        const [result, setResult] = React37.useState([]);
+        const [format, setFormat] = React40.useState("directory");
+        const [busy, setBusy] = React40.useState(false);
+        const [error, setError] = React40.useState("");
+        const [result, setResult] = React40.useState([]);
         async function submit(e) {
           e.preventDefault();
           const form = e.currentTarget;
@@ -17103,37 +18360,37 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           "details",
           null,
-          h33("summary", null, "导入本地技能"),
-          h33(
+          h36("summary", null, "导入本地技能"),
+          h36(
             "form",
             { className: "workagent-form", onSubmit: submit },
-            h33(
+            h36(
               Field2,
               { label: "导入技能名称" },
-              h33(Input2, { name: "name", required: true, maxLength: 120 }),
+              h36(Input2, { name: "name", required: true, maxLength: 120 }),
             ),
-            h33(
+            h36(
               Field2,
               { label: "技能描述" },
-              h33(Input2, { name: "description", maxLength: 4e3 }),
+              h36(Input2, { name: "description", maxLength: 4e3 }),
             ),
-            h33(
+            h36(
               Field2,
               { label: "技能来源" },
-              h33(
+              h36(
                 "select",
                 { value: format, onChange: (e) => setFormat(e.target.value) },
-                h33("option", { value: "directory" }, "本地目录"),
-                h33("option", { value: "zip" }, "ZIP 包"),
+                h36("option", { value: "directory" }, "本地目录"),
+                h36("option", { value: "zip" }, "ZIP 包"),
               ),
             ),
-            h33(
+            h36(
               Field2,
               { label: "选择技能文件" },
-              h33("input", {
+              h36("input", {
                 key: format,
                 name: "files",
                 type: "file",
@@ -17143,26 +18400,26 @@ window.__ModuleLoader__.load({
                   : { accept: ".zip" }),
               }),
             ),
-            h33(
+            h36(
               "p",
               null,
               "目录或 ZIP 包须包含 SKILL.md 和依赖文件，最多 48 MB。导入后可为助手启用。",
             ),
-            h33(
+            h36(
               Button2,
               { type: "submit", disabled: busy },
               busy ? "导入中…" : "导入技能",
             ),
-            error ? h33("p", { role: "alert" }, error) : null,
-            h33(Results, { rows: result }),
+            error ? h36("p", { role: "alert" }, error) : null,
+            h36(Results, { rows: result }),
           ),
         );
       }
       function MCPImport({ onImported }) {
-        const [text, setText] = React37.useState("");
-        const [busy, setBusy] = React37.useState(false);
-        const [rows, setRows] = React37.useState([]);
-        const [error, setError] = React37.useState("");
+        const [text, setText] = React40.useState("");
+        const [busy, setBusy] = React40.useState(false);
+        const [rows, setRows] = React40.useState([]);
+        const [error, setError] = React40.useState("");
         async function submit(e) {
           e.preventDefault();
           setBusy(true);
@@ -17182,17 +18439,17 @@ window.__ModuleLoader__.load({
             setBusy(false);
           }
         }
-        return h33(
+        return h36(
           "details",
           null,
-          h33("summary", null, "批量导入 MCP JSON"),
-          h33(
+          h36("summary", null, "批量导入 MCP JSON"),
+          h36(
             "form",
             { className: "workagent-form", onSubmit: submit },
-            h33(
+            h36(
               Field2,
               { label: "MCP JSON 配置" },
-              h33("textarea", {
+              h36("textarea", {
                 value: text,
                 onChange: (e) => setText(e.target.value),
                 required: true,
@@ -17203,36 +18460,36 @@ window.__ModuleLoader__.load({
                   '{"mcpServers":{"example":{"command":"...","args":[]}}}',
               }),
             ),
-            h33(
+            h36(
               "p",
               null,
               "支持 command/args/env 和 url/headers。密钥保存到当前员工的凭据库，导入记录不保留原始配置。",
             ),
-            h33(
+            h36(
               Button2,
               { type: "submit", disabled: busy },
               busy ? "导入中…" : "导入 MCP",
             ),
-            error ? h33("p", { role: "alert" }, error) : null,
-            h33(Results, { rows }),
+            error ? h36("p", { role: "alert" }, error) : null,
+            h36(Results, { rows }),
           ),
         );
       }
       function History() {
         const [state, refresh] = useResource2(`${apiRoot2}/imports`);
-        return h33(
+        return h36(
           "section",
           null,
-          h33("h3", null, "能力导入记录"),
-          h33(Button2, { onClick: refresh }, "刷新导入记录"),
+          h36("h3", null, "能力导入记录"),
+          h36(Button2, { onClick: refresh }, "刷新导入记录"),
           state.error
-            ? h33("p", { role: "alert" }, friendlyError2(state.error))
+            ? h36("p", { role: "alert" }, friendlyError2(state.error))
             : null,
           ...state.rows
             .slice()
             .reverse()
             .map((row, i) =>
-              h33(
+              h36(
                 "p",
                 { key: i },
                 `${new Date(row.at).toLocaleString()} · ${row.kind} · ${row.name} · ${row.error ? friendlyError2(row.error) : "已导入"}`,
@@ -17244,8 +18501,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/capabilities/settings.js
-    var import_react59 = __toESM(require("react"), 1);
-    var import_react60 = require("react");
+    var import_react62 = __toESM(require("react"), 1);
+    var import_react63 = require("react");
     function CapabilitySync({ kind, onSynced }) {
       const [state, refresh] = useResource(
         `${apiRoot}/capability-sync/status`,
@@ -17264,15 +18521,15 @@ window.__ModuleLoader__.load({
             : []),
         ],
       );
-      import_react59.default.useEffect(() => {
+      import_react62.default.useEffect(() => {
         const timer = setInterval(() => {
           refresh();
           onSynced();
         }, 5e3);
         return () => clearInterval(timer);
       }, [refresh, onSynced]);
-      const [busy, setBusy] = import_react59.default.useState(false);
-      const [error, setError] = import_react59.default.useState("");
+      const [busy, setBusy] = import_react62.default.useState(false);
+      const [error, setError] = import_react62.default.useState("");
       const sync = async () => {
         setBusy(true);
         setError("");
@@ -17290,24 +18547,24 @@ window.__ModuleLoader__.load({
         (row) =>
           row.kind === kind && ["unavailable", "conflict"].includes(row.status),
       );
-      return (0, import_react60.createElement)(
+      return (0, import_react63.createElement)(
         "div",
         { className: "workagent-capability-sync" },
-        (0, import_react60.createElement)(
+        (0, import_react63.createElement)(
           "p",
           { className: "workagent-muted" },
           "自动发现本账号的全局安装，供兼容助手使用；项目安装仍留在项目。启停和同步对新会话生效。",
         ),
-        (0, import_react60.createElement)(
+        (0, import_react63.createElement)(
           Button,
           { onClick: sync, disabled: busy },
           busy ? "正在同步…" : "检查新安装",
         ),
         error
-          ? (0, import_react60.createElement)("p", { role: "alert" }, error)
+          ? (0, import_react63.createElement)("p", { role: "alert" }, error)
           : null,
         ...problems.map((row) =>
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             "p",
             { key: row.key, role: "status" },
             `${row.name}：${row.status === "conflict" ? "存在冲突，请检查原安装与设置" : "暂不可共享"}（${row.reason}）`,
@@ -17318,8 +18575,8 @@ window.__ModuleLoader__.load({
     function MCPSection() {
       const endpoint2 = `${apiRoot}/mcp-servers`;
       const [state, refresh] = useResource(endpoint2);
-      const [error, setError] = import_react59.default.useState("");
-      const [transport, setTransport] = import_react59.default.useState("http");
+      const [error, setError] = import_react62.default.useState("");
+      const [transport, setTransport] = import_react62.default.useState("http");
       const submit = async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -17365,31 +18622,31 @@ window.__ModuleLoader__.load({
           setError(reason.message);
         }
       };
-      return (0, import_react60.createElement)(
+      return (0, import_react63.createElement)(
         Section,
         { title: "MCP 服务" },
-        (0, import_react60.createElement)(CapabilitySync, {
+        (0, import_react63.createElement)(CapabilitySync, {
           kind: "mcp",
           onSynced: refresh,
         }),
-        (0, import_react60.createElement)(imports.MCPImport, {
+        (0, import_react63.createElement)(imports.MCPImport, {
           onImported: refresh,
         }),
-        (0, import_react60.createElement)(
+        (0, import_react63.createElement)(
           "form",
           { className: "workagent-form", onSubmit: submit },
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             Field,
             { label: "名称" },
-            (0, import_react60.createElement)(Input, {
+            (0, import_react63.createElement)(Input, {
               name: "name",
               required: true,
             }),
           ),
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             Field,
             { label: "连接方式" },
-            (0, import_react60.createElement)(Select, {
+            (0, import_react63.createElement)(Select, {
               value: transport,
               onChange: (e) => setTransport(e.target.value),
               options: [
@@ -17399,31 +18656,31 @@ window.__ModuleLoader__.load({
               ],
             }),
           ),
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             Field,
             { label: transport === "stdio" ? "命令" : "服务地址" },
-            (0, import_react60.createElement)(Input, {
+            (0, import_react63.createElement)(Input, {
               name: "target",
               required: true,
               type: transport === "stdio" ? "text" : "url",
             }),
           ),
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             "button",
             { className: "workagent-button", type: "submit" },
             "添加服务",
           ),
         ),
         error
-          ? (0, import_react60.createElement)(
+          ? (0, import_react63.createElement)(
               "p",
               { role: "alert", className: "workagent-error" },
               error,
             )
           : null,
-        (0, import_react60.createElement)(Status, { state }),
+        (0, import_react63.createElement)(Status, { state }),
         ...state.rows.map((row) =>
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             Card,
             {
               key: row.id,
@@ -17431,7 +18688,7 @@ window.__ModuleLoader__.load({
               detail: `${row.transport?.globalSource ? "Codex 全局安装 · " : ""}${displayValue(row.health, "未知状态")} · ${displayValue(row.oauthState, "无需授权")}`,
             },
             row.source === "user"
-              ? (0, import_react60.createElement)(
+              ? (0, import_react63.createElement)(
                   Button,
                   {
                     onClick: () =>
@@ -17447,13 +18704,13 @@ window.__ModuleLoader__.load({
                 )
               : null,
             row.oauthState === "needs_auth"
-              ? (0, import_react60.createElement)(
+              ? (0, import_react63.createElement)(
                   Button,
                   { onClick: () => oauth(row) },
                   "授权",
                 )
               : null,
-            (0, import_react60.createElement)(
+            (0, import_react63.createElement)(
               Button,
               {
                 onClick: () =>
@@ -17467,7 +18724,7 @@ window.__ModuleLoader__.load({
               "测试连接",
             ),
             row.source === "user"
-              ? (0, import_react60.createElement)(
+              ? (0, import_react63.createElement)(
                   Button,
                   {
                     onClick: () =>
@@ -17488,41 +18745,41 @@ window.__ModuleLoader__.load({
     function SkillsSection() {
       const endpoint2 = apiRoot + "/skills";
       const [state, refresh] = useResource(endpoint2);
-      const [error, setError] = import_react59.default.useState("");
-      return (0, import_react60.createElement)(
+      const [error, setError] = import_react62.default.useState("");
+      return (0, import_react63.createElement)(
         Section,
         { title: "技能" },
-        (0, import_react60.createElement)(CapabilitySync, {
+        (0, import_react63.createElement)(CapabilitySync, {
           kind: "skill",
           onSynced: refresh,
         }),
-        (0, import_react60.createElement)(imports.SkillImport, {
+        (0, import_react63.createElement)(imports.SkillImport, {
           onImported: refresh,
         }),
-        (0, import_react60.createElement)(
+        (0, import_react63.createElement)(
           "p",
           { className: "workagent-muted" },
           "管理已安装的技能；更多能力可在市场中获取。",
         ),
         error
-          ? (0, import_react60.createElement)("p", { role: "alert" }, error)
+          ? (0, import_react63.createElement)("p", { role: "alert" }, error)
           : null,
-        (0, import_react60.createElement)(Status, { state }),
+        (0, import_react63.createElement)(Status, { state }),
         ...state.rows.map((row) =>
-          (0, import_react60.createElement)(
+          (0, import_react63.createElement)(
             Card,
             {
               key: row.id,
               title: row.name,
               detail:
                 (row.referenceDirectory
-                  ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH" })[engine]).join("、")}）`
+                  ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH", acp: "ACP" })[engine]).join("、")}）`
                   : displayValue(row.source)) +
                 " · " +
                 displayValue(row.enabled ? row.health || "ready" : "disabled"),
             },
             ["user", "market"].includes(row.source)
-              ? (0, import_react60.createElement)(
+              ? (0, import_react63.createElement)(
                   Button,
                   {
                     onClick: () =>
@@ -17542,7 +18799,7 @@ window.__ModuleLoader__.load({
       );
     }
     var imports = createImports({
-      React: import_react59.default,
+      React: import_react62.default,
       request,
       apiRoot,
       Field,
@@ -17553,10 +18810,10 @@ window.__ModuleLoader__.load({
     });
 
     // src/features/conversations/home.js
-    var import_react61 = __toESM(require("react"), 1);
-    var import_react62 = require("react");
+    var import_react64 = __toESM(require("react"), 1);
+    var import_react65 = require("react");
     function useDraftOption(key, options, defaultId, revision) {
-      const [selection, setSelection] = import_react61.default.useState({
+      const [selection, setSelection] = import_react64.default.useState({
         revision,
         values: {},
       });
@@ -17584,11 +18841,11 @@ window.__ModuleLoader__.load({
       const search = navigation.useSearch();
       const projectId = sharedTaskProject(new URLSearchParams(search));
       return projectId
-        ? (0, import_react62.createElement)(SharedTaskComposer, {
+        ? (0, import_react65.createElement)(SharedTaskComposer, {
             key: projectId,
             projectId,
           })
-        : (0, import_react62.createElement)(WorkspaceComposer);
+        : (0, import_react65.createElement)(WorkspaceComposer);
     }
     function SharedTaskComposer({ projectId }) {
       const [state] = useResource(
@@ -17597,20 +18854,20 @@ window.__ModuleLoader__.load({
       );
       const project = state.rows.find((row) => row.id === projectId);
       if (state.loading)
-        return (0, import_react62.createElement)(
+        return (0, import_react65.createElement)(
           "p",
           { role: "status" },
           "正在加载共享项目…",
         );
       if (state.error || !project)
-        return (0, import_react62.createElement)(
+        return (0, import_react65.createElement)(
           "p",
           { role: "alert", className: "workagent-error" },
           state.error
             ? friendlyError(state.error)
             : "项目不存在，或你已不再是项目成员。",
         );
-      return (0, import_react62.createElement)(WorkspaceComposer, {
+      return (0, import_react65.createElement)(WorkspaceComposer, {
         sharedProject: project,
       });
     }
@@ -17624,13 +18881,13 @@ window.__ModuleLoader__.load({
       );
       const [modelState] = useResource(`${apiRoot}/model-options`);
       const [personalProjectChoice, setProjectChoice] =
-        import_react61.default.useState(
+        import_react64.default.useState(
           () =>
             new URLSearchParams(routeSearch).get("project") ||
             localStorage.getItem(WORKSPACE_PICK_KEY) ||
             "none",
         );
-      import_react61.default.useEffect(() => {
+      import_react64.default.useEffect(() => {
         setProjectChoice(
           new URLSearchParams(routeSearch).get("project") ||
             localStorage.getItem(WORKSPACE_PICK_KEY) ||
@@ -17640,17 +18897,17 @@ window.__ModuleLoader__.load({
       const projectChoice = sharedProject
         ? `shared:${sharedProject.id}`
         : personalProjectChoice;
-      const [presetId, setPresetId] = import_react61.default.useState(
+      const [presetId, setPresetId] = import_react64.default.useState(
         () => localStorage.getItem(AGENT_PICK_KEY) || "builtin-general",
       );
-      const [projectName, setProjectName] = import_react61.default.useState("");
+      const [projectName, setProjectName] = import_react64.default.useState("");
       const [preferences, , defaultsRevision] = useModelDefaults();
       const [message, setMessage] = workbench.useDraft(`home:${projectChoice}`);
       const [attachmentsBusy, setAttachmentsBusy] =
-        import_react61.default.useState(false);
-      const [busy, setBusy] = import_react61.default.useState(false);
-      const [error, setError] = import_react61.default.useState("");
-      import_react61.default.useEffect(() => {
+        import_react64.default.useState(false);
+      const [busy, setBusy] = import_react64.default.useState(false);
+      const [error, setError] = import_react64.default.useState("");
+      import_react64.default.useEffect(() => {
         window.dispatchEvent(
           new window.CustomEvent(FILE_PROJECT_EVENT, {
             detail: ["none", "new"].includes(projectChoice)
@@ -17659,18 +18916,18 @@ window.__ModuleLoader__.load({
           }),
         );
       }, [projectChoice]);
-      import_react61.default.useEffect(() => {
+      import_react64.default.useEffect(() => {
         const update = (event) => setPresetId(event.detail);
         window.addEventListener(HERO_AGENT_EVENT, update);
         return () => window.removeEventListener(HERO_AGENT_EVENT, update);
       }, []);
-      import_react61.default.useEffect(() => {
+      import_react64.default.useEffect(() => {
         if (sharedProject) return;
         const update = (event) => setProjectChoice(event.detail);
         window.addEventListener(HERO_WORKSPACE_EVENT, update);
         return () => window.removeEventListener(HERO_WORKSPACE_EVENT, update);
       }, []);
-      import_react61.default.useEffect(() => {
+      import_react64.default.useEffect(() => {
         const update = () => void reloadWorkspaces();
         window.addEventListener(PROJECTS_CHANGED_EVENT, update);
         return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
@@ -17681,7 +18938,9 @@ window.__ModuleLoader__.load({
         presetState.rows[0];
       const availableProjects = workspaceState.rows;
       const modelGroup = modelState.rows.find(
-        (group) => group.engine === selectedPreset?.engine,
+        (group) =>
+          group.engine === selectedPreset?.engine &&
+          group.acpCatalogId === selectedPreset?.acpCatalogId,
       );
       const availableModels = modelGroup?.models || [];
       const defaults = resolveModelDefaults(
@@ -17708,13 +18967,22 @@ window.__ModuleLoader__.load({
           : defaultEffort(selectedPreset?.engine, selectedModel),
         defaultsRevision,
       );
+      const availablePermissions =
+        selectedPreset?.engine === "acp"
+          ? [
+              ["", "使用引擎原生审批"],
+              ...permissionOptions.filter(
+                ([id]) => modelGroup?.permissionModes?.[id],
+              ),
+            ]
+          : permissionOptions;
       const [permissionMode, setPermissionMode] = useDraftOption(
         draftKey,
-        permissionOptions.map(([id]) => ({ id })),
+        availablePermissions.map(([id]) => ({ id })),
         defaults.permissionMode,
         defaultsRevision,
       );
-      import_react61.default.useEffect(() => {
+      import_react64.default.useEffect(() => {
         if (sharedProject || workspaceState.loading) return;
         const valid = availableProjects.some(
           (project) => project.id === projectChoice,
@@ -17769,10 +19037,13 @@ window.__ModuleLoader__.load({
           const common = {
             ...(modelId ? { modelId } : {}),
             ...(thinkingEffort ? { thinkingEffort } : {}),
-            permissionMode,
+            ...(permissionMode ? { permissionMode } : {}),
           };
           const options = {
             engine: selectedPreset.engine,
+            ...(selectedPreset.acpCatalogId
+              ? { acpCatalogId: selectedPreset.acpCatalogId }
+              : {}),
             title: plainSessionTitle(fileReferenceLabel(content).slice(0, 28)),
             presetId: selectedPreset.id,
             ...common,
@@ -17830,13 +19101,13 @@ window.__ModuleLoader__.load({
           setBusy(false);
         }
       };
-      return (0, import_react62.createElement)(
+      return (0, import_react65.createElement)(
         "div",
         { className: "workagent-hero-controls" },
-        (0, import_react62.createElement)(
+        (0, import_react65.createElement)(
           ComposerForm,
           { className: "workagent-hero-composer", onSubmit: submit },
-          (0, import_react62.createElement)(workbench.ComposerTools, {
+          (0, import_react65.createElement)(workbench.ComposerTools, {
             key: projectChoice,
             session: {
               id: "home",
@@ -17854,7 +19125,7 @@ window.__ModuleLoader__.load({
             onError: setError,
             onBusyChange: setAttachmentsBusy,
           }),
-          (0, import_react62.createElement)(ComposerInput, {
+          (0, import_react65.createElement)(ComposerInput, {
             "aria-label": "输入消息",
             workspaceId: projectChoice === "none" ? "default" : projectChoice,
             value: message,
@@ -17862,19 +19133,19 @@ window.__ModuleLoader__.load({
             onKeyDown: submitComposerOnEnter,
             placeholder: "描述你想完成的任务…",
           }),
-          (0, import_react62.createElement)(
+          (0, import_react65.createElement)(
             "div",
             { className: "workagent-hero-composer-bar" },
-            (0, import_react62.createElement)(
+            (0, import_react65.createElement)(
               "div",
               { className: "workagent-composer-options" },
-              (0, import_react62.createElement)(
+              (0, import_react65.createElement)(
                 "label",
                 {
                   className: "workagent-model-choice",
                   title: selectedModel?.name || "模型",
                 },
-                (0, import_react62.createElement)(
+                (0, import_react65.createElement)(
                   "span",
                   {
                     className: "workagent-model-choice-label",
@@ -17882,7 +19153,7 @@ window.__ModuleLoader__.load({
                   },
                   selectedModel?.name || "模型",
                 ),
-                (0, import_react62.createElement)(Select, {
+                (0, import_react65.createElement)(Select, {
                   "aria-label": "模型",
                   value: modelId,
                   disabled: modelState.loading || !availableModels.length,
@@ -17902,10 +19173,10 @@ window.__ModuleLoader__.load({
                   ],
                 }),
               ),
-              (0, import_react62.createElement)(
+              (0, import_react65.createElement)(
                 "label",
                 { title: "思考级别" },
-                (0, import_react62.createElement)(Select, {
+                (0, import_react65.createElement)(Select, {
                   "aria-label": "思考级别",
                   heading: "思考强度",
                   value: thinkingEffort,
@@ -17919,19 +19190,19 @@ window.__ModuleLoader__.load({
                     : [["", "未提供思考选项"]],
                 }),
               ),
-              (0, import_react62.createElement)(
+              (0, import_react65.createElement)(
                 "label",
                 { title: "权限" },
-                (0, import_react62.createElement)(Select, {
+                (0, import_react65.createElement)(Select, {
                   "aria-label": "权限",
                   heading: "权限",
                   value: permissionMode,
                   onChange: (event) => setPermissionMode(event.target.value),
-                  options: permissionOptions,
+                  options: availablePermissions,
                 }),
               ),
             ),
-            (0, import_react62.createElement)(
+            (0, import_react65.createElement)(
               "button",
               {
                 type: "submit",
@@ -17943,25 +19214,25 @@ window.__ModuleLoader__.load({
                   !selectedPreset ||
                   (projectChoice === "new" && !projectName.trim()),
               },
-              (0, import_react62.createElement)(Icon, {
+              (0, import_react65.createElement)(Icon, {
                 name: "send",
                 size: 18,
               }),
             ),
           ),
         ),
-        (0, import_react62.createElement)(
+        (0, import_react65.createElement)(
           "div",
           { className: "workagent-project-row" },
-          (0, import_react62.createElement)(
+          (0, import_react65.createElement)(
             "label",
             { className: "workagent-project-select" },
-            (0, import_react62.createElement)(Icon, {
+            (0, import_react65.createElement)(Icon, {
               name: "workspace",
               size: 16,
             }),
             sharedProject
-              ? (0, import_react62.createElement)(
+              ? (0, import_react65.createElement)(
                   "span",
                   {
                     className: "workagent-shared-project-name",
@@ -17969,7 +19240,7 @@ window.__ModuleLoader__.load({
                   },
                   sharedProject.name,
                 )
-              : (0, import_react62.createElement)(Select, {
+              : (0, import_react65.createElement)(Select, {
                   "aria-label": "个人项目",
                   value: projectChoice,
                   onChange: selectProject,
@@ -17984,17 +19255,17 @@ window.__ModuleLoader__.load({
                 }),
           ),
           projectChoice === "new"
-            ? (0, import_react62.createElement)(
+            ? (0, import_react65.createElement)(
                 "div",
                 { className: "workagent-project-draft" },
-                (0, import_react62.createElement)(Input, {
+                (0, import_react65.createElement)(Input, {
                   className: "workagent-project-name",
                   "aria-label": "新项目名称",
                   value: projectName,
                   onChange: (event) => setProjectName(event.target.value),
                   placeholder: "个人项目名称",
                 }),
-                (0, import_react62.createElement)(
+                (0, import_react65.createElement)(
                   Button,
                   {
                     disabled: busy || !projectName.trim(),
@@ -18024,12 +19295,12 @@ window.__ModuleLoader__.load({
               )
             : null,
           error
-            ? (0, import_react62.createElement)(
+            ? (0, import_react65.createElement)(
                 "span",
                 { role: "alert", className: "workagent-error" },
                 error,
               )
-            : (0, import_react62.createElement)(
+            : (0, import_react65.createElement)(
                 "span",
                 { className: "workagent-composer-hint" },
                 busy
@@ -18043,8 +19314,8 @@ window.__ModuleLoader__.load({
     }
 
     // src/features/files/sidebar.js
-    var import_react63 = __toESM(require("react"), 1);
-    var import_react64 = require("react");
+    var import_react66 = __toESM(require("react"), 1);
+    var import_react67 = require("react");
     function FileSidebarPanel({
       workspaceId,
       onProjectChange,
@@ -18062,16 +19333,16 @@ window.__ModuleLoader__.load({
             : `${apiRoot}/workspaces`,
         (value) => (sharedProjectId ? value?.projects || [] : value),
       );
-      const [open, setOpen] = import_react63.default.useState(
+      const [open, setOpen] = import_react66.default.useState(
         () =>
           localStorage.getItem("workagent.files.open") === "true" ||
           (localStorage.getItem("workagent.files.open") === null &&
             window.innerWidth >= 1100),
       );
-      const [width, setWidth] = import_react63.default.useState(
+      const [width, setWidth] = import_react66.default.useState(
         () => Number(localStorage.getItem("workagent.files.width")) || 440,
       );
-      import_react63.default.useEffect(() => {
+      import_react66.default.useEffect(() => {
         const openFile = (event) => {
           if (event.detail?.workspaceId === workspaceId) {
             setOpen(true);
@@ -18087,7 +19358,7 @@ window.__ModuleLoader__.load({
         setWidth(next);
         localStorage.setItem("workagent.files.width", String(next));
       };
-      import_react63.default.useEffect(() => {
+      import_react66.default.useEffect(() => {
         const update = () =>
           document.body.style.setProperty(
             "--workagent-files-width",
@@ -18143,19 +19414,19 @@ window.__ModuleLoader__.load({
             },
           }
         : {};
-      import_react63.default.useEffect(() => {
+      import_react66.default.useEffect(() => {
         const update = () => void refresh();
         window.addEventListener(PROJECTS_CHANGED_EVENT, update);
         return () => window.removeEventListener(PROJECTS_CHANGED_EVENT, update);
       }, [refresh]);
-      return (0, import_react64.createElement)(
-        import_react63.default.Fragment,
+      return (0, import_react67.createElement)(
+        import_react66.default.Fragment,
         null,
-        (0, import_react64.createElement)(
+        (0, import_react67.createElement)(
           "div",
           { className: "workagent-top-actions" },
-          (0, import_react64.createElement)(TopNotificationButton),
-          (0, import_react64.createElement)(
+          (0, import_react67.createElement)(TopNotificationButton),
+          (0, import_react67.createElement)(
             "button",
             {
               type: "button",
@@ -18166,21 +19437,21 @@ window.__ModuleLoader__.load({
               title: "项目文件",
               onClick: () => toggle(!open),
             },
-            (0, import_react64.createElement)(Icon, {
+            (0, import_react67.createElement)(Icon, {
               name: "workspace",
               size: 19,
             }),
           ),
         ),
         open
-          ? (0, import_react64.createElement)("button", {
+          ? (0, import_react67.createElement)("button", {
               type: "button",
               className: "workagent-files-backdrop",
               "aria-label": "关闭文件侧栏遮罩",
               onClick: () => toggle(false),
             })
           : null,
-        (0, import_react64.createElement)(
+        (0, import_react67.createElement)(
           "aside",
           {
             id: "workagent-files-panel",
@@ -18195,7 +19466,7 @@ window.__ModuleLoader__.load({
                 toggle(false);
             },
           },
-          (0, import_react64.createElement)(ResizeHandle, {
+          (0, import_react67.createElement)(ResizeHandle, {
             orientation: "vertical",
             value: width,
             onChange: resizeWidth,
@@ -18206,24 +19477,24 @@ window.__ModuleLoader__.load({
               return (move) => actualWidth + initial - move.clientX;
             },
           }),
-          (0, import_react64.createElement)(
+          (0, import_react67.createElement)(
             "header",
             { className: "workagent-files-panel-header" },
-            (0, import_react64.createElement)("strong", null, "项目文件"),
-            (0, import_react64.createElement)(FileIconButton, {
+            (0, import_react67.createElement)("strong", null, "项目文件"),
+            (0, import_react67.createElement)(FileIconButton, {
               name: "expand",
               label: width > 500 ? "缩小文件侧栏" : "放大文件侧栏",
               onClick: () =>
                 resizeWidth(width > 500 ? 440 : window.innerWidth * 0.55),
             }),
-            (0, import_react64.createElement)(FileIconButton, {
+            (0, import_react67.createElement)(FileIconButton, {
               name: "close",
               label: "关闭文件侧栏",
               onClick: () => toggle(false),
             }),
           ),
           onProjectChange && !sharedProjectId
-            ? (0, import_react64.createElement)(
+            ? (0, import_react67.createElement)(
                 "select",
                 {
                   className: "workagent-files-project",
@@ -18231,7 +19502,7 @@ window.__ModuleLoader__.load({
                   value: workspace?.id || "",
                   onChange: (event) => onProjectChange(event.target.value),
                 },
-                (0, import_react64.createElement)(
+                (0, import_react67.createElement)(
                   "option",
                   { value: "" },
                   "选择项目",
@@ -18239,14 +19510,14 @@ window.__ModuleLoader__.load({
                 ...state.rows
                   .filter((row) => row.scope !== "team")
                   .map((row) =>
-                    (0, import_react64.createElement)(
+                    (0, import_react67.createElement)(
                       "option",
                       { key: row.id, value: row.id },
                       displayWorkspaceName(row.name),
                     ),
                   ),
               )
-            : (0, import_react64.createElement)(
+            : (0, import_react67.createElement)(
                 "div",
                 {
                   className: "workagent-files-project",
@@ -18259,37 +19530,37 @@ window.__ModuleLoader__.load({
                     : "当前会话项目",
               ),
           state.error || sessionError
-            ? (0, import_react64.createElement)(
+            ? (0, import_react67.createElement)(
                 "p",
                 { role: "alert", className: "workagent-file-notice" },
                 friendlyError(state.error || sessionError),
               )
             : state.loading || sessionLoading
-              ? (0, import_react64.createElement)(
+              ? (0, import_react67.createElement)(
                   "p",
                   { role: "status" },
                   "正在加载项目…",
                 )
               : workspace
-                ? (0, import_react64.createElement)(WorkspaceFileManager, {
+                ? (0, import_react67.createElement)(WorkspaceFileManager, {
                     key: workspace.id,
                     workspace,
                     ...sharedFiles,
                     onDismiss: () => toggle(false),
                   })
-                : (0, import_react64.createElement)(
+                : (0, import_react67.createElement)(
                     "div",
                     { className: "workagent-file-panel-empty" },
-                    (0, import_react64.createElement)(Icon, {
+                    (0, import_react67.createElement)(Icon, {
                       name: "workspace",
                       size: 32,
                     }),
-                    (0, import_react64.createElement)(
+                    (0, import_react67.createElement)(
                       "strong",
                       null,
                       sharedProjectId ? "共享项目文件夹" : "选择项目后查看文件",
                     ),
-                    (0, import_react64.createElement)(
+                    (0, import_react67.createElement)(
                       "p",
                       null,
                       sharedProjectId
@@ -18302,25 +19573,25 @@ window.__ModuleLoader__.load({
     }
     function HomeFileSidebar() {
       const routeSearch = navigation.useSearch();
-      const [workspaceId, setWorkspaceId] = import_react63.default.useState(
+      const [workspaceId, setWorkspaceId] = import_react66.default.useState(
         () =>
           new URLSearchParams(routeSearch).get("project") ||
           localStorage.getItem(WORKSPACE_PICK_KEY) ||
           "",
       );
-      import_react63.default.useEffect(() => {
+      import_react66.default.useEffect(() => {
         setWorkspaceId(
           new URLSearchParams(routeSearch).get("project") ||
             localStorage.getItem(WORKSPACE_PICK_KEY) ||
             "",
         );
       }, [routeSearch]);
-      import_react63.default.useEffect(() => {
+      import_react66.default.useEffect(() => {
         const update = (event) => setWorkspaceId(event.detail || "");
         window.addEventListener(FILE_PROJECT_EVENT, update);
         return () => window.removeEventListener(FILE_PROJECT_EVENT, update);
       }, []);
-      return (0, import_react64.createElement)(FileSidebarPanel, {
+      return (0, import_react67.createElement)(FileSidebarPanel, {
         workspaceId,
         onProjectChange: (id) => {
           setWorkspaceId(id);
@@ -18337,7 +19608,7 @@ window.__ModuleLoader__.load({
       const [state] = useSessionResource(
         `${apiRoot}/sessions/${encodeURIComponent(sessionId2)}`,
       );
-      return (0, import_react64.createElement)(FileSidebarPanel, {
+      return (0, import_react67.createElement)(FileSidebarPanel, {
         workspaceId: state.rows[0]?.workspaceId,
         sessionLoading: state.loading,
         sessionError: state.error,
@@ -18352,33 +19623,33 @@ window.__ModuleLoader__.load({
         params.get("personal") === "new" &&
         params.get("project");
       if (sharedStarter && !sessionId2)
-        return (0, import_react64.createElement)(FileSidebarPanel, {
+        return (0, import_react67.createElement)(FileSidebarPanel, {
           key: `shared:${sharedStarter}`,
           workspaceId: `shared:${sharedStarter}`,
         });
       if (params.get("workagent") && !sessionId2)
-        return (0, import_react64.createElement)(
+        return (0, import_react67.createElement)(
           "div",
           { className: "workagent-top-actions" },
-          (0, import_react64.createElement)(TopNotificationButton),
+          (0, import_react67.createElement)(TopNotificationButton),
         );
       return sessionId2
-        ? (0, import_react64.createElement)(SessionFileSidebar, {
+        ? (0, import_react67.createElement)(SessionFileSidebar, {
             key: sessionId2,
             sessionId: sessionId2,
           })
-        : (0, import_react64.createElement)(HomeFileSidebar);
+        : (0, import_react67.createElement)(HomeFileSidebar);
     }
 
     // src/features/quota/panel.js
-    var import_react65 = __toESM(require("react"), 1);
-    var import_react66 = require("react");
+    var import_react68 = __toESM(require("react"), 1);
+    var import_react69 = require("react");
     function QuotaPanel() {
       const [state, refresh] = useResource(
         "/api/quota/dollars",
         (value) => value.budgets || [],
       );
-      import_react65.default.useEffect(() => {
+      import_react68.default.useEffect(() => {
         const timer = setInterval(refresh, 5e3);
         return () => clearInterval(timer);
       }, [refresh]);
@@ -18386,12 +19657,12 @@ window.__ModuleLoader__.load({
         `${limit > 0 ? Math.round(Math.max(0, Math.min(1, 1 - used / limit)) * 100) : 0}%`;
       const meter = (label, used, limit) => {
         const value = remaining(used, limit);
-        return (0, import_react66.createElement)(
+        return (0, import_react69.createElement)(
           "div",
           { className: "workagent-quota-row" },
-          (0, import_react66.createElement)("span", null, label),
-          (0, import_react66.createElement)("span", null, value),
-          (0, import_react66.createElement)(
+          (0, import_react69.createElement)("span", null, label),
+          (0, import_react69.createElement)("span", null, value),
+          (0, import_react69.createElement)(
             "div",
             {
               className: "workagent-quota-track",
@@ -18401,22 +19672,22 @@ window.__ModuleLoader__.load({
               "aria-valuemax": 100,
               "aria-valuenow": parseInt(value, 10),
             },
-            (0, import_react66.createElement)("span", {
+            (0, import_react69.createElement)("span", {
               style: { width: value },
             }),
           ),
         );
       };
-      return (0, import_react66.createElement)(
+      return (0, import_react69.createElement)(
         "aside",
         { className: "workagent-quota-panel", "aria-label": "使用额度" },
-        (0, import_react66.createElement)("strong", null, "剩余额度"),
-        (0, import_react66.createElement)(Status, { state }),
+        (0, import_react69.createElement)("strong", null, "剩余额度"),
+        (0, import_react69.createElement)(Status, { state }),
         ...state.rows.map((b) =>
-          (0, import_react66.createElement)(
+          (0, import_react69.createElement)(
             "div",
             { className: "workagent-dollar-quota", key: b.pool },
-            (0, import_react66.createElement)(
+            (0, import_react69.createElement)(
               "strong",
               null,
               b.pool === "codex" ? "Codex / ChatGPT" : "Kimi",
@@ -18425,7 +19696,7 @@ window.__ModuleLoader__.load({
             meter("每周剩余", b.weeklyUsd, b.weeklyLimitUsd),
           ),
         ),
-        (0, import_react66.createElement)(
+        (0, import_react69.createElement)(
           "span",
           { className: "workagent-muted" },
           "DSH 与 Codex / ChatGPT 共享额度。",
@@ -18434,7 +19705,7 @@ window.__ModuleLoader__.load({
     }
 
     // src/client.js
-    var import_react67 = require("react");
+    var import_react70 = require("react");
     var pluginScript = document.currentScript?.src;
     var sections = [
       ["workagent-system", 40, "系统与帮助", SystemSettings],
@@ -18586,7 +19857,7 @@ window.__ModuleLoader__.load({
               order: 100 + order,
             },
             (props) =>
-              (0, import_react67.createElement)(FooterAction, {
+              (0, import_react70.createElement)(FooterAction, {
                 ...props,
                 kind,
                 theme: ctx.theme,
@@ -18629,10 +19900,10 @@ window.__ModuleLoader__.load({
         ctx.slots.register(
           { name: "shell.overlay", id: "workagent-page", order: 10 },
           (props) =>
-            (0, import_react67.createElement)(
+            (0, import_react70.createElement)(
               RuntimeServices.Provider,
               { value: ctx },
-              (0, import_react67.createElement)(WorkAgentOverlay, props),
+              (0, import_react70.createElement)(WorkAgentOverlay, props),
             ),
         ),
       );

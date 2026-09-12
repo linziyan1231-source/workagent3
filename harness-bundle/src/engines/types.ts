@@ -5,13 +5,24 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [key: string]: JsonValue };
-export type NativeApprovalDecision = "allow" | "reject" | "cancel";
+export type NativeApprovalDecision =
+  | "allow"
+  | "reject"
+  | "cancel"
+  | { optionId: string };
+export type NativeApprovalOption = {
+  id: string;
+  label: string;
+  outcome: "allow" | "reject" | "cancel";
+  scope: "once" | "session" | "rule" | "remember";
+};
 export type NativeApprovalRequest = {
   turnId: string;
   tool: string;
   summary: string;
   input?: unknown;
   options?: JsonValue[];
+  choices?: NativeApprovalOption[];
   signal: AbortSignal;
 };
 export type ToolDetails = {
@@ -77,6 +88,7 @@ export type BridgeSession = {
   // False once the backing engine process is gone; the runtime must
   // re-activate instead of reusing the dead session.
   readonly connected: boolean;
+  commands?(): NativeCommandCatalog;
   readonly permissionMode?:
     | EngineSessionOptions["permissionMode"]
     | "manual_approval";
@@ -101,7 +113,7 @@ export type NativeEngineStatus = {
 };
 
 export type EngineBridge = {
-  readonly id: "codex" | "kimi";
+  readonly id: "codex" | "kimi" | "acp";
   create(
     workspace: string,
     onEvent: (event: BridgeEvent) => void,
@@ -123,6 +135,17 @@ export type EngineBridge = {
   close(): Promise<void>;
   status(): Promise<NativeEngineStatus>;
   listModels(): Promise<EngineModel[]>;
+};
+
+export type NativeCommandCatalog = {
+  supported: boolean;
+  revision: number;
+  items: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    inputHint?: string;
+  }>;
 };
 
 export type EngineModel = {

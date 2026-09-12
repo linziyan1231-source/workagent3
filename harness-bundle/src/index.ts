@@ -27,6 +27,7 @@ import { AutomationController } from "./automation-api.js";
 import { AutomationScheduler, AutomationStore } from "./automation-store.js";
 import { TeamController } from "./team-api.js";
 import { TeamOrchestrator, TeamStore } from "./team-store.js";
+import { SessionTools, mountSessionTools } from "./session-tools.js";
 import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
@@ -264,12 +265,8 @@ export function apply(ctx: Context): void {
           platformQuota,
           personalQuotaSettlements,
         );
-  new AutomationController(
-    ctx,
-    token,
-    automations,
-    new AutomationScheduler(automations, automationRunner),
-  );
+  const scheduler = new AutomationScheduler(automations, automationRunner);
+  new AutomationController(ctx, token, automations, scheduler);
   const teams = new TeamStore(dshHome);
   const teamRunner =
     platformQuota === undefined
@@ -280,13 +277,29 @@ export function apply(ctx: Context): void {
           platformQuota,
           personalQuotaSettlements,
         );
-  new TeamController(
+  const orchestrator = new TeamOrchestrator(teams, teamRunner);
+  new TeamController(ctx, token, teams, orchestrator, runtime);
+  mountSessionTools(
     ctx,
     token,
-    teams,
-    new TeamOrchestrator(teams, teamRunner),
-    runtime,
+    new SessionTools(
+      runtime,
+      automations,
+      scheduler,
+      teams,
+      orchestrator,
+      presets,
+    ),
   );
+  runtime.setTeamInputHandler((sessionId, input) => {
+    const context = teams.contextForSession(sessionId);
+    if (!context) return false;
+    teams.operation(`user:${sessionId}:${input.messageId}`, input, () =>
+      teams.startRun(context.team.id, input.content, context.member.id),
+    );
+    void orchestrator.tick();
+    return true;
+  });
   const inbox = new InboxStore(dshHome);
   new InboxController(ctx, token, inbox, runtime);
   runtime.setActivityProvider(() => {
@@ -301,19 +314,10 @@ export function apply(ctx: Context): void {
               (run) => run.status === "pending" || run.status === "running",
             ),
         ) ||
-        teams
-          .list()
-          .some((team) =>
-            teams
-              .tasks(team.id)
-              .some(
-                (task) => task.status === "queued" || task.status === "running",
-              ),
-          ),
+        teams.hasActiveWork(),
       nextWakeAt:
-        definitions
-          .filter((definition) => definition.enabled && definition.nextRunAt)
-          .map((definition) => definition.nextRunAt!)
+        [automations.nextWakeAt(), teams.nextWakeAt()]
+          .filter((value): value is string => value !== null)
           .sort()[0] ?? null,
     };
   });

@@ -19,6 +19,7 @@ type auditScope struct {
 	correlationID string
 	actor         string
 	force         bool
+	source        map[string]string
 }
 
 type statusWriter struct {
@@ -67,7 +68,7 @@ func (s *Server) correlatedAudit(next http.Handler) http.Handler {
 			writeError(writer, http.StatusInternalServerError, "internal_error")
 			return
 		}
-		scope := &auditScope{correlationID: correlationID, actor: "anonymous"}
+		scope := &auditScope{correlationID: correlationID, actor: "anonymous", source: s.modules.RequestSource.source(request)}
 		request = request.WithContext(context.WithValue(request.Context(), auditContextKey{}, scope))
 		request.Header.Set(correlationHeader, correlationID)
 		writer.Header().Set(correlationHeader, correlationID)
@@ -82,7 +83,7 @@ func (s *Server) correlatedAudit(next http.Handler) http.Handler {
 		}
 		_, _ = s.modules.Audit.Record(context.WithoutCancel(request.Context()), contracts.AuditInput{
 			Actor: scope.actor, Target: boundedAuditTarget(request.URL.Path), Action: auditAction(request),
-			Result: auditResult(status), CorrelationID: correlationID,
+			Result: auditResult(status), CorrelationID: correlationID, Metadata: scope.source,
 		})
 	})
 }
@@ -120,11 +121,25 @@ func (s *Server) recordBusinessEvent(ctx context.Context, actor, action, target 
 		correlationID = generated
 	}
 	result := "success"
+	trustedMetadata := map[string]string{}
+	for key, value := range metadata {
+		trustedMetadata[key] = value
+	}
+	for _, key := range []string{"client_ip", "peer_ip", "source_kind", "user_agent"} {
+		delete(trustedMetadata, key)
+	}
+	if scope, ok := ctx.Value(auditContextKey{}).(*auditScope); ok {
+		for key, value := range scope.source {
+			trustedMetadata[key] = value
+		}
+	} else {
+		trustedMetadata["source_kind"] = "background"
+	}
 	if operation != nil {
 		result = "failure"
 	}
 	_, _ = s.modules.Audit.Record(context.WithoutCancel(ctx), contracts.AuditInput{
-		Actor: actor, Target: target, Action: action, Result: result, CorrelationID: correlationID, Metadata: metadata,
+		Actor: actor, Target: target, Action: action, Result: result, CorrelationID: correlationID, Metadata: trustedMetadata,
 	})
 }
 

@@ -93,6 +93,13 @@ const errorStatus = (error: unknown): [number, string] => {
   )
     return [404, code];
   if (code === "request_too_large") return [413, code];
+  if (code === "search_busy") return [429, code];
+  if (
+    code === "invalid_search" ||
+    code === "invalid_search_cursor" ||
+    code === "search_depth_exceeded"
+  )
+    return [400, code];
   if (
     code === "invalid_move" ||
     code === "move_not_pending" ||
@@ -165,7 +172,7 @@ export class WorkspaceController {
             if (basePath !== "/v1/workspaces") {
               const url = new URL(request.url ?? "/", "http://runtime");
               if (
-                !/^\/[A-Za-z0-9_-]{16,128}\/(files|content|directories|move|uploads(?:\/[A-Za-z0-9_-]+(?:\/complete)?)?|locate)$/.test(
+                !/^\/[A-Za-z0-9_-]{16,128}\/(search|files|content|directories|move|uploads(?:\/[A-Za-z0-9_-]+(?:\/complete)?)?|locate)$/.test(
                   url.pathname.slice(basePath.length),
                 )
               ) {
@@ -320,7 +327,7 @@ export class WorkspaceController {
       return;
     }
     const match =
-      /^\/v1\/workspaces\/([^/]+)\/(files|content|directories|move|assets|attachments|locate)$/.exec(
+      /^\/v1\/workspaces\/([^/]+)\/(search|files|content|directories|move|assets|attachments|locate)$/.exec(
         url.pathname,
       );
     if (match === null) {
@@ -329,6 +336,34 @@ export class WorkspaceController {
     }
     const id = decodeURIComponent(match[1] ?? "");
     const action = match[2];
+    if (action === "search" && request.method === "DELETE") {
+      const cursor = url.searchParams.get("cursor");
+      if (!cursor) throw new Error("invalid_search_cursor");
+      await this.#store.search.release(id, cursor);
+      json(response, 204, undefined);
+      return;
+    }
+    if (action === "search" && request.method === "GET") {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      response.once("close", cancel);
+      try {
+        json(
+          response,
+          200,
+          await this.#store.search.search(
+            id,
+            url.searchParams.get("q") ?? "",
+            url.searchParams.get("cursor") ?? undefined,
+            Number(url.searchParams.get("limit") ?? 100),
+            controller.signal,
+          ),
+        );
+      } finally {
+        response.off("close", cancel);
+      }
+      return;
+    }
     let path = url.searchParams.get("path") ?? "";
     const sessionId = url.searchParams.get("sessionId") ?? "";
     if (action === "locate" && request.method === "GET") {

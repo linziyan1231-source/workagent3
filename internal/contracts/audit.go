@@ -27,6 +27,7 @@ type AuditEvent struct {
 }
 
 type AuditQuery struct {
+	ClientIP      string
 	Actor         string
 	Action        string
 	Target        string

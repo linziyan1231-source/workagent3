@@ -149,7 +149,7 @@ describe("TeamStore", () => {
 
     expect(reopened.task(queued.id)?.status).toBe("succeeded");
     expect(executeTeamTask).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: queued.id }),
+      expect.objectContaining({ logicalTaskId: queued.id }),
     );
     expect(new TeamStore(home).interruptedExecutions()).toEqual([]);
   });
@@ -267,7 +267,11 @@ describe("TeamStore", () => {
     const executeTeamTask = vi.fn(
       (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
         new Promise<{ sessionId: string; result?: string }>((resolve) => {
-          releases.set(request.taskId, resolve);
+          if (!request.logicalTaskId) {
+            resolve({ sessionId: request.sessionId, result: "summary" });
+            return;
+          }
+          releases.set(request.logicalTaskId, resolve);
         }),
     );
     // The engine acknowledges the cancel but the in-flight execution settles
@@ -295,7 +299,9 @@ describe("TeamStore", () => {
     await orchestrator.cancel(team.id, first.id);
 
     await vi.waitFor(() => expect(executeTeamTask).toHaveBeenCalledTimes(2));
-    expect(cancelTeamTask).toHaveBeenCalledWith(first.id);
+    expect(cancelTeamTask).toHaveBeenCalledWith(
+      store.dispatches().find((item) => item.taskId === first.id)?.id,
+    );
     expect(store.task(first.id)?.status).toBe("cancelled");
     expect(store.task(second.id)?.status).toBe("running");
 
@@ -320,7 +326,11 @@ describe("TeamStore", () => {
     const executeTeamTask = vi.fn(
       (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
         new Promise<{ sessionId: string; result?: string }>((resolve) => {
-          releases.set(request.taskId, resolve);
+          if (!request.logicalTaskId) {
+            resolve({ sessionId: request.sessionId, result: "summary" });
+            return;
+          }
+          releases.set(request.logicalTaskId, resolve);
         }),
     );
     const cancelTeamTask = vi.fn(async () => undefined);
@@ -376,7 +386,11 @@ describe("TeamStore", () => {
     const executeTeamTask = vi.fn(
       (request: Parameters<TeamRunnerPort["executeTeamTask"]>[0]) =>
         new Promise<{ sessionId: string; result: string }>((resolve) => {
-          releases.set(request.taskId, resolve);
+          if (!request.logicalTaskId) {
+            resolve({ sessionId: request.sessionId, result: "summary" });
+            return;
+          }
+          releases.set(request.logicalTaskId, resolve);
         }),
     );
     const orchestrator = new TeamOrchestrator(store, { executeTeamTask });

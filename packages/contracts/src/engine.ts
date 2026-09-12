@@ -1,7 +1,17 @@
 import { z } from "zod";
 
-export const engineIdSchema = z.enum(["harness", "codex", "kimi"]);
+export const engineIdSchema = z.enum(["harness", "codex", "kimi", "acp"]);
 export type EngineId = z.infer<typeof engineIdSchema>;
+export const acpCatalogIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+export const validEngineSelection = (value: {
+  engine: EngineId;
+  acpCatalogId?: string | undefined;
+}) =>
+  value.engine === "acp"
+    ? Boolean(value.acpCatalogId)
+    : value.acpCatalogId === undefined;
 
 export const engineCapabilitiesSchema = z.object({
   approval: z.boolean(),
@@ -14,6 +24,7 @@ export type EngineCapabilities = z.infer<typeof engineCapabilitiesSchema>;
 
 export const engineStatusSchema = z.object({
   id: engineIdSchema,
+  acpCatalogId: acpCatalogIdSchema.optional(),
   label: z.string().min(1),
   available: z.boolean(),
   authenticated: z.boolean().nullable(),
@@ -23,21 +34,27 @@ export const engineStatusSchema = z.object({
 });
 export type EngineStatus = z.infer<typeof engineStatusSchema>;
 
-export const createEngineSessionSchema = z.object({
-  engine: engineIdSchema,
-  title: z.string().trim().min(1).max(200),
-  workspace: z.string().min(1),
-  presetId: z.string().min(1).optional(),
-  operationId: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{1,160}$/)
-    .optional(),
-  modelId: z.string().trim().min(1).max(200).optional(),
-  thinkingEffort: z.string().trim().min(1).max(80).optional(),
-  permissionMode: z
-    .enum(["read_only", "workspace_write", "full_access"])
-    .optional(),
-});
+export const createEngineSessionSchema = z
+  .object({
+    engine: engineIdSchema,
+    acpCatalogId: acpCatalogIdSchema.optional(),
+    title: z.string().trim().min(1).max(200),
+    workspace: z.string().min(1),
+    presetId: z.string().min(1).optional(),
+    operationId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,160}$/)
+      .optional(),
+    modelId: z.string().trim().min(1).max(200).optional(),
+    thinkingEffort: z.string().trim().min(1).max(80).optional(),
+    permissionMode: z
+      .enum(["read_only", "workspace_write", "full_access"])
+      .optional(),
+  })
+  .refine(validEngineSelection, {
+    message: "ACP selections require a catalog id; built-in engines forbid it",
+    path: ["acpCatalogId"],
+  });
 export type CreateEngineSession = z.infer<typeof createEngineSessionSchema>;
 
 export const sendEngineTurnSchema = z.object({

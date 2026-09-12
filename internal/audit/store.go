@@ -109,9 +109,10 @@ func (s *Store) List(ctx context.Context, query contracts.AuditQuery) ([]contrac
 FROM audit_events
 WHERE (?='' OR actor=?) AND (?='' OR action=?) AND (?='' OR target=?) AND (?='' OR correlation_id=?)
 AND (?=0 OR occurred_at>=?) AND (?=0 OR occurred_at<=?)
+AND (?='' OR json_extract(metadata,'$.client_ip')=?)
 ORDER BY occurred_at DESC,id DESC LIMIT ?`,
 		query.Actor, query.Actor, query.Action, query.Action, query.Target, query.Target, query.CorrelationID, query.CorrelationID,
-		from, from, to, to, query.Limit)
+		from, from, to, to, query.ClientIP, query.ClientIP, query.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("list audit events: %w", err)
 	}

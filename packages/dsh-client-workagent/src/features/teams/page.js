@@ -27,6 +27,7 @@ function TeamsPage() {
   const [selectedTeam, setSelectedTeam] = React.useState(null);
   const [teamAction, setTeamAction] = React.useState(null);
   const [teamActionValue, setTeamActionValue] = React.useState("");
+  const [operationId, setOperationId] = React.useState("");
   const [memberEngine, setMemberEngine] = React.useState("codex");
   const [memberPresetId, setMemberPresetId] = React.useState("");
   const [targetMemberId, setTargetMemberId] = React.useState("");
@@ -68,6 +69,9 @@ function TeamsPage() {
       "task.completed",
       "task.failed",
       "task.cancelled",
+      "run.updated",
+      "dispatch.updated",
+      "task.updated",
       "mail.received",
     ])
       source.addEventListener(type, receive);
@@ -84,20 +88,28 @@ function TeamsPage() {
         engine: presets.rows.find((row) => row.id === values.get("presetId"))
           ?.engine,
         presetId: String(values.get("presetId")),
+        ...(presets.rows.find((row) => row.id === values.get("presetId"))
+          ?.engine === "acp"
+          ? {
+              acpCatalogId: presets.rows.find(
+                (row) => row.id === values.get("presetId"),
+              )?.acpCatalogId,
+            }
+          : {}),
       },
     });
   };
   const loadDetails = async (team) => {
     setSelectedTeam(team);
     try {
-      const [tasks, messages, events] = await Promise.all(
-        ["tasks", "messages", "events"].map((name) =>
+      const [tasks, messages, events, runs] = await Promise.all(
+        ["tasks", "messages", "events", "runs"].map((name) =>
           request(`${endpoint}/${encodeURIComponent(team.id)}/${name}`),
         ),
       );
       setDetails((value) => ({
         ...value,
-        [team.id]: { tasks, messages, events },
+        [team.id]: { tasks, messages, events, runs },
       }));
     } catch (reason) {
       setError(reason.message);
@@ -106,6 +118,11 @@ function TeamsPage() {
   const beginTeamAction = (kind, team) => {
     setTeamAction({ kind, team });
     setTeamActionValue("");
+    setOperationId(
+      Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join(""),
+    );
     setMemberEngine("codex");
     setMemberPresetId(team.members[0].presetId);
     setTargetMemberId(team.members[0].id);
@@ -116,6 +133,11 @@ function TeamsPage() {
     if (!value || !teamAction) return;
     const { kind, team } = teamAction;
     const action = {
+      run: {
+        suffix: "runs",
+        refresh: () => loadDetails(team),
+        body: { input: value, operationId },
+      },
       member: {
         suffix: "members",
         refresh,
@@ -123,6 +145,13 @@ function TeamsPage() {
           name: value,
           engine: memberEngine,
           presetId: memberPresetId,
+          ...(memberEngine === "acp"
+            ? {
+                acpCatalogId: presets.rows?.find(
+                  (preset) => preset.id === memberPresetId,
+                )?.acpCatalogId,
+              }
+            : {}),
         },
       },
       task: {
@@ -325,6 +354,11 @@ function TeamsPage() {
           { onClick: () => beginTeamAction("member", team) },
           "添加成员",
         ),
+        h(
+          Button,
+          { onClick: () => beginTeamAction("run", team) },
+          "交给团队自主完成",
+        ),
         h(Button, { onClick: () => beginTeamAction("task", team) }, "分派任务"),
         h(Button, { onClick: () => loadDetails(team) }, "消息与动态"),
         h(
@@ -336,6 +370,86 @@ function TeamsPage() {
           ? h(
               "div",
               { className: "workagent-stack" },
+              ...(details[team.id].runs || []).map((run) =>
+                h(
+                  "article",
+                  { key: run.id },
+                  h(
+                    "strong",
+                    null,
+                    {
+                      running: "团队协作中",
+                      paused: "已暂停",
+                      paused_limit: "本段协作已达上限",
+                      completed: "已完成",
+                      cancelled: "已取消",
+                      interrupted: "已中断，等待恢复",
+                    }[run.status],
+                  ),
+                  h("p", null, run.input),
+                  h(
+                    "p",
+                    null,
+                    `第 ${run.segment} 段 · 已执行 ${run.dispatchCount}/64 个成员回合`,
+                  ),
+                  run.status === "paused_limit"
+                    ? h(
+                        "p",
+                        null,
+                        "继续将开启新的运行预算段，保留成员、消息和待办。",
+                      )
+                    : null,
+                  run.reason === "dependency_failed"
+                    ? h(
+                        "p",
+                        null,
+                        "前置任务未成功，后续任务已暂停。继续后由组长检查原因并调整分工。",
+                      )
+                    : null,
+                  run.result ? h(Markdown, null, run.result) : null,
+                  ...(["completed", "cancelled"].includes(run.status)
+                    ? []
+                    : [
+                        h(
+                          Button,
+                          {
+                            key: "toggle",
+                            onClick: () =>
+                              mutate(
+                                () => loadDetails(team),
+                                setError,
+                                `${endpoint}/${encodeURIComponent(team.id)}/runs/${encodeURIComponent(run.id)}/${run.status === "running" ? "pause" : "resume"}`,
+                                "POST",
+                                {},
+                              ),
+                          },
+                          run.status === "running"
+                            ? "暂停后续协作"
+                            : "继续协作",
+                        ),
+                        h(
+                          Button,
+                          {
+                            key: "cancel",
+                            onClick: () =>
+                              mutate(
+                                () => loadDetails(team),
+                                setError,
+                                `${endpoint}/${encodeURIComponent(team.id)}/runs/${encodeURIComponent(run.id)}/cancel`,
+                                "POST",
+                                {},
+                              ),
+                          },
+                          "取消本次协作",
+                        ),
+                        h(
+                          "small",
+                          { key: "note" },
+                          "暂停停止后续分派；取消会中止运行中的回合，已发生的文件和网络操作不会自动撤销。",
+                        ),
+                      ]),
+                ),
+              ),
               h(
                 "span",
                 null,
@@ -356,6 +470,13 @@ function TeamsPage() {
                     `执行成员：${team.members.find((member) => member.id === taskEntry.memberId)?.name || "已移除成员"}`,
                   ),
                   taskEntry.result ? h(Markdown, null, taskEntry.result) : null,
+                  taskEntry.dependsOnIds?.length
+                    ? h(
+                        "p",
+                        null,
+                        `前置任务：${taskEntry.dependsOnIds.map((id) => details[team.id].tasks.find((task) => task.id === id)?.title || id).join("、")}`,
+                      )
+                    : null,
                   taskEntry.error
                     ? h("p", { role: "alert" }, friendlyError(taskEntry.error))
                     : null,
@@ -409,6 +530,7 @@ function TeamsPage() {
                 member: "成员名称",
                 task: "任务标题",
                 mail: "发送给团队的消息",
+                run: "希望团队完成的目标",
               }[teamAction.kind],
             },
             h(Input, {
@@ -452,6 +574,7 @@ function TeamsPage() {
                       ["harness", "通用引擎"],
                       ["codex", "Codex"],
                       ["kimi", "Kimi"],
+                      ["acp", "管理员提供的 ACP 引擎"],
                     ],
                   }),
                 ),

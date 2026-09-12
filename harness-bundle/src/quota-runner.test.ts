@@ -50,6 +50,75 @@ const presets = {
 };
 
 describe("QuotaAutomationRunner", () => {
+  it("does not reserve or send when ACP is cancelled while resolving its frozen catalog", async () => {
+    let finish!: (model: string) => void;
+    const billingModel = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const execute = vi.fn();
+    const reserve = vi.fn();
+    const settle = vi.fn();
+    const runner = new QuotaAutomationRunner(
+      { billingModel, execute },
+      presets,
+      { reserve, settle },
+    );
+    const promise = runner.execute({
+      ...request,
+      definition: {
+        ...request.definition,
+        engine: "acp",
+        acpCatalogId: "approved",
+      },
+    });
+    await vi.waitFor(() => expect(billingModel).toHaveBeenCalledOnce());
+    await runner.cancel(request.automationRunId);
+    finish("fixed-billing");
+    await expect(promise).rejects.toThrow("automation_cancelled");
+    expect(reserve).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(settle).not.toHaveBeenCalled();
+  });
+  it.each([true, false])(
+    "charges failed ACP automation only after submission (%s) using frozen catalog billing",
+    async (submitted) => {
+      const selected = {
+        ...request,
+        definition: {
+          ...request.definition,
+          engine: "acp" as const,
+          acpCatalogId: "approved",
+          modelId: "display-model",
+        },
+      };
+      const reserve = vi.fn().mockResolvedValue({ status: "reserved" });
+      const settle = vi.fn().mockResolvedValue(undefined);
+      const runner = new QuotaAutomationRunner(
+        {
+          billingModel: async () => "fixed-billing",
+          execute: async (input) => {
+            if (submitted) input.onSubmitted?.("native-turn");
+            throw new Error("interrupted");
+          },
+        },
+        presets,
+        { reserve, settle },
+      );
+      await expect(runner.execute(selected)).rejects.toThrow("interrupted");
+      expect(reserve).toHaveBeenCalledWith(
+        expect.objectContaining({ engine: "acp", modelId: "fixed-billing" }),
+      );
+      expect(settle).toHaveBeenCalledWith({
+        runId: selected.automationRunId,
+        actualUnits: submitted
+          ? estimatedAutomationUnits(selected.definition.input)
+          : 0,
+      });
+    },
+  );
   it("reserves before execution and settles the correlated successful run", async () => {
     const order: string[] = [];
     const reserve = vi.fn(async () => {

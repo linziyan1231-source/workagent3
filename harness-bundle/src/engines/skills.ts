@@ -42,9 +42,16 @@ export function withSkillCatalog(
       ? { permissionMode: session.permissionMode }
       : {}),
     ...(session.compact ? { compact: () => session.compact!() } : {}),
+    ...(session.commands ? { commands: () => session.commands!() } : {}),
     cancel: () => session.cancel(),
     close: () => session.close(),
     async send(content, images) {
+      const command = /^\/([^\s]+)(?:\s|$)/.exec(content)?.[1];
+      if (
+        command &&
+        session.commands?.().items.some((item) => item.id === command)
+      )
+        return session.send(content, images);
       const result = await session.send(
         (pending ? context : "") + content,
         images,

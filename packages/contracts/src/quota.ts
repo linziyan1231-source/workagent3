@@ -47,7 +47,7 @@ export const quotaReserveRequestSchema = z.object({
   sid: z.string().startsWith("S-1-"),
   modelId: z.string().min(1),
   estimatedUnits: z.number().int().nonnegative(),
-  engine: z.enum(["harness", "codex", "kimi"]).optional(),
+  engine: z.enum(["harness", "codex", "kimi", "acp"]).optional(),
   // Shared runs bill the frozen triggerer while the caller authenticates as
   // the runtime owner SID.
   payerSid: z.string().startsWith("S-1-").optional(),

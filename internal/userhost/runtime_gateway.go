@@ -26,14 +26,16 @@ import (
 )
 
 type runtimeGateway struct {
-	butlerToken   string
-	server        *http.Server
-	catalog       *mcpruntime.Catalog
-	credentials   *credentialbroker.Store
-	skills        *skillruntime.Store
-	migration     *skillmigration.Store
-	oauth         *mcpOAuthManager
-	cancelRefresh context.CancelFunc
+	closePublishedApps func()
+	acpToken           string
+	butlerToken        string
+	server             *http.Server
+	catalog            *mcpruntime.Catalog
+	credentials        *credentialbroker.Store
+	skills             *skillruntime.Store
+	migration          *skillmigration.Store
+	oauth              *mcpOAuthManager
+	cancelRefresh      context.CancelFunc
 	// deliver performs the Harness-facing startup round-trips (MCP/Provider/
 	// Skill/Preset projections and, for a staged bundle, the final consume).
 	// It runs after the listener and lease are up so a slow or cold Harness
@@ -178,6 +180,16 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	}
 	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, runtimeSharedProjectOperator{sharedProjects}, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, professionalDatabaseURL, assigners...)
 	baseHandler := handler
+	acpToken, err := auth.RandomToken(32)
+	if err != nil {
+		cancelRefresh()
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	acpHandler := acpCatalogHandler(credentials, auditSink, token, acpToken)
 	butlerToken, err := auth.RandomToken(32)
 	if err != nil {
 		cancelRefresh()
@@ -214,12 +226,19 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 			writeRuntimeError(w, 405, "method_not_allowed")
 			return
 		}
+		if r.URL.Path == "/v1/acp-catalog" || strings.HasPrefix(r.URL.Path, "/v1/acp-catalog/") || r.URL.Path == "/internal/acp-catalog" || strings.HasPrefix(r.URL.Path, "/internal/acp-catalog/") {
+			acpHandler.ServeHTTP(w, r)
+			return
+		}
 		baseHandler.ServeHTTP(w, r)
 	})
-	return &runtimeGateway{butlerToken: butlerToken, server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
+	return &runtimeGateway{acpToken: acpToken, butlerToken: butlerToken, server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
 }
 
 func (g *runtimeGateway) Close() error {
+	if g.closePublishedApps != nil {
+		g.closePublishedApps()
+	}
 	if g.cancelRefresh != nil {
 		g.cancelRefresh()
 	}

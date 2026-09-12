@@ -1,6 +1,12 @@
 import type { EngineEvent } from "@workagent/contracts";
 import { randomUUID } from "node:crypto";
 import {
+  SessionBusyError,
+  type ExecutionAdmission,
+} from "./execution-admission.js";
+import { ManagedAcpCatalog } from "./acp-catalog.js";
+import type { AcpCatalogEntry, EngineId } from "@workagent/contracts";
+import {
   resolveExecutionConfiguration,
   ExecutionConfigurationError,
 } from "./execution-configuration.js";
@@ -13,6 +19,7 @@ import {
 } from "./market-capabilities.js";
 import { butlerServer } from "./butler-mcp.js";
 import { messageServer } from "./message-mcp.js";
+import { sessionToolsServer } from "./session-tools-mcp.js";
 import { sharedTrashServer } from "./shared-trash-mcp.js";
 import { RuntimePreferences } from "./runtime-preferences.js";
 import { nativeImages, nativeFileInput } from "./native-images.js";
@@ -131,10 +138,10 @@ export const automationTargetSessionId = (
 };
 
 export const nativeCredentialError = (
-  engine: "harness" | "codex" | "kimi",
+  engine: EngineId,
   credential: CredentialStatus | undefined,
 ): string | undefined =>
-  engine === "harness" || credential?.state === "ready"
+  engine === "harness" || engine === "acp" || credential?.state === "ready"
     ? undefined
     : `credential_needs_auth:${engine}`;
 
@@ -209,7 +216,10 @@ export const planMessageFork = (
 
 type SessionRecord = {
   createdAt: string;
-  engine: "harness" | "codex" | "kimi";
+  engine: EngineId;
+  acpCatalogId?: string;
+  acpCatalogRevision?: string;
+  acpSnapshot?: AcpCatalogEntry;
   events: PublicEvent[];
   activity?: ReturnType<typeof sessionActivity>;
   lastTurn?: RuntimeSession["lastTurn"];
@@ -242,6 +252,13 @@ type SessionRecord = {
 };
 
 const branchMetadata = (record: SessionRecord) => ({
+  ...(record.acpSnapshot
+    ? {
+        acpCatalogId: record.acpSnapshot.id,
+        acpCatalogRevision: record.acpSnapshot.revision,
+        acpSnapshot: record.acpSnapshot,
+      }
+    : {}),
   ...(record.parentSessionId
     ? { parentSessionId: record.parentSessionId }
     : {}),
@@ -550,9 +567,7 @@ export class RuntimeController
     },
     models: async (id) => {
       const record = this.#nativeRecord(id);
-      const models = await this.#bridges
-        .get(record.engine as "codex" | "kimi")!
-        .listModels();
+      const models = await (await this.#bridge(record)).listModels();
       const model =
         record.modelId &&
         !["codex-native", "kimi-native"].includes(record.modelId)
@@ -571,7 +586,12 @@ export class RuntimeController
         groups: [
           {
             id: record.engine,
-            name: record.engine === "codex" ? "Codex" : "Kimi",
+            name:
+              record.engine === "codex"
+                ? "Codex"
+                : record.engine === "acp"
+                  ? (record.acpSnapshot?.label ?? "ACP")
+                  : "Kimi",
             models: models.map((row) => ({
               id: row.id,
               name: row.name,
@@ -600,9 +620,7 @@ export class RuntimeController
         throw new Error("session_input_pending");
       if (selection.provider !== record.engine)
         throw new Error("engine_model_mismatch");
-      const models = await this.#bridges
-        .get(record.engine as "codex" | "kimi")!
-        .listModels();
+      const models = await (await this.#bridge(record)).listModels();
       const model = models.find((row) => row.id === selection.model);
       if (this.#sessions.get(id) !== record)
         throw new Error("session_not_found");
@@ -673,6 +691,48 @@ export class RuntimeController
     Promise<{ sessionId: string; result?: string }>
   >();
   readonly #automationTargets = new Map<string, string>();
+  readonly #cancelledBackground = new Set<string>();
+  readonly #backgroundAdmissions = new Map<string, string>();
+  readonly #toolScopes = new Map<string, string>();
+  #teamInputHandler:
+    | ((sessionId: string, input: QueuedInput) => boolean)
+    | undefined;
+  setTeamInputHandler(
+    handler: (sessionId: string, input: QueuedInput) => boolean,
+  ): void {
+    this.#teamInputHandler = handler;
+  }
+
+  validateToolScope(sessionId: string, scopeToken: string): boolean {
+    return (
+      typeof scopeToken === "string" &&
+      this.#toolScopes.get(sessionId) === scopeToken
+    );
+  }
+  sessionToolContext(sessionId: string) {
+    const record = this.#sessions.get(sessionId);
+    if (!record || record.internal) throw new Error("session_not_found");
+    return {
+      sessionId,
+      engine: record.engine,
+      presetId: record.preset.presetId,
+      workspaceId: record.workspaceId,
+      ...(record.preset.resolvedSnapshot.acpCatalogId
+        ? { acpCatalogId: record.preset.resolvedSnapshot.acpCatalogId }
+        : {}),
+    };
+  }
+  #sessionMcpServers(
+    id: string,
+    servers: readonly ResolvedMcpServer[],
+  ): readonly ResolvedMcpServer[] {
+    let token = this.#toolScopes.get(id);
+    if (!token) {
+      token = randomUUID();
+      this.#toolScopes.set(id, token);
+    }
+    return [...servers, sessionToolsServer(id, token)];
+  }
   readonly #automationNotifications = new Map<
     string,
     { runId: string; enabled: boolean; targetId: string }
@@ -680,6 +740,7 @@ export class RuntimeController
   readonly #sharedTurnExecutions = new Map<string, Promise<SharedTurnResult>>();
   readonly #sharedTurnTargets = new Map<string, string>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
+  readonly #acp: ManagedAcpCatalog;
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
   #sharedFiles?: WorkspaceStore;
@@ -728,6 +789,7 @@ export class RuntimeController
     if (dshHome === undefined)
       throw new Error("workagent-runtime-api: DSH_HOME is required");
     this.#preferences = new RuntimePreferences(dshHome);
+    this.#acp = new ManagedAcpCatalog(dshHome);
     this.#preferences.mount(ctx, token);
     this.#conversationQuota = new ConversationQuota(dshHome, quota);
     this.#index = new SessionIndex(dshHome);
@@ -921,6 +983,83 @@ export class RuntimeController
     else await record.native!.cancel();
   }
 
+  admit(request: AutomationExecution): ExecutionAdmission {
+    return this.#admitSession(
+      automationTargetSessionId(request.automationRunId, request.definition),
+      request.automationRunId,
+    );
+  }
+
+  admitTeamTask(request: TeamExecution): ExecutionAdmission {
+    return this.#admitSession(request.sessionId, request.taskId);
+  }
+
+  async billingModel(
+    request: AutomationExecution,
+    recovery = false,
+  ): Promise<string> {
+    const id = automationTargetSessionId(
+      request.automationRunId,
+      request.definition,
+    );
+    if (!recovery) {
+      if (request.definition.executionMode === "existing")
+        await this.#existingAutomationSession(id, request.definition);
+      else await this.#startAutomationSession(id, request);
+    }
+    const record = this.#sessions.get(id);
+    if (!record?.acpSnapshot)
+      throw new Error("acp_accounting_snapshot_missing");
+    return record.acpSnapshot.billingModelId;
+  }
+
+  async teamBillingModel(
+    request: TeamExecution,
+    recovery = false,
+  ): Promise<string> {
+    if (!recovery)
+      await this.openTeamSession({
+        sessionId: request.sessionId,
+        title: request.name,
+        engine: request.engine,
+        acpCatalogId: request.acpCatalogId,
+        presetId: request.presetId,
+        workspaceId: request.workspaceId,
+      });
+    const record = this.#sessions.get(request.sessionId);
+    if (!record?.acpSnapshot)
+      throw new Error("acp_accounting_snapshot_missing");
+    return record.acpSnapshot.billingModelId;
+  }
+
+  #admitSession(sessionId: string, executionId: string): ExecutionAdmission {
+    if (this.#draining) throw new Error("runtime_draining");
+    if (this.#cancelledBackground.has(executionId))
+      throw new Error("background_execution_cancelled");
+    if (this.#backgroundAdmissions.get(sessionId) === executionId)
+      return { release() {} };
+    const record = this.#sessions.get(sessionId);
+    if (
+      this.#backgroundAdmissions.has(sessionId) ||
+      record?.inputPending ||
+      (record?.activity && record.activity.state !== "idle")
+    )
+      throw new SessionBusyError(sessionId);
+    this.#backgroundAdmissions.set(sessionId, executionId);
+    if (record) record.inputPending = true;
+    return {
+      release: () => {
+        if (this.#backgroundAdmissions.get(sessionId) !== executionId) return;
+        this.#backgroundAdmissions.delete(sessionId);
+        this.#cancelledBackground.delete(executionId);
+        if (record) {
+          record.inputPending = false;
+          setTimeout(() => void this.#drainQueue(sessionId, record), 0);
+        }
+      },
+    };
+  }
+
   execute(
     request: AutomationExecution,
   ): Promise<{ sessionId: string; result?: string }> {
@@ -940,6 +1079,7 @@ export class RuntimeController
     const execution = this.#executeAutomation(request).finally(() => {
       this.#automationExecutions.delete(request.automationRunId);
       this.#automationTargets.delete(request.automationRunId);
+      this.#cancelledBackground.delete(request.automationRunId);
       if (
         this.#automationNotifications.get(target)?.runId ===
         request.automationRunId
@@ -1246,6 +1386,7 @@ export class RuntimeController
         await this.#activate(id, record);
       } catch (error) {
         this.#sessions.delete(id);
+        this.#toolScopes.delete(id);
         throw error;
       }
       this.#persist(id, record);
@@ -1382,7 +1523,7 @@ export class RuntimeController
         this.#credentials.statusFor(`${request.engine}-native`),
       );
       if (credentialError !== undefined) throw new Error(credentialError);
-      const bridge = this.#bridges.get(request.engine);
+      const bridge = await this.#bridge(record);
       if (bridge === undefined) throw new Error("engine_unavailable");
       record.native = await bridge.create(
         this.#workspaces.engineRoot(record.workspaceId),
@@ -1392,7 +1533,7 @@ export class RuntimeController
             this.#nativeEvent(request.sessionId, record, event),
           ),
         {
-          mcpServers,
+          mcpServers: this.#sessionMcpServers(request.sessionId, mcpServers),
           ...this.#nativeSkillOptions(resolvedSkills, record),
           requestApproval: (approval) =>
             this.#approvals.requestNative(request.sessionId, approval),
@@ -1422,10 +1563,13 @@ export class RuntimeController
       engine: request.engine,
       presetId: request.presetId,
       workspaceId: request.workspaceId,
+      acpCatalogId: request.acpCatalogId,
     });
     const now = new Date().toISOString();
     return this.execute({
       automationRunId: request.taskId,
+      onSubmitted: request.onSubmitted,
+      executionContext: request.executionContext,
       definition: {
         id: `team-${request.teamId}-${request.memberId}`,
         version: 1,
@@ -1434,6 +1578,7 @@ export class RuntimeController
         schedule: { kind: "interval", everyMinutes: 1 },
         presetId: request.presetId,
         engine: request.engine,
+        acpCatalogId: request.acpCatalogId,
         workspaceId: request.workspaceId,
         input: request.input,
         notificationPolicy: "none",
@@ -1549,8 +1694,14 @@ export class RuntimeController
   }
 
   async cancel(automationRunId: string): Promise<void> {
+    const admittedSession = [...this.#backgroundAdmissions].find(
+      ([, executionId]) => executionId === automationRunId,
+    )?.[0];
+    if (admittedSession || this.#automationTargets.has(automationRunId))
+      this.#cancelledBackground.add(automationRunId);
     const sessionId =
       this.#automationTargets.get(automationRunId) ??
+      admittedSession ??
       `session-${automationRunId}`;
     const record = this.#sessions.get(sessionId);
     if (record === undefined) return;
@@ -1645,11 +1796,10 @@ export class RuntimeController
               response.end();
               return;
             }
-            writeJson(
-              response,
-              200,
-              await discoverModels(this.#ctx, this.#bridges),
-            );
+            writeJson(response, 200, [
+              ...(await discoverModels(this.#ctx, this.#bridges)),
+              ...(await this.#acpModels()),
+            ]);
           },
         }),
       "workagent-runtime-api: live model discovery",
@@ -1657,7 +1807,9 @@ export class RuntimeController
     this.#ctx.effect(
       () => () =>
         Promise.all(
-          [...this.#bridges.values()].map((bridge) => bridge.close()),
+          [...this.#bridges.values()]
+            .map((bridge) => bridge.close())
+            .concat(this.#acp.close()),
         ),
       "workagent-runtime-api: native engine shutdown",
     );
@@ -1739,6 +1891,34 @@ export class RuntimeController
     );
   }
 
+  async #acpModels() {
+    const entries = await this.#acp.list().catch(() => []);
+    return Promise.all(
+      entries
+        .filter((entry) => entry.enabled)
+        .map(async (entry) => {
+          const base = {
+            engine: "acp",
+            acpCatalogId: entry.id,
+            label: entry.label,
+            permissionModes: entry.permissionModes ?? {},
+            fetchedAt: new Date().toISOString(),
+          };
+          try {
+            const bridge = await this.#acp.bridge(entry);
+            const models = await bridge.listModels();
+            return {
+              ...base,
+              state: models.length ? "ready" : "empty",
+              models,
+            };
+          } catch {
+            return { ...base, state: "unavailable", models: [] };
+          }
+        }),
+    );
+  }
+
   async #engines(
     request: IncomingMessage,
     response: ServerResponse,
@@ -1777,6 +1957,34 @@ export class RuntimeController
       status("codex", "Codex"),
       status("kimi", "Kimi"),
     ]);
+    const approved = await this.#acp.list().catch(() => []);
+    const acpStatuses = await Promise.all(
+      approved.map(async (entry) => {
+        const base = {
+          id: "acp",
+          acpCatalogId: entry.id,
+          label: entry.label,
+          available: false,
+          authenticated: null,
+          state: "unavailable",
+          capabilities: {
+            approval: true,
+            resume: false,
+            steer: false,
+            toolEvents: true,
+            usage: false,
+          },
+        };
+        if (!entry.enabled) return { ...base, detail: "管理员已停用" };
+        try {
+          const bridge = await this.#acp.bridge(entry);
+          const state = await bridge.status();
+          return { ...base, ...state, capabilities: bridge.capabilities() };
+        } catch {
+          return { ...base, detail: "请检查自己的引擎连接信息" };
+        }
+      }),
+    );
     writeJson(response, 200, [
       {
         id: "harness",
@@ -1799,6 +2007,7 @@ export class RuntimeController
         ...kimi,
         capabilities: ENGINE_CAPABILITIES.kimi,
       },
+      ...acpStatuses,
     ]);
   }
 
@@ -1981,7 +2190,7 @@ export class RuntimeController
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|question-reply|fork|side-chat|configuration|capabilities\/reload)$/.exec(
+      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|question-reply|fork|side-chat|configuration|commands|capabilities\/reload)$/.exec(
         path,
       );
     if (match === null) {
@@ -1992,6 +2201,28 @@ export class RuntimeController
     const record = this.#sessions.get(id);
     if (record === undefined || record.internal === true) {
       writeJson(response, 404, { error: "session_not_found" });
+      return;
+    }
+    if (match[2] === "commands" && request.method === "GET") {
+      try {
+        await this.#activate(id, record);
+        writeJson(
+          response,
+          200,
+          record.native?.commands?.() ?? {
+            supported: false,
+            revision: 0,
+            items: [],
+          },
+        );
+      } catch (error) {
+        writeJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "engine_commands_unavailable",
+        });
+      }
       return;
     }
     if (match[2] === "question-reply" && request.method === "POST") {
@@ -2268,7 +2499,11 @@ export class RuntimeController
       writeJson(response, 202, { accepted: true });
       return;
     }
-    if (match[2] !== "events" && match[2] !== "messages") {
+    if (
+      match[2] !== "events" &&
+      match[2] !== "messages" &&
+      match[2] !== "cancel"
+    ) {
       try {
         await this.#activate(id, record);
       } catch (error) {
@@ -2364,7 +2599,8 @@ export class RuntimeController
         record.handle.agent.cancel({ kind: "user" });
       else {
         try {
-          await record.native!.cancel();
+          if (record.activating) await record.activating;
+          await record.native?.cancel();
         } catch {
           writeJson(response, 503, { error: "engine_cancel_failed" });
           return;
@@ -2390,6 +2626,7 @@ export class RuntimeController
       // Removing live admission first prevents a queued/resuming request from
       // starting a turn while the engine is being closed.
       this.#sessions.delete(id);
+      this.#toolScopes.delete(id);
       try {
         await record.activating?.catch(() => undefined);
         if (record.handle) await record.handle.dispose();
@@ -2487,7 +2724,12 @@ export class RuntimeController
     if (
       (input.engine !== "harness" &&
         input.engine !== "codex" &&
-        input.engine !== "kimi") ||
+        input.engine !== "kimi" &&
+        input.engine !== "acp") ||
+      (input.engine === "acp"
+        ? typeof input.acpCatalogId !== "string" ||
+          !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(input.acpCatalogId)
+        : input.acpCatalogId !== undefined) ||
       typeof input.title !== "string" ||
       input.title.trim() === "" ||
       input.title.length > 200 ||
@@ -2533,6 +2775,9 @@ export class RuntimeController
             operationId: input.operationId,
             input: {
               engine: input.engine,
+              ...(typeof input.acpCatalogId === "string"
+                ? { acpCatalogId: input.acpCatalogId }
+                : {}),
               title: input.title.trim(),
               workspace: workspaceId,
               presetId:
@@ -2620,6 +2865,9 @@ export class RuntimeController
     const record: SessionRecord = {
       activating: undefined,
       engine: input.engine,
+      ...(typeof input.acpCatalogId === "string"
+        ? { acpCatalogId: input.acpCatalogId }
+        : {}),
       events: [],
       handle: undefined,
       native: undefined,
@@ -2652,8 +2900,13 @@ export class RuntimeController
     // Persist the operation and frozen binding before invoking any engine.
     // The normal activation path materializes this empty session on first use.
     try {
+      await this.#prepareAcp(record);
       this.#executionConfiguration(record);
     } catch (error) {
+      if (record.engine === "acp" && error instanceof Error) {
+        writeJson(response, 409, { error: error.message });
+        return;
+      }
       if (!(error instanceof ExecutionConfigurationError)) throw error;
       writeJson(response, 400, { error: error.message });
       return;
@@ -2664,6 +2917,7 @@ export class RuntimeController
           id: publicId,
           nativeId: publicId,
           engine: record.engine,
+          ...branchMetadata(record),
           title: record.title,
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
@@ -2720,7 +2974,7 @@ export class RuntimeController
           writeJson(response, 409, { error: credentialError });
           return;
         }
-        const bridge = this.#bridges.get(input.engine);
+        const bridge = await this.#bridge(record);
         if (bridge === undefined) {
           writeJson(response, 503, { error: "engine_unavailable" });
           return;
@@ -2731,7 +2985,7 @@ export class RuntimeController
             this.#publish(record, this.#nativeEvent(publicId, record, event));
           },
           {
-            mcpServers,
+            mcpServers: this.#sessionMcpServers(publicId, mcpServers),
             ...this.#nativeSkillOptions(resolvedSkills, record),
             requestApproval: (approval) =>
               this.#approvals.requestNative(publicId, approval),
@@ -2767,6 +3021,7 @@ export class RuntimeController
 
   #createdSession(publicId: string, record: SessionRecord) {
     return {
+      ...branchMetadata(record),
       id: publicId,
       engine: record.engine,
       title: record.title,
@@ -2811,71 +3066,31 @@ export class RuntimeController
         ? await this.#existingAutomationSession(sessionId, definition)
         : await this.#startAutomationSession(sessionId, request);
     request.onSessionStarted?.(sessionId);
-    const terminal = this.#waitForTerminal(sessionId);
-    this.#workspaces.moves.drain(record.workspaceId);
-    const fileChanges = this.#workspaces.moves.context(
-      record.workspaceId,
-      record.fileRevision,
-    );
-    record.activity = { state: "running" };
-    record.updatedAt = new Date().toISOString();
+    const admission = this.admit(request);
+    const terminal = this.#submittedTurn(sessionId, request.onSubmitted);
     try {
-      if (record.handle !== undefined) {
-        record.handle.agent.followup(
-          createUserMessage({
-            content: [
-              {
-                type: "text",
-                text:
-                  fileChanges.text +
-                  nativeFileInput(
-                    this.#workspaces,
-                    record.workspaceId,
-                    skillPrompt.input,
-                  ),
-              },
-            ],
-            source: { kind: "user" },
-          }),
-        );
-      } else {
-        await record.native!.send(
-          fileChanges.text +
-            nativeFileInput(
-              this.#workspaces,
-              record.workspaceId,
-              skillPrompt.input,
-            ),
-          await nativeImages(
-            this.#workspaces,
-            record.workspaceId,
-            definition.input,
-          ),
-        );
-      }
-      record.fileRevision = fileChanges.revision;
-      this.#persist(sessionId, record);
-    } catch (error) {
-      this.#publish(record, {
-        eventId: `${sessionId}-${record.nextEventSequence++}`,
-        occurredAt: new Date().toISOString(),
+      await this.#deliverInput(
         sessionId,
-        type: "turn.failed",
-        turnId: `turn-${request.automationRunId}`,
-        code: "engine_turn_rejected",
-        message:
-          error instanceof Error ? error.message : "engine_turn_rejected",
-      });
+        record,
+        {
+          messageId: `message-${request.automationRunId}`,
+          content: (request.executionContext ?? "") + skillPrompt.input,
+          displayContent: definition.input,
+        },
+        false,
+        { executionId: request.automationRunId },
+      );
+    } catch (error) {
+      terminal.cancel();
+      admission.release();
+      throw error;
     }
-    this.#messages.append({
-      id: `message-${request.automationRunId}`,
-      sessionId,
-      role: "user",
-      text: definition.input,
-      createdAt: new Date().toISOString(),
-    });
-    this.#persist(sessionId, record);
-    const result = await terminal;
+    let result: { sessionId: string; result?: string };
+    try {
+      result = await terminal.promise;
+    } finally {
+      admission.release();
+    }
     const skillSuggestionPath = await validatedSkillSuggestion(
       this.#workspaces,
       record.workspaceId,
@@ -3012,7 +3227,7 @@ export class RuntimeController
           this.#credentials.statusFor(`${request.engine}-native`),
         );
         if (credentialError !== undefined) throw new Error(credentialError);
-        const bridge = this.#bridges.get(request.engine);
+        const bridge = await this.#bridge(record);
         if (bridge === undefined) throw new Error("engine_unavailable");
         record.native = await bridge.create(
           request.workspacePath,
@@ -3152,14 +3367,14 @@ export class RuntimeController
         record,
       );
     } else {
-      const bridge = this.#bridges.get(definition.engine);
+      const bridge = await this.#bridge(record);
       if (bridge === undefined) throw new Error("engine_unavailable");
       record.native = await bridge.create(
         this.#workspaces.engineRoot(record.workspaceId),
         (event) =>
           this.#publish(record, this.#nativeEvent(publicId, record, event)),
         {
-          mcpServers,
+          mcpServers: this.#sessionMcpServers(publicId, mcpServers),
           ...this.#nativeSkillOptions(resolvedSkills, record),
           requestApproval: (approval) =>
             this.#approvals.requestNative(publicId, approval),
@@ -3170,6 +3385,57 @@ export class RuntimeController
     this.#sessions.set(publicId, record);
     this.#persist(publicId, record);
     return record;
+  }
+
+  #submittedTurn(sessionId: string, onSubmitted?: (turnId: string) => void) {
+    let turnId: string | undefined;
+    let result: string | undefined;
+    let cleanup = () => {};
+    const promise = new Promise<{ sessionId: string; result?: string }>(
+      (resolve, reject) => {
+        const listener = (event: PublicEvent) => {
+          if (
+            event.type === "turn.started" &&
+            turnId === undefined &&
+            typeof event.turnId === "string"
+          ) {
+            turnId = event.turnId;
+            onSubmitted?.(turnId);
+          }
+          if (!turnId || !("turnId" in event) || event.turnId !== turnId)
+            return;
+          if (
+            event.type === "assistant.completed" &&
+            typeof event.content === "string"
+          )
+            result = event.content;
+          if (event.type === "turn.completed") {
+            cleanup();
+            resolve({ sessionId, ...(result === undefined ? {} : { result }) });
+          }
+          if (event.type === "turn.failed" || event.type === "turn.cancelled") {
+            cleanup();
+            reject(
+              new Error(
+                event.type === "turn.failed"
+                  ? String(event.message ?? "engine_turn_failed")
+                  : "engine_turn_cancelled",
+              ),
+            );
+          }
+        };
+        const listeners = this.#eventListeners.get(sessionId) ?? new Set();
+        listeners.add(listener);
+        this.#eventListeners.set(sessionId, listeners);
+        cleanup = () => {
+          listeners.delete(listener);
+          if (!listeners.size) this.#eventListeners.delete(sessionId);
+        };
+      },
+    );
+    // Synchronous native terminal events can precede the send acknowledgement.
+    void promise.catch(() => undefined);
+    return { promise, cancel: cleanup };
   }
 
   #waitForTerminal(
@@ -3318,8 +3584,9 @@ export class RuntimeController
     );
     const resolvedSkills = this.#resolvedSkills(source.preset);
     const workspace = this.#engineWorkspace(source);
+    const publicId = `session-${randomUUID()}`;
     const options = {
-      mcpServers,
+      mcpServers: this.#sessionMcpServers(publicId, mcpServers),
       ...this.#nativeSkillOptions(resolvedSkills, source),
       requestApproval: (approval: NativeApprovalRequest) =>
         this.#approvals.requestNative(publicId, approval),
@@ -3331,11 +3598,17 @@ export class RuntimeController
         ? {}
         : { permissionMode: source.permissionMode }),
     };
-    const publicId = `session-${randomUUID()}`;
     const now = new Date().toISOString();
     const record: SessionRecord = {
       activating: undefined,
       engine: source.engine,
+      ...(source.acpSnapshot
+        ? {
+            acpCatalogId: source.acpSnapshot.id,
+            acpCatalogRevision: source.acpSnapshot.revision,
+            acpSnapshot: source.acpSnapshot,
+          }
+        : {}),
       events: [],
       handle: undefined,
       native: undefined,
@@ -3379,7 +3652,7 @@ export class RuntimeController
         record,
       );
     } else if (nativeFork || replacementContent !== undefined) {
-      const bridge = this.#bridges.get(source.engine);
+      const bridge = await this.#bridge(source);
       if (bridge === undefined) throw new Error("engine_unavailable");
       record.native =
         !nativeFork ||
@@ -3503,7 +3776,23 @@ export class RuntimeController
     record: SessionRecord,
     input: QueuedInput,
     steering: boolean,
+    background?: {
+      executionId: string;
+      onSubmitted?: (turnId: string) => void;
+    },
   ): Promise<void> {
+    const checkBackgroundCancellation = () => {
+      if (background && this.#cancelledBackground.has(background.executionId))
+        throw new Error("background_execution_cancelled");
+    };
+    checkBackgroundCancellation();
+    if (!background && !steering && this.#teamInputHandler?.(id, input)) {
+      if (record.queue?.includes(input)) {
+        record.queue = record.queue.filter((row) => row !== input);
+        this.#queueChanged(id, record);
+      }
+      return;
+    }
     const known = this.#messages
       .list(id)
       .find((row) => row.id === input.messageId);
@@ -3514,8 +3803,15 @@ export class RuntimeController
     }
     if (this.#draining) throw new Error("runtime_draining");
     const running = !!record.activity && record.activity.state !== "idle";
-    if (record.inputPending || (!steering && running))
-      throw new Error("session_input_pending");
+    const admitted =
+      background &&
+      this.#backgroundAdmissions.get(id) === background.executionId;
+    if (
+      (!admitted &&
+        (record.inputPending || this.#backgroundAdmissions.has(id))) ||
+      (!steering && running)
+    )
+      throw new SessionBusyError(id);
     if (steering && !running) throw new Error("no_active_turn");
     if (!running) this.#workspaces.moves.drain(record.workspaceId);
     record.inputPending = true;
@@ -3563,37 +3859,41 @@ export class RuntimeController
           input.content,
           record.workspacePath,
         );
-      let modelId = record.modelId;
-      if (record.engine === "harness")
-        modelId = String(this.#harnessSelection(record).model);
-      if (!modelId || ["codex-native", "kimi-native"].includes(modelId)) {
-        const models = await this.#bridges
-          .get(record.engine as "codex" | "kimi")!
-          .listModels();
-        modelId = models.find((model) => model.isDefault)?.id;
+      if (!background) {
+        let modelId =
+          record.engine === "acp"
+            ? record.acpSnapshot?.billingModelId
+            : record.modelId;
+        if (record.engine === "harness")
+          modelId = String(this.#harnessSelection(record).model);
+        if (!modelId || ["codex-native", "kimi-native"].includes(modelId)) {
+          const models = await (await this.#bridge(record)).listModels();
+          modelId = models.find((model) => model.isDefault)?.id;
+        }
+        if (!modelId) throw new Error("quota_not_configured");
+        // Kimi presents a provider-qualified model ID, whereas the gateway
+        // records the model name accepted by its OpenAI-compatible endpoint.
+        if (record.engine === "kimi")
+          modelId = modelId.replace(/^kimi-code\//, "");
+        const activeTurn =
+          steering && record.engine !== "kimi"
+            ? record.events.findLast((event) => event.type === "turn.started")
+                ?.turnId
+            : undefined;
+        quotaRunId = await this.#conversationQuota.begin(
+          id,
+          modelId,
+          content,
+          typeof activeTurn === "string" ? activeTurn : undefined,
+          record.engine,
+        );
       }
-      if (!modelId) throw new Error("quota_not_configured");
-      // Kimi presents a provider-qualified model ID, whereas the gateway
-      // records the model name accepted by its OpenAI-compatible endpoint.
-      if (record.engine === "kimi")
-        modelId = modelId.replace(/^kimi-code\//, "");
-      const activeTurn =
-        steering && record.engine !== "kimi"
-          ? record.events.findLast((event) => event.type === "turn.started")
-              ?.turnId
-          : undefined;
-      quotaRunId = await this.#conversationQuota.begin(
-        id,
-        modelId,
-        content,
-        typeof activeTurn === "string" ? activeTurn : undefined,
-        record.engine,
-      );
       if (this.#sessions.get(id) !== record) {
-        await this.#conversationQuota.release(quotaRunId);
+        if (quotaRunId) await this.#conversationQuota.release(quotaRunId);
         return;
       }
       if (record.handle) {
+        checkBackgroundCancellation();
         record.handle.agent[steering ? "steer" : "followup"](
           createUserMessage({
             content: [{ type: "text", text: content }],
@@ -3601,20 +3901,28 @@ export class RuntimeController
           }),
         );
       } else {
+        const images = await nativeImages(
+          this.#workspaces,
+          record.workspaceId,
+          input.content,
+          record.workspacePath,
+        );
+        checkBackgroundCancellation();
         nativeTurnId = await record.native![steering ? "steer" : "send"](
           content,
-          await nativeImages(
-            this.#workspaces,
-            record.workspaceId,
-            input.content,
-            record.workspacePath,
-          ),
+          images,
         );
       }
       if (this.#sessions.get(id) !== record) {
-        await this.#conversationQuota.release(quotaRunId);
+        if (quotaRunId) await this.#conversationQuota.release(quotaRunId);
         return;
       }
+      const submittedTurnId =
+        nativeTurnId ??
+        record.events.findLast((event) => event.type === "turn.started")
+          ?.turnId;
+      if (typeof submittedTurnId === "string")
+        background?.onSubmitted?.(submittedTurnId);
       record.pendingContext = undefined;
       record.fileRevision = fileChanges.revision;
       if (awareness) record.sharedCursor = awareness.cursor;
@@ -3657,7 +3965,9 @@ export class RuntimeController
       if (
         error instanceof Error &&
         (error.message.startsWith("quota_") ||
-          error.message.startsWith("platform_quota_"))
+          error.message.startsWith("platform_quota_") ||
+          error.message.startsWith("acp_catalog_") ||
+          error.message === "acp_credentials_required")
       )
         throw error;
       throw new Error(
@@ -3871,7 +4181,50 @@ export class RuntimeController
     }
   }
 
+  async #prepareAcp(record: SessionRecord): Promise<void> {
+    const presetId = record.preset.resolvedSnapshot.acpCatalogId;
+    if (record.engine !== "acp") {
+      if (record.acpCatalogId || presetId)
+        throw new Error("acp_catalog_forbidden");
+      return;
+    }
+    const id = record.acpCatalogId ?? presetId;
+    if (!id || (presetId && presetId !== id))
+      throw new Error("preset_acp_catalog_mismatch");
+    const approved = await this.#acp.resolve(id, record.acpCatalogRevision);
+    if (
+      record.acpSnapshot &&
+      JSON.stringify({
+        ...record.acpSnapshot,
+        resolvedCommand: undefined,
+        enabled: true,
+      }) !==
+        JSON.stringify({
+          ...approved,
+          resolvedCommand: undefined,
+          enabled: true,
+        })
+    )
+      throw new Error("acp_catalog_revision_changed");
+    record.acpCatalogId = id;
+    record.acpCatalogRevision = approved.revision;
+    record.acpSnapshot ??= (({
+      resolvedCommand: _resolvedCommand,
+      ...snapshot
+    }) => snapshot)(approved);
+  }
+
+  async #bridge(record: SessionRecord): Promise<EngineBridge> {
+    await this.#prepareAcp(record);
+    if (record.engine === "acp") return this.#acp.bridge(record.acpSnapshot!);
+    if (record.engine === "harness") throw new Error("engine_not_native");
+    const bridge = this.#bridges.get(record.engine);
+    if (!bridge) throw new Error("engine_unavailable");
+    return bridge;
+  }
+
   async #activate(id: string, record: SessionRecord): Promise<void> {
+    await this.#prepareAcp(record);
     if (
       record.creation &&
       this.#index.lookupOperation(record.creation.operationId)?.state !==
@@ -3937,13 +4290,13 @@ export class RuntimeController
       }
       return;
     }
-    const bridge = this.#bridges.get(record.engine);
+    const bridge = await this.#bridge(record);
     if (bridge === undefined) throw new Error("engine unavailable");
     const onEvent = (event: BridgeEvent) =>
       this.#publish(record, this.#nativeEvent(id, record, event));
     const options = {
       ...(record.requirePermission ? { requirePermission: true } : {}),
-      mcpServers,
+      mcpServers: this.#sessionMcpServers(id, mcpServers),
       ...this.#nativeSkillOptions(resolvedSkills, record),
       requestApproval: (approval: NativeApprovalRequest) =>
         // Internal shared tasks have no interactive approval surface.
@@ -4018,12 +4371,16 @@ export class RuntimeController
       | "modelId"
       | "thinkingEffort"
       | "permissionMode"
+      | "acpSnapshot"
     >,
   ) {
     return resolveExecutionConfiguration({
       engine: record.engine,
       preset: record.preset,
       overrides: record,
+      ...(record.acpSnapshot
+        ? { acpBillingModelId: record.acpSnapshot.billingModelId }
+        : {}),
       workspace:
         record.workspacePath ?? this.#workspaces.engineRoot(record.workspaceId),
       workspaceAssigned:
@@ -4039,9 +4396,14 @@ export class RuntimeController
     return {
       skills,
       systemPrompt: configuration.systemPrompt,
-      permissionMode: configuration.permissionMode,
+      ...(record.engine !== "acp" ||
+      record.permissionMode !== undefined ||
+      record.acpSnapshot?.permissionModes?.[configuration.permissionMode]
+        ? { permissionMode: configuration.permissionMode }
+        : {}),
       approvalPolicy: configuration.approvalPolicy,
-      requirePermission: true,
+      requirePermission:
+        record.engine !== "acp" || record.permissionMode !== undefined,
       ...(configuration.engineModelId
         ? { modelId: configuration.engineModelId }
         : {}),
@@ -4447,7 +4809,10 @@ export class RuntimeController
           current: selection,
           assembled: undefined,
         });
-        for (const config of projectHarnessMcpServers(mcpServers, workspace))
+        for (const config of projectHarnessMcpServers(
+          this.#sessionMcpServers(id, mcpServers),
+          workspace,
+        ))
           await installMcp(agentContext, config);
         this.#installHarnessSkills(agentContext, skills);
       },

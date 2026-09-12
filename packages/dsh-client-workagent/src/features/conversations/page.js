@@ -81,7 +81,7 @@ function RuntimeConversation({
   const ctx = React.useContext(RuntimeServices);
   const standard = hasStandardSessions(ctx);
   const native =
-    standard && ["codex", "kimi"].includes(sessionState.rows[0]?.engine);
+    standard && ["codex", "kimi", "acp"].includes(sessionState.rows[0]?.engine);
   const legacy = !standard || sessionState.rows[0]?.engine === "harness";
   const nativeState = useNativeConversation(ctx, sessionId, native);
   const [legacyQueueState, reloadQueue] = useResource(

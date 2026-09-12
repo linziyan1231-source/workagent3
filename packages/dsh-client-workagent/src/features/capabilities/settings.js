@@ -257,7 +257,7 @@ function SkillsSection() {
           title: row.name,
           detail:
             (row.referenceDirectory
-              ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH" })[engine]).join("、")}）`
+              ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH", acp: "ACP" })[engine]).join("、")}）`
               : displayValue(row.source)) +
             " · " +
             displayValue(row.enabled ? row.health || "ready" : "disabled"),

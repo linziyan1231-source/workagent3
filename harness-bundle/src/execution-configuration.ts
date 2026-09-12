@@ -18,7 +18,15 @@ const billingDefaults = {
 export const executionBillingModel = (
   engine: EngineId,
   presetModelId?: string | null,
-) => presetModelId ?? billingDefaults[engine];
+  acpBillingModelId?: string,
+) => {
+  if (engine === "acp") {
+    if (!acpBillingModelId)
+      throw new ExecutionConfigurationError("acp_catalog_required");
+    return acpBillingModelId;
+  }
+  return presetModelId ?? billingDefaults[engine];
+};
 
 export class ExecutionConfigurationError extends Error {}
 
@@ -28,6 +36,7 @@ export function resolveExecutionConfiguration(input: {
   overrides?: ExecutionOverrides;
   workspace: string;
   workspaceAssigned?: boolean;
+  acpBillingModelId?: string;
 }) {
   const preset = input.preset.resolvedSnapshot;
   const overrides = input.overrides ?? {};
@@ -65,8 +74,13 @@ export function resolveExecutionConfiguration(input: {
     presetId: input.preset.presetId,
     presetVersion: input.preset.presetVersion,
     systemPrompt: preset.systemPrompt,
-    billingModelId: executionBillingModel(input.engine, preset.modelId),
+    billingModelId: executionBillingModel(
+      input.engine,
+      preset.modelId,
+      input.acpBillingModelId,
+    ),
     engineModelId:
+      input.engine !== "acp" &&
       overrides.modelId === billingDefaults[input.engine]
         ? undefined
         : overrides.modelId,

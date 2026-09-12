@@ -57,6 +57,9 @@ func (s *Store) migrate(ctx context.Context) error {
 PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS login_attempts (
+ key TEXT PRIMARY KEY, started_at INTEGER NOT NULL, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
