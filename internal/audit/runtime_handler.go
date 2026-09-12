@@ -67,6 +67,13 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 			}
 			correlationID = generated
 		}
+		if input.Metadata == nil {
+			input.Metadata = map[string]string{}
+		}
+		for _, key := range []string{"client_ip", "peer_ip", "user_agent", "source_kind"} {
+			delete(input.Metadata, key)
+		}
+		input.Metadata["source_kind"] = "employee_runtime"
 		if _, err := store.Record(request.Context(), contracts.AuditInput{
 			Actor: input.SID, Target: input.Target, Action: input.Action,
 			Result: input.Result, CorrelationID: correlationID, Metadata: input.Metadata,

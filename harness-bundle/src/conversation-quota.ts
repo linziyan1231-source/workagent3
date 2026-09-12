@@ -14,6 +14,8 @@ type Entry = {
   runId: string;
   sessionId: string;
   modelId: string;
+  engine?: "harness" | "codex" | "kimi" | "acp";
+  estimatedUnits?: number;
   turnId?: string;
   finished?: boolean;
 };
@@ -50,7 +52,7 @@ export class ConversationQuota {
     modelId: string,
     content: string,
     turnId?: string,
-    engine?: "harness" | "codex" | "kimi",
+    engine?: "harness" | "codex" | "kimi" | "acp",
   ): Promise<string> {
     await this.ready;
     if (!this.quota) throw new Error("platform_quota_unconfigured");
@@ -67,6 +69,8 @@ export class ConversationQuota {
       runId: `conversation-${randomUUID()}`,
       sessionId,
       modelId,
+      ...(engine ? { engine } : {}),
+      estimatedUnits: estimatedAutomationUnits(content),
       ...(turnId ? { turnId } : {}),
     };
     this.#entries.push(entry);
@@ -74,7 +78,7 @@ export class ConversationQuota {
     const reservation = this.quota.reserve({
       runId: entry.runId,
       modelId,
-      estimatedUnits: estimatedAutomationUnits(content),
+      estimatedUnits: entry.estimatedUnits,
       ...(engine ? { engine } : {}),
     });
     const pending = this.#pendingReservations.get(sessionId) ?? new Set();
@@ -148,7 +152,13 @@ export class ConversationQuota {
     try {
       // Actual model consumption is counted once from the gateway ledger,
       // including requests that consumed tokens before failure/cancellation.
-      await this.quota.settle({ runId, actualUnits: 0 });
+      await this.quota.settle({
+        runId,
+        actualUnits:
+          entry?.engine === "acp" && entry.turnId
+            ? (entry.estimatedUnits ?? 0)
+            : 0,
+      });
     } catch (error) {
       if (
         !(error instanceof Error) ||

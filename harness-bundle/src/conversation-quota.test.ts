@@ -19,6 +19,38 @@ const fixture = () => {
 };
 
 describe("conversation admission and recovery", () => {
+  it("charges submitted ACP turns conservatively and preserves that charge across recovery", async () => {
+    const { home, quota, port } = fixture();
+    const unsubmitted = await quota.begin(
+      "not-sent",
+      "fixed-model",
+      "hello",
+      undefined,
+      "acp",
+    );
+    await quota.release(unsubmitted);
+    expect(port.settle).toHaveBeenLastCalledWith({
+      runId: unsubmitted,
+      actualUnits: 0,
+    });
+    const submitted = await quota.begin(
+      "sent",
+      "fixed-model",
+      "hello",
+      undefined,
+      "acp",
+    );
+    quota.started("sent", "turn");
+    const estimate = port.reserve.mock.calls.at(-1)![0].estimatedUnits;
+    port.settle.mockRejectedValueOnce(new Error("network down"));
+    await expect(quota.ended("sent", "turn")).rejects.toThrow("network down");
+    await new ConversationQuota(home, port as AutomationQuotaPort).ready;
+    expect(port.settle).toHaveBeenLastCalledWith({
+      runId: submitted,
+      actualUnits: estimate,
+    });
+    expect(estimate).toBeGreaterThan(0);
+  });
   it("fails closed without quota and preserves the over-quota error", async () => {
     const { home, quota, port } = fixture();
     port.reserve.mockRejectedValue(new Error("quota_exceeded"));

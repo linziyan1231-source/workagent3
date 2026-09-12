@@ -98,6 +98,17 @@ AND (g.model IN (%s) OR g.alias IN (%s))`, marks, marks), args...).Scan(&usage.C
 	if err != nil {
 		return Usage{}, err
 	}
+	// ACP agents may use employee-owned API credentials outside the gateway.
+	// Their explicitly estimated ledger must remain visible alongside gateway usage.
+	estimateArgs := []any{sid, string(period), periodKey(period, at)}
+	for _, model := range scope.models {
+		estimateArgs = append(estimateArgs, model)
+	}
+	var estimated int64
+	if err := q.QueryRowContext(ctx, fmt.Sprintf(`SELECT COALESCE(SUM(actual_units),0) FROM quota_reservations WHERE sid=? AND period=? AND period_key=? AND engine='acp' AND status='settled' AND model_id IN (%s)`, marks), estimateArgs...).Scan(&estimated); err != nil {
+		return Usage{}, err
+	}
+	usage.ConsumedUnits += estimated
 	args = []any{sid}
 	for _, model := range scope.models {
 		args = append(args, model)

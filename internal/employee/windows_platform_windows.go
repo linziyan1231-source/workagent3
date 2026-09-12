@@ -40,6 +40,7 @@ type WindowsPlatformConfig struct {
 	DataRootBase            string
 	UserHostExecutable      string
 	HarnessCommand          string
+	PublishedPythonCommand  string
 	HarnessEntrypoint       string
 	CodexCommand            string
 	KimiCommand             string
@@ -85,7 +86,10 @@ func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) 
 		return nil, errors.New("Harness entrypoint must be relative to the released profile")
 	}
 	config.HarnessEntrypoint = entrypoint
-	for _, software := range []string{config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.CodexCommand, config.KimiCommand, config.ManagedSkillsRoot, config.ManagedToolsRoot} {
+	if config.PublishedPythonCommand != "" && !filepath.IsAbs(config.PublishedPythonCommand) {
+		return nil, errors.New("published Python command must be absolute")
+	}
+	for _, software := range []string{config.UserHostExecutable, config.HarnessCommand, config.HarnessProfileSource, config.CodexCommand, config.KimiCommand, config.ManagedSkillsRoot, config.ManagedToolsRoot, config.PublishedPythonCommand} {
 		if software == "" {
 			continue
 		}
@@ -269,7 +273,8 @@ func (p *WindowsPlatform) CheckManagedCredential(user store.User) error {
 func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath string) userhost.FileConfig {
 	return userhost.FileConfig{
 		SID: spec.SID, DataRoot: spec.DataRoot, HarnessCommand: p.config.HarnessCommand,
-		CodexCommand: p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
+		PublishedPythonCommand: p.config.PublishedPythonCommand,
+		CodexCommand:           p.config.CodexCommand, KimiCommand: p.config.KimiCommand,
 		HarnessArguments: append([]string{filepath.Join(p.config.HarnessProfileSource, p.config.HarnessEntrypoint)}, p.config.HarnessArguments...), Profile: p.config.Profile,
 		PublicBaseURL: p.config.PublicBaseURL,
 		PortalURL:     p.config.PortalURL, RegistrationCredentialFile: credentialPath,

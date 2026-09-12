@@ -31,6 +31,7 @@ type Config struct {
 	SID                     string
 	DataRoot                string
 	Command                 string
+	PublishedPythonCommand  string
 	CodexCommand            string
 	KimiCommand             string
 	Arguments               []string
@@ -70,6 +71,9 @@ func New(config Config) (*Supervisor, error) {
 	}
 	if !filepath.IsAbs(config.DataRoot) {
 		return nil, errors.New("data root must be absolute")
+	}
+	if config.PublishedPythonCommand != "" && !filepath.IsAbs(config.PublishedPythonCommand) {
+		return nil, errors.New("published Python command must be absolute")
 	}
 	if (config.CodexCommand != "" && !filepath.IsAbs(config.CodexCommand)) ||
 		(config.KimiCommand != "" && !filepath.IsAbs(config.KimiCommand)) ||
@@ -209,6 +213,11 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		s.Close()
 		return runtimeapi.Registration{}, err
 	}
+	if err := s.attachPublishedApps(gateway, target, token); err != nil {
+		gateway.Close()
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		gateway.Close()
@@ -231,6 +240,12 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	s.gatewayExited = make(chan error, 1)
+	acpEndpoint, _ := json.Marshal(map[string]string{"baseURL": "http://" + listener.Addr().String(), "token": gateway.acpToken})
+	if err := os.WriteFile(filepath.Join(butlerDirectory, "acp-gateway.json"), acpEndpoint, 0600); err != nil {
+		listener.Close()
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
 	go func() { s.gatewayExited <- gateway.server.Serve(listener) }()
 	return runtimeapi.Registration{SID: s.config.SID, BaseURL: "http://" + listener.Addr().String(), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
 }

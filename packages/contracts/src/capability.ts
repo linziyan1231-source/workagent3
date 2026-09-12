@@ -8,7 +8,9 @@ export const skillCatalogEntrySchema = z.object({
   source: z.enum(["builtin", "managed", "market", "user"]),
   enabled: z.boolean(),
   referenceDirectory: z.string().optional(),
-  compatibleEngines: z.array(z.enum(["codex", "kimi", "harness"])).optional(),
+  compatibleEngines: z
+    .array(z.enum(["codex", "kimi", "harness", "acp"]))
+    .optional(),
   relativePath: z
     .string()
     .min(1)

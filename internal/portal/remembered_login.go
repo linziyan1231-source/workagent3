@@ -13,7 +13,7 @@ func (s *Server) rememberedCookie(value string) *http.Cookie {
 }
 
 func (s *Server) rememberedUser(request *http.Request) (store.User, error) {
-	cookie, err := request.Cookie(s.rememberedCookie("").Name)
+	cookie, err := uniqueCookie(request, s.rememberedCookie("").Name)
 	if err != nil {
 		return store.User{}, err
 	}
@@ -32,7 +32,7 @@ func (s *Server) rememberedLogin(writer http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) saveRememberedLogin(writer http.ResponseWriter, request *http.Request, user store.User, remember bool) error {
-	if previous, err := request.Cookie(s.rememberedCookie("").Name); err == nil {
+	if previous, err := uniqueCookie(request, s.rememberedCookie("").Name); err == nil {
 		if err := s.store.DeleteRememberedLogin(request.Context(), previous.Value); err != nil {
 			return err
 		}

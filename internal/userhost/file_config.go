@@ -22,6 +22,7 @@ type FileConfig struct {
 	SID                        string              `json:"sid"`
 	DataRoot                   string              `json:"dataRoot"`
 	HarnessCommand             string              `json:"harnessCommand"`
+	PublishedPythonCommand     string              `json:"publishedPythonCommand,omitempty"`
 	CodexCommand               string              `json:"codexCommand,omitempty"`
 	KimiCommand                string              `json:"kimiCommand,omitempty"`
 	HarnessArguments           []string            `json:"harnessArguments,omitempty"`
@@ -61,6 +62,9 @@ func LoadFileConfig(path string) (FileConfig, error) {
 	}
 	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
 		return FileConfig{}, errors.New("managed tools root must be absolute")
+	}
+	if config.PublishedPythonCommand != "" && !filepath.IsAbs(config.PublishedPythonCommand) {
+		return FileConfig{}, errors.New("published Python command must be absolute")
 	}
 	if err := ValidateProfessionalDatabaseURL(config.ProfessionalDatabaseURL); err != nil {
 		return FileConfig{}, err

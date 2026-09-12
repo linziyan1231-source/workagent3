@@ -14,7 +14,7 @@ const baseKeys = new Set([
 
 export function nativeEngineEnvironment(
   source: NodeJS.ProcessEnv,
-  privateHomeKey: "CODEX_HOME" | "KIMI_CODE_HOME",
+  privateHomeKey: "CODEX_HOME" | "KIMI_CODE_HOME" | "ACP_HOME",
 ): NodeJS.ProcessEnv {
   const allowed = new Set(baseKeys);
   allowed.add(privateHomeKey);

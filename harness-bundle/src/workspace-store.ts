@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { link, open, rename, rm, writeFile } from "node:fs/promises";
 import { isUtf8 } from "node:buffer";
 import { FileMoves } from "./file-moves.js";
+import { WorkspaceSearch } from "./workspace-search.js";
 import { ResumableUploads } from "./resumable-upload.js";
 
 import { MAX_UPLOAD_BYTES } from "@workagent/contracts/upload-policy";
@@ -134,6 +135,10 @@ const validateRelativePath = (value: string, allowEmpty = true): string => {
 };
 
 export class WorkspaceStore {
+  readonly search = new WorkspaceSearch(
+    (id, path) => this.#resolve(id, path, true),
+    (id, path) => this.locate(id, path),
+  );
   readonly uploads: ResumableUploads;
   readonly moves: FileMoves;
   readonly #root: string;
@@ -147,7 +152,10 @@ export class WorkspaceStore {
     root: string,
     dshHome: string,
     readonly shared = false,
-    readonly recycleShared?: (projectId: string, path: string) => Promise<unknown>,
+    readonly recycleShared?: (
+      projectId: string,
+      path: string,
+    ) => Promise<unknown>,
   ) {
     if (!isAbsolute(root)) throw new Error("workspace root must be absolute");
     this.#root = resolve(root);

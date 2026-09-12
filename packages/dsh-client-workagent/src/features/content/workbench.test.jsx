@@ -42,6 +42,173 @@ beforeEach(() => {
   uploadFile.mockImplementation(async (_id, path) => path);
   request.mockResolvedValue([]);
 });
+it("keeps native session approval scopes as separate options", async () => {
+  nativeSessionAction.mockResolvedValue({
+    current: { provider: "acp", model: "default" },
+    groups: [],
+  });
+  request.mockImplementation(async (path) =>
+    path.includes("interactions?")
+      ? [
+          {
+            id: "choice",
+            choices: [
+              {
+                id: "once",
+                label: "允许本次",
+                outcome: "allow",
+                scope: "once",
+              },
+              {
+                id: "session",
+                label: "在本会话允许",
+                outcome: "allow",
+                scope: "session",
+              },
+            ],
+          },
+        ]
+      : { permissionMode: "manual_approval" },
+  );
+  render(
+    <features.Controls
+      ctx={{ sessions: { binding() {} } }}
+      session={{ id: "s", engine: "acp" }}
+      busy={false}
+      cancel={() => {}}
+    />,
+  );
+  const button = await screen.findByRole("button", { name: "在本会话允许" });
+  expect(screen.getByRole("button", { name: "允许本次" })).toBeTruthy();
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "/api/runtime/v1/interactions/choice/respond",
+      expect.objectContaining({
+        body: '{"sessionId":"s","optionId":"session"}',
+      }),
+    ),
+  );
+});
+
+it("loads native command metadata and inserts the exact slash command", async () => {
+  const setInput = vi.fn();
+  request.mockImplementation(async (path) =>
+    path.endsWith("/commands")
+      ? {
+          supported: true,
+          revision: 1,
+          items: [{ id: "review", description: "Review project" }],
+        }
+      : [],
+  );
+  render(
+    <features.ComposerTools
+      session={{ id: "s", workspaceId: "one" }}
+      input="/rev"
+      setInput={setInput}
+      onError={() => {}}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /review.*Review project/ }),
+  );
+  expect(setInput.mock.calls.at(-1)[0]("/rev")).toBe("/review ");
+});
+
+it("continues recursive mention search through empty pages and cancels a superseded query", async () => {
+  const setInput = vi.fn();
+  const requests = [];
+  request.mockImplementation(async (path, options) => {
+    if (!path.includes("/search?")) return [];
+    requests.push({ path, signal: options.signal });
+    if (path.includes("cursor=next"))
+      return {
+        items: [
+          {
+            kind: "file",
+            name: "report.txt",
+            path: "deep/area/report.txt",
+            fileId: "stable-file",
+          },
+        ],
+        nextCursor: null,
+      };
+    return { items: [], nextCursor: "next" };
+  });
+  const view = render(
+    <features.ComposerTools
+      session={{ id: "s", workspaceId: "one" }}
+      input="@report"
+      setInput={setInput}
+      onError={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "继续搜索" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /deep\/area\/report.txt/ }),
+  );
+  expect(setInput.mock.calls.at(-1)[0]("@report")).toContain("stable-file");
+  view.rerender(
+    <features.ComposerTools
+      session={{ id: "s", workspaceId: "one" }}
+      input="@other"
+      setInput={setInput}
+      onError={() => {}}
+    />,
+  );
+  await waitFor(() =>
+    expect(requests.some((row) => row.path.includes("q=other"))).toBe(true),
+  );
+  expect(requests[0].signal.aborted).toBe(true);
+});
+it("releases abandoned mention cursors, including a late page from the previous workspace", async () => {
+  let finishPage;
+  request.mockImplementation(async (path, options = {}) => {
+    if (options.method === "DELETE") return {};
+    if (path.includes("cursor=first"))
+      return new Promise((resolve) => {
+        finishPage = resolve;
+      });
+    return {
+      items: [],
+      nextCursor: path.includes("/one/") ? "first" : "second",
+    };
+  });
+  const props = { input: "@report", setInput() {}, onError() {} };
+  const view = render(
+    <features.ComposerTools
+      {...props}
+      session={{ id: "s", workspaceId: "one" }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "继续搜索" }));
+  await waitFor(() => expect(finishPage).toBeTypeOf("function"));
+  view.rerender(
+    <features.ComposerTools
+      {...props}
+      session={{ id: "s", workspaceId: "two" }}
+    />,
+  );
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces/one/search?cursor=first",
+      { method: "DELETE" },
+    ),
+  );
+  finishPage({ items: [], nextCursor: "late-page" });
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "/api/runtime/v1/workspaces/one/search?cursor=late-page",
+      { method: "DELETE" },
+    ),
+  );
+  view.unmount();
+  expect(request).toHaveBeenCalledWith(
+    "/api/runtime/v1/workspaces/two/search?cursor=second",
+    { method: "DELETE" },
+  );
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -513,7 +680,9 @@ it("selects native model/effort and responds to the pending approval belonging t
   await waitFor(() =>
     expect(request).toHaveBeenCalledWith(
       "/api/runtime/v1/interactions/approval-one/respond",
-      expect.objectContaining({ body: '{"decision":"reject"}' }),
+      expect.objectContaining({
+        body: '{"sessionId":"main","decision":"reject"}',
+      }),
     ),
   );
 });

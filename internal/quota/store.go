@@ -59,6 +59,7 @@ type Reservation struct {
 	RunID           string `json:"runId"`
 	SID             string `json:"sid"`
 	ModelID         string `json:"modelId"`
+	Engine          string `json:"engine,omitempty"`
 	Period          Period `json:"period"`
 	PeriodKey       string `json:"periodKey"`
 	ReservedUnits   int64  `json:"reservedUnits"`
@@ -232,6 +233,17 @@ ALTER TABLE quota_reservations ADD COLUMN settle_source TEXT CHECK (settle_sourc
 			return fmt.Errorf("add quota settlement source column: %w", err)
 		}
 	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('quota_reservations') WHERE name='engine'`).Scan(&columnCount); err != nil {
+		return err
+	}
+	if columnCount == 0 {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE quota_reservations ADD COLUMN engine TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE quota_reservations SET engine=COALESCE((SELECT engine FROM quota_run_authorizations a WHERE a.run_id=quota_reservations.run_id),'')`); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -318,7 +330,7 @@ func (s *Store) reserveAuthorized(ctx context.Context, request ReserveRequest, a
 	if existing, found, err := reservationByRun(ctx, tx, request.RunID); err != nil {
 		return Reservation{}, false, err
 	} else if found {
-		if existing.SID != request.SID || existing.ModelID != request.ModelID || existing.ReservedUnits != request.EstimatedUnits {
+		if existing.SID != request.SID || existing.ModelID != request.ModelID || existing.ReservedUnits != request.EstimatedUnits || ((existing.Engine == "acp" || request.Engine == "acp") && existing.Engine != request.Engine) {
 			return Reservation{}, true, ErrIdempotencyConflict
 		}
 		if authorization != nil {
@@ -352,12 +364,23 @@ func (s *Store) reserveAuthorized(ctx context.Context, request ReserveRequest, a
 	if err != nil {
 		return Reservation{}, false, err
 	}
+	if request.Engine == "acp" && s.gatewayAccounting {
+		for _, scope := range scopes {
+			if scope.id == request.ModelID {
+				usage, err = gatewayUsageFor(ctx, tx, request.SID, scope, period, request.At, limit)
+				if err != nil {
+					return Reservation{}, false, err
+				}
+				break
+			}
+		}
+	}
 	if usage.ConsumedUnits+usage.ReservedUnits+request.EstimatedUnits > limit {
-		if !s.gatewayAccounting || request.ModelID == SpeechTranscriptionModelID {
+		if !s.gatewayAccounting || request.ModelID == SpeechTranscriptionModelID || request.Engine == "acp" {
 			return Reservation{}, false, ErrExceeded
 		}
 	}
-	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID {
+	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID && request.Engine != "acp" {
 		if err := ensureGatewayFresh(ctx, tx, request.SID, request.At); err != nil {
 			return Reservation{}, false, err
 		}
@@ -400,13 +423,13 @@ func (s *Store) reserveAuthorized(ctx context.Context, request ReserveRequest, a
 		}
 	}
 	reservation := Reservation{
-		RunID: request.RunID, SID: request.SID, ModelID: request.ModelID,
+		RunID: request.RunID, SID: request.SID, ModelID: request.ModelID, Engine: request.Engine,
 		Period: period, PeriodKey: key, ReservedUnits: request.EstimatedUnits, Status: "reserved",
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO quota_reservations(run_id, sid, model_id, period, period_key, reserved_units, status, created_at)
-VALUES(?, ?, ?, ?, ?, ?, 'reserved', ?)`, request.RunID, request.SID, request.ModelID,
-		period, key, request.EstimatedUnits, request.At.Unix())
+INSERT INTO quota_reservations(run_id, sid, model_id, period, period_key, reserved_units, status, created_at, engine)
+VALUES(?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`, request.RunID, request.SID, request.ModelID,
+		period, key, request.EstimatedUnits, request.At.Unix(), request.Engine)
 	if err != nil {
 		return Reservation{}, false, fmt.Errorf("persist quota reservation: %w", err)
 	}
@@ -548,7 +571,7 @@ func (s *Store) settleAs(ctx context.Context, sid, runtimeSID string, request Se
 		return ErrReservationNotFound
 	}
 	if reservation.Status == "settled" {
-		if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+		if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID && reservation.Engine != "acp" {
 			record = false
 			return nil
 		}
@@ -570,7 +593,7 @@ func (s *Store) settleAs(ctx context.Context, sid, runtimeSID string, request Se
 	}
 	var source string
 	var gatewayOwner string
-	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID && reservation.Engine != "acp" {
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT sid FROM quota_gateway_run_owners WHERE run_id=?),?)`, reservation.RunID, reservation.SID).Scan(&gatewayOwner); err != nil {
 			return err
 		}
@@ -592,7 +615,10 @@ func (s *Store) settleAs(ctx context.Context, sid, runtimeSID string, request Se
 			}
 		}
 	}
-	if reservation.ModelID != SpeechTranscriptionModelID && (!s.gatewayAccounting || gatewayOwner != reservation.SID) {
+	if reservation.Engine == "acp" {
+		source = "estimated"
+	}
+	if reservation.Engine != "acp" && reservation.ModelID != SpeechTranscriptionModelID && (!s.gatewayAccounting || gatewayOwner != reservation.SID) {
 		// Authoritative settlement prefers real tokens from the drained gateway
 		// usage detail (matched by SID + time window + model); without a match
 		// the caller's conservative estimate stands and is marked estimated.
@@ -618,7 +644,7 @@ WHERE run_id = ? AND status = 'reserved'`, actual, s.now().Unix(), sourceColumn,
 	if err != nil {
 		return fmt.Errorf("settle quota reservation: %w", err)
 	}
-	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {
+	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID && reservation.Engine != "acp" {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO quota_gateway_holds(run_id,release_after_ms) VALUES(?,?)`, reservation.RunID, s.now().UnixMilli()); err != nil {
 			return err
 		}
@@ -690,9 +716,9 @@ func reservationByRun(ctx context.Context, q queryer, runID string) (Reservation
 	var value Reservation
 	var actual sql.NullInt64
 	err := q.QueryRowContext(ctx, `
-SELECT run_id, sid, model_id, period, period_key, reserved_units, actual_units, status
+SELECT run_id, sid, model_id, period, period_key, reserved_units, actual_units, status, engine
 FROM quota_reservations WHERE run_id = ?`, runID).Scan(&value.RunID, &value.SID, &value.ModelID,
-		&value.Period, &value.PeriodKey, &value.ReservedUnits, &actual, &value.Status)
+		&value.Period, &value.PeriodKey, &value.ReservedUnits, &actual, &value.Status, &value.Engine)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, false, nil
 	}
@@ -722,7 +748,7 @@ func validateSID(sid string) error {
 }
 
 func validateReserve(request ReserveRequest) error {
-	if request.Engine != "" && request.Engine != "codex" && request.Engine != "kimi" && request.Engine != "harness" {
+	if request.Engine != "" && request.Engine != "codex" && request.Engine != "kimi" && request.Engine != "harness" && request.Engine != "acp" {
 		return errors.New("invalid quota engine")
 	}
 	if strings.TrimSpace(request.RunID) == "" {

@@ -10,6 +10,10 @@ import {
 import { dirname, join } from "node:path";
 import { Cron } from "croner";
 import {
+  SessionBusyError,
+  type ExecutionAdmission,
+} from "./execution-admission.js";
+import {
   automationDocumentSchema,
   automationDefinitionSchema,
   automationMutationSchema,
@@ -75,6 +79,11 @@ export const nextScheduleTime = (
   after: Date,
 ): Date => {
   const parsed = automationScheduleSchema.parse(schedule);
+  if (parsed.kind === "once") {
+    const at = new Date(parsed.at);
+    if (at <= after) throw new Error("automation_once_time_in_past");
+    return at;
+  }
   if (parsed.kind === "interval")
     return new Date(after.getTime() + parsed.everyMinutes * 60_000);
 
@@ -113,6 +122,11 @@ export class AutomationStore {
   readonly #definitions = new Map<string, AutomationDefinition>();
   readonly #runs = new Map<string, AutomationRun>();
   readonly #quotaReconciledRunIds = new Set<string>();
+  readonly #operations = new Map<
+    string,
+    { id: string; input: string; result: unknown }
+  >();
+  #batch = false;
 
   constructor(dshHome: string, clock: Clock = defaultClock) {
     this.#path = join(dshHome, "workagent", "automations.json");
@@ -123,6 +137,8 @@ export class AutomationStore {
       );
       for (const definition of document.definitions)
         this.#definitions.set(definition.id, definition);
+      for (const operation of document.operations)
+        this.#operations.set(operation.id, operation);
       let recovered = false;
       for (const value of document.runs) {
         const run =
@@ -204,6 +220,20 @@ export class AutomationStore {
     });
     validateMessageNotification(next);
     this.#definitions.set(id, next);
+    if (mutation.enabled === false) {
+      for (const run of this.#runs.values()) {
+        if (
+          run.automationId === id &&
+          (run.status === "waiting" || run.status === "pending") &&
+          run.trigger === "scheduled"
+        )
+          this.#runs.set(run.id, {
+            ...run,
+            status: "cancelled",
+            finishedAt: now.toISOString(),
+          });
+      }
+    }
     this.#save();
     return next;
   }
@@ -214,7 +244,7 @@ export class AutomationStore {
       [...this.#runs.values()].some(
         (run) =>
           run.automationId === id &&
-          (run.status === "pending" || run.status === "running"),
+          ["pending", "waiting", "running"].includes(run.status),
       )
     )
       throw new Error("automation_has_active_run");
@@ -295,26 +325,39 @@ export class AutomationStore {
         ...definition,
         version: definition.version + 1,
         lastRunAt: scheduledFor,
-        nextRunAt: nextScheduleTime(definition.schedule, now).toISOString(),
+        enabled:
+          definition.schedule.kind === "once" ? false : definition.enabled,
+        nextRunAt:
+          definition.schedule.kind === "once"
+            ? null
+            : nextScheduleTime(definition.schedule, now).toISOString(),
         updatedAt: now.toISOString(),
       });
       changed = true;
     }
     if (changed) this.#save();
     return [...this.#runs.values()]
-      .filter((run) => run.status === "pending")
+      .filter(
+        (run) =>
+          run.status === "pending" ||
+          (run.status === "waiting" &&
+            run.notBefore !== null &&
+            new Date(run.notBefore) <= now),
+      )
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   begin(runId: string): AutomationRun {
     const run = this.#requiredRun(runId);
-    if (run.status !== "pending") throw new Error("automation_run_not_pending");
+    if (run.status !== "pending" && run.status !== "waiting")
+      throw new Error("automation_run_not_pending");
     const next = automationRunSchema.parse({
       ...run,
       status: "running",
       attempt: run.attempt + 1,
       startedAt: this.#clock.now().toISOString(),
       error: null,
+      notBefore: null,
     });
     this.#runs.set(runId, next);
     this.#save();
@@ -326,6 +369,56 @@ export class AutomationStore {
     if (run.status !== "running") return;
     this.#runs.set(runId, automationRunSchema.parse({ ...run, sessionId }));
     this.#save();
+  }
+
+  submitted(runId: string, turnId: string): void {
+    const run = this.#requiredRun(runId);
+    if (run.status !== "running") return;
+    this.#runs.set(runId, {
+      ...run,
+      turnId,
+      submittedAt: this.#clock.now().toISOString(),
+    });
+    this.#save();
+  }
+
+  deferBusy(runId: string): AutomationRun {
+    const run = this.#requiredRun(runId);
+    if (run.status === "cancelled") return run;
+    if (run.status !== "running" || run.submittedAt)
+      throw new Error("automation_run_not_retryable");
+    const exhausted = run.busyRetryCount >= 3;
+    const next: AutomationRun = {
+      ...run,
+      status: exhausted ? "skipped_busy" : "waiting",
+      attempt: Math.max(0, run.attempt - 1),
+      busyRetryCount: run.busyRetryCount + (exhausted ? 0 : 1),
+      notBefore: exhausted
+        ? null
+        : new Date(this.#clock.now().getTime() + 30_000).toISOString(),
+      lastWaitReason: "session_busy",
+      error: exhausted ? "automation_session_busy_after_retries" : null,
+      startedAt: null,
+      finishedAt: exhausted ? this.#clock.now().toISOString() : null,
+    };
+    this.#runs.set(runId, next);
+    this.#save();
+    return next;
+  }
+
+  nextWakeAt(): string | null {
+    return (
+      [
+        ...this.list().flatMap((definition) =>
+          definition.enabled && definition.nextRunAt
+            ? [definition.nextRunAt]
+            : [],
+        ),
+        ...[...this.#runs.values()].flatMap((run) =>
+          run.status === "waiting" && run.notBefore ? [run.notBefore] : [],
+        ),
+      ].sort()[0] ?? null
+    );
   }
 
   interruptedExecutions(): AutomationExecution[] {
@@ -386,7 +479,11 @@ export class AutomationStore {
     const run = this.#requiredRun(runId);
     if (run.automationId !== automationId)
       throw new Error("automation_run_not_found");
-    if (run.status !== "pending" && run.status !== "running")
+    if (
+      run.status !== "pending" &&
+      run.status !== "waiting" &&
+      run.status !== "running"
+    )
       throw new Error("automation_run_not_cancellable");
     const next = automationRunSchema.parse({
       ...run,
@@ -396,6 +493,35 @@ export class AutomationStore {
     this.#runs.set(runId, next);
     this.#save();
     return next;
+  }
+
+  operation<T>(id: string, input: unknown, perform: () => T): T {
+    if (!/^[A-Za-z0-9_:@.-]{1,200}$/.test(id))
+      throw new Error("invalid_operation_id");
+    const encoded = JSON.stringify(input);
+    const known = this.#operations.get(id);
+    if (known) {
+      if (known.input !== encoded) throw new Error("operation_id_conflict");
+      return known.result as T;
+    }
+    const definitions = new Map(this.#definitions),
+      runs = new Map(this.#runs);
+    this.#batch = true;
+    try {
+      const result = perform();
+      this.#operations.set(id, { id, input: encoded, result });
+      this.#batch = false;
+      this.#save();
+      return result;
+    } catch (error) {
+      this.#definitions.clear();
+      for (const [key, value] of definitions) this.#definitions.set(key, value);
+      this.#runs.clear();
+      for (const [key, value] of runs) this.#runs.set(key, value);
+      this.#operations.delete(id);
+      this.#batch = false;
+      throw error;
+    }
   }
 
   #required(id: string): AutomationDefinition {
@@ -411,6 +537,7 @@ export class AutomationStore {
   }
 
   #save(): void {
+    if (this.#batch) return;
     mkdirSync(dirname(this.#path), { recursive: true, mode: 0o700 });
     const temporary = `${this.#path}.${process.pid}.tmp`;
     writeFileSync(
@@ -421,6 +548,7 @@ export class AutomationStore {
           definitions: [...this.#definitions.values()],
           runs: [...this.#runs.values()],
           quotaReconciledRunIds: [...this.#quotaReconciledRunIds].sort(),
+          operations: [...this.#operations.values()],
         },
         null,
         2,
@@ -435,9 +563,16 @@ export type AutomationExecution = {
   automationRunId: string;
   definition: AutomationDefinition;
   onSessionStarted?: (sessionId: string) => void;
+  onSubmitted?: ((turnId: string) => void) | undefined;
+  executionContext?: string | undefined;
 };
 
 export interface AutomationRunnerPort {
+  admit?(request: AutomationExecution): ExecutionAdmission;
+  billingModel?(
+    request: AutomationExecution,
+    recovery?: boolean,
+  ): Promise<string>;
   execute(request: AutomationExecution): Promise<{
     sessionId: string;
     result?: string;
@@ -530,11 +665,16 @@ export class AutomationScheduler {
               definition: run.definitionSnapshot,
               onSessionStarted: (sessionId) =>
                 this.store.bindSession(run.id, sessionId),
+              onSubmitted: (turnId) => this.store.submitted(run.id, turnId),
             });
             this.#notifyTerminal(
               this.store.finish(run.id, { status: "succeeded", ...result }),
             );
           } catch (error) {
+            if (error instanceof SessionBusyError) {
+              this.#notifyTerminal(this.store.deferBusy(run.id));
+              continue;
+            }
             this.#notifyTerminal(
               this.store.finish(run.id, {
                 status: "failed",
@@ -559,11 +699,16 @@ export class AutomationScheduler {
   #notifyTerminal(run: AutomationRun): void {
     if (this.notifier === undefined) return;
     // A cancel can race execute; finish() then returns the cancelled run.
-    if (run.status !== "succeeded" && run.status !== "failed") return;
+    if (
+      run.status !== "succeeded" &&
+      run.status !== "failed" &&
+      run.status !== "skipped_busy"
+    )
+      return;
     const policy = run.definitionSnapshot.notificationPolicy;
     if (
       policy === "none" ||
-      (policy === "on_failure" && run.status !== "failed")
+      (policy === "on_failure" && run.status === "succeeded")
     )
       return;
     const name = run.definitionSnapshot.name;
@@ -571,11 +716,11 @@ export class AutomationScheduler {
       .publish({
         kind: "automation",
         title:
-          run.status === "failed"
+          run.status !== "succeeded"
             ? "Automation failed"
             : "Automation completed",
         message:
-          run.status === "failed"
+          run.status !== "succeeded"
             ? `Automation "${name}" failed: ${run.error ?? "unknown error"}`
             : `Automation "${name}" finished successfully.`,
         deepLink: `/scheduled/${run.automationId}`,

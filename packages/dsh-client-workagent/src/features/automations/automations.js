@@ -19,6 +19,8 @@ export function createAutomations({
   const endpoint = `${apiRoot}/automations`;
   const runLabels = {
     pending: "等待",
+    waiting: "等待对话空闲",
+    skipped_busy: "对话持续忙碌，已跳过",
     running: "运行中",
     succeeded: "成功",
     failed: "失败",
@@ -180,22 +182,32 @@ export function createAutomations({
         .split(":")
         .map(Number);
       const timezone = String(form.get("timezone") || "UTC");
+      const onceAt =
+        kind === "once" ? new Date(String(form.get("onceAt"))) : null;
+      if (
+        onceAt &&
+        (!Number.isFinite(onceAt.getTime()) ||
+          (form.get("enabled") === "on" && onceAt.getTime() <= Date.now()))
+      )
+        return setError("请选择未来的执行时间");
       const schedule =
-        kind === "interval"
-          ? { kind, everyMinutes: Number(form.get("minutes")) }
-          : kind === "weekly"
-            ? {
-                kind,
-                daysOfWeek: form.getAll("days").map(Number),
-                hour,
-                minute,
-                timezone,
-              }
-            : {
-                kind,
-                expression: String(form.get("expression")).trim(),
-                timezone,
-              };
+        kind === "once"
+          ? { kind, at: onceAt.toISOString() }
+          : kind === "interval"
+            ? { kind, everyMinutes: Number(form.get("minutes")) }
+            : kind === "weekly"
+              ? {
+                  kind,
+                  daysOfWeek: form.getAll("days").map(Number),
+                  hour,
+                  minute,
+                  timezone,
+                }
+              : {
+                  kind,
+                  expression: String(form.get("expression")).trim(),
+                  timezone,
+                };
       if (kind === "weekly" && !schedule.daysOfWeek.length)
         return setError("请选择至少一个执行日");
       const messageNotificationTargetId = String(
@@ -217,6 +229,12 @@ export function createAutomations({
               schedule,
               presetId,
               engine,
+              ...(engine === "acp"
+                ? {
+                    acpCatalogId: presets.find((p) => p.id === presetId)
+                      ?.acpCatalogId,
+                  }
+                : {}),
               workspaceId,
               input: String(form.get("input")),
               notificationPolicy: String(form.get("notificationPolicy")),
@@ -316,83 +334,104 @@ export function createAutomations({
           value: kind,
           onChange: (e) => setKind(e.target.value),
           options: [
+            ["once", "指定时间执行一次"],
             ["interval", "固定间隔"],
             ["weekly", "每周"],
             ["cron", "Cron 表达式"],
           ],
         }),
       ),
-      kind === "interval"
+      kind === "once"
         ? field(
-            "执行间隔（分钟）",
+            `执行时间（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`,
             h(Input, {
-              name: "minutes",
-              type: "number",
-              min: 1,
-              max: 525600,
+              key: "onceAt",
+              name: "onceAt",
+              type: "datetime-local",
               required: true,
-              defaultValue: row?.schedule.everyMinutes || 60,
+              defaultValue:
+                row?.schedule.kind === "once"
+                  ? new Date(
+                      new Date(row.schedule.at).getTime() -
+                        new Date(row.schedule.at).getTimezoneOffset() * 60000,
+                    )
+                      .toISOString()
+                      .slice(0, 16)
+                  : "",
             }),
           )
-        : h(
-            React.Fragment,
-            null,
-            field(
-              "时区",
+        : kind === "interval"
+          ? field(
+              "执行间隔（分钟）",
               h(Input, {
-                name: "timezone",
+                key: "minutes",
+                name: "minutes",
+                type: "number",
+                min: 1,
+                max: 525600,
                 required: true,
-                defaultValue:
-                  row?.schedule.timezone ||
-                  Intl.DateTimeFormat().resolvedOptions().timeZone ||
-                  "UTC",
+                defaultValue: row?.schedule.everyMinutes || 60,
               }),
-            ),
-            kind === "cron"
-              ? field(
-                  "Cron 表达式",
-                  h(Input, {
-                    name: "expression",
-                    required: true,
-                    placeholder: "0 9 * * 1-5",
-                    defaultValue: row?.schedule.expression || "",
-                  }),
-                )
-              : h(
-                  React.Fragment,
-                  null,
-                  h(
-                    "fieldset",
+            )
+          : h(
+              React.Fragment,
+              null,
+              field(
+                "时区",
+                h(Input, {
+                  name: "timezone",
+                  required: true,
+                  defaultValue:
+                    row?.schedule.timezone ||
+                    Intl.DateTimeFormat().resolvedOptions().timeZone ||
+                    "UTC",
+                }),
+              ),
+              kind === "cron"
+                ? field(
+                    "Cron 表达式",
+                    h(Input, {
+                      name: "expression",
+                      required: true,
+                      placeholder: "0 9 * * 1-5",
+                      defaultValue: row?.schedule.expression || "",
+                    }),
+                  )
+                : h(
+                    React.Fragment,
                     null,
-                    h("legend", null, "执行日"),
-                    ...["日", "一", "二", "三", "四", "五", "六"].map(
-                      (day, index) =>
-                        h(
-                          "label",
-                          { key: day },
-                          h("input", {
-                            type: "checkbox",
-                            name: "days",
-                            value: index,
-                            defaultChecked: (
-                              row?.schedule.daysOfWeek || [1]
-                            ).includes(index),
-                          }),
-                          `周${day}`,
-                        ),
+                    h(
+                      "fieldset",
+                      null,
+                      h("legend", null, "执行日"),
+                      ...["日", "一", "二", "三", "四", "五", "六"].map(
+                        (day, index) =>
+                          h(
+                            "label",
+                            { key: day },
+                            h("input", {
+                              type: "checkbox",
+                              name: "days",
+                              value: index,
+                              defaultChecked: (
+                                row?.schedule.daysOfWeek || [1]
+                              ).includes(index),
+                            }),
+                            `周${day}`,
+                          ),
+                      ),
+                    ),
+                    field(
+                      "执行时间",
+                      h(Input, {
+                        type: "time",
+                        name: "time",
+                        required: true,
+                        defaultValue: `${String(row?.schedule.hour ?? 9).padStart(2, "0")}:${String(row?.schedule.minute ?? 0).padStart(2, "0")}`,
+                      }),
                     ),
                   ),
-                  field(
-                    "执行时间",
-                    h(Input, {
-                      type: "time",
-                      name: "time",
-                      required: true,
-                      defaultValue: `${String(row?.schedule.hour ?? 9).padStart(2, "0")}:${String(row?.schedule.minute ?? 0).padStart(2, "0")}`,
-                    }),
-                  ),
-                ),
-          ),
+            ),
       field(
         "执行方式",
         h(Select, {
@@ -553,7 +592,7 @@ export function createAutomations({
           "div",
           null,
           h("h3", null, "让日常工作，自动进行"),
-          h("p", null, "按间隔、每周或 Cron 执行，可持续使用同一对话。"),
+          h("p", null, "按指定时间一次执行，或按间隔、每周、Cron 重复执行。"),
         ),
       ),
       editing !== null
@@ -681,6 +720,13 @@ export function createAutomations({
                         h("strong", null, runLabels[run.status] || run.status),
                         " · ",
                         new Date(run.createdAt).toLocaleString(),
+                        run.status === "waiting"
+                          ? h(
+                              "p",
+                              { role: "status" },
+                              `目标对话正在工作，${new Date(run.notBefore).toLocaleString()} 再尝试（${run.busyRetryCount}/3）。尚未发送请求。`,
+                            )
+                          : null,
                         run.sessionId
                           ? h(
                               "a",
@@ -708,7 +754,7 @@ export function createAutomations({
                         run.skillSuggestionPath
                           ? h(SkillSuggestion, { row, run, saved: refresh })
                           : null,
-                        ["pending", "running"].includes(run.status)
+                        ["pending", "waiting", "running"].includes(run.status)
                           ? h(
                               Button,
                               {

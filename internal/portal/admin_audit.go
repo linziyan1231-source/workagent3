@@ -66,7 +66,8 @@ func (s *Server) adminAuditExport(writer http.ResponseWriter, request *http.Requ
 func parseAuditQuery(writer http.ResponseWriter, request *http.Request) (contracts.AuditQuery, bool) {
 	parameters := request.URL.Query()
 	query := contracts.AuditQuery{
-		Actor: parameters.Get("actor"), Action: parameters.Get("action"),
+		ClientIP: parameters.Get("client_ip"),
+		Actor:    parameters.Get("actor"), Action: parameters.Get("action"),
 		Target: parameters.Get("target"), CorrelationID: parameters.Get("correlation_id"),
 	}
 	var err error

@@ -9,6 +9,10 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  SessionBusyError,
+  type ExecutionAdmission,
+} from "./execution-admission.js";
+import {
   teamCreateSchema,
   teamDocumentSchema,
   teamEventSchema,
@@ -16,6 +20,10 @@ import {
   teamMemberSchema,
   teamSchema,
   teamTaskSchema,
+  teamRunSchema,
+  teamDispatchSchema,
+  type TeamRun,
+  type TeamDispatch,
   type EngineId,
   type Team,
   type TeamCreate,
@@ -41,6 +49,14 @@ export class TeamStore {
   readonly #messages = new Map<string, TeamMailboxMessage>();
   readonly #events: TeamEvent[] = [];
   #sequence = 0;
+  readonly #runs = new Map<string, TeamRun>();
+  readonly #dispatches = new Map<string, TeamDispatch>();
+  readonly #operations = new Map<
+    string,
+    { id: string; input: string; result: ReturnType<typeof JSON.parse> }
+  >();
+  #batch = false;
+
   readonly #quotaReconciledTaskIds = new Set<string>();
 
   constructor(dshHome: string, clock: Clock = defaultClock) {
@@ -51,6 +67,32 @@ export class TeamStore {
       JSON.parse(readFileSync(this.#path, "utf8")),
     );
     for (const team of document.teams) this.#teams.set(team.id, team);
+    for (const value of document.runs) this.#runs.set(value.id, value);
+    for (const value of document.operations)
+      this.#operations.set(value.id, value);
+    for (const value of document.dispatches) {
+      const interrupted = value.status === "running";
+      this.#dispatches.set(
+        value.id,
+        interrupted
+          ? {
+              ...value,
+              status: "interrupted",
+              error: "runtime_restarted",
+              finishedAt: this.#now(),
+            }
+          : value,
+      );
+      if (interrupted) {
+        const run = this.#runs.get(value.runId)!;
+        this.#runs.set(run.id, {
+          ...run,
+          status: "interrupted",
+          reason: "runtime_restarted",
+          updatedAt: this.#now(),
+        });
+      }
+    }
     let recovered = false;
     for (const stored of document.tasks) {
       const task =
@@ -65,6 +107,21 @@ export class TeamStore {
       if (task !== stored) recovered = true;
       this.#tasks.set(task.id, task);
     }
+    for (const dispatch of this.#dispatches.values()) {
+      const task = dispatch.taskId
+        ? this.#tasks.get(dispatch.taskId)
+        : undefined;
+      if (
+        dispatch.status === "queued" &&
+        task &&
+        ["failed", "succeeded", "cancelled"].includes(task.status)
+      )
+        this.#dispatches.set(dispatch.id, {
+          ...dispatch,
+          status: "cancelled",
+          finishedAt: this.#now(),
+        });
+    }
     for (const message of document.messages)
       this.#messages.set(message.id, message);
     for (const event of document.events) this.#events.push(event);
@@ -75,7 +132,20 @@ export class TeamStore {
     );
     for (const id of document.quotaReconciledTaskIds)
       this.#quotaReconciledTaskIds.add(id);
-    if (recovered) {
+    for (const task of this.#tasks.values()) {
+      if (
+        task.status === "queued" &&
+        ![...this.#dispatches.values()].some((item) => item.taskId === task.id)
+      ) {
+        const run = this.#ensureRun(task.teamId, task.input);
+        this.#enqueue(run, task.memberId, task.input, null, task.id);
+        recovered = true;
+      }
+    }
+    if (
+      recovered ||
+      document.dispatches.some((item) => item.status === "running")
+    ) {
       for (const [id, team] of this.#teams)
         this.#teams.set(id, {
           ...team,
@@ -175,7 +245,12 @@ export class TeamStore {
 
   addMember(
     teamId: string,
-    input: { name: string; engine: EngineId; presetId: string },
+    input: {
+      name: string;
+      engine: EngineId;
+      presetId: string;
+      acpCatalogId?: string;
+    },
   ): Team {
     const team = this.#requiredTeam(teamId);
     if (
@@ -209,7 +284,12 @@ export class TeamStore {
   updateMember(
     teamId: string,
     memberId: string,
-    input: { name?: string; engine?: EngineId; presetId?: string },
+    input: {
+      name?: string;
+      engine?: EngineId;
+      presetId?: string;
+      acpCatalogId?: string;
+    },
   ): Team {
     const team = this.#requiredTeam(teamId);
     const current = this.#requiredMember(team, memberId);
@@ -224,7 +304,16 @@ export class TeamStore {
       )
     )
       throw new Error("team_member_name_conflict");
-    const updated = teamMemberSchema.parse({ ...current, ...input });
+    const changedEngine =
+      (input.engine !== undefined && input.engine !== current.engine) ||
+      (input.presetId !== undefined && input.presetId !== current.presetId) ||
+      (input.acpCatalogId !== undefined &&
+        input.acpCatalogId !== current.acpCatalogId);
+    const updated = teamMemberSchema.parse({
+      ...current,
+      ...input,
+      ...(changedEngine ? { sessionId: `session-${randomUUID()}` } : {}),
+    });
     const next = teamSchema.parse({
       ...team,
       version: team.version + 1,
@@ -251,6 +340,11 @@ export class TeamStore {
     if (member.role === "lead") throw new Error("team_lead_cannot_be_removed");
     if (
       member.status === "running" ||
+      this.dispatches().some(
+        (item) =>
+          item.memberId === memberId &&
+          ["queued", "running"].includes(item.status),
+      ) ||
       this.tasks(teamId).some(
         (task) =>
           task.memberId === memberId &&
@@ -273,6 +367,10 @@ export class TeamStore {
   delete(teamId: string): void {
     this.#requiredTeam(teamId);
     if (
+      this.dispatches().some(
+        (item) =>
+          item.teamId === teamId && ["queued", "running"].includes(item.status),
+      ) ||
       this.tasks(teamId).some(
         (task) => task.status === "queued" || task.status === "running",
       )
@@ -280,6 +378,12 @@ export class TeamStore {
       throw new Error("team_has_active_task");
     this.#event(teamId, "team.removed", teamId);
     this.#teams.delete(teamId);
+    for (const [id, run] of this.#runs)
+      if (run.teamId === teamId) this.#runs.delete(id);
+    for (const [id, dispatch] of this.#dispatches)
+      if (dispatch.teamId === teamId) this.#dispatches.delete(id);
+    for (const id of this.#operations.keys())
+      if (id.startsWith(`${teamId}:`)) this.#operations.delete(id);
     for (const [id, task] of this.#tasks)
       if (task.teamId === teamId) this.#tasks.delete(id);
     for (const [id, message] of this.#messages)
@@ -304,10 +408,20 @@ export class TeamStore {
   }
   queueTask(
     teamId: string,
-    input: { memberId: string; title: string; input: string },
+    input: {
+      memberId: string;
+      title: string;
+      input: string;
+      dependsOnIds?: string[];
+      createdByMemberId?: string | null;
+    },
+    parentId: string | null = null,
   ): TeamTask {
+    if (!this.#batch)
+      return this.#transaction(() => this.queueTask(teamId, input, parentId));
     const team = this.#requiredTeam(teamId);
     this.#requiredMember(team, input.memberId);
+    this.#validateDependencies(teamId, input.dependsOnIds ?? []);
     const now = this.#now();
     const task = teamTaskSchema.parse({
       id: `team-task-${randomUUID()}`,
@@ -322,6 +436,8 @@ export class TeamStore {
       finishedAt: null,
     });
     this.#tasks.set(task.id, task);
+    const run = this.#ensureRun(teamId, task.input);
+    this.#enqueue(run, task.memberId, task.input, parentId, task.id);
     this.#event(teamId, "task.queued", task.id);
     this.#save();
     return task;
@@ -335,6 +451,12 @@ export class TeamStore {
   interruptedExecutions(): TeamExecution[] {
     const executions: TeamExecution[] = [];
     for (const task of this.#tasks.values()) {
+      if (
+        this.dispatches().some(
+          (item) => item.taskId === task.id && item.status === "interrupted",
+        )
+      )
+        continue;
       if (task.status !== "failed" || task.error !== "runtime_restarted")
         continue;
       if (this.#quotaReconciledTaskIds.has(task.id)) continue;
@@ -342,11 +464,37 @@ export class TeamStore {
       const member = this.#requiredMember(team, task.memberId);
       executions.push(this.#execution(task, team, member));
     }
+    for (const item of this.#dispatches.values()) {
+      if (
+        item.status !== "interrupted" ||
+        this.#quotaReconciledTaskIds.has(item.id)
+      )
+        continue;
+      const team = this.#requiredTeam(item.teamId);
+      const member = this.#requiredMember(team, item.memberId);
+      executions.push({
+        taskId: item.id,
+        teamId: team.id,
+        memberId: member.id,
+        sessionId: member.sessionId!,
+        name: team.name,
+        engine: member.engine,
+        acpCatalogId: member.acpCatalogId,
+        presetId: member.presetId,
+        workspaceId: team.workspaceId,
+        input: item.input,
+      });
+    }
     return executions.sort((left, right) =>
       left.taskId.localeCompare(right.taskId),
     );
   }
   acknowledgeInterruptedExecution(taskId: string): void {
+    if (this.#dispatches.get(taskId)?.status === "interrupted") {
+      this.#quotaReconciledTaskIds.add(taskId);
+      this.#save();
+      return;
+    }
     const task = this.#requiredTask(taskId);
     if (task.status !== "failed" || task.error !== "runtime_restarted")
       throw new Error("team_task_not_interrupted");
@@ -358,6 +506,12 @@ export class TeamStore {
     if (task.status !== "queued") throw new Error("team_task_not_queued");
     const team = this.#requiredTeam(task.teamId);
     const member = this.#requiredMember(team, task.memberId);
+    if (
+      task.dependsOnIds.some(
+        (id) => this.#tasks.get(id)?.status !== "succeeded",
+      )
+    )
+      throw new Error("team_task_blocked");
     if (member.status === "running") throw new Error("team_member_busy");
     const nextTask = teamTaskSchema.parse({
       ...task,
@@ -422,6 +576,16 @@ export class TeamStore {
       finishedAt: this.#now(),
     });
     this.#tasks.set(id, next);
+    for (const dispatch of this.#dispatches.values())
+      if (
+        dispatch.taskId === id &&
+        ["queued", "running"].includes(dispatch.status)
+      )
+        this.#dispatches.set(dispatch.id, {
+          ...dispatch,
+          status: "cancelled",
+          finishedAt: this.#now(),
+        });
     if (task.status === "running")
       this.#idleMember(teamId, task.memberId, false);
     this.#event(teamId, "task.cancelled", id);
@@ -450,7 +614,10 @@ export class TeamStore {
       toMemberId: string | null;
       body: string;
     },
+    parentId: string | null = null,
   ): TeamMailboxMessage {
+    if (!this.#batch)
+      return this.#transaction(() => this.sendMessage(teamId, input, parentId));
     const team = this.#requiredTeam(teamId);
     if (input.fromMemberId !== null)
       this.#requiredMember(team, input.fromMemberId);
@@ -463,6 +630,32 @@ export class TeamStore {
       readAt: null,
     });
     this.#messages.set(message.id, message);
+    const run = this.#ensureRun(teamId, input.body);
+    const targets = input.toMemberId
+      ? [input.toMemberId]
+      : team.members
+          .filter((member) => member.id !== input.fromMemberId)
+          .map((member) => member.id);
+    for (const memberId of targets) {
+      const pending = [...this.#dispatches.values()].find(
+        (item) =>
+          item.runId === run.id &&
+          item.memberId === memberId &&
+          item.status === "queued" &&
+          item.taskId === null &&
+          item.messageIds.length > 0,
+      );
+      const text = `团队消息（${input.fromMemberId ?? "用户"}）：\n${input.body}`;
+      if (pending) {
+        const depth = this.#registerEdge(run, memberId, parentId);
+        this.#dispatches.set(pending.id, {
+          ...pending,
+          depth: Math.max(pending.depth, depth),
+          messageIds: [...pending.messageIds, message.id],
+          input: `${pending.input}\n\n${text}`,
+        });
+      } else this.#enqueue(run, memberId, text, parentId, null, [message.id]);
+    }
     this.#event(teamId, "mail.received", message.id);
     this.#save();
     return message;
@@ -477,6 +670,535 @@ export class TeamStore {
     return this.#events.filter((event) => event.sequence > after);
   }
 
+  runs(teamId: string): TeamRun[] {
+    this.#requiredTeam(teamId);
+    return [...this.#runs.values()].filter((run) => run.teamId === teamId);
+  }
+  contextForSession(sessionId: string) {
+    for (const team of this.#teams.values()) {
+      const member = team.members.find((item) => item.sessionId === sessionId);
+      if (member)
+        return {
+          team,
+          member,
+          dispatch: this.dispatches().find(
+            (item) => item.memberId === member.id && item.status === "running",
+          ),
+          run: this.runs(team.id).findLast(
+            (item) => !["completed", "cancelled"].includes(item.status),
+          ),
+        };
+    }
+    return undefined;
+  }
+  operation<T>(id: string, input: unknown, perform: () => T): T {
+    if (!/^[A-Za-z0-9_:@.-]{1,200}$/.test(id))
+      throw new Error("invalid_operation_id");
+    const encoded = JSON.stringify(input);
+    const previous = this.#operations.get(id);
+    if (previous) {
+      if (previous.input !== encoded) throw new Error("operation_id_conflict");
+      return previous.result as T;
+    }
+    return this.#transaction(() => {
+      const result = perform();
+      this.#operations.set(id, {
+        id,
+        input: encoded,
+        result: JSON.parse(JSON.stringify(result ?? null)),
+      });
+      return result;
+    });
+  }
+  #transaction<T>(perform: () => T): T {
+    if (this.#batch) return perform();
+    const before = {
+      teams: new Map(this.#teams),
+      tasks: new Map(this.#tasks),
+      messages: new Map(this.#messages),
+      runs: new Map(this.#runs),
+      dispatches: new Map(this.#dispatches),
+      operations: new Map(this.#operations),
+      events: [...this.#events],
+      sequence: this.#sequence,
+    };
+    this.#batch = true;
+    try {
+      const result = perform();
+      this.#batch = false;
+      this.#save();
+      return result;
+    } catch (error) {
+      for (const [target, snapshot] of [
+        [this.#teams, before.teams],
+        [this.#tasks, before.tasks],
+        [this.#messages, before.messages],
+        [this.#runs, before.runs],
+        [this.#dispatches, before.dispatches],
+        [this.#operations, before.operations],
+      ] as [Map<string, unknown>, Map<string, unknown>][]) {
+        target.clear();
+        for (const [key, value] of snapshot) target.set(key, value);
+      }
+      this.#events.splice(0, this.#events.length, ...before.events);
+      this.#sequence = before.sequence;
+      this.#batch = false;
+      throw error;
+    }
+  }
+  startRun(teamId: string, input: string, memberId?: string): TeamRun {
+    if (!input.trim() || input.length > 65536)
+      throw new Error("invalid_team_input");
+    const team = this.#requiredTeam(teamId);
+    const target =
+      memberId ?? team.members.find((item) => item.role === "lead")!.id;
+    this.#requiredMember(team, target);
+    const run = this.#ensureRun(teamId, input);
+    if (run.status !== "running") throw new Error("team_run_requires_resume");
+    this.#enqueue(run, target, input);
+    this.#save();
+    return run;
+  }
+  controlRun(
+    teamId: string,
+    runId: string,
+    action: "pause" | "resume" | "cancel",
+  ): TeamRun {
+    if (!this.#batch)
+      return this.#transaction(() => this.controlRun(teamId, runId, action));
+    const run = this.#runs.get(runId);
+    if (!run || run.teamId !== teamId) throw new Error("team_run_not_found");
+    if (["completed", "cancelled"].includes(run.status))
+      throw new Error("team_run_finished");
+    const next: TeamRun = {
+      ...run,
+      status:
+        action === "resume"
+          ? "running"
+          : action === "pause"
+            ? "paused"
+            : "cancelled",
+      reason: null,
+      updatedAt: this.#now(),
+      ...(action === "resume"
+        ? { segment: run.segment + 1, dispatchCount: 0, recruitedCount: 0 }
+        : {}),
+    };
+    this.#runs.set(runId, next);
+    if (action === "cancel")
+      for (const item of this.#dispatches.values()) {
+        if (
+          item.runId !== runId ||
+          !["queued", "running"].includes(item.status)
+        )
+          continue;
+        this.#dispatches.set(item.id, {
+          ...item,
+          status: "cancelled",
+          finishedAt: this.#now(),
+        });
+        if (
+          item.taskId &&
+          ["queued", "running"].includes(this.#requiredTask(item.taskId).status)
+        )
+          this.cancelTask(teamId, item.taskId);
+        this.#idleMember(teamId, item.memberId, false);
+      }
+    if (action === "resume") {
+      for (const item of this.#dispatches.values())
+        if (item.runId === runId && item.status === "queued")
+          this.#dispatches.set(item.id, { ...item, depth: 0, parentId: null });
+      if (run.status === "interrupted" || run.reason === "dependency_failed") {
+        const lead = this.#requiredTeam(teamId).members.find(
+          (member) => member.role === "lead",
+        )!;
+        this.#enqueue(
+          next,
+          lead.id,
+          "用户要求继续团队目标。上次运行中断，已经发送的操作可能发生过，请先检查成员会话和文件状态；不要盲目重复外部操作。",
+        );
+      }
+    }
+    this.#event(teamId, "run.updated", runId);
+    this.#save();
+    return next;
+  }
+  recruit(
+    teamId: string,
+    parentId: string,
+    input: {
+      name: string;
+      engine: EngineId;
+      presetId: string;
+      acpCatalogId?: string;
+    },
+  ): Team {
+    if (!this.#batch)
+      return this.#transaction(() => this.recruit(teamId, parentId, input));
+    const parent = this.#dispatches.get(parentId);
+    if (!parent || parent.teamId !== teamId || parent.status !== "running")
+      throw new Error("team_dispatch_expired");
+    const run = this.#runs.get(parent.runId)!;
+    if (run.status !== "running") throw new Error("team_run_paused");
+    if (run.recruitedCount >= 8) throw new Error("team_recruit_limit");
+    const team = this.addMember(teamId, input);
+    this.#runs.set(run.id, {
+      ...run,
+      recruitedCount: run.recruitedCount + 1,
+      ...(run.recruitedCount + 1 >= 8
+        ? { status: "paused_limit", reason: "recruit_limit" }
+        : {}),
+    });
+    this.#event(teamId, "run.updated", run.id);
+    this.#save();
+    return team;
+  }
+  updateTask(
+    teamId: string,
+    taskId: string,
+    version: number,
+    input: {
+      title?: string;
+      input?: string;
+      dependsOnIds?: string[];
+      status?: "succeeded" | "failed";
+      result?: string;
+    },
+    callerMemberId?: string,
+  ): TeamTask {
+    const task = this.#requiredTask(taskId);
+    if (task.teamId !== teamId) throw new Error("team_task_not_found");
+    if (task.version !== version) throw new Error("team_task_version_conflict");
+    if (input.status && task.status !== "running")
+      throw new Error("team_task_not_running");
+    if (
+      callerMemberId &&
+      task.memberId !== callerMemberId &&
+      this.#requiredMember(this.#requiredTeam(teamId), callerMemberId).role !==
+        "lead"
+    )
+      throw new Error("team_task_forbidden");
+    if (input.dependsOnIds)
+      this.#validateDependencies(teamId, input.dependsOnIds, taskId);
+    if (task.status !== "queued" && (input.input || input.dependsOnIds))
+      throw new Error("team_task_already_started");
+    const next = teamTaskSchema.parse({
+      ...task,
+      ...input,
+      version: task.version + 1,
+      ...(input.status ? { finishedAt: this.#now() } : {}),
+    });
+    this.#tasks.set(taskId, next);
+    if (input.input)
+      for (const item of this.#dispatches.values())
+        if (item.taskId === taskId && item.status === "queued")
+          this.#dispatches.set(item.id, { ...item, input: input.input });
+    this.#event(teamId, "task.updated", taskId);
+    this.#save();
+    return next;
+  }
+  dispatches(runId?: string): TeamDispatch[] {
+    return [...this.#dispatches.values()].filter(
+      (item) => !runId || item.runId === runId,
+    );
+  }
+  hasActiveWork(): boolean {
+    return this.dispatches().some(
+      (item) =>
+        item.status === "running" ||
+        (item.status === "queued" &&
+          this.#runs.get(item.runId)?.status === "running" &&
+          (!item.notBefore || new Date(item.notBefore) <= this.#clock.now()) &&
+          (!item.taskId ||
+            this.#requiredTask(item.taskId).dependsOnIds.every(
+              (id) => this.#tasks.get(id)?.status === "succeeded",
+            ))),
+    );
+  }
+  nextWakeAt(): string | null {
+    return (
+      this.dispatches()
+        .filter(
+          (item) =>
+            item.status === "queued" &&
+            this.#runs.get(item.runId)?.status === "running" &&
+            item.notBefore,
+        )
+        .map((item) => item.notBefore!)
+        .sort()[0] ?? null
+    );
+  }
+  queuedDispatches(): TeamDispatch[] {
+    return this.dispatches().filter(
+      (item) =>
+        item.status === "queued" &&
+        this.#runs.get(item.runId)?.status === "running" &&
+        (!item.notBefore || new Date(item.notBefore) <= this.#clock.now()),
+    );
+  }
+  pauseBlockedRuns(): void {
+    for (const run of this.#runs.values()) {
+      if (run.status !== "running") continue;
+      const outstanding = this.dispatches(run.id).filter((item) =>
+        ["queued", "running"].includes(item.status),
+      );
+      if (
+        !outstanding.length ||
+        outstanding.some(
+          (item) =>
+            item.status === "running" ||
+            !item.taskId ||
+            !this.#requiredTask(item.taskId).dependsOnIds.some((id) =>
+              ["failed", "cancelled"].includes(this.#requiredTask(id).status),
+            ),
+        )
+      )
+        continue;
+      this.#runs.set(run.id, {
+        ...run,
+        status: "paused",
+        reason: "dependency_failed",
+        updatedAt: this.#now(),
+      });
+      this.#event(run.teamId, "run.updated", run.id);
+      this.#save();
+    }
+  }
+  beginDispatch(id: string): TeamExecution {
+    const item = this.#dispatches.get(id)!;
+    const run = this.#runs.get(item.runId)!;
+    if (item.status !== "queued" || run.status !== "running")
+      throw new Error("team_dispatch_not_ready");
+    const team = this.#requiredTeam(item.teamId);
+    const member = this.#requiredMember(team, item.memberId);
+    if (
+      member.status === "running" ||
+      this.dispatches(item.runId).filter((row) => row.status === "running")
+        .length >= 4
+    )
+      throw new Error("team_member_busy");
+    if (run.dispatchCount >= 64 || item.depth > 8) {
+      this.#runs.set(run.id, {
+        ...run,
+        status: "paused_limit",
+        reason: run.dispatchCount >= 64 ? "dispatch_budget" : "depth_limit",
+        updatedAt: this.#now(),
+      });
+      this.#event(team.id, "run.updated", run.id);
+      this.#save();
+      throw new Error("team_run_limit");
+    }
+    return this.#transaction(() => {
+      if (item.taskId) this.beginTask(item.taskId);
+      else
+        this.#teams.set(team.id, {
+          ...team,
+          members: team.members.map((row) =>
+            row.id === member.id ? { ...row, status: "running" } : row,
+          ),
+        });
+      this.#runs.set(run.id, { ...run, dispatchCount: run.dispatchCount + 1 });
+      this.#dispatches.set(id, { ...item, status: "running", notBefore: null });
+      this.#event(team.id, "dispatch.updated", id);
+      this.#save();
+      return {
+        taskId: id,
+        runId: run.id,
+        ...(item.taskId ? { logicalTaskId: item.taskId } : {}),
+        teamId: team.id,
+        memberId: member.id,
+        sessionId: member.sessionId!,
+        name: `${team.name} · ${member.name}`,
+        engine: member.engine,
+        acpCatalogId: member.acpCatalogId,
+        presetId: member.presetId,
+        workspaceId: team.workspaceId,
+        input: item.input,
+        executionContext: `你是持久 AI 团队「${team.name}」的${member.role === "lead" ? "组长" : "成员"}「${member.name}」。使用协作工具查询成员和任务、分工、消息与依赖。仅组长可招募；原生子 agent 不会成为持久成员。收到成员结果后组长检查并总结。避免互相发送无新内容的确认。\n团队目标：${run.input}\n\n`,
+        onSubmitted: (turnId) => this.submittedDispatch(id, turnId),
+      };
+    });
+  }
+  submittedDispatch(id: string, turnId: string): void {
+    const item = this.#dispatches.get(id)!;
+    if (item.status !== "running") return;
+    this.#dispatches.set(id, { ...item, turnId, submittedAt: this.#now() });
+    for (const messageId of item.messageIds) {
+      const message = this.#messages.get(messageId)!;
+      this.#messages.set(messageId, { ...message, readAt: this.#now() });
+    }
+    this.#save();
+  }
+  deferDispatch(id: string): void {
+    const item = this.#dispatches.get(id)!;
+    if (item.status !== "running" || item.submittedAt) return;
+    this.#dispatches.set(id, {
+      ...item,
+      status: "queued",
+      notBefore: new Date(this.#clock.now().getTime() + 1000).toISOString(),
+    });
+    const run = this.#runs.get(item.runId)!;
+    this.#runs.set(run.id, {
+      ...run,
+      dispatchCount: Math.max(0, run.dispatchCount - 1),
+    });
+    if (item.taskId) {
+      const task = this.#requiredTask(item.taskId);
+      this.#tasks.set(task.id, { ...task, status: "queued", startedAt: null });
+    }
+    this.#idleMember(item.teamId, item.memberId, false);
+    this.#save();
+  }
+  finishDispatch(
+    id: string,
+    result: { sessionId: string; result?: string } | { error: string },
+  ): void {
+    if (!this.#batch)
+      return this.#transaction(() => this.finishDispatch(id, result));
+    const item = this.#dispatches.get(id)!;
+    if (item.status !== "running") return;
+    const failed = "error" in result;
+    this.#dispatches.set(id, {
+      ...item,
+      status: failed ? "failed" : "succeeded",
+      result: failed ? null : (result.result ?? null),
+      error: failed ? result.error : null,
+      finishedAt: this.#now(),
+    });
+    if (item.taskId && this.#requiredTask(item.taskId).status === "running")
+      this.finishTask(
+        item.taskId,
+        failed
+          ? { status: "failed", error: result.error }
+          : { status: "succeeded", ...result },
+      );
+    else this.#idleMember(item.teamId, item.memberId, failed);
+    const run = this.#runs.get(item.runId)!;
+    if (!["cancelled", "interrupted", "completed"].includes(run.status)) {
+      const team = this.#requiredTeam(item.teamId);
+      const lead = team.members.find((member) => member.role === "lead")!;
+      if (lead.id !== item.memberId)
+        this.sendMessage(
+          team.id,
+          {
+            fromMemberId: item.memberId,
+            toMemberId: lead.id,
+            body: `成员回合 ${id} ${failed ? "失败" : "完成"}：\n${failed ? result.error : (result.result ?? "已完成，请检查成果。")}`,
+          },
+          id,
+        );
+      else if (
+        !this.dispatches(run.id).some((row) =>
+          ["queued", "running"].includes(row.status),
+        )
+      )
+        this.#runs.set(run.id, {
+          ...run,
+          status: failed ? "interrupted" : "completed",
+          reason: failed ? result.error : null,
+          result: failed ? null : (result.result ?? null),
+          updatedAt: this.#now(),
+        });
+    }
+    this.#event(item.teamId, "dispatch.updated", id);
+    this.#event(item.teamId, "run.updated", run.id);
+    this.#save();
+  }
+  #ensureRun(teamId: string, input: string): TeamRun {
+    const active = this.runs(teamId).findLast(
+      (run) => !["completed", "cancelled"].includes(run.status),
+    );
+    if (active) return active;
+    const run = teamRunSchema.parse({
+      id: `team-run-${randomUUID()}`,
+      teamId,
+      input,
+      status: "running",
+      segment: 1,
+      dispatchCount: 0,
+      recruitedCount: 0,
+      reason: null,
+      result: null,
+      createdAt: this.#now(),
+      updatedAt: this.#now(),
+    });
+    this.#runs.set(run.id, run);
+    this.#event(teamId, "run.updated", run.id);
+    return run;
+  }
+  #enqueue(
+    run: TeamRun,
+    memberId: string,
+    input: string,
+    parentId: string | null = null,
+    taskId: string | null = null,
+    messageIds: string[] = [],
+  ): void {
+    const depth = this.#registerEdge(run, memberId, parentId);
+    const item = teamDispatchSchema.parse({
+      id: `team-dispatch-${randomUUID()}`,
+      teamId: run.teamId,
+      runId: run.id,
+      memberId,
+      taskId,
+      messageIds,
+      input,
+      parentId,
+      depth,
+      status: "queued",
+      turnId: null,
+      submittedAt: null,
+      result: null,
+      error: null,
+      createdAt: this.#now(),
+      finishedAt: null,
+    });
+    this.#dispatches.set(item.id, item);
+    this.#event(run.teamId, "dispatch.updated", item.id);
+  }
+  #registerEdge(
+    run: TeamRun,
+    memberId: string,
+    parentId: string | null,
+  ): number {
+    const parent = parentId ? this.#dispatches.get(parentId) : undefined;
+    if (parent && (parent.runId !== run.id || parent.status === "cancelled"))
+      throw new Error("team_dispatch_expired");
+    if (["cancelled", "completed"].includes(run.status))
+      throw new Error("team_run_finished");
+    const targets = new Set(parent?.fanoutMemberIds ?? []);
+    targets.add(memberId);
+    const depth = parent ? parent.depth + 1 : 0;
+    if (parent)
+      this.#dispatches.set(parent.id, {
+        ...parent,
+        fanoutMemberIds: [...targets],
+      });
+    if (targets.size > 4 || depth > 8) {
+      this.#runs.set(run.id, {
+        ...this.#runs.get(run.id)!,
+        status: "paused_limit",
+        reason: targets.size > 4 ? "fanout_limit" : "depth_limit",
+        updatedAt: this.#now(),
+      });
+      this.#event(run.teamId, "run.updated", run.id);
+    }
+    return depth;
+  }
+  #validateDependencies(teamId: string, ids: string[], taskId?: string): void {
+    if (new Set(ids).size !== ids.length)
+      throw new Error("invalid_task_dependencies");
+    const visit = (id: string, seen: Set<string>) => {
+      if (id === taskId) throw new Error("team_task_dependency_cycle");
+      if (seen.has(id)) return;
+      seen.add(id);
+      const task = this.#requiredTask(id);
+      if (task.teamId !== teamId)
+        throw new Error("team_task_dependency_other_team");
+      for (const dependency of task.dependsOnIds) visit(dependency, seen);
+    };
+    for (const id of ids) visit(id, new Set());
+  }
   #idleMember(teamId: string, memberId: string, failed: boolean): void {
     const team = this.#requiredTeam(teamId);
     this.#teams.set(teamId, {
@@ -522,7 +1244,7 @@ export class TeamStore {
       teamId: team.id,
       memberId: member.id,
       sessionId: member.sessionId ?? `session-${task.id}`,
-      name: `${team.name} · ${member.name}`,
+      name: `${team.name} 路 ${member.name}`,
       engine: member.engine,
       presetId: member.presetId,
       workspaceId: team.workspaceId,
@@ -533,11 +1255,12 @@ export class TeamStore {
     return this.#clock.now().toISOString();
   }
   #save(): void {
+    if (this.#batch) return;
     mkdirSync(dirname(this.#path), { recursive: true, mode: 0o700 });
     const temporary = `${this.#path}.${process.pid}.tmp`;
     writeFileSync(
       temporary,
-      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: this.#events, eventSequence: this.#sequence, quotaReconciledTaskIds: [...this.#quotaReconciledTaskIds].sort() }, null, 2)}\n`,
+      `${JSON.stringify({ version: 1, teams: this.list(), tasks: [...this.#tasks.values()], messages: [...this.#messages.values()], events: this.#events, eventSequence: this.#sequence, quotaReconciledTaskIds: [...this.#quotaReconciledTaskIds].sort(), runs: [...this.#runs.values()], dispatches: [...this.#dispatches.values()], operations: [...this.#operations.values()] }, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     renameSync(temporary, this.#path);
@@ -554,8 +1277,18 @@ export type TeamExecution = {
   presetId: string;
   workspaceId: string;
   input: string;
+  executionContext?: string | undefined;
+  acpCatalogId?: string | undefined;
+  logicalTaskId?: string;
+  runId?: string;
+  onSubmitted?: (turnId: string) => void;
 };
 export interface TeamRunnerPort {
+  admitTeamTask?(request: TeamExecution): ExecutionAdmission;
+  teamBillingModel?(
+    request: TeamExecution,
+    recovery?: boolean,
+  ): Promise<string>;
   executeTeamTask(
     request: TeamExecution,
   ): Promise<{ sessionId: string; result?: string }>;
@@ -569,6 +1302,7 @@ export type TeamSessionRequest = {
   engine: EngineId;
   presetId: string;
   workspaceId: string;
+  acpCatalogId?: string | undefined;
   modelId?: string;
   thinkingEffort?: string;
   permissionMode?: "read_only" | "workspace_write" | "full_access";
@@ -587,6 +1321,7 @@ export class TeamOrchestrator {
   #recovered = false;
   #recovering: Promise<void> | undefined;
   #wake: (() => void) | undefined;
+  #retryTimer: ReturnType<typeof setTimeout> | undefined;
   constructor(
     readonly store: TeamStore,
     readonly runner: TeamRunnerPort,
@@ -600,6 +1335,7 @@ export class TeamOrchestrator {
   stop(timeoutMs = 5_000): Promise<void> {
     if (this.#stopping) return this.#stopping;
     this.#stopped = true;
+    clearTimeout(this.#retryTimer);
     this.#wake?.();
     const cancellations = [...this.#executions.keys()].map((id) =>
       Promise.resolve().then(() => this.runner.cancelTeamTask?.(id)),
@@ -630,11 +1366,11 @@ export class TeamOrchestrator {
   async #run(): Promise<void> {
     await this.#recoverInterruptedTasks();
     while (!this.#stopped) {
-      for (const queued of this.store.claimQueued()) {
+      for (const queued of this.store.queuedDispatches()) {
         if (this.#stopped) break;
         let begun;
         try {
-          begun = this.store.beginTask(queued.id);
+          begun = this.store.beginDispatch(queued.id);
         } catch {
           continue;
         }
@@ -645,7 +1381,19 @@ export class TeamOrchestrator {
           () => this.#executions.delete(queued.id),
         );
       }
-      if (this.#executions.size === 0) return;
+      if (this.#executions.size === 0) {
+        this.store.pauseBlockedRuns();
+        const next = this.store.nextWakeAt();
+        if (next) {
+          clearTimeout(this.#retryTimer);
+          this.#retryTimer = setTimeout(
+            () => void this.tick().catch(() => undefined),
+            Math.max(1, new Date(next).getTime() - Date.now()),
+          );
+          this.#retryTimer.unref();
+        }
+        return;
+      }
       const woke = new Promise<void>((resolve) => {
         this.#wake = resolve;
       });
@@ -672,35 +1420,40 @@ export class TeamOrchestrator {
     await this.#recovering;
   }
 
-  async #execute(begun: ReturnType<TeamStore["beginTask"]>): Promise<void> {
+  async #execute(request: TeamExecution): Promise<void> {
     try {
-      const result = await this.runner.executeTeamTask({
-        taskId: begun.task.id,
-        teamId: begun.team.id,
-        memberId: begun.member.id,
-        sessionId: begun.member.sessionId ?? `session-${begun.task.id}`,
-        name: `${begun.team.name} · ${begun.member.name}`,
-        engine: begun.member.engine,
-        presetId: begun.member.presetId,
-        workspaceId: begun.team.workspaceId,
-        input: begun.task.input,
-      });
-      this.#notifyTerminal(
-        begun.team,
-        this.store.finishTask(begun.task.id, {
-          status: "succeeded",
-          ...result,
-        }),
-      );
+      const result = await this.runner.executeTeamTask(request);
+      this.store.finishDispatch(request.taskId, result);
     } catch (error) {
-      this.#notifyTerminal(
-        begun.team,
-        this.store.finishTask(begun.task.id, {
-          status: "failed",
+      if (error instanceof SessionBusyError)
+        this.store.deferDispatch(request.taskId);
+      else
+        this.store.finishDispatch(request.taskId, {
           error: error instanceof Error ? error.message : "team_task_failed",
-        }),
-      );
+        });
     }
+    if (request.logicalTaskId) {
+      const task = this.store.task(request.logicalTaskId);
+      if (task) this.#notifyTerminal(this.store.get(request.teamId)!, task);
+    }
+  }
+
+  async controlRun(
+    teamId: string,
+    runId: string,
+    action: "pause" | "resume" | "cancel",
+  ) {
+    const active = this.store
+      .dispatches(runId)
+      .filter((item) => item.status === "running");
+    const run = this.store.controlRun(teamId, runId, action);
+    if (action === "cancel")
+      await Promise.allSettled(
+        active.map((item) => this.runner.cancelTeamTask?.(item.id)),
+      );
+    if (action === "resume") void this.tick();
+    this.#wake?.();
+    return run;
   }
 
   // Delivers the terminal-state notification through the platform
@@ -726,9 +1479,14 @@ export class TeamOrchestrator {
     void notification.finally(() => this.#notifications.delete(notification));
   }
   async cancel(teamId: string, taskId: string): Promise<TeamTask> {
+    const active = this.store
+      .dispatches()
+      .filter((item) => item.taskId === taskId && item.status === "running");
     const task = this.store.cancelTask(teamId, taskId);
     try {
-      await this.runner.cancelTeamTask?.(taskId);
+      await Promise.allSettled(
+        active.map((item) => this.runner.cancelTeamTask?.(item.id)),
+      );
     } finally {
       // The cancelled member is idle in the store even if the engine turn is
       // still settling, so wake the scheduling loop to claim queued work.

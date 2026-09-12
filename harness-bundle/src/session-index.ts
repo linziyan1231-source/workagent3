@@ -11,6 +11,9 @@ import {
   sessionLastTurnSchema,
   type PresetBinding,
   type RuntimeSession,
+  type EngineId,
+  type AcpCatalogEntry,
+  acpCatalogEntrySchema,
 } from "@workagent/contracts";
 
 export type QueuedInput = {
@@ -24,7 +27,10 @@ export type QueuedInput = {
 export type StoredSession = {
   id: string;
   nativeId: string;
-  engine: "harness" | "codex" | "kimi";
+  engine: EngineId;
+  acpCatalogId?: string;
+  acpCatalogRevision?: string;
+  acpSnapshot?: AcpCatalogEntry;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -51,7 +57,8 @@ export type StoredSession = {
 export type SessionCreation = {
   operationId: string;
   input: {
-    engine: "harness" | "codex" | "kimi";
+    engine: EngineId;
+    acpCatalogId?: string;
     title: string;
     workspace: string;
     presetId: string;
@@ -70,7 +77,11 @@ const valid = (value: unknown): value is StoredSession => {
     typeof item.nativeId === "string" &&
     (item.engine === "harness" ||
       item.engine === "codex" ||
-      item.engine === "kimi") &&
+      item.engine === "kimi" ||
+      item.engine === "acp") &&
+    (item.engine !== "acp" ||
+      (typeof item.acpCatalogId === "string" &&
+        acpCatalogEntrySchema.safeParse(item.acpSnapshot).success)) &&
     typeof item.title === "string" &&
     typeof item.createdAt === "string" &&
     typeof item.updatedAt === "string" &&

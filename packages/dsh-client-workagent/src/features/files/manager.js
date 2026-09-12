@@ -1,4 +1,5 @@
 import { createFileMoves } from "./moves.js";
+import { PublishedApps } from "./published-apps.js";
 import { createFileTrash } from "./trash.js";
 import { apiRoot, request } from "../../platform/api.js";
 import { Button, Input } from "../../ui/elements.js";
@@ -53,6 +54,69 @@ function WorkspaceFileManager({
   trashRoot,
 }) {
   const [tree, setTree] = React.useState({});
+  const [applicationsOpen, setApplicationsOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [searchRows, setSearchRows] = React.useState([]);
+  const [searchCursor, setSearchCursor] = React.useState(null);
+  const [searchBusy, setSearchBusy] = React.useState(false);
+  const searchAbort = React.useRef(null);
+  const searchLease = React.useRef(null);
+  const releaseSearch = () => {
+    const lease = searchLease.current;
+    searchLease.current = null;
+    if (lease)
+      void request(
+        `${lease.root}/search?cursor=${encodeURIComponent(lease.cursor)}`,
+        { method: "DELETE" },
+      ).catch(() => {});
+  };
+  const searchFiles = async (cursor = null) => {
+    searchAbort.current?.abort();
+    if (!cursor) releaseSearch();
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    setSearchBusy(true);
+    try {
+      const result = await request(
+        `${root}/search?q=${encodeURIComponent(searchQuery)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        { signal: controller.signal },
+      );
+      if (!controller.signal.aborted) {
+        searchLease.current = result.nextCursor
+          ? { root, cursor: result.nextCursor }
+          : null;
+        setSearchRows((rows) =>
+          cursor ? [...rows, ...result.items] : result.items,
+        );
+        setSearchCursor(result.nextCursor);
+      } else if (result.nextCursor) {
+        void request(
+          `${root}/search?cursor=${encodeURIComponent(result.nextCursor)}`,
+          { method: "DELETE" },
+        ).catch(() => {});
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(friendlyError(reason.message));
+    } finally {
+      if (!controller.signal.aborted) setSearchBusy(false);
+    }
+  };
+  React.useEffect(() => {
+    searchAbort.current?.abort();
+    releaseSearch();
+    setSearchRows([]);
+    setSearchCursor(null);
+    if (!searchQuery.trim()) {
+      setSearchBusy(false);
+      return;
+    }
+    const timer = setTimeout(() => searchFiles(), 200);
+    return () => {
+      clearTimeout(timer);
+      searchAbort.current?.abort();
+      releaseSearch();
+    };
+  }, [root, searchQuery]);
   const { confirm, confirmation } = useConfirm();
   const [trashOpen, setTrashOpen] = React.useState(false);
   const trash = useFileTrash({ root: trashRoot, enabled: trashOpen });
@@ -671,6 +735,17 @@ function WorkspaceFileManager({
             ),
           )
         : null,
+      !workspace.currentRole || workspace.currentRole === "owner"
+        ? h(
+            Button,
+            { onClick: () => setApplicationsOpen((value) => !value) },
+            applicationsOpen ? "关闭应用发布" : "应用预览与发布",
+          )
+        : null,
+      applicationsOpen &&
+        (!workspace.currentRole || workspace.currentRole === "owner")
+        ? h(PublishedApps, { workspace, entry: selected?.path || "index.html" })
+        : null,
       trashOpen
         ? trash.content
         : h(
@@ -679,17 +754,57 @@ function WorkspaceFileManager({
               className: "workagent-file-tree",
               "aria-label": "项目文件树",
             },
-            tree[""]
-              ? tree[""].length
-                ? renderDirectory("")
-                : h(
-                    "div",
-                    { className: "workagent-file-panel-empty" },
-                    h(Icon, { name: "workspace", size: 32 }),
-                    h("strong", null, "此项目还没有文件"),
-                    h("p", null, "拖入文件，或让助手在项目中创建文件。"),
-                  )
-              : h("p", { role: "status" }, "正在加载文件…"),
+            h(Input, {
+              "aria-label": "搜索整个项目",
+              placeholder: "搜索整个项目的文件名或路径",
+              value: searchQuery,
+              onChange: (event) => setSearchQuery(event.target.value),
+            }),
+            searchQuery.trim()
+              ? h(
+                  "div",
+                  { "aria-label": "项目搜索结果" },
+                  ...searchRows.map((entry) =>
+                    h(
+                      "button",
+                      {
+                        key: entry.path,
+                        type: "button",
+                        className: "workagent-file-tree-row",
+                        onClick: () => {
+                          setTabs((rows) => [
+                            ...rows.filter((item) => item.path !== entry.path),
+                            entry,
+                          ]);
+                          setSelected(entry);
+                        },
+                      },
+                      entry.path,
+                    ),
+                  ),
+                  searchBusy
+                    ? h("p", { role: "status" }, "正在搜索…")
+                    : searchCursor
+                      ? h(
+                          Button,
+                          { onClick: () => searchFiles(searchCursor) },
+                          "继续搜索",
+                        )
+                      : !searchRows.length
+                        ? h("p", null, "没有匹配的文件")
+                        : null,
+                )
+              : tree[""]
+                ? tree[""].length
+                  ? renderDirectory("")
+                  : h(
+                      "div",
+                      { className: "workagent-file-panel-empty" },
+                      h(Icon, { name: "workspace", size: 32 }),
+                      h("strong", null, "此项目还没有文件"),
+                      h("p", null, "拖入文件，或让助手在项目中创建文件。"),
+                    )
+                : h("p", { role: "status" }, "正在加载文件…"),
           ),
     ),
     tabs.length && !trashOpen

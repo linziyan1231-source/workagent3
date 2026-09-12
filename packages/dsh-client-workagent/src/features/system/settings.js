@@ -1,4 +1,5 @@
 import { apiRoot, mutate, request } from "../../platform/api.js";
+import { FeedbackForm } from "./feedback.js";
 import { useResource } from "../../platform/resources.js";
 import { Button, Field, Input, Section } from "../../ui/elements.js";
 import { Icon } from "../../ui/icons.js";
@@ -202,6 +203,7 @@ function SystemSettings() {
       ),
     ),
     h("a", { href: "/api/system/diagnostics", download: true }, "下载诊断报告"),
+    h(FeedbackForm),
     h(
       Button,
       {

@@ -33,28 +33,29 @@ import (
 )
 
 type managerConfig struct {
-	ProfessionalDatabase *professionalDatabaseConfig   `json:"professionalDatabase,omitempty"`
-	RuntimePolicy        employeemanager.RuntimePolicy `json:"runtimePolicy"`
-	StorageLimits        *contracts.StorageLimits      `json:"storageLimits,omitempty"`
-	CredentialRoot       string                        `json:"credentialRoot,omitempty"`
-	LauncherExecutable   string                        `json:"launcherExecutable,omitempty"`
-	LaunchManifestRoot   string                        `json:"launchManifestRoot,omitempty"`
-	DatabasePath         string                        `json:"databasePath"`
-	DataRootBase         string                        `json:"dataRootBase"`
-	UserHostExecutable   string                        `json:"userHostExecutable"`
-	HarnessCommand       string                        `json:"harnessCommand"`
-	HarnessEntrypoint    string                        `json:"harnessEntrypoint"`
-	CodexCommand         string                        `json:"codexCommand,omitempty"`
-	KimiCommand          string                        `json:"kimiCommand,omitempty"`
-	HarnessArguments     []string                      `json:"harnessArguments,omitempty"`
-	Profile              string                        `json:"profile"`
-	HarnessProfileSource string                        `json:"harnessProfileSource"`
-	ManagedSkillsRoot    string                        `json:"managedSkillsRoot"`
-	ManagedToolsRoot     string                        `json:"managedToolsRoot,omitempty"`
-	ManagedMCPServers    []mcpruntime.Server           `json:"managedMcpServers,omitempty"`
-	PortalURL            string                        `json:"portalUrl"`
-	PublicBaseURL        string                        `json:"publicBaseURL,omitempty"`
-	Limits               winutil.JobLimits             `json:"limits"`
+	ProfessionalDatabase   *professionalDatabaseConfig   `json:"professionalDatabase,omitempty"`
+	RuntimePolicy          employeemanager.RuntimePolicy `json:"runtimePolicy"`
+	StorageLimits          *contracts.StorageLimits      `json:"storageLimits,omitempty"`
+	CredentialRoot         string                        `json:"credentialRoot,omitempty"`
+	LauncherExecutable     string                        `json:"launcherExecutable,omitempty"`
+	LaunchManifestRoot     string                        `json:"launchManifestRoot,omitempty"`
+	DatabasePath           string                        `json:"databasePath"`
+	DataRootBase           string                        `json:"dataRootBase"`
+	UserHostExecutable     string                        `json:"userHostExecutable"`
+	HarnessCommand         string                        `json:"harnessCommand"`
+	PublishedPythonCommand string                        `json:"publishedPythonCommand,omitempty"`
+	HarnessEntrypoint      string                        `json:"harnessEntrypoint"`
+	CodexCommand           string                        `json:"codexCommand,omitempty"`
+	KimiCommand            string                        `json:"kimiCommand,omitempty"`
+	HarnessArguments       []string                      `json:"harnessArguments,omitempty"`
+	Profile                string                        `json:"profile"`
+	HarnessProfileSource   string                        `json:"harnessProfileSource"`
+	ManagedSkillsRoot      string                        `json:"managedSkillsRoot"`
+	ManagedToolsRoot       string                        `json:"managedToolsRoot,omitempty"`
+	ManagedMCPServers      []mcpruntime.Server           `json:"managedMcpServers,omitempty"`
+	PortalURL              string                        `json:"portalUrl"`
+	PublicBaseURL          string                        `json:"publicBaseURL,omitempty"`
+	Limits                 winutil.JobLimits             `json:"limits"`
 	// ModelGateway holds the CLIProxyAPI downstream key policy. Model and quota
 	// values are mandatory when present — no code defaults exist; see
 	// docs/employee-manager.config.example.json for the full template.
@@ -197,8 +198,9 @@ func run() error {
 		CredentialRoot:     config.CredentialRoot, LauncherExecutable: config.LauncherExecutable, LaunchManifestRoot: config.LaunchManifestRoot,
 		DataRootBase: config.DataRootBase, UserHostExecutable: config.UserHostExecutable,
 		HarnessCommand: config.HarnessCommand, HarnessEntrypoint: config.HarnessEntrypoint,
-		CodexCommand: config.CodexCommand,
-		KimiCommand:  config.KimiCommand, HarnessArguments: config.HarnessArguments,
+		PublishedPythonCommand: config.PublishedPythonCommand,
+		CodexCommand:           config.CodexCommand,
+		KimiCommand:            config.KimiCommand, HarnessArguments: config.HarnessArguments,
 		Profile: config.Profile, HarnessProfileSource: config.HarnessProfileSource,
 		ManagedSkillsRoot: config.ManagedSkillsRoot,
 		ManagedToolsRoot:  config.ManagedToolsRoot,
@@ -474,6 +476,9 @@ func loadManagerConfig(path string) (managerConfig, error) {
 	}
 	if config.ManagedToolsRoot != "" && !filepath.IsAbs(config.ManagedToolsRoot) {
 		return managerConfig{}, errors.New("managed tools root must be absolute")
+	}
+	if config.PublishedPythonCommand != "" && !filepath.IsAbs(config.PublishedPythonCommand) {
+		return managerConfig{}, errors.New("published Python command must be absolute")
 	}
 	if config.ManagedToolsRoot != "" {
 		if err := verifyManagedTools(config.ManagedToolsRoot); err != nil {

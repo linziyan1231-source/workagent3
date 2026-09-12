@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"workagent3/internal/acpcatalog"
 	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/collaboration"
 	"workagent3/internal/contracts"
+	"workagent3/internal/feedback"
 	"workagent3/internal/marketplace"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/settings"
@@ -39,6 +41,8 @@ type Server struct {
 	sharedEvents  *sharedEventHub
 	migrationJobs *migrationJobTracker
 	personalTasks *personalTaskService
+	loginSlots    chan struct{}
+	apps          *applicationGateway
 }
 
 type ModelAccessPort interface {
@@ -109,6 +113,13 @@ type AuditPort interface {
 }
 
 type Modules struct {
+	SoftwareVersion      string
+	PublishedApps        PublishedAppsConfig
+	AcpCatalog           *acpcatalog.Store
+	Feedback             *feedback.Store
+	ChatGPTPro           ChatGPTProPort
+	RequestSource        RequestSourcePolicy
+	LoginPolicy          store.LoginPolicy
 	ProfessionalDatabase ProfessionalDatabasePort
 	Storage              StoragePort
 	ModelAccess          ModelAccessPort
@@ -158,6 +169,17 @@ func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter
 		}
 		server.personalTasks = &personalTaskService{store: modules.Collaboration, runtime: runtime, users: data}
 	}
+	server.loginSlots = make(chan struct{}, 1)
+	if modules.PublishedApps.Store != nil {
+		u, err := url.Parse(modules.PublishedApps.PublicURL)
+		if err != nil || u.Scheme != "http" || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, errors.New("published applications require a public HTTP origin")
+		}
+		server.apps = &applicationGateway{s: server, config: modules.PublishedApps, listeners: map[string]*http.Server{}, tickets: map[string]appGrant{}, grants: map[string]appGrant{}}
+	}
+	if server.modules.LoginPolicy.Window == 0 {
+		server.modules.LoginPolicy = store.DefaultLoginPolicy()
+	}
 	return server, nil
 }
 
@@ -167,6 +189,24 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /apps/{id}", s.applicationEntry)
+	mux.HandleFunc("GET /api/portal/apps", s.requireUser(s.publishedAppsHTTP))
+	mux.HandleFunc("POST /api/portal/apps", s.requireUser(s.publishedAppsHTTP))
+	mux.HandleFunc("GET /api/portal/apps/{id}", s.requireUser(s.publishedAppsHTTP))
+	mux.HandleFunc("POST /api/portal/apps/{id}/open", s.requireUser(s.applicationOpen))
+	mux.HandleFunc("POST /api/portal/apps/{id}/{action}", s.requireUser(s.publishedAppsHTTP))
+	mux.HandleFunc("GET /api/portal/admin/acp-catalog", s.requireUser(s.requireAdmin(s.adminAcpCatalog)))
+	mux.HandleFunc("PATCH /api/portal/admin/acp-catalog/{id}", s.requireUser(s.requireAdmin(s.adminAcpCatalog)))
+	mux.HandleFunc("POST /api/system/feedback", s.requireUser(s.feedbackHTTP))
+	mux.HandleFunc("GET /api/system/feedback", s.requireUser(s.feedbackHTTP))
+	mux.HandleFunc("GET /api/admin/feedback/backup", s.requireUser(s.requireAdmin(s.feedbackBackup)))
+	mux.HandleFunc("GET /api/portal/apps/{id}/status", s.requireUser(s.applicationStatus))
+	mux.HandleFunc("GET /api/system/feedback/{id}", s.requireUser(s.feedbackHTTP))
+	mux.HandleFunc("PATCH /api/system/feedback/{id}", s.requireUser(s.feedbackHTTP))
+	mux.HandleFunc("GET /api/system/feedback/{id}/attachments/{attachment}", s.requireUser(s.feedbackHTTP))
+	mux.HandleFunc("GET /api/portal/me/chatgpt/quota", s.requireUser(s.chatGPTProUsage))
+	mux.HandleFunc("GET /api/portal/admin/chatgpt/quotas", s.requireUser(s.chatGPTProUsage))
+	mux.HandleFunc("POST /api/portal/admin/chatgpt/quotas", s.requireUser(s.adminChatGPTPro))
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("GET /api/auth/remembered", s.rememberedLogin)
@@ -308,6 +348,7 @@ func (s *Server) chatForward(writer http.ResponseWriter, request *http.Request, 
 		return
 	}
 	s.modules.ChatForward.ServeChatForward(writer, request, contracts.ChatForwardDelegation{
+		SID:     user.SID,
 		UserID:  strconv.FormatInt(user.ID, 10),
 		NowUnix: s.now().Unix(),
 	})
@@ -567,7 +608,7 @@ type userHandler func(http.ResponseWriter, *http.Request, store.User)
 
 func (s *Server) requireUser(next userHandler) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		cookie, err := request.Cookie(s.cookieName())
+		cookie, err := uniqueCookie(request, s.cookieName())
 		if err != nil {
 			markAudit(request, "anonymous", true)
 			writeError(writer, http.StatusUnauthorized, "authentication_required")
@@ -619,11 +660,19 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	markAudit(request, input.Username, false)
+	finish, admitted := s.beginLogin(writer, request, input.Username)
+	if !admitted {
+		return
+	}
+	defer finish()
 	var user store.User
 	if input.UseRemembered {
 		var err error
 		user, err = s.rememberedUser(request)
 		if err != nil || !strings.EqualFold(user.Username, input.Username) || input.Password != "" {
+			if !s.recordLogin(writer, request, input.Username, false) {
+				return
+			}
 			writeError(writer, http.StatusUnauthorized, "invalid_credentials")
 			return
 		}
@@ -636,9 +685,15 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		}
 		valid := auth.VerifyPassword(encoded, []byte(input.Password))
 		if lookupErr != nil || !valid || user.Disabled {
+			if !s.recordLogin(writer, request, input.Username, false) {
+				return
+			}
 			writeError(writer, http.StatusUnauthorized, "invalid_credentials")
 			return
 		}
+	}
+	if !s.recordLogin(writer, request, input.Username, true) {
+		return
 	}
 	token, err := auth.RandomToken(32)
 	if err != nil {
@@ -695,13 +750,24 @@ func (s *Server) changePassword(writer http.ResponseWriter, request *http.Reques
 		writePasswordChangeError(writer, http.StatusBadRequest, "PASSWORD_POLICY")
 		return
 	}
+	finish, admitted := s.beginLogin(writer, request, input.Username)
+	if !admitted {
+		return
+	}
+	defer finish()
 	user, lookupErr := s.store.UserByUsername(request.Context(), input.Username)
 	encoded := s.dummyHash
 	if lookupErr == nil {
 		encoded = user.PasswordHash
 	}
 	if !auth.VerifyPassword(encoded, []byte(input.CurrentPassword)) || lookupErr != nil || user.Disabled {
+		if !s.recordLogin(writer, request, input.Username, false) {
+			return
+		}
 		writePasswordChangeError(writer, http.StatusUnauthorized, "INVALID_CURRENT_PASSWORD")
+		return
+	}
+	if !s.recordLogin(writer, request, input.Username, true) {
 		return
 	}
 	if auth.VerifyPassword(user.PasswordHash, []byte(input.NewPassword)) {
@@ -725,7 +791,7 @@ func writePasswordChangeError(writer http.ResponseWriter, status int, code strin
 }
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request, _ store.User) {
-	cookie, _ := request.Cookie(s.cookieName())
+	cookie, _ := uniqueCookie(request, s.cookieName())
 	if err := s.store.DeleteSession(request.Context(), cookie.Value); err != nil {
 		writeError(writer, http.StatusInternalServerError, "internal_error")
 		return
@@ -859,6 +925,11 @@ func (s *Server) proxyDsh(writer http.ResponseWriter, request *http.Request, use
 }
 
 func (s *Server) proxyRuntimePath(writer http.ResponseWriter, request *http.Request, user store.User, stripPrefix string) {
+	forwardPath := "/" + strings.TrimPrefix(strings.TrimPrefix(request.URL.Path, stripPrefix), "/")
+	if strings.HasPrefix(forwardPath, "/internal/") || forwardPath == "/internal" || strings.HasPrefix(forwardPath, "/v1/published-apps/") {
+		writeError(writer, 403, "internal_route_forbidden")
+		return
+	}
 	if s.interceptPersonalTaskDeletion(writer, request, user) {
 		return
 	}
@@ -951,7 +1022,7 @@ func (s *Server) webSurface(legacy http.Handler) http.Handler {
 			legacy.ServeHTTP(writer, request)
 			return
 		}
-		cookie, err := request.Cookie(s.cookieName())
+		cookie, err := uniqueCookie(request, s.cookieName())
 		if err != nil {
 			legacy.ServeHTTP(writer, request)
 			return
@@ -986,6 +1057,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 			policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'"
 		}
 		writer.Header().Set("Content-Security-Policy", policy)
+		if s.dshDocument(request) && s.apps != nil {
+			u, _ := url.Parse(s.apps.config.PublicURL)
+			policy += "; frame-src 'self' http://" + u.Hostname() + ":*"
+			writer.Header().Set("Content-Security-Policy", policy)
+		}
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(writer, request)
@@ -996,7 +1072,7 @@ func (s *Server) dshDocument(request *http.Request) bool {
 	if request.Method != http.MethodGet || request.URL.Path != "/" {
 		return false
 	}
-	if _, err := request.Cookie(s.cookieName()); err != nil {
+	if _, err := uniqueCookie(request, s.cookieName()); err != nil {
 		return false
 	}
 	variant := request.URL.Query().Get("frontend")

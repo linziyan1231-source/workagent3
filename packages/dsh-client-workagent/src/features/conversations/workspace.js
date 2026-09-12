@@ -112,7 +112,7 @@ function ConversationWorkspace({ sessionId }) {
         );
         if (
           hasStandardSessions(ctx) &&
-          ["codex", "kimi"].includes(current.engine)
+          ["codex", "kimi", "acp"].includes(current.engine)
         )
           await nativeSessionAction(
             ctx,

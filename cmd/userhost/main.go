@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"workagent3/internal/publishedapps"
 	"workagent3/internal/userhost"
 )
 
@@ -24,6 +25,9 @@ func main() {
 }
 
 func run() error {
+	if handled, err := publishedapps.Worker(os.Args[1:]); handled {
+		return err
+	}
 	configPath := flag.String("config", "", "absolute path to the UserHost configuration")
 	flag.Parse()
 	if !filepath.IsAbs(*configPath) {
@@ -60,7 +64,8 @@ func run() error {
 	}
 	supervisor, err := userhost.New(userhost.Config{
 		SID: config.SID, DataRoot: config.DataRoot, Command: config.HarnessCommand,
-		CodexCommand: config.CodexCommand, KimiCommand: config.KimiCommand,
+		PublishedPythonCommand: config.PublishedPythonCommand,
+		CodexCommand:           config.CodexCommand, KimiCommand: config.KimiCommand,
 		Arguments: config.HarnessArguments, Profile: config.Profile, Limits: config.Limits,
 		StartupTimeout:          time.Duration(config.StartupTimeoutSeconds) * time.Second,
 		ManagedSkillsRoot:       config.ManagedSkillsRoot,

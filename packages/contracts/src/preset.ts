@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { engineIdSchema } from "./engine.js";
+import { engineIdSchema, acpCatalogIdSchema } from "./engine.js";
 import {
   runtimeMcpServerSchema,
   skillCatalogEntrySchema,
@@ -21,6 +21,7 @@ export const presetDefinitionSchema = z.object({
   avatar: z.string().max(65_536).nullable(),
   enabled: z.boolean(),
   engine: engineIdSchema,
+  acpCatalogId: acpCatalogIdSchema.optional(),
   modelId: z.string().min(1).nullable(),
   systemPrompt: z.string().max(50_000),
   workspacePolicy: workspacePolicySchema,

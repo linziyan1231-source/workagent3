@@ -24,7 +24,11 @@ function ModelsSection() {
       .filter((preset) => preset.source === "user")
       .map((preset) => ({
         preset,
-        group: state.rows.find((group) => group.engine === preset.engine) || {
+        group: state.rows.find(
+          (group) =>
+            group.engine === preset.engine &&
+            group.acpCatalogId === preset.acpCatalogId,
+        ) || {
           engine: preset.engine,
           state: "unavailable",
           models: [],
@@ -50,7 +54,7 @@ function ModelsSection() {
       h(
         "section",
         {
-          key: preset?.id || group.engine,
+          key: preset?.id || group.acpCatalogId || group.engine,
           className: "workagent-model-group",
           "data-preset-id": preset?.id,
         },

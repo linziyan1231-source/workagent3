@@ -109,6 +109,7 @@ export const createTeamHandler =
               sessionId: lead.sessionId!,
               title: `${team.name} · ${lead.name}`,
               engine: lead.engine,
+              acpCatalogId: lead.acpCatalogId,
               presetId: lead.presetId,
               workspaceId: team.workspaceId,
               ...(input.lead.modelId === undefined
@@ -147,6 +148,36 @@ export const createTeamHandler =
           signal,
         );
         return;
+      }
+      const runMatch =
+        /^\/v1\/teams\/([^/]+)\/runs(?:\/([^/]+)\/(pause|resume|cancel))?$/.exec(
+          path,
+        );
+      if (runMatch) {
+        const teamId = decodeURIComponent(runMatch[1]!);
+        if (!runMatch[2] && request.method === "GET")
+          return json(response, 200, store.runs(teamId));
+        if (!runMatch[2] && request.method === "POST") {
+          const input = await body(request);
+          const run = store.operation(
+            `user:${teamId}:${text(input.operationId, "operation_id")}`,
+            input,
+            () => store.startRun(teamId, text(input.input, "input")),
+          );
+          void orchestrator.tick();
+          return json(response, 202, run);
+        }
+        if (runMatch[2] && request.method === "POST")
+          return json(
+            response,
+            200,
+            await orchestrator.controlRun(
+              teamId,
+              decodeURIComponent(runMatch[2]),
+              runMatch[3] as "pause" | "resume" | "cancel",
+            ),
+          );
+        return method(response, "GET, POST");
       }
       const match =
         /^\/v1\/teams\/([^/]+)(?:\/(members|tasks|messages|events)(?:\/([^/]+)(?:\/(cancel))?)?)?$/.exec(
@@ -206,6 +237,9 @@ export const createTeamHandler =
           const team = store.addMember(teamId, {
             name: text(input.name, "name"),
             engine: engineIdSchema.parse(input.engine),
+            ...(input.acpCatalogId
+              ? { acpCatalogId: text(input.acpCatalogId, "acp_catalog") }
+              : {}),
             presetId: text(input.presetId, "preset"),
           });
           const member = team.members[team.members.length - 1]!;
@@ -214,6 +248,7 @@ export const createTeamHandler =
               sessionId: member.sessionId!,
               title: `${team.name} · ${member.name}`,
               engine: member.engine,
+              acpCatalogId: member.acpCatalogId,
               presetId: member.presetId,
               workspaceId: team.workspaceId,
             });
@@ -227,13 +262,16 @@ export const createTeamHandler =
           const input = await body(request);
           const mutation: {
             name?: string;
-            engine?: "harness" | "codex" | "kimi";
+            engine?: "harness" | "codex" | "kimi" | "acp";
+            acpCatalogId?: string;
             presetId?: string;
           } = {};
           if (input.name !== undefined)
             mutation.name = text(input.name, "name");
           if (input.engine !== undefined)
             mutation.engine = engineIdSchema.parse(input.engine);
+          if (input.acpCatalogId !== undefined)
+            mutation.acpCatalogId = text(input.acpCatalogId, "acp_catalog");
           if (input.presetId !== undefined)
             mutation.presetId = text(input.presetId, "preset");
           return json(
@@ -258,6 +296,13 @@ export const createTeamHandler =
             memberId: text(input.memberId, "member"),
             title: text(input.title, "title"),
             input: text(input.input, "input"),
+            ...(Array.isArray(input.dependsOnIds)
+              ? {
+                  dependsOnIds: input.dependsOnIds.map((id) =>
+                    text(id, "dependency"),
+                  ),
+                }
+              : {}),
           });
           void orchestrator.tick();
           return json(response, 202, task);
@@ -286,21 +331,16 @@ export const createTeamHandler =
           );
         if (childId === undefined && request.method === "POST") {
           const input = await body(request);
-          return json(
-            response,
-            201,
-            store.sendMessage(teamId, {
-              fromMemberId:
-                input.fromMemberId === null
-                  ? null
-                  : text(input.fromMemberId, "from_member"),
-              toMemberId:
-                input.toMemberId === null || input.toMemberId === undefined
-                  ? null
-                  : text(input.toMemberId, "to_member"),
-              body: text(input.body, "body"),
-            }),
-          );
+          const message = store.sendMessage(teamId, {
+            fromMemberId: null,
+            toMemberId:
+              input.toMemberId === null || input.toMemberId === undefined
+                ? null
+                : text(input.toMemberId, "to_member"),
+            body: text(input.body, "body"),
+          });
+          void orchestrator.tick();
+          return json(response, 201, message);
         }
         return method(response, "GET, POST");
       }

@@ -157,7 +157,9 @@ describe.each(["scheduler", "team"] as const)("%s shutdown", (kind) => {
     });
     await Promise.resolve();
     expect(f.cancel).toHaveBeenCalledTimes(1);
-    expect(f.cancel).toHaveBeenCalledWith(f.ids[0]);
+    expect(f.cancel).toHaveBeenCalledWith(
+      kind === "team" ? expect.stringMatching(/^team-dispatch-/) : f.ids[0],
+    );
     expect(f.execute).toHaveBeenCalledTimes(1);
     expect(closed).toBe(false);
     f.execution.resolve({ sessionId: "finished" });
@@ -186,7 +188,12 @@ describe.each(["scheduler", "team"] as const)("%s shutdown", (kind) => {
       "running",
       kind === "team" ? "queued" : "pending",
     ]);
-    expect(await f.restart()).toEqual({ executed: 1, reconciled: 1 });
+    // A persistent team pauses after an ambiguous submission; its pending
+    // descendants remain durable until the user explicitly continues.
+    expect(await f.restart()).toEqual({
+      executed: kind === "team" ? 0 : 1,
+      reconciled: 1,
+    });
     expect(f.execute).toHaveBeenCalledTimes(1);
     // The unresolved old process is intentionally never resumed after restart.
   });

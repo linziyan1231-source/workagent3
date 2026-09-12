@@ -18,6 +18,20 @@ export const pendingInteractionSchema = z.object({
   status: interactionStatusSchema,
   createdAt: z.iso.datetime({ offset: true }),
   resolvedAt: z.iso.datetime({ offset: true }).optional(),
+  native: z.boolean().optional(),
+  input: z.json().optional(),
+  options: z.array(z.json()).optional(),
+  choices: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        label: z.string(),
+        outcome: z.enum(["allow", "reject", "cancel"]),
+        scope: z.enum(["once", "session", "rule", "remember"]),
+      }),
+    )
+    .optional(),
+  selectedOptionId: z.string().optional(),
 });
 export type PendingInteraction = z.infer<typeof pendingInteractionSchema>;
 

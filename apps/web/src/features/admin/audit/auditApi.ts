@@ -7,14 +7,16 @@ export type AuditEvent = {
   action: string;
   target: string;
   result: string;
+  correlation_id?: string;
+  metadata?: Record<string, string>;
 };
-const query = (action: string) =>
-  `limit=100&action=${encodeURIComponent(action)}`;
+const query = (action: string, ip = "") =>
+  `limit=100&action=${encodeURIComponent(action)}&client_ip=${encodeURIComponent(ip)}`;
 export const auditApi = {
-  events: (action: string) =>
+  events: (action: string, ip = "") =>
     requestJson<{ events: AuditEvent[] }>(
-      `/api/portal/admin/audit?${query(action)}`,
+      `/api/portal/admin/audit?${query(action, ip)}`,
     ),
-  exportUrl: (action: string) =>
-    `/api/portal/admin/audit/export?${query(action)}`,
+  exportUrl: (action: string, ip = "") =>
+    `/api/portal/admin/audit/export?${query(action, ip)}`,
 };

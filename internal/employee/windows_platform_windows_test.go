@@ -46,17 +46,21 @@ func TestRuntimeConfigProjectsManagedSkillsRelease(t *testing.T) {
 		ToolPolicy: "none", OAuthState: "none", Health: "unavailable",
 	}
 	platform := &WindowsPlatform{config: WindowsPlatformConfig{
-		HarnessCommand:    filepath.Join(root, "dsh.exe"),
-		HarnessEntrypoint: filepath.Join("dist", "index.js"),
-		HarnessArguments:  []string{"--verbose"},
-		Profile:           "workagent",
-		PortalURL:         "http://127.0.0.1:8080",
-		PublicBaseURL:     "https://workagent.example.com",
-		ManagedSkillsRoot: managedSkillsRoot,
-		ManagedMCPServers: []mcpruntime.Server{managedServer},
+		HarnessCommand:         filepath.Join(root, "dsh.exe"),
+		PublishedPythonCommand: filepath.Join(root, "release", "python.exe"),
+		HarnessEntrypoint:      filepath.Join("dist", "index.js"),
+		HarnessArguments:       []string{"--verbose"},
+		Profile:                "workagent",
+		PortalURL:              "http://127.0.0.1:8080",
+		PublicBaseURL:          "https://workagent.example.com",
+		ManagedSkillsRoot:      managedSkillsRoot,
+		ManagedMCPServers:      []mcpruntime.Server{managedServer},
 	}}
 	spec := RuntimeSpec{SID: "S-1-5-21-1000", DataRoot: filepath.Join(root, "employee")}
 	config := platform.runtimeFileConfig(spec, filepath.Join(root, "registration.token"))
+	if config.PublishedPythonCommand != platform.config.PublishedPythonCommand {
+		t.Fatal("trusted published Python interpreter was not projected")
+	}
 	if config.PublicBaseURL != "https://workagent.example.com" || config.PortalURL != "http://127.0.0.1:8080" {
 		t.Fatal("public reminder origin and internal Portal URL must be projected independently")
 	}

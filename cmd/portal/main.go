@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,16 +18,19 @@ import (
 	"syscall"
 	"time"
 
+	"workagent3/internal/acpcatalog"
 	"workagent3/internal/audit"
 	"workagent3/internal/auth"
 	"workagent3/internal/chatforward"
 	"workagent3/internal/collaboration"
+	"workagent3/internal/feedback"
 	"workagent3/internal/imdelivery"
 	"workagent3/internal/marketplace"
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/nativeauth"
 	"workagent3/internal/notifications"
 	"workagent3/internal/portal"
+	"workagent3/internal/publishedapps"
 	"workagent3/internal/quota"
 	"workagent3/internal/runtimeapi"
 	"workagent3/internal/settings"
@@ -42,6 +47,7 @@ func main() {
 
 func run() error {
 	address := flag.String("addr", "127.0.0.1:8080", "Portal listen address")
+	publicAddress := flag.String("public-addr", "", "Optional direct public HTTP listener preserving client source addresses")
 	databasePath := flag.String("db", filepath.Join("data", "portal.db"), "Portal SQLite path")
 	modelAccessPath := flag.String("model-access-db", "", "Model Access SQLite path (defaults beside Portal database)")
 	quotaPath := flag.String("quota-db", "", "Quota SQLite path (defaults beside Portal database)")
@@ -54,6 +60,19 @@ func run() error {
 	webPath := flag.String("web", filepath.Join("apps", "web", "dist"), "Web distribution directory")
 	assistantResources := flag.String("assistant-resources", filepath.Join("release", "assistant-resources"), "managed builtin assistant resource root")
 	secureCookie := flag.Bool("secure-cookie", true, "Require HTTPS for the session cookie")
+	feedbackPersonal := flag.Int64("feedback-personal-bytes", 100*1024*1024, "Per employee feedback storage limit")
+	feedbackTotal := flag.Int64("feedback-total-bytes", 10*1024*1024*1024, "Total feedback storage limit")
+	feedbackRetention := flag.Int("feedback-retention-days", 90, "Feedback retention in days")
+	appsPublicURL := flag.String("apps-public-url", "", "Public HTTP Portal origin enabling application publishing")
+	appsBind := flag.String("apps-bind", "127.0.0.1", "Application content listener bind address")
+	appsEmployeeRoot := flag.String("apps-employee-root", "", "Managed employee data root used to verify application network workers")
+	appsFirst := flag.Int("apps-port-first", 20000, "First dedicated application port")
+	appsLast := flag.Int("apps-port-last", 20999, "Last dedicated application port")
+	acpManifest := flag.String("acp-catalog", "", "Immutable approved ACP release manifest")
+	acpState := flag.String("acp-state", "", "ACP selection state (defaults beside Portal database)")
+	trustedProxies := flag.String("trusted-proxies", "", "Comma-separated trusted proxy CIDRs; empty ignores forwarding headers")
+	loginAccountLimit := flag.Int("login-account-limit", 5, "Failed authentications per account in 15 minutes")
+	loginIPLimit := flag.Int("login-ip-limit", 20, "Failed authentications per client IP in 15 minutes; 0 disables IP limit")
 	harnessModel := flag.String("harness-model", os.Getenv("WORKAGENT_HARNESS_MODEL"), "configured Codex model displayed for the managed Harness provider")
 	flag.Parse()
 
@@ -65,6 +84,27 @@ func run() error {
 		return err
 	}
 	defer data.Close()
+	if *acpState == "" {
+		*acpState = filepath.Join(filepath.Dir(*databasePath), "acp-catalog.json")
+	}
+	acpStore, err := acpcatalog.Open(*acpManifest, *acpState)
+	if err != nil {
+		return err
+	}
+	feedbackStore, err := feedback.Open(filepath.Join(filepath.Dir(*databasePath), "feedback.db"))
+	if err != nil {
+		return err
+	}
+	defer feedbackStore.Close()
+	if err = feedbackStore.Configure(feedback.Limits{PersonalBytes: *feedbackPersonal, TotalBytes: *feedbackTotal, SubmissionsPerTenMinutes: 10}); err != nil {
+		return err
+	}
+	if *feedbackRetention < 1 {
+		return errors.New("feedback retention must be positive")
+	}
+	if err = feedbackStore.Prune(context.Background(), time.Now().Add(-time.Duration(*feedbackRetention)*24*time.Hour)); err != nil {
+		return err
+	}
 	if err := bootstrapUser(data); err != nil {
 		return err
 	}
@@ -201,13 +241,40 @@ func run() error {
 		return err
 	}
 	modules := portal.Modules{
-		ModelAccess: models, Quota: quotas, SpeechQuota: quotas, SharedRunQuota: quotas, Speech: speechProxy,
+		SoftwareVersion: softwareVersion(),
+		AcpCatalog:      acpStore,
+		Feedback:        feedbackStore,
+		LoginPolicy:     store.LoginPolicy{AccountLimit: *loginAccountLimit, IPLimit: *loginIPLimit, Window: 15 * time.Minute, Lockout: 15 * time.Minute},
+		ModelAccess:     models, Quota: quotas, SpeechQuota: quotas, SharedRunQuota: quotas, Speech: speechProxy,
 		Settings: clientSettings, SkillMarket: market, Marketplace: sharedMarket,
 		Collaboration: sharedProjects, SharedProjects: sharedPlatform, SharedFiles: sharedFiles, SharedTurns: sharedTurns,
 		Notifications: notificationStore, Audit: auditStore,
 	}
+	if *loginAccountLimit < 1 || *loginIPLimit < 0 {
+		return errors.New("invalid login attempt limits")
+	}
+	for _, raw := range strings.Split(*trustedProxies, ",") {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("trusted proxy: %w", err)
+		}
+		modules.RequestSource.TrustedProxies = append(modules.RequestSource.TrustedProxies, prefix)
+	}
 	if chatForwardProxy != nil {
 		modules.ChatForward = chatForwardProxy
+		chatQuota, err := chatforward.Open(filepath.Join(filepath.Dir(*databasePath), "chatforward.db"))
+		if err != nil {
+			return err
+		}
+		defer chatQuota.Close()
+		modules.ChatGPTPro = chatQuota
+		chatForwardProxy.SetQuota(chatQuota, func(ctx context.Context, sid string) bool {
+			user, err := data.UserBySID(ctx, sid)
+			return err == nil && !user.Disabled && !user.Offboarded
+		})
 	}
 	if imGatewayProxy != nil {
 		modules.IM = imGatewayProxy
@@ -218,11 +285,26 @@ func run() error {
 		modules.Storage = employeeManager
 		modules.SharedTrash = employeeManager
 	}
+	if *appsPublicURL != "" {
+		if !filepath.IsAbs(*appsEmployeeRoot) {
+			return errors.New("apps-employee-root must name the absolute managed employee data root")
+		}
+		appsStore, err := publishedapps.Open(filepath.Join(filepath.Dir(*databasePath), "published-apps.db"), *appsFirst, *appsLast)
+		if err != nil {
+			return err
+		}
+		defer appsStore.Close()
+		modules.PublishedApps = portal.PublishedAppsConfig{Store: appsStore, PublicURL: strings.TrimRight(*appsPublicURL, "/"), BindHost: *appsBind, EmployeeRoot: *appsEmployeeRoot}
+	}
 	server, err := portal.NewWithModules(data, registry, *secureCookie, modules)
 	if err != nil {
 		return err
 	}
 	web, err := fs.Sub(os.DirFS(*webPath), ".")
+	if err := server.StartPublishedApps(); err != nil {
+		return err
+	}
+	defer server.ClosePublishedApps()
 	if err != nil {
 		return fmt.Errorf("open Web distribution: %w", err)
 	}
@@ -245,6 +327,11 @@ func run() error {
 	}
 
 	root := http.NewServeMux()
+	root.Handle("/internal/runtime/acp-catalog", server.AcpCatalogRuntimeHandler())
+	root.Handle("/internal/runtime/published-apps/network", server.PublishedAppsNetworkHandler())
+	if chatForwardProxy != nil {
+		root.Handle("/internal/chatforward/quota/", chatForwardProxy.CallbackHandler())
+	}
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
 	if employeeManager != nil {
 		root.Handle("/internal/runtime/control", employeeManager.RuntimeControl(registry))
@@ -275,10 +362,40 @@ func run() error {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	var publicServer *http.Server
+	if *publicAddress != "" {
+		listener, err := net.Listen("tcp", *publicAddress)
+		if err != nil {
+			return err
+		}
+		publicServer = &http.Server{Handler: publicPortalHandler(root), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
+		defer publicServer.Close()
+		go func() {
+			if err := publicServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("Portal public listener: %v", err)
+				_ = httpServer.Close()
+			}
+		}()
+		log.Printf("WorkAgent public HTTP listening on %s", *publicAddress)
+	}
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go server.RunOwnershipTransferRecovery(shutdownContext, 5*time.Second)
 	go server.RunSharedQuotaRecovery(shutdownContext, 5*time.Second)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-shutdownContext.Done():
+				return
+			case <-ticker.C:
+				if err := feedbackStore.Prune(shutdownContext, time.Now().Add(-time.Duration(*feedbackRetention)*24*time.Hour)); err != nil {
+					log.Printf("feedback retention: %v", err)
+				}
+			}
+		}
+	}()
 	personalTaskRecoveryDone := make(chan struct{})
 	go func() {
 		defer close(personalTaskRecoveryDone)
@@ -292,6 +409,11 @@ func run() error {
 		<-shutdownContext.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if publicServer != nil {
+			if err := publicServer.Shutdown(ctx); err != nil {
+				log.Printf("Portal public shutdown: %v", err)
+			}
+		}
 		if err := httpServer.Shutdown(ctx); err != nil {
 			log.Printf("Portal shutdown: %v", err)
 		}

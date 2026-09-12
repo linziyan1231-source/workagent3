@@ -39,6 +39,7 @@ export function allowedButlerRequest(method: string, path: string): boolean {
     ["POST", `/v1/presets/${id}/copy`],
     ["POST", `/v1/sessions/${id}/capabilities/reload`],
     ["POST", "/v1/completion-notifications/send"],
+    ["POST", "/v1/session-tools"],
     ["GET", "/dsh-im-connect/api/(channels|assistant|projects)"],
     ["POST", "/dsh-im-connect/api/assistant"],
     [

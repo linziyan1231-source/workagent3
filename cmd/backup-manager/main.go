@@ -1,11 +1,13 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,18 +137,49 @@ func parseSources(values []string) ([]operations.BackupSource, error) {
 		if err != nil {
 			return nil, err
 		}
-		source.Exporter = fileExporter{path: path, portal: source.Owner == operations.OwnerPortalAuth}
+		source.Exporter = fileExporter{path: path, portal: source.Owner == operations.OwnerPortalAuth, feedback: source.Owner == operations.OwnerFeedback}
 		sources = append(sources, source)
 	}
 	return sources, nil
 }
 
 type fileExporter struct {
-	path   string
-	portal bool
+	path     string
+	portal   bool
+	feedback bool
 }
 
 func (exporter fileExporter) ExportBackup(ctx context.Context, destination string) error {
+	if exporter.feedback {
+		archive, err := zip.OpenReader(exporter.path)
+		if err != nil {
+			return fmt.Errorf("feedback source must be an archive exported by Portal: %w", err)
+		}
+		found := false
+		for _, entry := range archive.File {
+			if entry.Name == "feedback.db" {
+				found = true
+			}
+		}
+		archive.Close()
+		if !found {
+			return errors.New("feedback archive has no database")
+		}
+		input, err := os.Open(exporter.path)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		defer output.Close()
+		if _, err = io.Copy(output, input); err != nil {
+			return err
+		}
+		return output.Sync()
+	}
 	if exporter.portal {
 		return portalstore.ExportBackup(ctx, exporter.path, destination)
 	}

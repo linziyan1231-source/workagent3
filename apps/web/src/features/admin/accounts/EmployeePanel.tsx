@@ -3,6 +3,7 @@ import { accountApi, type Employee, type Job } from "./accountApi.js";
 import { errorMessage } from "../shared/adminErrors.js";
 import { Dialog, ActionForm, Password } from "../shared/adminUi.js";
 import { DollarBudgets } from "../usage/DollarUsage.js";
+import { ChatGPTProQuota } from "../usage/ChatGPTProQuota.js";
 import { StorageEditor } from "../storage/StorageEditor.js";
 import { ProfessionalDatabasePanel } from "./ProfessionalDatabasePanel.js";
 export function EmployeePanel({
@@ -121,6 +122,7 @@ export function EmployeePanel({
         ))}
       </div>
       {tab === "quota" && <DollarBudgets username={u.username} />}
+      {tab === "quota" && <ChatGPTProQuota username={u.username} />}
       {tab === "storage" && (
         <StorageEditor key={u.username} username={u.username} />
       )}

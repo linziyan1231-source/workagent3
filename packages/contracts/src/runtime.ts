@@ -6,8 +6,10 @@ import {
   engineEventSchema,
   engineIdSchema,
   assistantMessageKindSchema,
+  acpCatalogIdSchema,
 } from "./engine.js";
 import { presetBindingSchema } from "./preset.js";
+import { acpCatalogEntrySchema } from "./acp.js";
 
 export const sessionLastTurnSchema = z.object({
   id: z.string().min(1),
@@ -18,6 +20,9 @@ export const sessionLastTurnSchema = z.object({
 export const runtimeSessionSchema = z.object({
   id: z.string().min(1),
   engine: engineIdSchema,
+  acpCatalogId: acpCatalogIdSchema.optional(),
+  acpCatalogRevision: z.string().optional(),
+  acpSnapshot: acpCatalogEntrySchema.optional(),
   title: z.string().min(1),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
