@@ -67,6 +67,8 @@ type Entry struct {
 	SeriesID         string    `json:"seriesId"`
 	ReleaseNotes     string    `json:"releaseNotes"`
 	Revoked          bool      `json:"revoked"`
+	DefaultEnabled   bool      `json:"defaultEnabled"`
+	Listed           bool      `json:"listed,omitempty"`
 	InstalledVersion string    `json:"installedVersion,omitempty"`
 	SelectedID       string    `json:"selectedId,omitempty"`
 	UpdateAvailable  bool      `json:"updateAvailable"`
@@ -128,14 +130,24 @@ func (s *Store) Publish(ctx context.Context, e Entry, b Bundle) error {
 			return ErrForbidden
 		}
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO marketplace_entries(id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes) VALUES(?,?,?,?,?,?,?,?,?,?)`, e.ID, e.Kind, e.Name, e.Description, e.Version, e.Publisher, time.Now().UTC().Format(time.RFC3339Nano), data, e.SeriesID, e.ReleaseNotes)
+	listed := 1
+	var lastAction string
+	err = s.db.QueryRowContext(ctx, `SELECT action FROM marketplace_actions WHERE series_id=? AND action IN ('unlist','relist') ORDER BY created_at DESC, id DESC LIMIT 1`, e.SeriesID).Scan(&lastAction)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	// A new version must not relist a series an administrator has unlisted.
+	if lastAction == "unlist" {
+		listed = 0
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO marketplace_entries(id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes,default_enabled,listed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.Kind, e.Name, e.Description, e.Version, e.Publisher, time.Now().UTC().Format(time.RFC3339Nano), data, e.SeriesID, e.ReleaseNotes, e.DefaultEnabled, listed)
 	return err
 }
 func (s *Store) Get(ctx context.Context, id string) (Entry, Bundle, error) {
 	var e Entry
 	var data []byte
 	var stamp string
-	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes,revoked FROM marketplace_entries WHERE id=? AND listed=1 AND revoked=0`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &data, &e.SeriesID, &e.ReleaseNotes, &e.Revoked)
+	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes,revoked,listed,default_enabled FROM marketplace_entries WHERE id=? AND listed=1 AND revoked=0`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &data, &e.SeriesID, &e.ReleaseNotes, &e.Revoked, &e.Listed, &e.DefaultEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, Bundle{}, ErrNotFound
 	}

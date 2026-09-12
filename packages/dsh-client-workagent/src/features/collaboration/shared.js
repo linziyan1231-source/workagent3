@@ -2548,15 +2548,31 @@ export function createShared({
                       h(
                         "summary",
                         {
-                          className: "workagent-button",
+                          className:
+                            "workagent-button workagent-collab-reminder-button",
                           "aria-label": "消息提醒",
                         },
-                        "消息提醒",
+                        icon("notifications", 16),
+                        h("span", null, "消息提醒"),
                       ),
                       h(
                         "div",
                         { className: "workagent-collab-reminder-popover" },
-                        h("small", null, "仅接收 Agent 完成提醒和产物文件。"),
+                        h(
+                          "header",
+                          {
+                            className: "workagent-collab-reminder-heading",
+                          },
+                          icon("notifications", 16),
+                          h("strong", null, "消息提醒"),
+                        ),
+                        h(
+                          "p",
+                          {
+                            className: "workagent-collab-reminder-description",
+                          },
+                          "仅接收 Agent 完成提醒和产物文件。",
+                        ),
                         h(SessionReminder, {
                           sessionId: `collaboration:${conversation.id}`,
                         }),

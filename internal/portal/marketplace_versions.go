@@ -362,7 +362,7 @@ func (s *Server) adminMarket(w http.ResponseWriter, r *http.Request, user store.
 			writeJSON(w, 202, map[string]any{"queued": true})
 			return
 		}
-		if input.SeriesID == "" || strings.TrimSpace(input.Reason) == "" || len(input.Reason) > 2000 || (input.Action != "update" && input.Action != "disable" && input.Action != "delete") {
+		if input.SeriesID == "" || strings.TrimSpace(input.Reason) == "" || len(input.Reason) > 2000 || (input.Action != "update" && input.Action != "disable" && input.Action != "delete" && input.Action != "unlist" && input.Action != "relist") {
 			writeError(w, 400, "invalid_market_action")
 			return
 		}
@@ -373,6 +373,25 @@ func (s *Server) adminMarket(w http.ResponseWriter, r *http.Request, user store.
 		}
 		if versions[0].Kind != "skill" {
 			writeError(w, 400, "market_action_requires_skill")
+			return
+		}
+		if input.Action == "unlist" || input.Action == "relist" {
+			// Lightweight listing toggle: no employee targets, nothing to process per runtime.
+			id, err := auth.RandomToken(18)
+			if err != nil {
+				marketError(w, err)
+				return
+			}
+			a := marketplace.Action{ID: id, SeriesID: input.SeriesID, Action: input.Action, Reason: input.Reason, Actor: user.Username, Targets: []marketplace.ActionTarget{}}
+			s.modules.Marketplace.InstallMu.Lock()
+			err = s.modules.Marketplace.CreateAction(r.Context(), a)
+			s.modules.Marketplace.InstallMu.Unlock()
+			s.recordBusinessEvent(r.Context(), user.SID, "market.admin."+a.Action, a.ID, err, map[string]string{"series_id": a.SeriesID, "reason": a.Reason})
+			if err != nil {
+				marketError(w, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"id": id})
 			return
 		}
 		if input.Action == "update" {

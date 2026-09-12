@@ -20,10 +20,11 @@ import (
 const maxMarketArchiveBytes = 50 << 20
 
 type marketSkillMetadata struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Version     string `json:"version"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Version        string `json:"version"`
+	DefaultEnabled *bool  `json:"defaultEnabled"`
 }
 
 func exportUserSkill(skills *skillruntime.Store) http.HandlerFunc {
@@ -90,7 +91,7 @@ func installMarketSkill(skills *skillruntime.Store, publisher skillProjectionPub
 		entry, err := skills.InstallMarket(request.Context(), skillruntime.InstallInput{
 			Entry: skillruntime.Entry{
 				ID: metadata.ID, Name: metadata.Name, Description: metadata.Description, Version: metadata.Version,
-				Source: "market", Enabled: true, RequiredMCPServerIDs: []string{},
+				Source: "market", Enabled: metadata.DefaultEnabled == nil || *metadata.DefaultEnabled, RequiredMCPServerIDs: []string{},
 			},
 			SourceDirectory: source,
 		})

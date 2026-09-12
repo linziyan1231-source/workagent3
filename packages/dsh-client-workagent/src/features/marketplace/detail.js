@@ -85,7 +85,7 @@ export function MarketplaceDetail({ row, request, explain, onClose }) {
           h(
             "p",
             { className: "workagent-muted" },
-            `版本 ${entry.version} · ${entry.publisher}`,
+            `版本 ${entry.version} · ${entry.publisher}${entry.defaultEnabled === false ? " · 默认关闭" : ""}`,
           ),
           h("p", { className: "workagent-release-notes" }, entry.description),
           entry.releaseNotes

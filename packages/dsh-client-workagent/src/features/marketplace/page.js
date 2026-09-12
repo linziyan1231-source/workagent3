@@ -73,6 +73,9 @@ function MarketPublishForm({ onPublished, entry }) {
               version: String(values.get("version")),
               seriesId: entry?.seriesId || "",
               releaseNotes: String(values.get("releaseNotes") || ""),
+              ...(kind === "skill"
+                ? { defaultEnabled: values.get("defaultEnabled") === "on" }
+                : {}),
             }),
           });
           await onPublished();
@@ -173,6 +176,17 @@ function MarketPublishForm({ onPublished, entry }) {
               placeholder: "说明新增能力、修复内容、兼容性及升级注意事项",
             }),
           ),
+          kind === "skill"
+            ? h(
+                Field,
+                { label: "安装后默认启用" },
+                h(Input, {
+                  name: "defaultEnabled",
+                  type: "checkbox",
+                  defaultChecked: true,
+                }),
+              )
+            : null,
           kind === "assistant"
             ? h(
                 "p",

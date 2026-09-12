@@ -25,6 +25,10 @@ import { ModelAccessStore } from "./model-access-store.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { BridgeEvent, EngineSessionOptions } from "./engines/types.js";
 import { fileReferenceText } from "@workagent/contracts";
+import { automationDefinitionSchema } from "@workagent/contracts";
+import { QuotaAutomationRunner } from "./quota-runner.js";
+import { ManagedAcpCatalog } from "./acp-catalog.js";
+import { CodexBridge } from "./engines/codex.js";
 
 const native = vi.hoisted(() => ({
   calls: [] as Array<{ method: string; content?: string; lastTurnId?: string }>,
@@ -36,6 +40,7 @@ const native = vi.hoisted(() => ({
   sendGate: undefined as Promise<void> | undefined,
   reserveGate: undefined as Promise<void> | undefined,
   settlements: [] as string[],
+  reservedModels: [] as string[],
   catalogGate: undefined as Promise<void> | undefined,
   catalogReads: 0,
   resumedOptions: [] as unknown[],
@@ -43,6 +48,7 @@ const native = vi.hoisted(() => ({
   sessions: [] as Array<{ nativeId: string; connected: boolean }>,
   createdOptions: [] as EngineSessionOptions[],
   resumeError: undefined as string | undefined,
+  resumeGate: undefined as Promise<void> | undefined,
 }));
 vi.mock("./engines/codex.js", () => ({
   CodexBridge: class {
@@ -68,6 +74,7 @@ vi.mock("./engines/codex.js", () => ({
     ) {
       native.resumedOptions.push(options);
       native.resumedIDs.push(_id);
+      await native.resumeGate;
       if (native.resumeError) throw new Error(native.resumeError);
       return this.session(emit);
     }
@@ -122,6 +129,94 @@ vi.mock("./engines/kimi.js", async () => {
 });
 
 const roots: string[] = [];
+it("freezes ACP version and billing, rejects mismatched presets, and permits cancellation after administrator disable", async () => {
+  const entry = {
+    id: "approved",
+    label: "Approved",
+    packageRef: "packages/agent",
+    revision: "v1",
+    command: "agent.exe",
+    args: [],
+    credentialFields: [],
+    billingModelId: "fixed-billing",
+    enabled: true,
+  };
+  let enabled = true,
+    latest = "v1";
+  const resolve = vi
+    .spyOn(ManagedAcpCatalog.prototype, "resolve")
+    .mockImplementation(async (id, revision) => {
+      if (!enabled) throw new Error("acp_catalog_disabled");
+      if (id !== entry.id) throw new Error("acp_catalog_not_found");
+      return { ...entry, revision: revision ?? latest };
+    });
+  const bridge = vi
+    .spyOn(ManagedAcpCatalog.prototype, "bridge")
+    .mockResolvedValue(new CodexBridge() as never);
+  const f = await fixture();
+  try {
+    const preset = f.presets.create({
+      name: "ACP",
+      engine: "acp",
+      acpCatalogId: "approved",
+    } as never);
+    const body = {
+      engine: "acp",
+      acpCatalogId: "approved",
+      presetId: preset.id,
+      title: "ACP task",
+      workspace: "default",
+      modelId: "display-model",
+    };
+    const mismatch = await f.call("", { ...body, acpCatalogId: "other" });
+    expect(mismatch.status).toBe(409);
+    const created = await f.call("", body);
+    expect(created.status).toBe(201);
+    expect(created.data).toMatchObject({
+      engine: "acp",
+      acpCatalogId: "approved",
+      acpCatalogRevision: "v1",
+    });
+    latest = "v2";
+    const forked = await f.call(`/${created.data.id}/side-chat`, {});
+    expect(forked.status).toBe(201);
+    expect(forked.data).toMatchObject({
+      engine: "acp",
+      acpCatalogId: "approved",
+      acpCatalogRevision: "v1",
+      acpSnapshot: { billingModelId: "fixed-billing" },
+    });
+    await f.runtime.nativeSessionPort.prompt(
+      created.data.id,
+      "hello",
+      "queue",
+      "acp-input",
+    );
+    expect(native.reservedModels.at(-1)).toBe("fixed-billing");
+    expect(resolve).toHaveBeenLastCalledWith("approved", "v1");
+    enabled = false;
+    const cancelled = await f.call(`/${created.data.id}/cancel`, {});
+    expect(cancelled.status).toBe(204);
+    await expect(
+      f.runtime.nativeSessionPort.prompt(
+        created.data.id,
+        "new",
+        "queue",
+        "acp-disabled",
+      ),
+    ).rejects.toThrow("acp_catalog_disabled");
+    expect(
+      new SessionIndex(f.home).list().find((row) => row.id === created.data.id),
+    ).toMatchObject({
+      acpCatalogRevision: "v1",
+      acpSnapshot: { billingModelId: "fixed-billing" },
+    });
+  } finally {
+    await f.close();
+    resolve.mockRestore();
+    bridge.mockRestore();
+  }
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   native.calls.length = 0;
@@ -131,6 +226,7 @@ afterEach(() => {
   native.sendGate = undefined;
   native.reserveGate = undefined;
   native.settlements.length = 0;
+  native.reservedModels.length = 0;
   native.catalogGate = undefined;
   native.catalogReads = 0;
   native.resumedOptions.length = 0;
@@ -138,6 +234,7 @@ afterEach(() => {
   native.sessions.length = 0;
   native.createdOptions.length = 0;
   native.resumeError = undefined;
+  native.resumeGate = undefined;
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
@@ -238,7 +335,8 @@ async function fixture(
     skills,
     { statusFor: () => ({ state: "ready" }) } as never,
     {
-      reserve: async () => {
+      reserve: async (request) => {
+        native.reservedModels.push(request.modelId);
         if (native.rejectQuota) throw new Error("quota_exceeded");
         native.calls.push({ method: "reserve" });
         await native.reserveGate;
@@ -271,7 +369,10 @@ async function fixture(
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       },
     );
-    return { status: response.status, data: await response.json() };
+    return {
+      status: response.status,
+      data: response.status === 204 ? undefined : await response.json(),
+    };
   };
   return {
     runtime,
@@ -296,6 +397,136 @@ async function fixture(
     },
   };
 }
+
+it("cancels a background execution while the native session is still activating without sending it", async () => {
+  const f = await fixture();
+  let release!: () => void;
+  native.resumeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const definition = automationDefinitionSchema.parse({
+    id: "automation-cancel",
+    version: 1,
+    name: "Cancelled",
+    enabled: false,
+    schedule: { kind: "interval", everyMinutes: 1 },
+    presetId: "builtin-codex",
+    engine: "codex",
+    workspaceId: "default",
+    input: "Must never send",
+    executionMode: "existing",
+    conversationId: "session-source",
+    notificationPolicy: "none",
+    nextRunAt: null,
+    lastRunAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  try {
+    const pending = f.runtime.execute({
+      automationRunId: "cancel-before-submit",
+      definition,
+    });
+    const rejected = expect(pending).rejects.toThrow(
+      "background_execution_cancelled",
+    );
+    await vi.waitFor(() => expect(native.resumedIDs.length).toBe(1));
+    const cancelled = f.runtime.cancel("cancel-before-submit");
+    release();
+    await cancelled;
+    await rejected;
+    expect(native.calls.some((call) => call.method === "send")).toBe(false);
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
+it("keeps a busy automation out of quota and binds its result to its own submitted turn", async () => {
+  const f = await fixture();
+  const definition = automationDefinitionSchema.parse({
+    id: "automation-precise",
+    version: 1,
+    name: "Followup",
+    enabled: false,
+    schedule: { kind: "interval", everyMinutes: 1 },
+    presetId: "builtin-codex",
+    engine: "codex",
+    workspaceId: "default",
+    input: "Scheduled question",
+    executionMode: "existing",
+    conversationId: "session-source",
+    notificationPolicy: "none",
+    nextRunAt: null,
+    lastRunAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const reserve = vi.fn(async () => ({ status: "reserved" as const }));
+  const settle = vi.fn(async () => {});
+  const runner = new QuotaAutomationRunner(f.runtime, f.presets, {
+    reserve,
+    settle,
+  } as never);
+  try {
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "User work",
+      "queue",
+    );
+    await expect(
+      runner.execute({ automationRunId: "busy-run", definition }),
+    ).rejects.toThrow("session_busy");
+    expect(reserve).not.toHaveBeenCalled();
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await vi.waitFor(() =>
+      expect(
+        f.runtime.nativeSessionPort
+          .list()
+          .find((session) => session.id === "session-source")?.activity?.state,
+      ).toBe("idle"),
+    );
+    const submitted = vi.fn();
+    let finished = false;
+    const pending = runner
+      .execute({
+        automationRunId: "precise-run",
+        definition,
+        onSubmitted: submitted,
+      })
+      .then((result) => {
+        finished = true;
+        return result;
+      });
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledWith("active"));
+    native.emit({
+      type: "assistant.completed",
+      turnId: "old-turn",
+      content: "Wrong answer",
+    });
+    native.emit({ type: "turn.completed", turnId: "old-turn" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(finished).toBe(false);
+    native.emit({
+      type: "assistant.completed",
+      turnId: "active",
+      content: "Scheduled answer",
+    });
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await expect(pending).resolves.toMatchObject({
+      result: "Scheduled answer",
+      sessionId: "session-source",
+    });
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(
+      f.messages
+        .list("session-source")
+        .some((message) => message.text === "Scheduled question"),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
 
 it("IM steering targets the bound ordinary task and cannot control a collaboration session", async () => {
   const f = await fixture();
@@ -549,7 +780,11 @@ it.each(["kimi", "codex"] as const)(
               : native.createdOptions.at(-1)
           ) as EngineSessionOptions;
           expect(options.requestApproval).toBeTypeOf("function");
-          let decision: string | undefined;
+          let decision:
+            | Awaited<
+                ReturnType<NonNullable<EngineSessionOptions["requestApproval"]>>
+              >
+            | undefined;
           const approval = options.requestApproval!({
             turnId: "active",
             tool: "Shell",
@@ -1805,6 +2040,87 @@ it("updates market-bound native tasks explicitly and lets emergency removal stop
       true,
     );
     expect(native.calls.some((c) => c.method === "cancel")).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+it("keeps sessions bound to a disabled skill working and hides it from the unbound catalog", async () => {
+  let f = await fixture();
+  const home = f.home;
+  const pausedSkill = () => ({
+    root: join(home, "paused-skill"),
+    entry: {
+      id: "paused-skill",
+      name: "paused-skill",
+      description: "Paused",
+      version: "1",
+      source: "user" as const,
+      enabled: false,
+      relativePath: "paused-skill/skill",
+      referenceDirectory: join(home, "paused-reference"),
+      requiredMcpServerIds: [],
+      requiredCommands: [],
+      health: "ready" as const,
+    },
+  });
+  try {
+    f.skills.replace({ skills: [pausedSkill()] });
+    // Unbound session: a disabled reference skill is neither injected nor catalogued.
+    const plain = await f.call("", {
+      engine: "codex",
+      title: "Plain",
+      workspace: "default",
+      modelId: "gpt-test",
+    });
+    expect(plain.status).toBe(201);
+    expect(plain.data.preset.resolvedSnapshot.skillIds).toEqual([]);
+    await f.runtime.nativeSessionPort.prompt(
+      plain.data.id,
+      "Hello",
+      "queue",
+      "plain-message",
+    );
+    expect(native.createdOptions.at(-1)).toMatchObject({
+      skills: [],
+      catalogSkills: [],
+    });
+    // Explicitly bound session: creating, prompting and resuming still work.
+    const preset = f.presets.create({
+      name: "Paused writer",
+      engine: "codex",
+      workspacePolicy: "optional",
+      skillIds: ["paused-skill"],
+    });
+    const bound = await f.call("", {
+      engine: "codex",
+      title: "Paused task",
+      workspace: "default",
+      presetId: preset.id,
+      modelId: "gpt-test",
+    });
+    expect(bound.status).toBe(201);
+    await f.runtime.nativeSessionPort.prompt(
+      bound.data.id,
+      "Use my skill",
+      "queue",
+      "paused-message",
+    );
+    expect(native.createdOptions.at(-1)).toMatchObject({
+      skills: [{ entry: { id: "paused-skill" } }],
+    });
+    await f.close();
+    f = await fixture("codex", home);
+    f.skills.replace({ skills: [pausedSkill()] });
+    await f.runtime.nativeSessionPort.prompt(
+      bound.data.id,
+      "Continue",
+      "queue",
+      "paused-message-2",
+    );
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      skills: [{ entry: { id: "paused-skill" } }],
+    });
   } finally {
     await f.close();
   }

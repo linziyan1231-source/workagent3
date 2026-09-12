@@ -944,7 +944,6 @@ diff --git a/lib/client.js b/lib/client.js
            } catch (error) {
              console.warn("[dsh-im-connect] 包裹官方任务树失败", error);
            } finally {
-
 diff --git a/lib/engine/assistant-settings.d.ts b/lib/engine/assistant-settings.d.ts
 index 1353db7..042a5b6 100644
 --- a/lib/engine/assistant-settings.d.ts

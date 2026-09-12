@@ -655,9 +655,14 @@ function SidebarSessions() {
           Dialog,
           { title: "消息提醒", onClose: () => setReminderSession(null) },
           h(
-            "small",
-            null,
-            `项目：${displayWorkspaceName(workspaceState.rows.find((workspace) => workspace.id === reminderSession.workspaceId)?.name || "未归属")} · 对话：${displaySessionTitle(reminderSession.title)}`,
+            "p",
+            { className: "workagent-reminder-context" },
+            h(Icon, { name: "chat", size: 14 }),
+            h(
+              "span",
+              null,
+              `项目：${displayWorkspaceName(workspaceState.rows.find((workspace) => workspace.id === reminderSession.workspaceId)?.name || "未归属")} · 对话：${displaySessionTitle(reminderSession.title)}`,
+            ),
           ),
           h(workbench.SessionReminder, {
             sessionId: reminderSession.id,

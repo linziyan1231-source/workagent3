@@ -176,6 +176,20 @@ it("shows an unconfigured grant without invented quota values", async () => {
   ).toBeNull();
 });
 
+it("marks an entry that installs disabled by default", async () => {
+  fixture((url) =>
+    url === `${endpoint}?id=${database.id}`
+      ? json({
+          ...detail(),
+          entry: { ...database, defaultEnabled: false },
+        })
+      : undefined,
+  );
+  render(<MarketplaceSection />);
+  const dialog = await open();
+  await within(dialog).findByText(/默认关闭/);
+});
+
 it("shows pending Kimi authorization while retaining configured employee quotas", async () => {
   fixture((url) =>
     url === `${endpoint}?id=${database.id}`

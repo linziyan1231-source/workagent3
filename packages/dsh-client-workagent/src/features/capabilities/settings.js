@@ -257,27 +257,25 @@ function SkillsSection() {
           title: row.name,
           detail:
             (row.referenceDirectory
-              ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH" })[engine]).join("、")}）`
+              ? `全局目录共享（${(row.compatibleEngines || ["codex", "kimi", "harness"]).map((engine) => ({ codex: "Codex", kimi: "Kimi", harness: "DSH", acp: "ACP" })[engine]).join("、")}）`
               : displayValue(row.source)) +
             " · " +
             displayValue(row.enabled ? row.health || "ready" : "disabled"),
         },
-        ["user", "market"].includes(row.source)
-          ? h(
-              Button,
-              {
-                onClick: () =>
-                  mutate(
-                    refresh,
-                    setError,
-                    endpoint + "/" + encodeURIComponent(row.id),
-                    "PATCH",
-                    { enabled: !row.enabled },
-                  ),
-              },
-              row.enabled ? "停用" : "启用",
-            )
-          : null,
+        h(
+          Button,
+          {
+            onClick: () =>
+              mutate(
+                refresh,
+                setError,
+                endpoint + "/" + encodeURIComponent(row.id),
+                "PATCH",
+                { enabled: !row.enabled },
+              ),
+          },
+          row.enabled ? "停用" : "启用",
+        ),
       ),
     ),
   );

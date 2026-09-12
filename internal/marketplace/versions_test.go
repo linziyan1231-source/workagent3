@@ -152,3 +152,62 @@ func TestMigrationAdoptsOnlyPreexistingCompletedInstallation(t *testing.T) {
 		t.Fatal("migration failed", selected, err)
 	}
 }
+
+func TestAdminUnlistControlsNewVersionsUntilRelist(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "market.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	publish := func(id, version string) {
+		t.Helper()
+		if err := s.Publish(ctx, Entry{ID: id, Name: "Review", Kind: "skill", Version: version, Publisher: "alice", DefaultEnabled: true}, Bundle{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("release-one", "1.0.0")
+	e, _, err := s.Get(ctx, "release-one")
+	if err != nil || !e.DefaultEnabled || !e.Listed {
+		t.Fatalf("new fields did not round-trip: %+v %v", e, err)
+	}
+	if snap, _, err := s.Snapshot(ctx, "release-one"); err != nil || !snap.DefaultEnabled || !snap.Listed {
+		t.Fatalf("snapshot lost new fields: %+v %v", snap, err)
+	}
+	series := e.SeriesID
+	action := func(id, name string) {
+		t.Helper()
+		if err := s.CreateAction(ctx, Action{ID: id, SeriesID: series, Action: name, Reason: "policy", Actor: "admin", Targets: []ActionTarget{}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	action("action-1-unlist", "unlist")
+	if _, _, err = s.Get(ctx, "release-one"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("unlisted version remains installable")
+	}
+	publish("release-two", "2.0.0")
+	versions, err := s.Versions(ctx, series, true)
+	if err != nil || len(versions) != 2 {
+		t.Fatal(err, versions)
+	}
+	for _, v := range versions {
+		if v.Listed {
+			t.Fatal("new version bypassed admin unlist", v)
+		}
+	}
+	if rows, _ := s.Catalog(ctx, "bob", "employee"); len(rows) != 0 {
+		t.Fatal("unlisted series remains in catalog")
+	}
+	action("action-2-relist", "relist")
+	if e, _, err = s.Get(ctx, "release-two"); err != nil || !e.Listed || !e.DefaultEnabled {
+		t.Fatal("relist did not restore listing", e, err)
+	}
+	// An author's own withdrawal is not an administrative hold and must not block new versions.
+	if err = s.Unpublish(ctx, "release-one", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	publish("release-three", "3.0.0")
+	if e, _, err = s.Get(ctx, "release-three"); err != nil || !e.Listed {
+		t.Fatal("author unpublish blocked a new version", e, err)
+	}
+}

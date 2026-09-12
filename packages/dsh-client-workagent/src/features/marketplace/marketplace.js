@@ -342,7 +342,7 @@ export function createMarketplace({
           {
             key: row.id,
             title: row.name,
-            detail: `${kinds[row.kind]} · 最新 ${row.version} · ${row.publisher}`,
+            detail: `${kinds[row.kind]} · 最新 ${row.version} · ${row.publisher}${row.defaultEnabled === false ? " · 默认关闭" : ""}`,
           },
           h("p", null, row.description),
           h(

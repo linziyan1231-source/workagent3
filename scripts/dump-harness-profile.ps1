@@ -70,6 +70,22 @@ $packageArchive = (& pnpm --dir $bundleDirectory pack --pack-destination $profil
 if ($LASTEXITCODE -ne 0 -or $packageArchive -eq '') {
     throw 'Failed to pack the WorkAgent Harness bundle'
 }
+$clientManifestPath = Join-Path $clientDirectory 'package.json'
+$clientManifest = Get-Content -Raw -LiteralPath $clientManifestPath | ConvertFrom-Json
+# The staged copy is not a workspace member; workspace: protocols cannot resolve there.
+if ($clientManifest.devDependencies) {
+    foreach ($property in @($clientManifest.devDependencies.PSObject.Properties)) {
+        if ($property.Value -is [string] -and $property.Value.StartsWith('workspace:')) {
+            $clientManifest.devDependencies.PSObject.Properties.Remove($property.Name)
+        }
+    }
+    $clientManifestJson = $clientManifest | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText(
+        $clientManifestPath,
+        $clientManifestJson,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
 $clientArchive = (& pnpm --dir $clientDirectory pack --pack-destination $profileHome | Select-Object -Last 1).Trim()
 if ($LASTEXITCODE -ne 0 -or $clientArchive -eq '') {
     throw 'Failed to pack the WorkAgent dsh client'

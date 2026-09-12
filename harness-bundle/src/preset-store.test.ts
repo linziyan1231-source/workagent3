@@ -289,6 +289,53 @@ describe("SID-private preset store", () => {
     ).toThrow("invalid_skill_binding:office:command_not_found:officecli");
   });
 
+  it("binds a disabled skill explicitly while still rejecting missing ones", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
+    const skills = new SkillCatalogStore();
+    const root =
+      process.platform === "win32" ? "C:\\private\\paused" : "/private/paused";
+    skills.replace({
+      skills: [
+        {
+          entry: {
+            id: "paused",
+            name: "Paused",
+            description: "Paused skill",
+            version: "1",
+            source: "managed",
+            enabled: false,
+            relativePath: "paused/paused",
+            requiredMcpServerIds: [],
+            requiredCommands: [],
+            health: "ready",
+          },
+          root,
+        },
+      ],
+    });
+    const store = new PresetStore(
+      home,
+      new ModelAccessStore(home),
+      skills,
+      new McpCatalogStore(),
+    );
+    const preset = store.create({
+      name: "Paused",
+      engine: "harness",
+      skillIds: ["paused"],
+    });
+    expect(store.resolve(preset.id).resolvedSnapshot.skillIds).toEqual([
+      "paused",
+    ]);
+    expect(() =>
+      store.create({
+        name: "Missing",
+        engine: "harness",
+        skillIds: ["missing"],
+      }),
+    ).toThrow("invalid_skill_binding:missing:not_found");
+  });
+
   it("freezes resolved MCP definitions in the session binding", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const mcp = new McpCatalogStore();

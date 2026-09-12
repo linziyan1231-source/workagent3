@@ -142,13 +142,14 @@ func marketError(w http.ResponseWriter, err error) {
 }
 
 type marketPublishInput struct {
-	Kind         string `json:"kind"`
-	SourceID     string `json:"sourceId"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Version      string `json:"version"`
-	SeriesID     string `json:"seriesId"`
-	ReleaseNotes string `json:"releaseNotes"`
+	Kind           string `json:"kind"`
+	SourceID       string `json:"sourceId"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Version        string `json:"version"`
+	SeriesID       string `json:"seriesId"`
+	ReleaseNotes   string `json:"releaseNotes"`
+	DefaultEnabled *bool  `json:"defaultEnabled"`
 }
 
 var marketVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -187,7 +188,7 @@ func (s *Server) publishMarketEntry(w http.ResponseWriter, r *http.Request, user
 		writeError(w, 500, "market_publish_failed")
 		return
 	}
-	e := marketplace.Entry{ID: id, Kind: input.Kind, Name: input.Name, Description: input.Description, Version: input.Version, Publisher: user.Username, SeriesID: input.SeriesID, ReleaseNotes: input.ReleaseNotes}
+	e := marketplace.Entry{ID: id, Kind: input.Kind, Name: input.Name, Description: input.Description, Version: input.Version, Publisher: user.Username, SeriesID: input.SeriesID, ReleaseNotes: input.ReleaseNotes, DefaultEnabled: input.DefaultEnabled == nil || *input.DefaultEnabled}
 	if err = s.modules.Marketplace.Publish(r.Context(), e, b); err != nil {
 		marketError(w, err)
 		return
@@ -413,6 +414,16 @@ func (s *Server) installMarketEntry(w http.ResponseWriter, r *http.Request, user
 	}
 	writeJSON(w, 201, map[string]any{"installation": installed})
 }
+
+// marketInstallSkillMetadata mirrors the userhost marketSkillMetadata wire contract.
+type marketInstallSkillMetadata struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Version        string `json:"version"`
+	DefaultEnabled *bool  `json:"defaultEnabled"`
+}
+
 func (s *Server) installBundle(ctx context.Context, remote marketRuntime, user store.User, e marketplace.Entry, b marketplace.Bundle, secrets map[string]map[string]string) (marketplace.Installation, error) {
 	state, err := s.modules.Marketplace.Installation(ctx, user.SID, e.ID)
 	if err != nil {
@@ -512,7 +523,7 @@ func (s *Server) installBundle(ctx context.Context, remote marketRuntime, user s
 		if skill.Builtin {
 			return state, errors.New("market_builtin_dependency_unavailable")
 		}
-		metadata, _ := json.Marshal(map[string]string{"id": fmt.Sprintf("market-%s-%d", e.ID, index), "name": skill.Name + suffix, "description": skill.Description, "version": skill.Version})
+		metadata, _ := json.Marshal(marketInstallSkillMetadata{ID: fmt.Sprintf("market-%s-%d", e.ID, index), Name: skill.Name + suffix, Description: skill.Description, Version: skill.Version, DefaultEnabled: &e.DefaultEnabled})
 		response, callErr := remote.send(ctx, "POST", "/v1/skills/market-install", bytes.NewReader(skill.Archive), map[string]string{"Content-Type": "application/zip", "X-WorkAgent-Skill-Metadata": base64.RawURLEncoding.EncodeToString(metadata)})
 		if callErr != nil {
 			return state, callErr

@@ -67,8 +67,8 @@ func TestGlobalSyncLifecycleAndProjectBoundary(t *testing.T) {
 	if skill.Enabled || server.Enabled {
 		t.Fatal("rescan reenabled capabilities")
 	}
-	if _, err := os.Stat(shared); !os.IsNotExist(err) {
-		t.Fatal("disabled skill remains shared")
+	if data, err := os.ReadFile(shared); err != nil || string(data) != "shared resource" {
+		t.Fatal("disabled skill lost its shared reference", err)
 	}
 	if err := imports.skills.Remove(t.Context(), skillID); err != nil {
 		t.Fatal(err)

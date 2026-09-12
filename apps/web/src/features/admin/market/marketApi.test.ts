@@ -26,6 +26,27 @@ test("market actions retain the selected series, version, action and reason", as
   );
 });
 
+test("unlist posts the series action without a target version", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const selection = {
+    seriesId: "skill-series",
+    targetId: "",
+    action: "unlist",
+    reason: "违规内容",
+  };
+  await marketApi.act(selection);
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/portal/admin/marketplace",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify(selection),
+    }),
+  );
+});
+
 test("retry identifies the prior action without creating a new market selection", async () => {
   const fetchMock = vi
     .fn()

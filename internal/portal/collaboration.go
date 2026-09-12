@@ -19,7 +19,7 @@ import (
 )
 
 type CollaborationPort interface {
-	QuotaRunIdentity(context.Context,string) (contracts.SharedRunIdentity,error)
+	QuotaRunIdentity(context.Context, string) (contracts.SharedRunIdentity, error)
 	PersonalTaskStore
 	ChannelHead(context.Context) (int64, error)
 	ChannelHistory(context.Context, string, int64, int64, int64, int) ([]collaboration.Message, int64, error)

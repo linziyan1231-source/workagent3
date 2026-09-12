@@ -1,4 +1,5 @@
 import { usePresets, mutatePreset as mutate } from "./api.js";
+import { AcpCredentials, useAcpCatalog } from "./acp.js";
 import { navigation } from "../../host/navigation.js";
 import { apiRoot, request } from "../../platform/api.js";
 import { useResource } from "../../platform/resources.js";
@@ -35,7 +36,7 @@ const defaultPreset = {
   approvalPolicy: "on_risk",
 };
 
-function CapabilityPicker({ name, label, state, selected = [] }) {
+function CapabilityPicker({ name, label, state, selected = [], markDisabled }) {
   const [ids, setIds] = React.useState(selected);
   const [query, setQuery] = React.useState("");
   const visible = state.rows.filter((row) =>
@@ -82,7 +83,13 @@ function CapabilityPicker({ name, label, state, selected = [] }) {
                           : ids.filter((id) => id !== row.id),
                       ),
                   }),
-                  h("span", null, row.name),
+                  h(
+                    "span",
+                    null,
+                    markDisabled && row.enabled === false
+                      ? `${row.name}（已停用）`
+                      : row.name,
+                  ),
                 ),
               ),
               !visible.length
@@ -117,6 +124,7 @@ function PresetsSection() {
   const [state, refresh] = usePresets();
   const [skills] = useResource(`${apiRoot}/skills`);
   const [servers] = useResource(`${apiRoot}/mcp-servers`);
+  const [acp] = useAcpCatalog();
   const [editing, setEditing] = React.useState(null);
   const [formVersion, setFormVersion] = React.useState(0);
   const [avatarEditing, setAvatarEditing] = React.useState(null);
@@ -156,9 +164,18 @@ function PresetsSection() {
         : {}),
       name: String(values.get("name")),
       avatar: String(values.get("avatar") || "") || null,
-      engine: String(values.get("engine")),
+      engine: String(values.get("engine")).startsWith("acp:")
+        ? "acp"
+        : String(values.get("engine")),
+      ...(String(values.get("engine")).startsWith("acp:")
+        ? { acpCatalogId: String(values.get("engine")).slice(4) }
+        : {}),
       modelId:
-        editing?.engine === values.get("engine") ? editing.modelId : null,
+        editing?.engine === values.get("engine") ||
+        (editing?.engine === "acp" &&
+          `acp:${editing.acpCatalogId}` === values.get("engine"))
+          ? editing.modelId
+          : null,
       systemPrompt: String(values.get("systemPrompt") || ""),
       skillIds: csv("skillIds"),
       mcpServerIds: csv("mcpServerIds"),
@@ -177,6 +194,7 @@ function PresetsSection() {
   return h(
     Section,
     { title: "助手" },
+    h(AcpCredentials),
     h(AgentDisplaySettings, { presets: state.rows }),
     h(
       Button,
@@ -210,11 +228,20 @@ function PresetsSection() {
         { label: "引擎" },
         h(Select, {
           name: "engine",
-          defaultValue: editing?.engine || "harness",
+          defaultValue:
+            editing?.engine === "acp"
+              ? `acp:${editing.acpCatalogId}`
+              : editing?.engine || "harness",
           options: [
             ["harness", "通用引擎"],
             ["codex", "Codex"],
             ["kimi", "Kimi"],
+            ...acp.rows
+              .filter((row) => row.enabled || row.id === editing?.acpCatalogId)
+              .map((row) => [
+                `acp:${row.id}`,
+                `${row.label}${row.enabled ? "" : "（已停用）"}`,
+              ]),
           ],
         }),
       ),
@@ -223,6 +250,7 @@ function PresetsSection() {
         label: "技能",
         state: skills,
         selected: editing?.skillIds,
+        markDisabled: true,
       }),
       h(CapabilityPicker, {
         name: "mcpServerIds",

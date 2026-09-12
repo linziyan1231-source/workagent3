@@ -63,3 +63,34 @@ func marketSkillZip(t *testing.T, files map[string]string) []byte {
 	}
 	return buffer.Bytes()
 }
+
+func TestMarketSkillInstallHonorsMetadataDefaultEnabled(t *testing.T) {
+	skills := openGatewaySkills(t)
+	disabled := false
+	for _, row := range []struct {
+		name    string
+		id      string
+		flag    *bool
+		enabled bool
+	}{
+		{"default on when metadata omits the flag", "market-default", nil, true},
+		{"metadata can request a disabled install", "market-disabled", &disabled, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			archive := marketSkillZip(t, map[string]string{"skill/SKILL.md": "---\nname: skill\ndescription: Skill\n---\n"})
+			metadata, _ := json.Marshal(marketSkillMetadata{ID: row.id, Name: "Skill " + row.id, Version: "1.0.0", DefaultEnabled: row.flag})
+			request := httptest.NewRequest(http.MethodPost, "/v1/skills/market-install", bytes.NewReader(archive))
+			request.Header.Set("Content-Type", "application/zip")
+			request.Header.Set("X-WorkAgent-Skill-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+			response := httptest.NewRecorder()
+			installMarketSkill(skills, gatewayTestPublisher{}, nil).ServeHTTP(response, request)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("install status %d: %s", response.Code, response.Body.String())
+			}
+			entry, err := skills.Get(t.Context(), row.id)
+			if err != nil || entry.Enabled != row.enabled {
+				t.Fatalf("installed entry = %#v, %v", entry, err)
+			}
+		})
+	}
+}

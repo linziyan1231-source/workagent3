@@ -1,5 +1,6 @@
 const valueLabels = {
   builtin: "系统内置",
+  managed: "平台受管",
   user: "用户添加",
   market: "技能市场",
   ready: "可用",
@@ -20,6 +21,7 @@ const valueLabels = {
   harness: "通用引擎",
   codex: "Codex",
   kimi: "Kimi",
+  acp: "ACP 引擎",
   "codex-native": "Codex 原生模型",
   "harness-default": "通用默认模型",
   "kimi-native": "Kimi 原生模型",
@@ -134,8 +136,10 @@ const friendlyError = (value) => {
     return "安装或发布未完成，请检查依赖配置后重试；已经完成的安装步骤会保留。";
   if (message?.startsWith("invalid_mcp_binding:"))
     return "绑定的 MCP 尚未就绪，请先测试连接或完成授权。";
+  if (message?.startsWith("skill_dependency_unavailable:"))
+    return "技能依赖不可用，请先检查依赖。";
   if (message?.startsWith("invalid_skill_binding:"))
-    return "绑定的技能尚未就绪，请先启用技能并检查依赖。";
+    return "绑定的技能不存在或尚未就绪，请检查依赖。";
   return labels[message] || message || "操作失败，请稍后重试。";
 };
 

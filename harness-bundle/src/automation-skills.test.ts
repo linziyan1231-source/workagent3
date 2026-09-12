@@ -28,7 +28,9 @@ it("proposes only for fresh conversations, validates scoped suggestions, and exe
     const bound = store.update(definition.id, definition.version, { skillId: "saved-skill" });
     expect(automationSkillPrompt(bound, "run-2", skills).input).toContain("Check the source dates.");
     expect(automationSkillPrompt(bound, "run-2", skills).path).toBeUndefined();
+    skills.replace({ skills: [{ root, entry: { id: "saved-skill", name: "Weekly report", description: "Prepare report", version: "1", source: "user", enabled: false, relativePath: "saved-skill/weekly-report", requiredMcpServerIds: [], requiredCommands: [], health: "ready" } }] });
+    expect(automationSkillPrompt(bound, "run-3", skills).input).toContain("Check the source dates.");
     skills.replace({ skills: [] });
-    expect(() => automationSkillPrompt(bound, "run-3", skills)).toThrow("automation_skill_unavailable");
+    expect(() => automationSkillPrompt(bound, "run-4", skills)).toThrow("automation_skill_unavailable");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

@@ -44,7 +44,13 @@ func discoverGlobalCapabilities(dataRoot string) ([]globalCapability, error) {
 	}
 	result = append(result, discoverGlobalSkills(filepath.Join(home, "skills"), "codex/skills")...)
 	// This is the employee's shared directory, not the interactive administrator's HOME.
-	result = append(result, discoverGlobalSkills(filepath.Join(dataRoot, ".agents", "skills"), "agents/skills")...)
+	// wa3- entries are this sync's own shared links, never employee content.
+	for _, item := range discoverGlobalSkills(filepath.Join(dataRoot, ".agents", "skills"), "agents/skills") {
+		if strings.HasPrefix(item.Key, "agents/skills:wa3-") {
+			continue
+		}
+		result = append(result, item)
+	}
 	for id, plugin := range config.Plugins {
 		if !plugin.Enabled {
 			continue

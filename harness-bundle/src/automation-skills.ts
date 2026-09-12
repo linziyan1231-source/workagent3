@@ -7,7 +7,7 @@ import type { WorkspaceStore } from "./workspace-store.js";
 export function automationSkillPrompt(definition: AutomationDefinition, runId: string, skills: SkillCatalogStore) {
   if (definition.skillId) {
     const skill = skills.resolveSkill(definition.skillId);
-    if (!skill?.entry.enabled) throw new Error("automation_skill_unavailable");
+    if (!skill) throw new Error("automation_skill_unavailable");
     const parts = skill.entry.relativePath.replaceAll("\\", "/").split("/");
     if (parts[0] === basename(skill.root)) parts.shift();
     if (parts.some((part) => !part || part === "." || part === ".." || part.includes(":"))) throw new Error("automation_skill_unavailable");

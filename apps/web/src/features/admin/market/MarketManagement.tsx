@@ -5,6 +5,8 @@ const labels: Record<string, string> = {
   update: "统一升级",
   disable: "应急停用",
   delete: "应急删除",
+  unlist: "禁用",
+  relist: "恢复上架",
 };
 export function MarketManagement({
   users,
@@ -56,7 +58,7 @@ export function MarketManagement({
     try {
       await marketApi.act({
         seriesId: selection.entry.seriesId,
-        targetId: target,
+        targetId: selection.action === "update" ? target : "",
         action: selection.action,
         reason,
       });
@@ -94,12 +96,18 @@ export function MarketManagement({
             <p>
               {e.publisher} · {e.version}
               {e.revoked ? " · 已撤销" : ""}
+              {e.listed === false ? " · 已禁用" : ""}
             </p>
             <p className="admin-market-notes">
               {e.releaseNotes || "尚无更新说明"}
             </p>
             <div className="admin-market-buttons">
-              {Object.entries(labels).map(([action, label]) => (
+              {[
+                "update",
+                "disable",
+                "delete",
+                e.listed === false ? "relist" : "unlist",
+              ].map((action) => (
                 <button
                   key={action}
                   disabled={busy}
@@ -113,7 +121,7 @@ export function MarketManagement({
                     setReason("");
                   }}
                 >
-                  {label}
+                  {labels[action]}
                 </button>
               ))}
             </div>
@@ -126,9 +134,17 @@ export function MarketManagement({
           <h2>
             {labels[selection.action]}：{selection.entry.name}
           </h2>
-          <p>
-            范围：所有安装过此技能的员工及订阅项目。正在使用受影响技能的任务会停止；离线账户保留待处理记录，上线执行前必须完成处置。
-          </p>
+          {selection.action === "unlist" || selection.action === "relist" ? (
+            <p>
+              {selection.action === "unlist"
+                ? "仅从市场移除并阻止新安装；已安装的副本不受影响。"
+                : "恢复到市场列表。"}
+            </p>
+          ) : (
+            <p>
+              范围：所有安装过此技能的员工及订阅项目。正在使用受影响技能的任务会停止；离线账户保留待处理记录，上线执行前必须完成处置。
+            </p>
+          )}
           {selection.action === "delete" && (
             <p>删除市场安装的软件副本并撤销旧版本；工作文件和会话历史保留。</p>
           )}
@@ -190,8 +206,9 @@ export function MarketManagement({
           </p>
           <p>{a.reason}</p>
           <p>
-            完成 {a.targets.filter((t) => t.state === "complete").length} /{" "}
-            {a.targets.length}
+            {a.targets.length
+              ? `完成 ${a.targets.filter((t) => t.state === "complete").length} / ${a.targets.length}`
+              : "已完成"}
           </p>
           <ul>
             {a.targets.map((t) => (

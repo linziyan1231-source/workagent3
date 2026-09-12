@@ -381,18 +381,52 @@
 .workagent-collab-reminder > summary::-webkit-details-marker {
   display: none;
 }
+.workagent-collab-reminder-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.workagent-collab-reminder-button .workagent-icon {
+  flex: none;
+}
+.workagent-collab-reminder[open] > .workagent-collab-reminder-button {
+  border-color: var(--dsw-color-accent);
+  background: var(--dsw-color-accent-soft);
+  color: var(--dsw-color-accent);
+}
 .workagent-collab-reminder-popover {
   position: absolute;
   box-sizing: border-box;
   right: 12px;
   top: calc(100% + 8px);
-  width: min(320px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(340px, calc(100vw - 32px));
   padding: 16px;
   border: 1px solid var(--dsw-color-border);
-  border-radius: 12px;
+  border-radius: var(--dsw-radius-lg);
   background: var(--dsw-color-panel);
-  box-shadow: 0 8px 24px #0002;
+  box-shadow: 0 16px 48px rgb(16 24 40 / 16%);
   z-index: 30;
+}
+.workagent-collab-reminder-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-color-text);
+  font-size: var(--workagent-type-section);
+}
+.workagent-collab-reminder-heading .workagent-icon {
+  flex: none;
+  color: var(--dsw-color-accent);
+}
+.workagent-collab-reminder-description {
+  margin: 0;
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+  line-height: 1.6;
 }
 .workagent-collab-files {
   display: flex;

@@ -9,6 +9,8 @@ export type Entry = {
   publisher: string;
   releaseNotes: string;
   revoked: boolean;
+  defaultEnabled: boolean;
+  listed?: boolean;
 };
 export type Action = {
   id: string;

@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,8 +9,10 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 	"workagent3/internal/marketplace"
 	"workagent3/internal/runtimeapi"
+	"workagent3/internal/store"
 )
 
 func TestProjectSubscriptionsAndExplicitMarketUpdate(t *testing.T) {
@@ -145,5 +148,104 @@ func TestMarketRuntimeAdmissionAuthenticatesEmployee(t *testing.T) {
 	}
 	if r := call(alice.user.SID, "runtime-registration-token"); r.Code != 200 {
 		t.Fatal(r.Body.String())
+	}
+}
+
+func TestAdminUnlistHidesSkillSeriesUntilRelist(t *testing.T) {
+	data, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	market, err := marketplace.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer market.Close()
+	admin, _ := data.CreateUser(t.Context(), "manager", "S-1-5-21-9100", "unused")
+	alice, _ := data.CreateUser(t.Context(), "alice", "S-1-5-21-9101", "unused")
+	bob, _ := data.CreateUser(t.Context(), "bob", "S-1-5-21-9102", "unused")
+	if err = data.SetUserAdmin(t.Context(), admin.Username, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []store.User{admin, alice, bob} {
+		_ = data.CreateSession(t.Context(), u.Username, u.ID, time.Now().Add(time.Hour))
+	}
+	var metadata []byte
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/skills":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "skill-source", "name": "Review", "description": "Review", "version": "1.0.0", "source": "user", "requiredMcpServerIds": []string{}}})
+		case "GET /v1/mcp-servers", "GET /v1/presets":
+			_ = json.NewEncoder(w).Encode([]any{})
+		case "GET /v1/skills/export":
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write([]byte("skill-archive"))
+		case "POST /v1/skills/market-install":
+			metadata, _ = base64.RawURLEncoding.DecodeString(r.Header.Get("X-WorkAgent-Skill-Metadata"))
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": "recipient-skill", "name": "Review"})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer runtime.Close()
+	base, _ := url.Parse(runtime.URL)
+	server, err := NewWithModules(data, StaticRouter{alice.SID: runtimeapi.Endpoint{BaseURL: base, Token: "runtime-token"}, bob.SID: runtimeapi.Endpoint{BaseURL: base, Token: "runtime-token"}}, false, Modules{Marketplace: market, EmployeeManagement: &fakeEmployeeManagement{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(actor, method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://portal.test"+path, strings.NewReader(body))
+		r.AddCookie(&http.Cookie{Name: developmentSessionCookie, Value: actor})
+		r.Header.Set("Origin", "http://portal.test")
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.Handler().ServeHTTP(w, r)
+		return w
+	}
+	published := call("alice", "POST", "/api/portal/marketplace", `{"kind":"skill","sourceId":"skill-source","version":"1.0.0","defaultEnabled":false}`)
+	if published.Code != 201 {
+		t.Fatalf("publish: %d %s", published.Code, published.Body.String())
+	}
+	var result struct {
+		Entry marketplace.Entry `json:"entry"`
+	}
+	_ = json.Unmarshal(published.Body.Bytes(), &result)
+	id := result.Entry.ID
+	entry, _, err := market.Get(t.Context(), id)
+	if err != nil || entry.DefaultEnabled {
+		t.Fatal("defaultEnabled=false was not persisted", entry, err)
+	}
+	installed := call("bob", "POST", "/api/portal/marketplace/install", `{"id":"`+id+`"}`)
+	if installed.Code != 201 {
+		t.Fatalf("install: %d %s", installed.Code, installed.Body.String())
+	}
+	if !strings.Contains(string(metadata), `"defaultEnabled":false`) {
+		t.Fatal("install metadata lost defaultEnabled", string(metadata))
+	}
+	action := func(actor, name string) *httptest.ResponseRecorder {
+		return call(actor, "POST", "/api/portal/admin/marketplace", `{"action":"`+name+`","seriesId":"`+entry.SeriesID+`","reason":"policy review"}`)
+	}
+	if r := action("alice", "unlist"); r.Code != 403 {
+		t.Fatal("non-admin unlist allowed", r.Code)
+	}
+	if r := action("manager", "unlist"); r.Code != 200 {
+		t.Fatalf("unlist: %d %s", r.Code, r.Body.String())
+	}
+	if list := call("bob", "GET", "/api/portal/marketplace", ""); strings.Contains(list.Body.String(), id) {
+		t.Fatal("unlisted series remains in the catalog")
+	}
+	if r := call("alice", "POST", "/api/portal/marketplace/install", `{"id":"`+id+`"}`); r.Code == 201 {
+		t.Fatal("unlisted entry accepted a new install")
+	}
+	if state, err := market.Installation(t.Context(), bob.SID, id); err != nil || !state.Complete {
+		t.Fatal("unlist disturbed an installed copy", state, err)
+	}
+	if r := action("manager", "relist"); r.Code != 200 {
+		t.Fatalf("relist: %d %s", r.Code, r.Body.String())
+	}
+	if list := call("bob", "GET", "/api/portal/marketplace", ""); !strings.Contains(list.Body.String(), id) {
+		t.Fatal("relist did not restore the catalog entry")
 	}
 }

@@ -276,7 +276,7 @@ func (s *capabilitySync) run(ctx context.Context) error {
 			return err
 		}
 		link := filepath.Join(s.dataRoot, ".agents", "skills", "wa3-"+row.ResourceID)
-		if row.Status == "ready" {
+		if row.Status == "ready" || row.Status == "disabled" {
 			entry, err := s.imports.skills.Get(ctx, row.ResourceID)
 			if err == nil {
 				err = skillruntime.EnsureDirectoryReference(link, entry.ReferenceDirectory)

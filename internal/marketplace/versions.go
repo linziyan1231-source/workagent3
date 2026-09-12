@@ -32,7 +32,7 @@ func (s *Store) migrateVersions() error {
 		columns[name] = true
 	}
 	rows.Close()
-	for _, c := range []struct{ name, definition string }{{"series_id", "TEXT NOT NULL DEFAULT ''"}, {"release_notes", "TEXT NOT NULL DEFAULT ''"}, {"revoked", "INTEGER NOT NULL DEFAULT 0"}} {
+	for _, c := range []struct{ name, definition string }{{"series_id", "TEXT NOT NULL DEFAULT ''"}, {"release_notes", "TEXT NOT NULL DEFAULT ''"}, {"revoked", "INTEGER NOT NULL DEFAULT 0"}, {"default_enabled", "INTEGER NOT NULL DEFAULT 1"}} {
 		if !columns[c.name] {
 			if _, err = s.db.Exec(`ALTER TABLE marketplace_entries ADD COLUMN ` + c.name + ` ` + c.definition); err != nil {
 				return err
@@ -105,7 +105,7 @@ func Newer(a, b string) bool {
 }
 
 func (s *Store) Versions(ctx context.Context, series string, admin bool) ([]Entry, error) {
-	query := `SELECT id,kind,name,description,version,publisher,created_at,series_id,release_notes,revoked FROM marketplace_entries WHERE (?='' OR series_id=?)`
+	query := `SELECT id,kind,name,description,version,publisher,created_at,series_id,release_notes,revoked,listed,default_enabled FROM marketplace_entries WHERE (?='' OR series_id=?)`
 	if !admin {
 		query += ` AND listed=1 AND revoked=0`
 	}
@@ -118,7 +118,7 @@ func (s *Store) Versions(ctx context.Context, series string, admin bool) ([]Entr
 	for rows.Next() {
 		var e Entry
 		var stamp string
-		if err = rows.Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &e.SeriesID, &e.ReleaseNotes, &e.Revoked); err != nil {
+		if err = rows.Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &e.SeriesID, &e.ReleaseNotes, &e.Revoked, &e.Listed, &e.DefaultEnabled); err != nil {
 			return nil, err
 		}
 		e.CreatedAt, _ = time.Parse(time.RFC3339Nano, stamp)
@@ -134,7 +134,7 @@ func (s *Store) Snapshot(ctx context.Context, id string) (Entry, Bundle, error) 
 	var b Bundle
 	var raw []byte
 	var stamp string
-	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,series_id,release_notes,revoked,bundle FROM marketplace_entries WHERE id=?`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &e.SeriesID, &e.ReleaseNotes, &e.Revoked, &raw)
+	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,series_id,release_notes,revoked,listed,default_enabled,bundle FROM marketplace_entries WHERE id=?`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &e.SeriesID, &e.ReleaseNotes, &e.Revoked, &e.Listed, &e.DefaultEnabled, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, b, ErrNotFound
 	}
@@ -291,6 +291,13 @@ func (s *Store) CreateAction(ctx context.Context, a Action) error {
 	}
 	if a.Action == "delete" || a.Action == "disable" {
 		_, err = tx.ExecContext(ctx, `UPDATE marketplace_entries SET revoked=1 WHERE series_id=?`, a.SeriesID)
+	}
+	if a.Action == "unlist" || a.Action == "relist" {
+		listed := 0
+		if a.Action == "relist" {
+			listed = 1
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE marketplace_entries SET listed=? WHERE series_id=?`, listed, a.SeriesID)
 	}
 	if a.Action == "update" {
 		_, err = tx.ExecContext(ctx, `UPDATE marketplace_entries SET revoked=1 WHERE series_id=? AND id<>?`, a.SeriesID, a.TargetID)
