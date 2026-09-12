@@ -366,6 +366,11 @@ func (r *Runner) start(ctx context.Context, manifest Manifest, validation bool) 
 	}()
 	instance.URL, _ = url.Parse("http://" + backendAddress)
 	if err = waitAppReady(readyCtx, client, instance.URL.String()+"/", ""); err != nil {
+		select {
+		case <-instance.process.Done():
+			return nil, fmt.Errorf("application exited before becoming ready: %v", instance.process.Wait())
+		default:
+		}
 		return nil, fmt.Errorf("application did not start: %w", err)
 	}
 	if err = winutil.VerifyAppListener(backendPort, r.config.OwnerSID, identity, instance.process.PID); err != nil {

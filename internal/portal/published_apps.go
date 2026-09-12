@@ -683,6 +683,9 @@ func (s *Server) applicationEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// Native form POSTs need a non-opaque Origin for the existing CSRF check.
+	// Send only the Portal origin, never this page's path or any ticket data.
+	w.Header().Set("Referrer-Policy", "origin")
 	_ = applicationEntryTemplate.Execute(w, map[string]string{"ID": a.ID, "Preview": strconv.FormatBool(preview)})
 }
 
@@ -705,6 +708,9 @@ func (s *Server) applicationOpen(w http.ResponseWriter, r *http.Request, user st
 	_ = json.Unmarshal(recorder.body.Bytes(), &ticket)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// The exchange crosses ports. A same-origin policy would make its native
+	// form POST Origin opaque again, so retain the origin-only policy here.
+	w.Header().Set("Referrer-Policy", "origin")
 	_ = appExchangeTemplate.Execute(w, ticket)
 }
 
