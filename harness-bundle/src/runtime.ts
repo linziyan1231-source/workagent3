@@ -1,6 +1,21 @@
+import type { EngineEvent } from "@workagent/contracts";
 import { randomUUID } from "node:crypto";
+import {
+  resolveExecutionConfiguration,
+  ExecutionConfigurationError,
+} from "./execution-configuration.js";
+import {
+  marketChangeSchema,
+  remapCapabilityIds,
+  projectCapabilityBinding,
+  runtimeMarketCapabilities,
+  type MarketChange,
+} from "./market-capabilities.js";
+import { butlerServer } from "./butler-mcp.js";
+import { messageServer } from "./message-mcp.js";
+import { sharedTrashServer } from "./shared-trash-mcp.js";
 import { RuntimePreferences } from "./runtime-preferences.js";
-import { nativeImages } from "./native-images.js";
+import { nativeImages, nativeFileInput } from "./native-images.js";
 import {
   automationSkillPrompt,
   validatedSkillSuggestion,
@@ -10,7 +25,18 @@ import {
   type NotificationTransport,
 } from "./completion-notifications.js";
 import { mountCompletionNotifications } from "./completion-notifications-api.js";
-import { resolve as resolvePath } from "node:path";
+import {
+  CollaborationChannels,
+  collaborationId,
+} from "./collaboration-channels.js";
+import { dirname, resolve as resolvePath } from "node:path";
+import { statSync } from "node:fs";
+import {
+  SharedAwareness,
+  isAbsoluteWorkspacePath,
+  resolveSharedProjectRoot,
+  sharedChangesText,
+} from "./shared-awareness.js";
 import {
   channelEngine,
   channelAssistantContext,
@@ -48,12 +74,13 @@ import type {
   EngineBridge,
   NativeApprovalRequest,
 } from "./engines/types.js";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import { ApprovalBridge } from "./approval-bridge.js";
 import {
   SessionIndex,
   type StoredSession,
   type QueuedInput,
+  type SessionCreation,
 } from "./session-index.js";
 import { ENGINE_CAPABILITIES } from "./engine-registry.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -82,6 +109,7 @@ import type {
 } from "./team-store.js";
 import type { InboxExecution, InboxRunnerPort } from "./inbox-api.js";
 import { projectHarnessMcpServers } from "./engines/harness-mcp.js";
+import { installHarnessPrompt } from "./engines/harness-configuration.js";
 import type { NativeSessionPort } from "./native-session-port.js";
 import type {} from "@deepseek-ai/dsh-session-title";
 import type {
@@ -206,8 +234,11 @@ type SessionRecord = {
   anchorMessageId?: string;
   contextMode?: "native" | "transcript";
   pendingContext?: string | undefined;
+  fileRevision?: number;
+  sharedCursor?: number;
   inputPending?: boolean;
   queue?: QueuedInput[];
+  creation?: SessionCreation;
 };
 
 const branchMetadata = (record: SessionRecord) => ({
@@ -298,7 +329,7 @@ const readJson = async (
 export const normalizeEvent = (
   session: Session,
   event: SessionEvent,
-): PublicEvent | undefined => {
+): EngineEvent | undefined => {
   const base = {
     eventId: `${session.id}-${event.seq}`,
     occurredAt: new Date(event.time).toISOString(),
@@ -433,15 +464,29 @@ export class RuntimeController
       return this.#messages.list(id);
     },
     queue: (id) => this.#nativeRecord(id).queue ?? [],
-    prompt: async (id, content, mode) => {
+    prompt: async (
+      id,
+      content,
+      mode,
+      messageId = `message-${randomUUID()}`,
+    ) => {
       const record = this.#nativeRecord(id);
       if (!content.trim()) throw new Error("content_required");
+      if (!messageId || messageId.length > 200)
+        throw new Error("invalid_message_id");
+      const known = this.#messages.list(id).find((row) => row.id === messageId);
+      const queued = record.queue?.find((row) => row.messageId === messageId);
+      if (known || queued) {
+        if ((known?.text ?? queued?.content) !== content)
+          throw new Error("message_id_conflict");
+        return;
+      }
       if (
         record.inputPending &&
         (!record.activity || record.activity.state === "idle")
       )
         throw new Error("session_input_pending");
-      const input = { messageId: `message-${randomUUID()}`, content };
+      const input = { messageId, content };
       if (
         mode === "queue" &&
         (record.inputPending ||
@@ -617,6 +662,7 @@ export class RuntimeController
     () => ({ active: true, nextWakeAt: null });
   readonly #token: string;
   readonly #sessions = new Map<string, SessionRecord>();
+  readonly #sessionDeletions = new Map<string, Promise<void>>();
   readonly #subscribers = new Map<string, Set<ServerResponse>>();
   readonly #eventListeners = new Map<
     string,
@@ -627,11 +673,28 @@ export class RuntimeController
     Promise<{ sessionId: string; result?: string }>
   >();
   readonly #automationTargets = new Map<string, string>();
+  readonly #automationNotifications = new Map<
+    string,
+    { runId: string; enabled: boolean; targetId: string }
+  >();
   readonly #sharedTurnExecutions = new Map<string, Promise<SharedTurnResult>>();
   readonly #sharedTurnTargets = new Map<string, string>();
   readonly #bridges = new Map<"codex" | "kimi", EngineBridge>();
   readonly #index: SessionIndex;
   readonly #workspaces: WorkspaceStore;
+  #sharedFiles?: WorkspaceStore;
+  setSharedFileStore(store: WorkspaceStore) {
+    this.#sharedFiles = store;
+    store.moves.busy = (id) =>
+      !store.get(id) ||
+      [...this.#sessions.values()].some(
+        (record) =>
+          record.workspacePath === store.engineRoot(id) &&
+          (record.inputPending ||
+            record.activating ||
+            (record.activity && record.activity.state !== "idle")),
+      );
+  }
   readonly #messages: MessageStore;
   readonly #presets: PresetStore;
   readonly #mcp: McpCatalogStore;
@@ -639,10 +702,12 @@ export class RuntimeController
   readonly #credentials: CredentialStatusStore;
   readonly #conversationQuota: ConversationQuota;
   readonly #completionNotifications: CompletionNotifications;
+  readonly #collaborationChannels: CollaborationChannels | undefined;
   readonly #nativeLog: NativeSessionLog | undefined;
   readonly #approvals: ApprovalBridge;
   readonly #nativeMetadata = new Map<string, string>();
   readonly #nativeAttached = new Set<string>();
+  readonly #awareness = new SharedAwareness();
 
   constructor(
     ctx: Context,
@@ -669,16 +734,50 @@ export class RuntimeController
     this.#messages = new MessageStore(dshHome);
     this.#nativeLog = nativeLog;
     this.#workspaces = workspaces;
+    workspaces.moves.busy = (id) =>
+      [...this.#sessions.values()].some(
+        (record) =>
+          record.workspaceId === id &&
+          (record.inputPending ||
+            record.activating ||
+            (record.activity && record.activity.state !== "idle")),
+      );
+
     this.#completionNotifications = new CompletionNotifications(
       dshHome,
       workspaces,
       process.env.WORKAGENT_PUBLIC_BASE_URL,
     );
+    this.#collaborationChannels =
+      CollaborationChannels.fromEnvironment(dshHome);
+    if (this.#collaborationChannels) {
+      const channels = this.#collaborationChannels;
+      this.#completionNotifications.attachCollaboration(channels);
+      ctx.effect(() => {
+        const poll = () =>
+          void channels
+            .poll(this.#completionNotifications)
+            .catch((error) =>
+              console.error("collaboration notification poll failed", error),
+            );
+        poll();
+        const timer = setInterval(poll, 5000);
+        timer.unref();
+        return () => clearInterval(timer);
+      }, "collaboration completion notifications");
+    }
     mountCompletionNotifications(
       ctx,
       token,
       this.#completionNotifications,
-      (id) => this.#sessions.has(id),
+      async (id) => {
+        const sharedId = collaborationId(id);
+        if (sharedId) {
+          await this.#collaborationChannels?.access(sharedId);
+          return Boolean(this.#collaborationChannels);
+        }
+        return this.#sessions.has(id);
+      },
     );
     this.#presets = presets;
     this.#mcp = mcp;
@@ -732,6 +831,7 @@ export class RuntimeController
           engine: record.engine,
           workspacePath: this.#engineWorkspace(record),
           createdAt: record.createdAt,
+          ...(record.nativeId ? { nativeId: record.nativeId } : {}),
           ...(record.parentSessionId
             ? { parentSessionId: record.parentSessionId }
             : {}),
@@ -831,22 +931,29 @@ export class RuntimeController
       request.definition,
     );
     this.#automationTargets.set(request.automationRunId, target);
+    if (request.definition.id.startsWith("automation-"))
+      this.#automationNotifications.set(target, {
+        runId: request.automationRunId,
+        enabled: request.definition.messageNotificationEnabled,
+        targetId: request.definition.messageNotificationTargetId ?? "",
+      });
     const execution = this.#executeAutomation(request).finally(() => {
       this.#automationExecutions.delete(request.automationRunId);
       this.#automationTargets.delete(request.automationRunId);
+      if (
+        this.#automationNotifications.get(target)?.runId ===
+        request.automationRunId
+      )
+        this.#automationNotifications.delete(target);
     });
     this.#automationExecutions.set(request.automationRunId, execution);
     return execution;
   }
 
   channelService() {
-    const owned = (key: string, id: string) => {
+    const owned = (_key: string, id: string) => {
       const record = this.#sessions.get(id);
-      if (
-        !record ||
-        record.channelKey !== key ||
-        !id.startsWith("session-channel-")
-      )
+      if (!record || record.internal)
         throw new Error("channel_session_not_found");
       return record;
     };
@@ -870,19 +977,33 @@ export class RuntimeController
     };
     return {
       configuration,
+      collaboration: this.#collaborationChannels,
+      steer: async (key: string, id: string, content: string) => {
+        const record = owned(key, id);
+        if (!content.trim()) throw new Error("content_required");
+        await this.#activate(id, record);
+        await this.#deliverInput(
+          id,
+          record,
+          { messageId: "message-" + randomUUID(), content },
+          true,
+        );
+      },
       cancel: (key: string, id: string) => {
         const record = owned(key, id);
         if (record.handle) return record.handle.agent.cancel({ kind: "user" });
         return this.nativeSessionPort.cancel(id);
       },
-      history: (key: string) =>
+      history: (_key: string) =>
         [...this.#sessions]
-          .filter(([, record]) => record.channelKey === key)
+          .filter(([, record]) => !record.internal)
           .map(([id, record]) => ({
             id,
             title: record.title,
             updatedAt: record.updatedAt,
             workspaceId: record.workspaceId,
+            workspaceName:
+              this.#workspaces.get(record.workspaceId)?.name || "默认项目",
             active: Boolean(
               record.inputPending ||
                 record.activating ||
@@ -892,13 +1013,26 @@ export class RuntimeController
           }))
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       projects: () =>
-        this.#workspaces.list().map((project) => ({
-          id: project.id,
-          name: project.name,
-          cwd: this.#workspaces.engineRoot(project.id),
-        })),
-      resume: (key: string, id: string) =>
-        this.#openChannel(configuration(key, id), id, undefined, key),
+        [{ id: "default", name: "默认项目" }, ...this.#workspaces.list()].map(
+          (project) => ({
+            id: project.id,
+            name: project.name,
+            cwd: this.#workspaces.engineRoot(project.id),
+          }),
+        ),
+      resume: async (key: string, id: string) => {
+        const record = owned(key, id);
+        if (
+          record.inputPending ||
+          record.activating ||
+          record.queue?.length ||
+          (record.activity && record.activity.state !== "idle")
+        )
+          throw new Error("session_input_pending");
+        await this.#activate(id, record);
+        return this.#channelHandle(id, record, key);
+      },
+      activeChannel: (id: string) => this.#channelRuns.get(id)?.key,
       rename: (key: string, id: string, title: string) => {
         const record = owned(key, id);
         if (record.engine === "harness") {
@@ -1000,9 +1134,9 @@ export class RuntimeController
       models: async () =>
         channelModelCatalog(await discoverModels(this.#ctx, this.#bridges)),
       listSessionIds: () =>
-        [...this.#sessions.keys()].filter((id) =>
-          id.startsWith("session-channel-"),
-        ),
+        [...this.#sessions]
+          .filter(([, record]) => !record.internal)
+          .map(([id]) => id),
       open: (
         config: ChannelConfig,
         sessionId?: string,
@@ -1029,8 +1163,7 @@ export class RuntimeController
       config.cwd || this.#workspaces.engineRoot("default"),
     );
     const existing = sessionId ? this.#sessions.get(sessionId) : undefined;
-    if (existing?.channelKey && existing.channelKey !== channelKey)
-      throw new Error("channel_session_not_found");
+    if (existing?.internal) throw new Error("channel_session_not_found");
     if (
       sessionId &&
       (!existing ||
@@ -1072,7 +1205,7 @@ export class RuntimeController
         throw new Error("channel_model_unavailable");
       const now = new Date().toISOString();
       const context = channelAssistantContext(
-        preset.resolvedSnapshot.systemPrompt,
+        "",
         engine === "harness" ? [] : this.#resolvedSkills(preset),
       );
       record = {
@@ -1117,11 +1250,16 @@ export class RuntimeController
       }
       this.#persist(id, record);
     } else {
-      if (channelKey) record.channelKey = channelKey;
       await this.#activate(id, record);
       this.#persist(id, record);
     }
-    const session = record;
+    return this.#channelHandle(id, record, channelKey);
+  }
+
+  // A channel owns a reply route for one input, never the task's runtime.
+  readonly #channelRuns = new Map<string, { key: string | undefined }>();
+
+  #channelHandle(id: string, session: SessionRecord, channelKey?: string) {
     return {
       sessionId: id,
       workagent: true,
@@ -1132,6 +1270,16 @@ export class RuntimeController
         },
         onEvent: (event: ChannelEvent) => Promise<void>,
       ) => {
+        if (this.#sessions.get(id) !== session)
+          throw new Error("channel_session_not_found");
+        if (
+          session.inputPending ||
+          session.queue?.length ||
+          (session.activity && session.activity.state !== "idle")
+        )
+          throw new Error("session_input_pending");
+        const route = { key: channelKey };
+        this.#channelRuns.set(id, route);
         let deliveries = Promise.resolve();
         let finish!: () => void;
         const terminal = new Promise<void>((resolve) => {
@@ -1146,8 +1294,12 @@ export class RuntimeController
             ["turn.completed", "turn.failed", "turn.cancelled"].includes(
               event.type,
             )
-          )
+          ) {
+            listeners.delete(listener);
+            if (this.#channelRuns.get(id) === route)
+              this.#channelRuns.delete(id);
             finish();
+          }
         };
         const listeners = this.#eventListeners.get(id) ?? new Set();
         listeners.add(listener);
@@ -1168,24 +1320,12 @@ export class RuntimeController
           await terminal;
           await deliveries;
         } finally {
+          if (this.#channelRuns.get(id) === route) this.#channelRuns.delete(id);
           listeners.delete(listener);
           if (!listeners.size) this.#eventListeners.delete(id);
         }
       },
-      dispose: async () => {
-        if (session.handle) {
-          await session.handle.dispose();
-          session.handle = undefined;
-        }
-        if (session.native) {
-          try {
-            await session.native.cancel();
-          } finally {
-            await session.native.close();
-            session.native = undefined;
-          }
-        }
-      },
+      dispose: async () => {},
     };
   }
 
@@ -1193,7 +1333,7 @@ export class RuntimeController
     if (this.#draining) throw new Error("runtime_draining");
     const existing = this.#sessions.get(request.sessionId);
     if (existing !== undefined) {
-      if (existing.handle === undefined && existing.native === undefined)
+      if (existing.handle === undefined && existing.native?.connected !== true)
         await this.#activate(request.sessionId, existing);
       return;
     }
@@ -1253,6 +1393,7 @@ export class RuntimeController
           ),
         {
           mcpServers,
+          ...this.#nativeSkillOptions(resolvedSkills, record),
           requestApproval: (approval) =>
             this.#approvals.requestNative(request.sessionId, approval),
           ...(request.modelId === undefined
@@ -1296,6 +1437,8 @@ export class RuntimeController
         workspaceId: request.workspaceId,
         input: request.input,
         notificationPolicy: "none",
+        messageNotificationEnabled: false,
+        messageNotificationTargetId: null,
         executionMode: "existing",
         conversationId: request.sessionId,
         nextRunAt: null,
@@ -1331,6 +1474,8 @@ export class RuntimeController
       workspaceId,
       input: request.input,
       notificationPolicy: "none",
+      messageNotificationEnabled: false,
+      messageNotificationTargetId: null,
       executionMode: "existing",
       conversationId: request.sessionId,
       nextRunAt: null,
@@ -1342,7 +1487,7 @@ export class RuntimeController
       automationRunId: request.receiptId,
       definition,
     });
-    if (record.handle === undefined && record.native === undefined)
+    if (record.handle === undefined && record.native?.connected !== true)
       await this.#activate(request.sessionId, record);
     const attachmentPaths: string[] = [];
     for (const attachment of request.attachments) {
@@ -1437,6 +1582,7 @@ export class RuntimeController
         ) ||
         this.#automationExecutions.size > 0 ||
         this.#sharedTurnExecutions.size > 0 ||
+        this.#sessionDeletions.size > 0 ||
         records.some(
           (record) =>
             record.inputPending ||
@@ -1536,11 +1682,30 @@ export class RuntimeController
     this.#ctx.effect(
       () =>
         this.#ctx.webServer.register({
+          kind: "exact",
+          path: "/v1/market-capabilities/change",
+          handler: (request, response) => this.#handle(request, response),
+        }),
+      "workagent-runtime-api: market capability changes",
+    );
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
           kind: "prefix",
           path: "/v1/sessions",
           handler: (request, response) => this.#handle(request, response),
         }),
       "workagent-runtime-api: session routes",
+    );
+    this.#ctx.effect(
+      () =>
+        this.#ctx.webServer.register({
+          kind: "prefix",
+          path: "/v1/session-operations",
+          handler: (request, response) =>
+            this.#sessionOperation(request, response),
+        }),
+      "workagent-runtime-api: durable session operations",
     );
     this.#ctx.effect(
       () =>
@@ -1554,6 +1719,23 @@ export class RuntimeController
           if (record !== undefined) this.#publish(record, normalized);
         }),
       "workagent-runtime-api: normalized session events",
+    );
+    // Harness file-tool observations feed the shared-folder own-write table.
+    // The dsh-fs event vocabulary is augmented onto Context by the tool stack,
+    // which this bundle does not depend on; register with a structural type.
+    (
+      this.#ctx as {
+        on(
+          event: string,
+          listener: (
+            target: { displayPath: string },
+            observation: { kind: "present" | "absent" },
+            actor: unknown,
+          ) => void,
+        ): unknown;
+      }
+    ).on("fs/observed", (target, observation, actor) =>
+      this.#observeSharedFile(target, observation, actor),
     );
   }
 
@@ -1630,6 +1812,23 @@ export class RuntimeController
     }
     const url = new URL(request.url ?? "/", "http://runtime");
     const path = url.pathname;
+    if (
+      path === "/v1/market-capabilities/change" &&
+      request.method === "POST"
+    ) {
+      try {
+        await this.#applyMarketChange(
+          marketChangeSchema.parse(await readJson(request)),
+        );
+        writeJson(response, 200, { applied: true });
+      } catch (error) {
+        writeJson(response, 409, {
+          error:
+            error instanceof Error ? error.message : "market_update_failed",
+        });
+      }
+      return;
+    }
     if (path === "/v1/messages/search" && request.method === "GET") {
       const keyword = (url.searchParams.get("keyword") ?? "").trim();
       const page = Number(url.searchParams.get("page") ?? "0");
@@ -1768,26 +1967,12 @@ export class RuntimeController
       }
       if (request.method === "DELETE") {
         try {
-          if (record.activating !== undefined) await record.activating;
-          if (record.handle !== undefined) await record.handle.dispose();
-          if (record.native !== undefined) await record.native.close();
+          await this.#deleteSession(id, record);
         } catch (error) {
           console.error("workagent-runtime-api: session close failed", error);
           writeJson(response, 503, { error: "session_close_failed" });
           return;
         }
-        this.#sessions.delete(id);
-        void this.#conversationQuota
-          .releaseSession(id)
-          .catch((error) =>
-            console.error("conversation quota settlement failed", error),
-          );
-        this.#index.delete(id);
-        this.#messages.delete(id);
-        for (const subscriber of this.#subscribers.get(id) ?? []) {
-          subscriber.end();
-        }
-        this.#subscribers.delete(id);
         response.writeHead(204);
         response.end();
         return;
@@ -1796,7 +1981,7 @@ export class RuntimeController
       return;
     }
     const match =
-      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|fork|side-chat|configuration)$/.exec(
+      /^\/v1\/sessions\/([^/]+)\/(turns|steer|queue|cancel|events|resume|messages|question-reply|fork|side-chat|configuration|capabilities\/reload)$/.exec(
         path,
       );
     if (match === null) {
@@ -1807,6 +1992,104 @@ export class RuntimeController
     const record = this.#sessions.get(id);
     if (record === undefined || record.internal === true) {
       writeJson(response, 404, { error: "session_not_found" });
+      return;
+    }
+    if (match[2] === "question-reply" && request.method === "POST") {
+      const input = await readJson(request);
+      if (
+        typeof input.questionId !== "string" ||
+        typeof input.content !== "string" ||
+        !input.content.trim()
+      )
+        return writeJson(response, 400, { error: "invalid_question_reply" });
+      const messages = this.#messages.list(id);
+      const question = messages.find(
+        (row) =>
+          row.id === input.questionId &&
+          row.role === "assistant" &&
+          row.kind === "question",
+      );
+      if (!question)
+        return writeJson(response, 404, { error: "question_not_found" });
+      const answer = input.content.trim();
+      const existing = messages.find(
+        (row) => row.role === "user" && row.replyTo?.id === question.id,
+      );
+      if (existing)
+        return existing.text === answer
+          ? writeJson(response, 200, { message: existing })
+          : writeJson(response, 409, { error: "question_already_answered" });
+      const messageId = `message-question-${question.id}`;
+      try {
+        await this.#deliverInput(
+          id,
+          record,
+          {
+            messageId,
+            content: `以下是用户对当前任务中补充问题的回答，请结合这些信息继续当前任务。\n\n原问题：\n${question.text}\n\n用户回答：\n${answer}`,
+            displayContent: answer,
+            replyTo: { id: question.id, text: question.text },
+          },
+          !!record.activity && record.activity.state !== "idle",
+        );
+        writeJson(response, 200, {
+          message: this.#messages.list(id).find((row) => row.id === messageId),
+        });
+      } catch (error) {
+        writeJson(response, 409, {
+          error:
+            error instanceof Error ? error.message : "question_reply_failed",
+        });
+      }
+      return;
+    }
+    if (match[2] === "capabilities/reload" && request.method === "POST") {
+      if (
+        record.inputPending ||
+        record.activating ||
+        (record.activity && record.activity.state !== "idle")
+      )
+        return writeJson(response, 409, { error: "session_input_pending" });
+      record.inputPending = true;
+      const previous = record.preset;
+      try {
+        const fresh = this.#presets.resolve(previous.presetId).resolvedSnapshot;
+        const preset = {
+          ...previous,
+          resolvedSnapshot: {
+            ...previous.resolvedSnapshot,
+            skillIds: fresh.skillIds,
+            mcpServerIds: fresh.mcpServerIds,
+            resolvedSkills: fresh.resolvedSkills,
+            resolvedMcpServers: fresh.resolvedMcpServers,
+            resolvedAt: fresh.resolvedAt,
+          },
+        };
+        this.#validateMcpCompatibility(
+          record.engine,
+          this.#resolvedMcpServers(preset),
+        );
+        this.#validateSkillCompatibility(
+          record.engine,
+          this.#resolvedSkills(preset),
+        );
+        await record.native?.close();
+        await record.handle?.dispose();
+        record.native = undefined;
+        record.handle = undefined;
+        record.preset = preset;
+        await this.#activate(id, record);
+        this.#persist(id, record);
+        writeJson(response, 200, { id, preset });
+      } catch (error) {
+        record.preset = previous;
+        writeJson(response, 409, {
+          error:
+            error instanceof Error ? error.message : "capability_reload_failed",
+        });
+      } finally {
+        record.inputPending = false;
+      }
       return;
     }
     if (match[2] === "configuration" && request.method === "PATCH") {
@@ -1990,13 +2273,19 @@ export class RuntimeController
         await this.#activate(id, record);
       } catch (error) {
         console.error("workagent-runtime-api: session resume failed", error);
+        if (error instanceof ExecutionConfigurationError) {
+          writeJson(response, 400, { error: error.message });
+          return;
+        }
         writeJson(response, 503, { error: "session_resume_failed" });
         return;
       }
     }
     if (match[2] === "configuration" && request.method === "GET") {
       writeJson(response, 200, {
-        permissionMode: record.permissionMode ?? record.native?.permissionMode ??
+        permissionMode:
+          record.permissionMode ??
+          record.native?.permissionMode ??
           (record.engine === "harness" ? "workspace_write" : undefined),
       });
       return;
@@ -2092,6 +2381,94 @@ export class RuntimeController
     writeJson(response, 405, { error: "method_not_allowed" });
   }
 
+  async #deleteSession(id: string, record: SessionRecord): Promise<void> {
+    const pending = this.#sessionDeletions.get(id);
+    if (pending) return pending;
+    const removal = (async () => {
+      if (record.creation)
+        this.#index.cancelOperation(record.creation.operationId);
+      // Removing live admission first prevents a queued/resuming request from
+      // starting a turn while the engine is being closed.
+      this.#sessions.delete(id);
+      try {
+        await record.activating?.catch(() => undefined);
+        if (record.handle) await record.handle.dispose();
+        if (record.native) await record.native.close();
+        // Cancelled sessions are intentionally not reopened at startup. Delete
+        // their canonical stream by ID even when no message projection exists.
+        if (record.engine !== "harness" && !record.internal)
+          this.#nativeLog?.delete(id);
+        this.#messages.delete(id);
+        // Keep the identity until every message owner has finished cleanup so
+        // a disk failure can resume through the persisted delete operation.
+        this.#index.delete(id);
+      } catch (error) {
+        this.#sessions.set(id, record);
+        throw error;
+      }
+      this.#awareness.release(id);
+      void this.#conversationQuota
+        .releaseSession(id)
+        .catch((error) =>
+          console.error("conversation quota settlement failed", error),
+        );
+      for (const subscriber of this.#subscribers.get(id) ?? [])
+        subscriber.end();
+      this.#subscribers.delete(id);
+    })().finally(() => this.#sessionDeletions.delete(id));
+    this.#sessionDeletions.set(id, removal);
+    return removal;
+  }
+
+  async #sessionOperation(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    if (!authorized(request, this.#token))
+      return writeJson(response, 401, { error: "authentication_required" });
+    const path = new URL(request.url ?? "/", "http://runtime.local").pathname;
+    const match = /^\/v1\/session-operations\/([A-Za-z0-9_-]{1,160})$/.exec(
+      path,
+    );
+    if (!match)
+      return writeJson(response, 400, { error: "invalid_operation_id" });
+    const operationId = match[1]!;
+    if (request.method === "DELETE") {
+      try {
+        this.#index.cancelOperation(operationId);
+        const operation = this.#index.lookupOperation(operationId)!;
+        const stored = operation.session;
+        if (stored) {
+          const record =
+            this.#sessions.get(stored.id) ?? this.#record(stored, "default");
+          await this.#deleteSession(stored.id, record);
+        }
+        response.writeHead(204);
+        response.end();
+      } catch {
+        writeJson(response, 503, { error: "session_close_failed" });
+      }
+      return;
+    }
+    if (request.method !== "GET")
+      return writeJson(response, 405, { error: "method_not_allowed" });
+    const operation = this.#index.lookupOperation(operationId);
+    if (!operation)
+      return writeJson(response, 404, { error: "operation_not_found" });
+    const stored = operation.session;
+    writeJson(response, 200, {
+      operation: { id: operationId, state: operation.state },
+      ...(operation.state === "ready" && stored
+        ? {
+            session: this.#createdSession(
+              stored.id,
+              this.#sessions.get(stored.id) ?? this.#record(stored, "default"),
+            ),
+          }
+        : {}),
+    });
+  }
+
   async #create(
     request: IncomingMessage,
     response: ServerResponse,
@@ -2099,6 +2476,14 @@ export class RuntimeController
     if (this.#draining)
       return writeJson(response, 503, { error: "runtime_draining" });
     const input = await readJson(request);
+    // The gateway injects workspace=<shared:projectId> plus the resolved
+    // absolute workspacePath for collaboration sessions; clients never send
+    // either directly. workspacePath is meaningless without a shared workspace.
+    const sharedProjectId =
+      typeof input.workspace === "string" &&
+      input.workspace.startsWith("shared:")
+        ? input.workspace.slice("shared:".length)
+        : undefined;
     if (
       (input.engine !== "harness" &&
         input.engine !== "codex" &&
@@ -2107,6 +2492,15 @@ export class RuntimeController
       input.title.trim() === "" ||
       input.title.length > 200 ||
       typeof input.workspace !== "string" ||
+      (input.operationId !== undefined &&
+        (typeof input.operationId !== "string" ||
+          !/^[A-Za-z0-9_-]{1,160}$/.test(input.operationId))) ||
+      (input.workspacePath !== undefined &&
+        (typeof input.workspacePath !== "string" ||
+          sharedProjectId === undefined ||
+          !isAbsoluteWorkspacePath(input.workspacePath))) ||
+      (sharedProjectId !== undefined &&
+        (sharedProjectId === "" || input.workspacePath === undefined)) ||
       (input.modelId !== undefined &&
         (typeof input.modelId !== "string" ||
           input.modelId.trim() === "" ||
@@ -2124,14 +2518,61 @@ export class RuntimeController
       return;
     }
     const workspaceId =
-      input.workspace === "default"
-        ? "default"
-        : this.#workspaces.get(input.workspace)?.id;
+      sharedProjectId !== undefined
+        ? input.workspace
+        : input.workspace === "default"
+          ? "default"
+          : this.#workspaces.get(input.workspace)?.id;
     if (workspaceId === undefined) {
       writeJson(response, 400, { error: "workspace_not_found" });
       return;
     }
-    const publicId = `session-${randomUUID()}`;
+    const creation: SessionCreation | undefined =
+      typeof input.operationId === "string"
+        ? {
+            operationId: input.operationId,
+            input: {
+              engine: input.engine,
+              title: input.title.trim(),
+              workspace: workspaceId,
+              presetId:
+                typeof input.presetId === "string"
+                  ? input.presetId
+                  : input.engine === "harness"
+                    ? "builtin-general"
+                    : `builtin-${input.engine}`,
+              ...(typeof input.modelId === "string"
+                ? { modelId: input.modelId.trim() }
+                : {}),
+              ...(typeof input.thinkingEffort === "string"
+                ? { thinkingEffort: input.thinkingEffort }
+                : {}),
+              ...(input.permissionMode === undefined
+                ? {}
+                : { permissionMode: input.permissionMode }),
+            },
+          }
+        : undefined;
+    if (creation) {
+      try {
+        const existing = this.#index.operation(creation);
+        if (existing) {
+          this.#writeCreatedSession(
+            response,
+            existing.id,
+            this.#sessions.get(existing.id) ??
+              this.#record(existing, workspaceId),
+          );
+          return;
+        }
+      } catch (error) {
+        writeJson(response, 409, { error: (error as Error).message });
+        return;
+      }
+    }
+    const publicId = creation
+      ? `session-op-${creation.operationId}`
+      : `session-${randomUUID()}`;
     const now = new Date().toISOString();
     let preset: PresetBinding;
     try {
@@ -2148,6 +2589,10 @@ export class RuntimeController
       });
       return;
     }
+    preset = projectCapabilityBinding(
+      preset,
+      await runtimeMarketCapabilities(workspaceId),
+    );
     if (preset.resolvedSnapshot.engine !== input.engine) {
       writeJson(response, 400, { error: "preset_engine_mismatch" });
       return;
@@ -2164,7 +2609,7 @@ export class RuntimeController
     }
     let mcpServers: readonly ResolvedMcpServer[];
     try {
-      mcpServers = this.#resolvedMcpServers(preset);
+      mcpServers = this.#resolvedMcpServers(preset, workspaceId);
       this.#validateMcpCompatibility(input.engine, mcpServers);
     } catch (error) {
       writeJson(response, 400, {
@@ -2184,6 +2629,9 @@ export class RuntimeController
       createdAt: now,
       updatedAt: now,
       workspaceId,
+      ...(input.workspacePath === undefined
+        ? {}
+        : { workspacePath: input.workspacePath }),
       ...(typeof input.modelId !== "string"
         ? {}
         : { modelId: input.modelId.trim() }),
@@ -2194,7 +2642,66 @@ export class RuntimeController
         ? {}
         : { permissionMode: input.permissionMode }),
       preset,
+      ...(creation ? { creation } : {}),
     };
+    if (record.workspaceId.startsWith("shared:") && !record.internal) {
+      record.pendingContext =
+        (record.pendingContext ?? "") +
+        "当前目录是协作项目的共享文件夹，你对文件的新增、修改和删除会立即对所有项目成员可见。修改文件前先读取其最新内容。\n\n";
+    }
+    // Persist the operation and frozen binding before invoking any engine.
+    // The normal activation path materializes this empty session on first use.
+    try {
+      this.#executionConfiguration(record);
+    } catch (error) {
+      if (!(error instanceof ExecutionConfigurationError)) throw error;
+      writeJson(response, 400, { error: error.message });
+      return;
+    }
+    if (creation) {
+      try {
+        const stored = this.#index.createOnce({
+          id: publicId,
+          nativeId: publicId,
+          engine: record.engine,
+          title: record.title,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          workspaceId,
+          ...(record.workspacePath
+            ? { workspacePath: record.workspacePath }
+            : {}),
+          ...(record.modelId ? { modelId: record.modelId } : {}),
+          ...(record.thinkingEffort
+            ? { thinkingEffort: record.thinkingEffort }
+            : {}),
+          ...(record.permissionMode
+            ? { permissionMode: record.permissionMode }
+            : {}),
+          preset,
+          creation,
+          ...(record.pendingContext
+            ? { pendingContext: record.pendingContext }
+            : {}),
+        });
+        const frozen =
+          this.#sessions.get(publicId) ?? this.#record(stored, workspaceId);
+        this.#sessions.set(publicId, frozen);
+        this.#persist(publicId, frozen);
+        this.#writeCreatedSession(response, publicId, frozen);
+      } catch (error) {
+        const code =
+          error instanceof Error ? error.message : "session_persist_failed";
+        writeJson(
+          response,
+          code === "operation_conflict" || code === "operation_deleted"
+            ? 409
+            : 503,
+          { error: code },
+        );
+      }
+      return;
+    }
     try {
       if (input.engine === "harness") {
         record.handle = await this.#createHarness(
@@ -2225,6 +2732,7 @@ export class RuntimeController
           },
           {
             mcpServers,
+            ...this.#nativeSkillOptions(resolvedSkills, record),
             requestApproval: (approval) =>
               this.#approvals.requestNative(publicId, approval),
             ...(record.modelId === undefined
@@ -2246,12 +2754,24 @@ export class RuntimeController
     }
     this.#sessions.set(publicId, record);
     this.#persist(publicId, record);
-    writeJson(response, 201, {
+    this.#writeCreatedSession(response, publicId, record);
+  }
+
+  #writeCreatedSession(
+    response: ServerResponse,
+    publicId: string,
+    record: SessionRecord,
+  ): void {
+    writeJson(response, 201, this.#createdSession(publicId, record));
+  }
+
+  #createdSession(publicId: string, record: SessionRecord) {
+    return {
       id: publicId,
-      engine: input.engine,
-      title: input.title.trim(),
-      createdAt: now,
-      updatedAt: now,
+      engine: record.engine,
+      title: record.title,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
       workspaceId: record.workspaceId,
       ...(record.modelId === undefined ? {} : { modelId: record.modelId }),
       ...(record.thinkingEffort === undefined
@@ -2260,8 +2780,8 @@ export class RuntimeController
       ...(record.permissionMode === undefined
         ? {}
         : { permissionMode: record.permissionMode }),
-      preset,
-    });
+      preset: record.preset,
+    };
   }
 
   async #executeAutomation(request: AutomationExecution): Promise<{
@@ -2292,18 +2812,40 @@ export class RuntimeController
         : await this.#startAutomationSession(sessionId, request);
     request.onSessionStarted?.(sessionId);
     const terminal = this.#waitForTerminal(sessionId);
+    this.#workspaces.moves.drain(record.workspaceId);
+    const fileChanges = this.#workspaces.moves.context(
+      record.workspaceId,
+      record.fileRevision,
+    );
+    record.activity = { state: "running" };
     record.updatedAt = new Date().toISOString();
     try {
       if (record.handle !== undefined) {
         record.handle.agent.followup(
           createUserMessage({
-            content: [{ type: "text", text: skillPrompt.input }],
+            content: [
+              {
+                type: "text",
+                text:
+                  fileChanges.text +
+                  nativeFileInput(
+                    this.#workspaces,
+                    record.workspaceId,
+                    skillPrompt.input,
+                  ),
+              },
+            ],
             source: { kind: "user" },
           }),
         );
       } else {
         await record.native!.send(
-          skillPrompt.input,
+          fileChanges.text +
+            nativeFileInput(
+              this.#workspaces,
+              record.workspaceId,
+              skillPrompt.input,
+            ),
           await nativeImages(
             this.#workspaces,
             record.workspaceId,
@@ -2311,6 +2853,8 @@ export class RuntimeController
           ),
         );
       }
+      record.fileRevision = fileChanges.revision;
+      this.#persist(sessionId, record);
     } catch (error) {
       this.#publish(record, {
         eventId: `${sessionId}-${record.nextEventSequence++}`,
@@ -2347,34 +2891,91 @@ export class RuntimeController
     request: SharedTurnRuntimeRequest,
   ): Promise<SharedTurnResult> {
     if (this.#draining) throw new Error("runtime_draining");
-    const sessionId = `session-shared-${request.conversationId}`;
+    const sessionId =
+      request.sessionKey ?? `session-shared-${request.conversationId}`;
+    const assistantId =
+      request.assistantId ||
+      (request.engine === "harness"
+        ? "builtin-general"
+        : `builtin-${request.engine}`);
     this.#sharedTurnTargets.set(request.runId, sessionId);
     let record = this.#sessions.get(sessionId);
+    if (
+      record !== undefined &&
+      (record.preset.presetId !== assistantId ||
+        record.engine !== request.engine)
+    )
+      throw new Error("shared_turn_assistant_identity_mismatch");
+    if (record !== undefined && request.capabilities) {
+      const next = projectCapabilityBinding(
+        this.#presets.resolve(assistantId),
+        request.capabilities,
+      );
+      if (
+        JSON.stringify(next.resolvedSnapshot.skillIds) !==
+          JSON.stringify(record.preset.resolvedSnapshot.skillIds) ||
+        JSON.stringify(next.resolvedSnapshot.mcpServerIds) !==
+          JSON.stringify(record.preset.resolvedSnapshot.mcpServerIds)
+      ) {
+        if (record.activity && record.activity.state !== "idle")
+          throw new Error("session_input_pending");
+        this.#validateSkillCompatibility(
+          record.engine,
+          this.#resolvedSkills(next),
+        );
+        this.#validateMcpCompatibility(
+          record.engine,
+          this.#resolvedMcpServers(next),
+        );
+        await record.handle?.dispose();
+        await record.native?.close();
+        record.handle = undefined;
+        record.native = undefined;
+        record.preset = next;
+        this.#persist(sessionId, record);
+      }
+    }
     if (
       record !== undefined &&
       (record.modelId !== request.modelId ||
         record.thinkingEffort !== request.thinkingEffort)
     ) {
+      if (record.activity && record.activity.state !== "idle")
+        throw new Error("session_input_pending");
+      const previous = {
+        modelId: record.modelId,
+        thinkingEffort: record.thinkingEffort,
+      };
       if (record.handle !== undefined) await record.handle.dispose();
       if (record.native !== undefined) await record.native.close();
-      this.#sessions.delete(sessionId);
-      this.#index.delete(sessionId);
-      this.#messages.delete(sessionId);
-      record = undefined;
+      record.handle = undefined;
+      record.native = undefined;
+      record.modelId = request.modelId;
+      record.thinkingEffort = request.thinkingEffort;
+      try {
+        // Resume the same native identity with new settings; keep its transcript.
+        await this.#activate(sessionId, record);
+        this.#persist(sessionId, record);
+      } catch (error) {
+        Object.assign(record, previous);
+        throw error;
+      }
     }
     const recovered =
       record === undefined && request.runtimeSessionId !== undefined;
     if (record === undefined) {
-      const preset = this.#presets.resolve(
-        request.engine === "harness"
-          ? "builtin-general"
-          : `builtin-${request.engine}`,
+      const preset = projectCapabilityBinding(
+        this.#presets.resolve(assistantId),
+        request.capabilities,
       );
       if (preset.resolvedSnapshot.engine !== request.engine)
         throw new Error("shared_turn_preset_engine_mismatch");
       const resolvedSkills = this.#resolvedSkills(preset);
       this.#validateSkillCompatibility(request.engine, resolvedSkills);
-      const mcpServers = this.#resolvedMcpServers(preset);
+      const mcpServers = this.#resolvedMcpServers(
+        preset,
+        `shared:${request.projectId}`,
+      );
       this.#validateMcpCompatibility(request.engine, mcpServers);
       const now = new Date().toISOString();
       record = {
@@ -2404,6 +3005,8 @@ export class RuntimeController
           record,
         );
       } else {
+        const assistantContext = channelAssistantContext("", resolvedSkills);
+        if (assistantContext) record.pendingContext = assistantContext + "\n\n";
         const credentialError = nativeCredentialError(
           request.engine,
           this.#credentials.statusFor(`${request.engine}-native`),
@@ -2421,6 +3024,7 @@ export class RuntimeController
           {
             mcpServers,
             modelId: request.modelId,
+            ...this.#nativeSkillOptions(resolvedSkills, record),
             requestApproval: (approval) =>
               record!.internal
                 ? Promise.resolve("cancel")
@@ -2439,26 +3043,48 @@ export class RuntimeController
         record.workspacePath !== request.workspacePath
       )
         throw new Error("shared_turn_session_mismatch");
-      if (record.handle === undefined && record.native === undefined)
+      if (record.handle === undefined && record.native?.connected !== true)
         await this.#activate(sessionId, record);
     }
     const terminal = this.#waitForTerminal(sessionId);
-    const input = recovered ? request.recoveryContext : request.context;
+    this.#sharedFiles?.moves.drain(request.projectId);
+    const sharedChanges = this.#sharedFiles?.moves.context(
+      request.projectId,
+      record.fileRevision,
+    );
+    const awareness = this.#sharedAwarenessContext(sessionId, record);
+    record.activity = { state: "running" };
+    const input =
+      (record.pendingContext ?? "") +
+      (awareness?.text ?? "") +
+      (sharedChanges?.text ?? "") +
+      (recovered ? request.recoveryContext : request.context);
     record.updatedAt = new Date().toISOString();
-    if (record.handle !== undefined) {
-      record.handle.agent.followup(
-        createUserMessage({
-          content: [{ type: "text", text: input }],
-          source: { kind: "user" },
-        }),
-      );
-    } else {
-      await record.native!.send(
-        input,
-        await nativeImages(this.#workspaces, record.workspaceId, input),
-      );
+    try {
+      if (record.handle !== undefined) {
+        record.handle.agent.followup(
+          createUserMessage({
+            content: [{ type: "text", text: input }],
+            source: { kind: "user" },
+          }),
+        );
+      } else await record.native!.send(input);
+      record.pendingContext = undefined;
+      if (sharedChanges) record.fileRevision = sharedChanges.revision;
+      if (awareness) record.sharedCursor = awareness.cursor;
+      this.#persist(sessionId, record);
+    } catch (error) {
+      this.#publish(record, {
+        eventId: `${sessionId}-${record.nextEventSequence++}`,
+        occurredAt: new Date().toISOString(),
+        sessionId,
+        type: "turn.failed",
+        turnId: request.runId,
+        code: "engine_turn_rejected",
+        message:
+          error instanceof Error ? error.message : "engine_turn_rejected",
+      });
     }
-    this.#persist(sessionId, record);
     const result = await terminal;
     return {
       runId: request.runId,
@@ -2481,7 +3107,7 @@ export class RuntimeController
       throw new Error("automation_conversation_workspace_mismatch");
     if (record.preset.presetId !== definition.presetId)
       throw new Error("automation_conversation_preset_mismatch");
-    if (record.handle === undefined && record.native === undefined)
+    if (record.handle === undefined && record.native?.connected !== true)
       await this.#activate(sessionId, record);
     return record;
   }
@@ -2534,6 +3160,7 @@ export class RuntimeController
           this.#publish(record, this.#nativeEvent(publicId, record, event)),
         {
           mcpServers,
+          ...this.#nativeSkillOptions(resolvedSkills, record),
           requestApproval: (approval) =>
             this.#approvals.requestNative(publicId, approval),
         },
@@ -2624,7 +3251,7 @@ export class RuntimeController
     sessionId: string,
     record: SessionRecord,
     event: BridgeEvent,
-  ): PublicEvent {
+  ): EngineEvent {
     return {
       ...event,
       eventId: `${sessionId}-${record.nextEventSequence++}`,
@@ -2685,11 +3312,15 @@ export class RuntimeController
               : plan.previousTurnId),
         );
 
-    const mcpServers = this.#resolvedMcpServers(source.preset);
+    const mcpServers = this.#resolvedMcpServers(
+      source.preset,
+      source.workspaceId,
+    );
     const resolvedSkills = this.#resolvedSkills(source.preset);
     const workspace = this.#engineWorkspace(source);
     const options = {
       mcpServers,
+      ...this.#nativeSkillOptions(resolvedSkills, source),
       requestApproval: (approval: NativeApprovalRequest) =>
         this.#approvals.requestNative(publicId, approval),
       ...(source.modelId === undefined ? {} : { modelId: source.modelId }),
@@ -2873,11 +3504,20 @@ export class RuntimeController
     input: QueuedInput,
     steering: boolean,
   ): Promise<void> {
+    const known = this.#messages
+      .list(id)
+      .find((row) => row.id === input.messageId);
+    if (known) {
+      if (known.text !== (input.displayContent ?? input.content))
+        throw new Error("message_id_conflict");
+      return;
+    }
     if (this.#draining) throw new Error("runtime_draining");
     const running = !!record.activity && record.activity.state !== "idle";
     if (record.inputPending || (!steering && running))
       throw new Error("session_input_pending");
     if (steering && !running) throw new Error("no_active_turn");
+    if (!running) this.#workspaces.moves.drain(record.workspaceId);
     record.inputPending = true;
     let quotaRunId: string | undefined;
     let completedBeforeAcknowledgement = false;
@@ -2885,9 +3525,44 @@ export class RuntimeController
     const reservedActivity = { state: "running" };
     if (!steering) record.activity = reservedActivity;
     try {
+      if (!steering) {
+        const next = projectCapabilityBinding(
+          record.preset,
+          await runtimeMarketCapabilities(record.workspaceId),
+        );
+        if (JSON.stringify(next) !== JSON.stringify(record.preset)) {
+          this.#validateSkillCompatibility(
+            record.engine,
+            this.#resolvedSkills(next),
+          );
+          this.#validateMcpCompatibility(
+            record.engine,
+            this.#resolvedMcpServers(next),
+          );
+          await record.handle?.dispose();
+          await record.native?.close();
+          record.handle = undefined;
+          record.native = undefined;
+          record.preset = next;
+        }
+      }
       await this.#activate(id, record);
       let nativeTurnId: string | undefined;
-      const content = (record.pendingContext ?? "") + input.content;
+      const fileChanges = this.#workspaces.moves.context(
+        record.workspaceId,
+        record.fileRevision,
+      );
+      const awareness = this.#sharedAwarenessContext(id, record);
+      const content =
+        (record.pendingContext ?? "") +
+        (awareness?.text ?? "") +
+        fileChanges.text +
+        nativeFileInput(
+          this.#workspaces,
+          record.workspaceId,
+          input.content,
+          record.workspacePath,
+        );
       let modelId = record.modelId;
       if (record.engine === "harness")
         modelId = String(this.#harnessSelection(record).model);
@@ -2932,6 +3607,7 @@ export class RuntimeController
             this.#workspaces,
             record.workspaceId,
             input.content,
+            record.workspacePath,
           ),
         );
       }
@@ -2940,12 +3616,15 @@ export class RuntimeController
         return;
       }
       record.pendingContext = undefined;
+      record.fileRevision = fileChanges.revision;
+      if (awareness) record.sharedCursor = awareness.cursor;
       record.updatedAt = new Date().toISOString();
       this.#messages.append({
         id: input.messageId,
         sessionId: id,
         role: "user",
         text: input.displayContent ?? input.content,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
         createdAt: record.updatedAt,
         ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
       });
@@ -2994,15 +3673,52 @@ export class RuntimeController
   #publish(record: SessionRecord, event: PublicEvent): void {
     if (
       this.#sessions.get(event.sessionId) === record &&
+      !record.workspaceId.startsWith("shared:") &&
       event.type === "assistant.completed" &&
       typeof event.content === "string"
     ) {
+      event = {
+        ...event,
+        content: event.content
+          .split(
+            /(^ {0,3}(?:`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}(?:`{3,}|~{3,})\s*$)/gm,
+          )
+          .map((chunk, index) =>
+            index % 2
+              ? chunk
+              : chunk.replace(
+                  /(`+)[\s\S]*?\1|(!?\[[^\]\n]*\]\()(<[^>]+>|[^)\n]+)(\))/g,
+                  (whole, code, start, target, end) => {
+                    if (code) return whole;
+                    try {
+                      const anchor =
+                        /#L?\d+(?:-L?\d+)?$/.exec(
+                          target.replace(/^<|>$/g, ""),
+                        )?.[0] ?? "";
+                      const reference = decodeURIComponent(
+                        target
+                          .replace(/^<|>$/g, "")
+                          .replace(/^sandbox:|^file:\/\//, ""),
+                      ).replace(/#L?\d+(?:-L?\d+)?$/, "");
+                      const file = this.#workspaces.locate(
+                        record.workspaceId,
+                        reference,
+                      );
+                      return `${start}${encodeURI(file.path).replaceAll("(", "%28").replaceAll(")", "%29")}?workagentFileId=${file.fileId}${anchor}${end}`;
+                    } catch {
+                      return whole;
+                    }
+                  },
+                ),
+          )
+          .join(""),
+      };
       const known = new Set(
         this.#workspaces
           .listAssets(record.workspaceId, event.sessionId)
           .map((asset) => asset.path),
       );
-      for (const match of event.content.matchAll(
+      for (const match of (event.content as string).matchAll(
         /\[[^\]\n]+\]\((<[^>]+>|[^)\n]+)\)/g,
       )) {
         try {
@@ -3010,7 +3726,10 @@ export class RuntimeController
             match[1]!.replace(/^<|>$/g, "").replace(/^sandbox:|^file:\/\//, ""),
           ).replace(/#L?\d+(?:-L?\d+)?$/, "");
           if (/^[a-z]+:\/\//i.test(reference)) continue;
-          const file = this.#workspaces.locate(record.workspaceId, reference);
+          const file = this.#workspaces.locate(
+            record.workspaceId,
+            reference.replace(/\?workagentFileId=[a-zA-Z0-9-]+$/, ""),
+          );
           if (!known.has(file.path)) {
             this.#workspaces.registerArtifact(
               record.workspaceId,
@@ -3087,12 +3806,20 @@ export class RuntimeController
       void this.#completionNotifications
         .complete({
           sessionId: event.sessionId,
+          source: this.#channelRuns.has(event.sessionId) ? "im" : "web",
           turnId:
             typeof event.turnId === "string" ? event.turnId : event.eventId,
           title: record.title,
           reply: typeof reply === "string" ? reply : "",
           workspaceId: record.workspaceId,
           startedAt: turnEvents[0]?.occurredAt ?? event.occurredAt,
+          ...(this.#automationNotifications.get(event.sessionId)
+            ? {
+                notification: this.#automationNotifications.get(
+                  event.sessionId,
+                )!,
+              }
+            : {}),
         })
         .catch((error) =>
           console.error("completion notification failed", error),
@@ -3114,6 +3841,11 @@ export class RuntimeController
         role: "assistant",
         text: event.content,
         createdAt: event.occurredAt,
+        ...(event.kind === "commentary" ||
+        event.kind === "question" ||
+        event.kind === "answer"
+          ? { kind: event.kind }
+          : {}),
         ...(typeof event.turnId === "string"
           ? { nativeTurnId: event.turnId }
           : {}),
@@ -3140,7 +3872,14 @@ export class RuntimeController
   }
 
   async #activate(id: string, record: SessionRecord): Promise<void> {
-    if (record.handle !== undefined || record.native !== undefined) return;
+    if (
+      record.creation &&
+      this.#index.lookupOperation(record.creation.operationId)?.state !==
+        "ready"
+    )
+      throw new Error("session_deleted");
+    if (record.handle !== undefined || record.native?.connected === true)
+      return;
     record.activating ??= this.#resume(id, record).finally(() => {
       record.activating = undefined;
     });
@@ -3148,12 +3887,18 @@ export class RuntimeController
   }
 
   async #resume(id: string, record: SessionRecord): Promise<void> {
-    const mcpServers = this.#resolvedMcpServers(record.preset);
+    if (record.workspaceId.startsWith("shared:"))
+      this.#resolveSharedWorkspacePath(record);
+    const mcpServers = this.#resolvedMcpServers(
+      record.preset,
+      record.workspaceId,
+    );
     this.#validateMcpCompatibility(record.engine, mcpServers);
     const resolvedSkills = this.#resolvedSkills(record.preset);
     if (!id.startsWith("session-channel-"))
       this.#validateSkillCompatibility(record.engine, resolvedSkills);
     if (record.engine === "harness") {
+      const configuration = this.#executionConfiguration(record);
       const selection = this.#harnessSelection(record);
       try {
         record.handle = await this.#ctx.agents.resume({
@@ -3163,8 +3908,7 @@ export class RuntimeController
             model: selection.model,
           },
           setup: async (agentContext) => {
-            if (id.startsWith("session-channel-"))
-              this.#applyChannelPermission(agentContext, record);
+            this.#applyHarnessConfiguration(agentContext, configuration);
             installModelSelection(agentContext, {
               current: selection,
               assembled: undefined,
@@ -3200,6 +3944,7 @@ export class RuntimeController
     const options = {
       ...(record.requirePermission ? { requirePermission: true } : {}),
       mcpServers,
+      ...this.#nativeSkillOptions(resolvedSkills, record),
       requestApproval: (approval: NativeApprovalRequest) =>
         // Internal shared tasks have no interactive approval surface.
         record.internal
@@ -3263,17 +4008,202 @@ export class RuntimeController
     this.#persist(id, record);
   }
 
-  #resolvedMcpServers(binding: PresetBinding): readonly ResolvedMcpServer[] {
+  #executionConfiguration(
+    record: Pick<
+      SessionRecord,
+      | "engine"
+      | "preset"
+      | "workspaceId"
+      | "workspacePath"
+      | "modelId"
+      | "thinkingEffort"
+      | "permissionMode"
+    >,
+  ) {
+    return resolveExecutionConfiguration({
+      engine: record.engine,
+      preset: record.preset,
+      overrides: record,
+      workspace:
+        record.workspacePath ?? this.#workspaces.engineRoot(record.workspaceId),
+      workspaceAssigned:
+        record.workspaceId !== "default" ||
+        (record.workspacePath !== undefined &&
+          resolvePath(record.workspacePath) !==
+            resolvePath(this.#workspaces.engineRoot("default"))),
+    });
+  }
+
+  #nativeSkillOptions(skills: readonly ResolvedSkill[], record: SessionRecord) {
+    const configuration = this.#executionConfiguration(record);
+    return {
+      skills,
+      systemPrompt: configuration.systemPrompt,
+      permissionMode: configuration.permissionMode,
+      approvalPolicy: configuration.approvalPolicy,
+      requirePermission: true,
+      ...(configuration.engineModelId
+        ? { modelId: configuration.engineModelId }
+        : {}),
+      ...(configuration.thinkingEffort
+        ? { thinkingEffort: configuration.thinkingEffort }
+        : {}),
+      nativeSkillPaths: this.#skills.nativeSkillPaths,
+      catalogSkills: this.#skills
+        .listSkills()
+        .filter((skill) => skill.referenceDirectory)
+        .map((skill) => this.#skills.resolveSkill(skill.id)!),
+      nativeMcpNames: this.#mcp.nativeNames,
+      nativeMcpConfig: this.#mcp.nativeConfig,
+    };
+  }
+
+  async #applyMarketChange(change: MarketChange): Promise<void> {
+    const affected = [...this.#sessions].filter(
+      ([id, record]) =>
+        (change.urgent || !record.workspaceId.startsWith("shared:")) &&
+        (record.preset.resolvedSnapshot.skillIds.some(
+          (id) => id in change.skills,
+        ) ||
+          record.preset.resolvedSnapshot.mcpServerIds.some(
+            (id) => id in change.mcp,
+          ) ||
+          record.preset.presetId in change.assistants),
+    );
+    if (
+      !change.urgent &&
+      affected.some(
+        ([, r]) =>
+          r.inputPending || (r.activity && r.activity.state !== "idle"),
+      )
+    )
+      throw new Error("market_update_session_busy");
+    if (!change.urgent) {
+      for (const [, r] of affected) {
+        const next = change.assistants[r.preset.presetId]
+          ? this.#presets.resolve(change.assistants[r.preset.presetId]!)
+          : {
+              ...r.preset,
+              resolvedSnapshot: {
+                ...r.preset.resolvedSnapshot,
+                skillIds: remapCapabilityIds(
+                  r.preset.resolvedSnapshot.skillIds,
+                  change.skills,
+                ),
+                mcpServerIds: remapCapabilityIds(
+                  r.preset.resolvedSnapshot.mcpServerIds,
+                  change.mcp,
+                ),
+                resolvedMcpServers: undefined,
+              },
+            };
+        try {
+          if (next.resolvedSnapshot.engine !== r.engine)
+            throw new Error("engine_changed");
+          this.#validateSkillCompatibility(
+            r.engine,
+            this.#resolvedSkills(next),
+          );
+          this.#validateMcpCompatibility(
+            r.engine,
+            this.#resolvedMcpServers(next),
+          );
+        } catch {
+          throw new Error("market_capability_incompatible");
+        }
+      }
+    }
+    for (const [id, r] of affected) {
+      if (change.urgent) {
+        r.inputPending = true;
+        if (r.queue)
+          for (const q of r.queue) q.error = "能力已由管理员变更，请检查后重试";
+        if (r.activity && r.activity.state !== "idle")
+          await this.#stopForEdit(id, r);
+      }
+      await r.handle?.dispose();
+      await r.native?.close();
+      r.handle = undefined;
+      r.native = undefined;
+      const snapshot = {
+        ...r.preset.resolvedSnapshot,
+        skillIds: remapCapabilityIds(
+          r.preset.resolvedSnapshot.skillIds,
+          change.skills,
+        ),
+        mcpServerIds: remapCapabilityIds(
+          r.preset.resolvedSnapshot.mcpServerIds,
+          change.mcp,
+        ),
+      };
+      delete snapshot.resolvedMcpServers;
+      r.preset = {
+        ...r.preset,
+        resolvedSnapshot: snapshot,
+        ...(r.preset.projectBase
+          ? {
+              projectBase: {
+                ...r.preset.projectBase,
+                skillIds: remapCapabilityIds(
+                  r.preset.projectBase.skillIds,
+                  change.skills,
+                ),
+                mcpServerIds: remapCapabilityIds(
+                  r.preset.projectBase.mcpServerIds,
+                  change.mcp,
+                ),
+                resolvedMcpServers: undefined,
+              },
+            }
+          : {}),
+      };
+      if (change.assistants[r.preset.presetId])
+        r.preset = this.#presets.resolve(change.assistants[r.preset.presetId]!);
+      r.inputPending = false;
+      this.#persist(id, r);
+    }
+    for (const p of this.#presets.list()) {
+      if (p.source !== "user") continue;
+      if (p.id in change.assistants) {
+        this.#presets.update(p.id, { enabled: false });
+        continue;
+      }
+      if (
+        !p.skillIds.some((id) => id in change.skills) &&
+        !p.mcpServerIds.some((id) => id in change.mcp)
+      )
+        continue;
+      this.#presets.update(p.id, {
+        skillIds: remapCapabilityIds(p.skillIds, change.skills),
+        mcpServerIds: remapCapabilityIds(p.mcpServerIds, change.mcp),
+      });
+    }
+  }
+
+  #resolvedMcpServers(
+    binding: PresetBinding,
+    workspaceId?: string,
+  ): readonly ResolvedMcpServer[] {
     const snapshot = binding.resolvedSnapshot;
     const ids =
       snapshot.resolvedMcpServers?.map((server) => server.id) ??
       snapshot.mcpServerIds;
-    return ids.map((id) => {
+    const servers = ids.map((id) => {
       const server = this.#mcp.resolveServer(id);
       if (server === undefined)
         throw new Error(`invalid_mcp_binding:${id}:not_found`);
       return server;
     });
+    if (
+      binding.presetId === "builtin-puxin-butler" ||
+      snapshot.systemPrompt.startsWith("你是 AI管家，") ||
+      snapshot.systemPrompt.startsWith("你是 PuxinAI 管家，")
+    )
+      servers.push(butlerServer());
+    servers.push(messageServer());
+    if (workspaceId?.startsWith("shared:"))
+      servers.push(sharedTrashServer(workspaceId.slice("shared:".length)));
+    return servers;
   }
 
   #resolvedSkills(binding: PresetBinding): readonly ResolvedSkill[] {
@@ -3291,7 +4221,19 @@ export class RuntimeController
     engine: SessionRecord["engine"],
     skills: readonly ResolvedSkill[],
   ): void {
-    if (skills.length !== 0 && engine !== "harness")
+    if (
+      skills.some(
+        (skill) => skill.entry.compatibleEngines?.includes(engine) === false,
+      )
+    )
+      throw new Error(`unsupported_skill_binding:${engine}`);
+    if (
+      skills.some(
+        (skill) =>
+          !skill.entry.referenceDirectory && skill.entry.source !== "market",
+      ) &&
+      engine !== "harness"
+    )
       throw new Error(`unsupported_skill_binding:${engine}`);
   }
 
@@ -3351,6 +4293,7 @@ export class RuntimeController
     this.#index.set({
       id,
       ...(record.channelKey ? { channelKey: record.channelKey } : {}),
+      ...(record.creation ? { creation: record.creation } : {}),
       nativeId: record.nativeId,
       engine: record.engine,
       title: record.title,
@@ -3372,6 +4315,12 @@ export class RuntimeController
       ...branchMetadata(record),
       lastTurn: record.lastTurn,
       ...(record.queue === undefined ? {} : { queue: record.queue }),
+      ...(record.fileRevision === undefined
+        ? {}
+        : { fileRevision: record.fileRevision }),
+      ...(record.sharedCursor === undefined
+        ? {}
+        : { sharedCursor: record.sharedCursor }),
       ...(record.pendingContext === undefined
         ? {}
         : { pendingContext: record.pendingContext }),
@@ -3385,6 +4334,91 @@ export class RuntimeController
     );
   }
 
+  /**
+   * Re-resolve a shared project's folder at (re)materialization time: after an
+   * ownership transfer the folder lives under a different owner's root, so the
+   * stored path may be stale. Fails the resume when the project is gone.
+   */
+  #resolveSharedWorkspacePath(record: SessionRecord): void {
+    const sharedRoot = process.env.WORKAGENT_SHARED_ROOT;
+    if (sharedRoot === undefined) return;
+    const resolved = resolveSharedProjectRoot(
+      dirname(sharedRoot),
+      record.workspaceId.slice("shared:".length),
+    );
+    if (resolved !== record.workspacePath) record.workspacePath = resolved;
+  }
+
+  /**
+   * Collaborator-change context for sessions on shared workspaces; undefined
+   * for personal workspaces (zero overhead) and empty text when nothing
+   * changed. The cursor persists on the record like `fileRevision`.
+   */
+  #sharedAwarenessContext(
+    id: string,
+    record: SessionRecord,
+  ): { text: string; cursor: number } | undefined {
+    if (
+      !record.workspaceId.startsWith("shared:") ||
+      record.workspacePath === undefined
+    )
+      return undefined;
+    const result = this.#awareness.changes(
+      id,
+      record.workspacePath,
+      record.sharedCursor ?? 0,
+    );
+    return { text: sharedChangesText(result.paths), cursor: result.cursor };
+  }
+
+  /**
+   * Record own file observations (read/write/edit outcomes) for shared
+   * harness sessions so the change feed can exclude the session's own writes.
+   * The cordis fs/observed event carries the tool-execution actor; the cordis
+   * session id equals `record.nativeId`. Native engines write directly from
+   * their CLIs, so their own edits stay visible in the feed — harmless.
+   */
+  #observeSharedFile(
+    target: { displayPath: string },
+    observation: { kind: "present" | "absent" },
+    actor: unknown,
+  ): void {
+    const cordisId = (
+      actor as { agent?: { session?: { id?: unknown } } } | undefined
+    )?.agent?.session?.id;
+    if (cordisId === undefined) return;
+    const entry = [...this.#sessions].find(
+      ([, record]) =>
+        record.engine === "harness" && record.nativeId === String(cordisId),
+    );
+    if (entry === undefined) return;
+    const [id, record] = entry;
+    if (
+      !record.workspaceId.startsWith("shared:") ||
+      record.workspacePath === undefined
+    )
+      return;
+    if (observation.kind === "absent") {
+      this.#awareness.forgetOwn(id, record.workspacePath, target.displayPath);
+      return;
+    }
+    try {
+      const stat = statSync(target.displayPath);
+      if (stat.isFile())
+        this.#awareness.observeOwn(
+          id,
+          record.workspacePath,
+          target.displayPath,
+          {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+          },
+        );
+    } catch {
+      // The file vanished between the operation and the observation.
+    }
+  }
+
   #createHarness(
     id: string,
     workspace: string,
@@ -3392,17 +4426,23 @@ export class RuntimeController
     skills: readonly ResolvedSkill[],
     record: Pick<
       SessionRecord,
-      "modelId" | "thinkingEffort" | "permissionMode"
+      | "engine"
+      | "preset"
+      | "workspaceId"
+      | "workspacePath"
+      | "modelId"
+      | "thinkingEffort"
+      | "permissionMode"
     >,
   ): Promise<AgentHandle> {
+    const configuration = this.#executionConfiguration(record);
     const selection = this.#harnessSelection(record);
     return this.#ctx.agents.create({
       sessionId: SessionId(id),
       meta: { cwd: workspace },
       agentOptions: { provider: selection.provider, model: selection.model },
       setup: async (agentContext) => {
-        if (id.startsWith("session-channel-"))
-          this.#applyChannelPermission(agentContext, record);
+        this.#applyHarnessConfiguration(agentContext, configuration);
         installModelSelection(agentContext, {
           current: selection,
           assembled: undefined,
@@ -3427,10 +4467,11 @@ export class RuntimeController
     };
   }
 
-  #applyChannelPermission(
+  #applyHarnessConfiguration(
     agentContext: Context,
-    record: Pick<SessionRecord, "permissionMode">,
+    configuration: ReturnType<typeof resolveExecutionConfiguration>,
   ) {
+    installHarnessPrompt(agentContext, configuration.systemPrompt);
     const permissions = (
       this.#ctx as Context & {
         permissionPresets: {
@@ -3443,9 +4484,9 @@ export class RuntimeController
     ).permissionPresets;
     permissions.set(
       agentContext.agent!.session,
-      record.permissionMode === "read_only"
+      configuration.permissionMode === "read_only"
         ? "read-only"
-        : record.permissionMode === "full_access"
+        : configuration.permissionMode === "full_access"
           ? "danger-full-access"
           : "workspace-write",
     );

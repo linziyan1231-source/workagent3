@@ -7,6 +7,14 @@
     "dist"
   ],
   "exports": {
+    "./file-reference": {
+      "types": "./dist/file-reference.d.ts",
+      "default": "./dist/file-reference.js"
+    },
+    "./upload-policy": {
+      "types": "./dist/upload-policy.d.ts",
+      "default": "./dist/upload-policy.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

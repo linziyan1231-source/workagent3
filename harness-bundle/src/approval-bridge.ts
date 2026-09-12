@@ -19,7 +19,7 @@ import {
   type NativeApprovalRequest,
   type NativeApprovalDecision,
 } from "./engines/types.js";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 
 export type InteractionStatus =
   | "pending"

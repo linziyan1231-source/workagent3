@@ -34,10 +34,15 @@ type sharedFileOperator interface {
 type sharedFileManager struct {
 	base     string
 	ownerSID string
+	recycle  func(context.Context, string, string) error
 	// officePreview converts Office documents to cached PDFs for the
 	// "office-preview" operation; wired by newRuntimeGateway.
 	officePreview *officePreviewService
 }
+
+// sharedBase exposes the shared-project base root to the session interceptor
+// (sharedSessionBaseProvider); it equals filepath.Dir(dataRoot).
+func (m *sharedFileManager) sharedBase() string { return m.base }
 
 func (m *sharedFileManager) ProjectRoot(_ context.Context, projectID string) (string, error) {
 	if !sharedProjectIDPattern.MatchString(strings.TrimSpace(projectID)) {
@@ -186,7 +191,17 @@ func (m *sharedFileManager) OperateFile(ctx context.Context, request sharedFileR
 		if relative == "" || len(request.Data) > maxSharedFileData {
 			return nil, errors.New("shared file write is invalid or oversized")
 		}
-		if err := os.WriteFile(targetPath, []byte(request.Data), 0o600); err != nil {
+		file, err := os.CreateTemp(filepath.Dir(targetPath), filepath.Base(targetPath)+".tmp-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.Remove(file.Name())
+		_, writeErr := file.Write([]byte(request.Data))
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(file.Name(), targetPath); err != nil {
 			return nil, err
 		}
 		return json.Marshal(true)
@@ -194,7 +209,10 @@ func (m *sharedFileManager) OperateFile(ctx context.Context, request sharedFileR
 		if relative == "" {
 			return nil, errors.New("shared project root cannot be removed")
 		}
-		if err := os.RemoveAll(targetPath); err != nil {
+		if m.recycle == nil {
+			return nil, errors.New("shared_trash_unavailable")
+		}
+		if err := m.recycle(ctx, request.ProjectID, relative); err != nil {
 			return nil, err
 		}
 		return []byte("null"), nil

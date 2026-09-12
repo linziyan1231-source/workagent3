@@ -2,6 +2,7 @@ package userhost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,21 +27,22 @@ import (
 var ErrRestartRequested = errors.New("runtime restart requested")
 
 type Config struct {
-	PublicBaseURL      string
-	SID                string
-	DataRoot           string
-	Command            string
-	CodexCommand       string
-	KimiCommand        string
-	Arguments          []string
-	Profile            string
-	Limits             winutil.JobLimits
-	StartupTimeout     time.Duration
-	ManagedSkillsRoot  string
-	ManagedToolsRoot   string
-	ManagedMCPServers  []mcpruntime.Server
-	PlatformURL        string
-	PlatformCredential string
+	PublicBaseURL           string
+	SID                     string
+	DataRoot                string
+	Command                 string
+	CodexCommand            string
+	KimiCommand             string
+	Arguments               []string
+	Profile                 string
+	Limits                  winutil.JobLimits
+	StartupTimeout          time.Duration
+	ManagedSkillsRoot       string
+	ManagedToolsRoot        string
+	ManagedMCPServers       []mcpruntime.Server
+	ProfessionalDatabaseURL string
+	PlatformURL             string
+	PlatformCredential      string
 	// HarnessModel and ModelGatewayBaseURL describe the managed model route the
 	// Harness shares with native Codex: the same SID-private CLIProxyAPI
 	// loopback and the configured Codex model. Both are empty only when the
@@ -76,6 +79,9 @@ func New(config Config) (*Supervisor, error) {
 	}
 	if config.StartupTimeout <= 0 {
 		config.StartupTimeout = 45 * time.Second
+	}
+	if err := ValidateProfessionalDatabaseURL(config.ProfessionalDatabaseURL); err != nil {
+		return nil, err
 	}
 	if (config.HarnessModel == "") != (config.ModelGatewayBaseURL == "") {
 		return nil, errors.New("Harness model and model gateway base URL must be configured together")
@@ -125,6 +131,12 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		if err := nativeauth.Apply(s.config.DataRoot); err != nil {
 			lock.Close()
 			return runtimeapi.Registration{}, fmt.Errorf("apply SID-private native model access: %w", err)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if err := nativeauth.EnsureWindowsSandbox(s.config.DataRoot); err != nil {
+			lock.Close()
+			return runtimeapi.Registration{}, fmt.Errorf("initialize native Windows sandbox: %w", err)
 		}
 	}
 	port, err := reserveLoopbackPort()
@@ -187,7 +199,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	// the Portal loopback endpoint; a misconfigured audit path must not block
 	// the runtime, so the client is nil on error.
 	auditSink, _ := newAuditClient(s.config.PlatformURL, s.config.PlatformCredential, s.config.SID)
-	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.ManagedMCPServers, s.config.ManagedToolsRoot, s.config.DataRoot, s.config.SID, target, token, stagedBundle, auditSink, func() {
+	gateway, err := newRuntimeGateway(directories.runtime, directories.dshHome, s.config.ManagedSkillsRoot, s.config.ManagedMCPServers, s.config.ManagedToolsRoot, s.config.DataRoot, s.config.SID, s.config.ProfessionalDatabaseURL, target, token, stagedBundle, auditSink, func() {
 		select {
 		case s.restartRequested <- struct{}{}:
 		default:
@@ -204,6 +216,20 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 		return runtimeapi.Registration{}, err
 	}
 	s.gateway = gateway
+	// The bundled butler discovers the employee API using a private, scoped
+	// credential, without exposing the platform credential to native engines.
+	butlerEndpoint, _ := json.Marshal(map[string]string{"baseURL": "http://" + listener.Addr().String(), "token": gateway.butlerToken})
+	butlerDirectory := filepath.Join(directories.dshHome, "workagent")
+	if err := os.MkdirAll(butlerDirectory, 0700); err != nil {
+		listener.Close()
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
+	if err := os.WriteFile(filepath.Join(butlerDirectory, "runtime-gateway.json"), butlerEndpoint, 0600); err != nil {
+		listener.Close()
+		s.Close()
+		return runtimeapi.Registration{}, err
+	}
 	s.gatewayExited = make(chan error, 1)
 	go func() { s.gatewayExited <- gateway.server.Serve(listener) }()
 	return runtimeapi.Registration{SID: s.config.SID, BaseURL: "http://" + listener.Addr().String(), Token: token, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
@@ -349,6 +375,7 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 		"UV_CACHE_DIR="+filepath.Join(directories.cache, "uv"),
 		"PYTHONPYCACHEPREFIX="+filepath.Join(directories.cache, "python"),
 		"WORKAGENT_WORKSPACE_ROOT="+directories.workspace,
+		"WORKAGENT_SHARED_ROOT="+filepath.Join(filepath.Dir(filepath.Dir(directories.workspace)), "shared", sid),
 		"CODEX_HOME="+filepath.Join(directories.native, "codex"),
 		"KIMI_CODE_HOME="+filepath.Join(directories.native, "kimi"),
 		"WORKAGENT_RUNTIME_TOKEN="+token,

@@ -1,3 +1,4 @@
+import { waitForShutdown } from "./shutdown.js";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -28,6 +29,19 @@ import {
 type Clock = { now(): Date };
 
 const defaultClock: Clock = { now: () => new Date() };
+
+const validateMessageNotification = (
+  definition: Pick<
+    AutomationDefinition,
+    "messageNotificationEnabled" | "messageNotificationTargetId"
+  >,
+) => {
+  if (
+    definition.messageNotificationEnabled &&
+    !definition.messageNotificationTargetId
+  )
+    throw new Error("automation_notification_target_required");
+};
 
 const weekday = new Map([
   ["Sun", 0],
@@ -153,6 +167,7 @@ export class AutomationStore {
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     });
+    validateMessageNotification(definition);
     this.#definitions.set(definition.id, definition);
     this.#save();
     return definition;
@@ -166,7 +181,10 @@ export class AutomationStore {
     const current = this.#required(id);
     if (current.version !== expectedVersion)
       throw new Error("automation_version_conflict");
-    const mutation = automationMutationSchema.partial().parse(input);
+    const parsed = automationMutationSchema.partial().parse(input);
+    const mutation = Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => Object.hasOwn(input, key)),
+    ) as Partial<AutomationMutation>;
     const now = this.#clock.now();
     const enabled = mutation.enabled ?? current.enabled;
     const schedule = mutation.schedule ?? current.schedule;
@@ -184,6 +202,7 @@ export class AutomationStore {
       nextRunAt,
       updatedAt: now.toISOString(),
     });
+    validateMessageNotification(next);
     this.#definitions.set(id, next);
     this.#save();
     return next;
@@ -419,9 +438,7 @@ export type AutomationExecution = {
 };
 
 export interface AutomationRunnerPort {
-  execute(
-    request: AutomationExecution,
-  ): Promise<{
+  execute(request: AutomationExecution): Promise<{
     sessionId: string;
     result?: string;
     skillSuggestionPath?: string;
@@ -431,6 +448,11 @@ export interface AutomationRunnerPort {
 }
 
 export class AutomationScheduler {
+  #stopped = false;
+  #stopping: Promise<void> | undefined;
+  #work: Promise<void> = Promise.resolve();
+  #activeRunId: string | undefined;
+  #notifications = new Set<Promise<unknown>>();
   #ticking = false;
   #recovered = false;
   #recovering: Promise<void> | undefined;
@@ -445,7 +467,7 @@ export class AutomationScheduler {
   ) {}
 
   start(intervalMs = 30_000): void {
-    if (this.#timer !== undefined) return;
+    if (this.#stopped || this.#timer !== undefined) return;
     void this.tick().catch(() => undefined);
     this.#timer = setInterval(
       () => void this.tick().catch(() => undefined),
@@ -454,10 +476,21 @@ export class AutomationScheduler {
     this.#timer.unref();
   }
 
-  stop(): void {
-    if (this.#timer === undefined) return;
+  stop(timeoutMs = 5_000): Promise<void> {
+    if (this.#stopping) return this.#stopping;
+    this.#stopped = true;
     clearInterval(this.#timer);
     this.#timer = undefined;
+    const activeRunId = this.#activeRunId;
+    const cancel =
+      activeRunId === undefined
+        ? Promise.resolve()
+        : Promise.resolve().then(() => this.runner.cancel?.(activeRunId));
+    const drain = Promise.allSettled([cancel, this.#work]).then(() =>
+      Promise.allSettled([...this.#notifications]),
+    );
+    this.#stopping = waitForShutdown(drain, timeoutMs);
+    return this.#stopping;
   }
 
   async cancel(automationId: string, runId: string): Promise<AutomationRun> {
@@ -466,12 +499,21 @@ export class AutomationScheduler {
     return run;
   }
 
-  async tick(): Promise<void> {
-    await this.#recoverInterruptedRuns();
-    if (this.#ticking) return;
+  tick(): Promise<void> {
+    if (this.#stopped || this.#ticking) return Promise.resolve();
     this.#ticking = true;
+    this.#work = this.#run().finally(() => {
+      this.#ticking = false;
+    });
+    return this.#work;
+  }
+
+  async #run(): Promise<void> {
+    await this.#recoverInterruptedRuns();
+    if (this.#stopped) return;
     try {
       for (const pending of this.store.claimRunnable()) {
+        if (this.#stopped) break;
         // Isolate each run: a failing begin/execute/finish must not abort the
         // loop and starve the remaining pending runs of this tick.
         try {
@@ -481,6 +523,7 @@ export class AutomationScheduler {
           } catch {
             continue;
           }
+          this.#activeRunId = run.id;
           try {
             const result = await this.runner.execute({
               automationRunId: run.id,
@@ -506,7 +549,7 @@ export class AutomationScheduler {
         }
       }
     } finally {
-      this.#ticking = false;
+      this.#activeRunId = undefined;
     }
   }
 
@@ -524,7 +567,7 @@ export class AutomationScheduler {
     )
       return;
     const name = run.definitionSnapshot.name;
-    void this.notifier
+    const notification = this.notifier
       .publish({
         kind: "automation",
         title:
@@ -538,6 +581,8 @@ export class AutomationScheduler {
         deepLink: `/scheduled/${run.automationId}`,
       })
       .catch(() => undefined);
+    this.#notifications.add(notification);
+    void notification.finally(() => this.#notifications.delete(notification));
   }
 
   async #recoverInterruptedRuns(): Promise<void> {
@@ -545,6 +590,7 @@ export class AutomationScheduler {
     if (this.#recovering === undefined) {
       this.#recovering = (async () => {
         for (const request of this.store.interruptedExecutions()) {
+          if (this.#stopped) return;
           if (this.runner.reconcileInterrupted !== undefined)
             await this.runner.reconcileInterrupted(request);
           this.store.acknowledgeInterruptedExecution(request.automationRunId);

@@ -1,4 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
+import { authorized, createHealthHandler } from "./runtime-http.js";
+import { PersonalQuotaSettlements } from "./quota-settlement.js";
+// Preserve the package entry exports for existing integrations.
+export { authorized, createHealthHandler } from "./runtime-http.js";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-agent";
@@ -26,6 +30,7 @@ import { TeamOrchestrator, TeamStore } from "./team-store.js";
 import { InboxController } from "./inbox-api.js";
 import { InboxStore } from "./inbox-store.js";
 import { PlatformQuotaClient } from "./quota-client.js";
+import { PlatformSharedTrashClient } from "./shared-trash-client.js";
 import {
   FailClosedAutomationRunner,
   FailClosedSharedTurnRunner,
@@ -64,32 +69,6 @@ const json = (
   response.end(JSON.stringify(value));
 };
 
-export const authorized = (
-  request: IncomingMessage,
-  expectedToken: string,
-): boolean => {
-  const provided = request.headers.authorization;
-  if (provided === undefined || !provided.startsWith("Bearer ")) return false;
-  const actual = Buffer.from(provided.slice("Bearer ".length));
-  const expected = Buffer.from(expectedToken);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-};
-
-export const createHealthHandler =
-  (token: string) =>
-  (request: IncomingMessage, response: ServerResponse): void => {
-    if (!authorized(request, token)) {
-      json(response, 401, { error: "authentication_required" });
-      return;
-    }
-    if (request.method !== "GET") {
-      response.writeHead(405, { allow: "GET" });
-      response.end();
-      return;
-    }
-    json(response, 200, { status: "healthy" });
-  };
-
 export function apply(ctx: Context): void {
   const token = process.env.WORKAGENT_RUNTIME_TOKEN;
   if (token === undefined || token.length < 22) {
@@ -103,6 +82,31 @@ export function apply(ctx: Context): void {
     throw new Error("workagent-runtime-api: private roots are required");
   }
   const workspaces = new WorkspaceStore(workspaceRoot, dshHome);
+  const sharedRoot = process.env.WORKAGENT_SHARED_ROOT;
+  const sharedTrash = PlatformSharedTrashClient.fromEnvironment();
+  const sharedFiles = sharedRoot
+    ? new WorkspaceStore(
+        sharedRoot,
+        join(dshHome, "shared-files"),
+        true,
+        sharedTrash
+          ? (projectId, path) =>
+              sharedTrash.operate(
+                { projectId, operation: "recycle", path },
+                "workspace-store",
+              )
+          : undefined,
+      )
+    : undefined;
+  if (sharedFiles) {
+    new WorkspaceController(
+      ctx,
+      token,
+      sharedFiles,
+      () => undefined,
+      "/v1/shared-workspaces",
+    );
+  }
   const models = new ModelAccessStore(dshHome);
   const skills = new SkillCatalogStore();
   const mcp = new McpCatalogStore();
@@ -214,10 +218,21 @@ export function apply(ctx: Context): void {
     undefined,
     ctx.workagentNativeLog,
   );
+  if (sharedFiles) runtime.setSharedFileStore(sharedFiles);
   runtime.mount();
   ctx.provide("workagentSessions", runtime.nativeSessionPort);
   ctx.provide("workagentChannels", runtime.channelService());
   const platformQuota = PlatformQuotaClient.fromEnvironment();
+  const personalQuotaSettlements =
+    platformQuota === undefined
+      ? undefined
+      : new PersonalQuotaSettlements(dshHome, platformQuota);
+  if (personalQuotaSettlements) {
+    ctx.effect(
+      () => personalQuotaSettlements.startRecovery(),
+      "personal quota recovery",
+    );
+  }
   // Fail-closed run entries: without the platform quota channel no run can be
   // reserved or settled, so automation, team, and shared runs refuse to start
   // instead of running unbilled.
@@ -236,14 +251,19 @@ export function apply(ctx: Context): void {
       platformQuota,
       new SharedTurnQuotaJournal(dshHome),
     );
-    void sharedTurnRunner.reconcileInterrupted().catch(() => undefined);
+    ctx.effect(() => sharedTurnRunner.startRecovery(), "shared quota recovery");
     new SharedTurnController(ctx, token, sharedTurnRunner);
   }
   const automations = new AutomationStore(dshHome);
   const automationRunner =
     platformQuota === undefined
       ? new FailClosedAutomationRunner(runtime)
-      : new QuotaAutomationRunner(runtime, presets, platformQuota);
+      : new QuotaAutomationRunner(
+          runtime,
+          presets,
+          platformQuota,
+          personalQuotaSettlements,
+        );
   new AutomationController(
     ctx,
     token,
@@ -254,7 +274,12 @@ export function apply(ctx: Context): void {
   const teamRunner =
     platformQuota === undefined
       ? new FailClosedTeamRunner(runtime)
-      : new QuotaTeamRunner(runtime, presets, platformQuota);
+      : new QuotaTeamRunner(
+          runtime,
+          presets,
+          platformQuota,
+          personalQuotaSettlements,
+        );
   new TeamController(
     ctx,
     token,
@@ -265,8 +290,32 @@ export function apply(ctx: Context): void {
   const inbox = new InboxStore(dshHome);
   new InboxController(ctx, token, inbox, runtime);
   runtime.setActivityProvider(() => {
-    const definitions=automations.list();
-    return { active: inbox.hasProcessing() || definitions.some((definition)=>automations.history(definition.id).some((run)=>run.status==="pending"||run.status==="running")) || teams.list().some((team)=>teams.tasks(team.id).some((task)=>task.status==="queued"||task.status==="running")), nextWakeAt: definitions.filter((definition)=>definition.enabled&&definition.nextRunAt).map((definition)=>definition.nextRunAt!).sort()[0] ?? null };
+    const definitions = automations.list();
+    return {
+      active:
+        inbox.hasProcessing() ||
+        definitions.some((definition) =>
+          automations
+            .history(definition.id)
+            .some(
+              (run) => run.status === "pending" || run.status === "running",
+            ),
+        ) ||
+        teams
+          .list()
+          .some((team) =>
+            teams
+              .tasks(team.id)
+              .some(
+                (task) => task.status === "queued" || task.status === "running",
+              ),
+          ),
+      nextWakeAt:
+        definitions
+          .filter((definition) => definition.enabled && definition.nextRunAt)
+          .map((definition) => definition.nextRunAt!)
+          .sort()[0] ?? null,
+    };
   });
   new WorkspaceController(ctx, token, workspaces, (sessionId) =>
     runtime.workspaceForSession(sessionId),

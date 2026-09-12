@@ -4,7 +4,7 @@ import {
   imInboxDeliverySchema,
   type ImInboundMessage,
 } from "@workagent/contracts";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import { InboxStore } from "./inbox-store.js";
 
 export type InboxExecution = {

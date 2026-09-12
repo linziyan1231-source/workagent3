@@ -1,0 +1,59 @@
+/* File atoms share the editable surface with message text. */
+.workagent-composer-input {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.5em;
+  max-height: 40vh;
+  overflow-y: auto;
+  outline: none;
+  cursor: text;
+  font: inherit;
+}
+.workagent-composer-input:empty::before,
+.workagent-composer-input[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--wa-muted, #858990);
+  pointer-events: none;
+}
+.workagent-file-reference {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  max-width: 100%;
+  border-radius: 5px;
+  padding: 0 3px;
+  gap: 3px;
+  background: color-mix(in srgb, #438de5 8%, transparent);
+  user-select: all;
+}
+.workagent-file-reference a {
+  color: #2474cb;
+  display: inline-block;
+  min-width: 0;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-file-reference a:hover {
+  text-decoration: underline;
+}
+.workagent-file-reference button {
+  border: 0;
+  padding: 0 3px;
+  color: #2474cb;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+[data-ds-dark-theme] .workagent-file-reference :is(a, button) {
+  color: #79b8ff;
+}
+.workagent-markdown a[href*="/workspaces/"][href*="/content?"] {
+  color: #2474cb;
+}
+[data-ds-dark-theme]
+  .workagent-markdown
+  a[href*="/workspaces/"][href*="/content?"] {
+  color: #79b8ff;
+}

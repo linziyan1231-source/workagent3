@@ -92,6 +92,22 @@ func TestRuntimeConfigProjectsManagedHarnessModelRoute(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigProjectsProfessionalDatabaseURL(t *testing.T) {
+	root := t.TempDir()
+	endpoint := "http://127.0.0.1:18306/professional-database/mcp"
+	platform := &WindowsPlatform{config: WindowsPlatformConfig{HarnessCommand: filepath.Join(root, "harness.exe"), HarnessEntrypoint: "index.js", Profile: "workagent", PortalURL: "http://127.0.0.1:8080", ProfessionalDatabaseURL: endpoint}}
+	config := platform.runtimeFileConfig(RuntimeSpec{SID: "S-1-5-21-1000", DataRoot: filepath.Join(root, "employee")}, filepath.Join(root, "registration.token"))
+	data, _ := json.Marshal(config)
+	file := filepath.Join(root, "userhost.json")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := userhost.LoadFileConfig(file)
+	if err != nil || loaded.ProfessionalDatabaseURL != endpoint {
+		t.Fatalf("professional database endpoint not propagated: %v", err)
+	}
+}
+
 func TestUpdateInstalledLimitsPreservesSIDOwnedRuntimeConfig(t *testing.T) {
 	root := t.TempDir()
 	sid := "S-1-5-21-1000"

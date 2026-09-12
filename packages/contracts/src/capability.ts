@@ -7,6 +7,8 @@ export const skillCatalogEntrySchema = z.object({
   version: z.string().min(1),
   source: z.enum(["builtin", "managed", "market", "user"]),
   enabled: z.boolean(),
+  referenceDirectory: z.string().optional(),
+  compatibleEngines: z.array(z.enum(["codex", "kimi", "harness"])).optional(),
   relativePath: z
     .string()
     .min(1)
@@ -22,6 +24,8 @@ export const skillCatalogListSchema = z.array(skillCatalogEntrySchema);
 export const runtimeMcpTransportSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("stdio"),
+    globalSource: z.string().optional(),
+    nativeName: z.string().optional(),
     command: z.string().min(1),
     args: z.array(z.string()).default([]),
     environmentCredentialIds: z
@@ -30,6 +34,8 @@ export const runtimeMcpTransportSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("http"),
+    globalSource: z.string().optional(),
+    nativeName: z.string().optional(),
     url: z.url(),
     headerCredentialIds: z
       .record(z.string().min(1), z.string().min(1))
@@ -37,6 +43,8 @@ export const runtimeMcpTransportSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("sse"),
+    globalSource: z.string().optional(),
+    nativeName: z.string().optional(),
     url: z.url(),
     headerCredentialIds: z
       .record(z.string().min(1), z.string().min(1))
@@ -111,13 +119,3 @@ export const runtimeMcpMutationSchema = runtimeMcpServerSchema
       });
   });
 export type RuntimeMcpMutation = z.infer<typeof runtimeMcpMutationSchema>;
-
-export interface SkillCatalogPort {
-  listSkills(): readonly SkillCatalogEntry[];
-  getSkill(id: string): SkillCatalogEntry | undefined;
-}
-
-export interface McpCatalogPort {
-  listServers(): readonly RuntimeMcpServer[];
-  getServer(id: string): RuntimeMcpServer | undefined;
-}

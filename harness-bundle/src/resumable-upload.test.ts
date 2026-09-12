@@ -71,3 +71,23 @@ it("resumes after restart, rejects offset conflicts and publishes only a complet
     }),
   ).toThrow("invalid_relative_path");
 });
+it("accepts 5 GiB resumable sessions and rejects one extra byte", () => {
+  const root = mkdtempSync(join(tmpdir(), "wa-resume-limit-"));
+  roots.push(root);
+  const store = new WorkspaceStore(join(root, "work"), join(root, "home"));
+  const project = store.create("project");
+  const input = {
+    path: "large.bin",
+    name: "large.bin",
+    size: 5 * 1024 ** 3,
+    lastModified: 0,
+  };
+  expect(store.uploads.create(project.id, input).size).toBe(5368709120);
+  expect(() =>
+    store.uploads.create(project.id, {
+      ...input,
+      path: "oversized.bin",
+      size: input.size + 1,
+    }),
+  ).toThrow("request_too_large");
+});

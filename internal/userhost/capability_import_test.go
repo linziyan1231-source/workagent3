@@ -56,6 +56,33 @@ func TestMCPImportProtectsSecretsAndReportsPartialFailure(t *testing.T) {
 		t.Fatal("history not persisted")
 	}
 }
+func TestMCPImportStreamableHTTPAliases(t *testing.T) {
+	for _, transport := range []string{"http", "streamable-http", "streamablehttp"} {
+		t.Run(transport, func(t *testing.T) {
+			importer := testImporter(t)
+			body := `{"mcpServers":{"remote":{"type":"` + transport + `","url":"https://example.test:8643/mcp","headers":{"Authorization":"alias-test-secret"}}}}`
+			w := httptest.NewRecorder()
+			importer.mcps(w, httptest.NewRequest("POST", "/v1/imports/mcp", strings.NewReader(body)))
+			var records []capabilityImportRecord
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &records) != nil || len(records) != 1 || records[0].Error != "" || records[0].ResourceID == "" {
+				t.Fatal("remote MCP import failed")
+			}
+			server, err := importer.mcp.Get(context.Background(), records[0].ResourceID)
+			if err != nil || server.Transport.Kind != "http" || server.Transport.URL != "https://example.test:8643/mcp" {
+				t.Fatal("remote transport not preserved as HTTP")
+			}
+			secret, err := importer.credentials.Resolve(context.Background(), server.Transport.HeaderCredentialIDs["Authorization"])
+			if err != nil || string(secret) != "alias-test-secret" {
+				t.Fatal("authorization credential not preserved")
+			}
+			clear(secret)
+			history, err := os.ReadFile(importer.journal)
+			if err != nil || bytes.Contains(history, []byte("alias-test-secret")) || strings.Contains(w.Body.String(), "alias-test-secret") {
+				t.Fatal("import outcomes did not protect credentials")
+			}
+		})
+	}
+}
 func TestSkillDirectoryImportRejectsTraversalAndInstallsCompletePackage(t *testing.T) {
 	for _, bad := range []bool{true, false} {
 		t.Run(map[bool]string{true: "traversal", false: "valid"}[bad], func(t *testing.T) {

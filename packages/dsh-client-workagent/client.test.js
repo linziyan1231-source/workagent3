@@ -17,22 +17,19 @@ describe("WorkAgent dsh client composition", () => {
 
   it("routes assistants to the real preset editor", () => {
     expect(client).toContain('assistants: ["助手", navigate("assistants")]');
-    expect(client).toContain('localStorage.getItem(CHAT_PAGE_KEY) || "/chatgpt/"');
+    expect(client).toContain(
+      'localStorage.getItem(CHAT_PAGE_KEY) || "/chatgpt/"',
+    );
   });
 
   it("uses the WorkAgent visual language for shell actions and agents", () => {
     expect(client).toContain("workagent-brand-mark");
-    expect(client).toContain("h(Icon, { name: kind })");
     expect(client).toContain('name: "notifications"');
     expect(client).toContain("workagent-agent-strip");
-    expect(client).toContain("h(EngineMark, { engine: preset.engine })");
     expect(client).toContain("workagent-hero-composer");
     expect(client).not.toContain('preset.engine !== "harness"');
     expect(client).not.toContain("wide ? label : label.slice(0, 1)");
-    expect(client).toContain("workagentHomeNavigation");
-    expect(client).toContain(
-      'workagent-overlay',
-    );
+    expect(client).toContain("workagent-overlay");
   });
 
   it.each([

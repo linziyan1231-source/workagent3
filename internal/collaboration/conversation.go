@@ -10,22 +10,27 @@ import (
 )
 
 type Conversation struct {
-	ID               string     `json:"id"`
-	ProjectID        string     `json:"projectId"`
-	ProjectName      string     `json:"projectName"`
-	Role             string     `json:"role"`
-	Name             string     `json:"name"`
-	AssistantID      string     `json:"assistantId"`
-	AssistantBackend string     `json:"assistantBackend"`
-	ModelID          string     `json:"modelId"`
-	ThinkingEffort   string     `json:"thinkingEffort"`
-	State            string     `json:"state"`
-	LastAIMessageSeq int64      `json:"lastAiMessageSeq"`
-	Pinned           bool       `json:"pinned"`
-	PinnedAt         *time.Time `json:"pinnedAt,omitempty"`
-	Hidden           bool       `json:"hidden"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	ID               string            `json:"id"`
+	ProjectID        string            `json:"projectId"`
+	ProjectName      string            `json:"projectName"`
+	Role             string            `json:"role"`
+	Name             string            `json:"name"`
+	Kind             string            `json:"kind"`
+	CreatorUserID    int64             `json:"creatorUserId"`
+	RuntimeSessionID string            `json:"runtimeSessionId"`
+	AssistantID      string            `json:"assistantId"`
+	AssistantBackend string            `json:"assistantBackend"`
+	AssistantLocked  bool              `json:"assistantLocked"`
+	Assistants       []AssistantMember `json:"assistants"`
+	ModelID          string            `json:"modelId"`
+	ThinkingEffort   string            `json:"thinkingEffort"`
+	State            string            `json:"state"`
+	LastAIMessageSeq int64             `json:"lastAiMessageSeq"`
+	Pinned           bool              `json:"pinned"`
+	PinnedAt         *time.Time        `json:"pinnedAt,omitempty"`
+	Hidden           bool              `json:"hidden"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
 type Mention struct {
@@ -34,34 +39,56 @@ type Mention struct {
 }
 
 type Message struct {
-	Seq          int64     `json:"seq"`
-	ID           string    `json:"id"`
-	Conversation string    `json:"conversationId"`
-	AuthorUserID *int64    `json:"authorUserId,omitempty"`
-	AuthorName   string    `json:"authorName"`
-	Kind         string    `json:"kind"`
-	Body         string    `json:"body"`
-	Mentions     []Mention `json:"mentions"`
-	Attachments  []string  `json:"attachments"`
-	CreatedAt    time.Time `json:"createdAt"`
+	Seq               int64     `json:"seq"`
+	ID                string    `json:"id"`
+	Conversation      string    `json:"conversationId"`
+	AuthorUserID      *int64    `json:"authorUserId,omitempty"`
+	AuthorName        string    `json:"authorName"`
+	AuthorAssistantID string    `json:"authorAssistantId,omitempty"`
+	Kind              string    `json:"kind"`
+	Body              string    `json:"body"`
+	Mentions          []Mention `json:"mentions"`
+	Attachments       []string  `json:"attachments"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
 func (s *Store) CreateConversation(ctx context.Context, conversation Conversation, userID int64) (Conversation, error) {
 	conversation.ID = strings.TrimSpace(conversation.ID)
 	conversation.Name = strings.TrimSpace(conversation.Name)
+	conversation.Kind = strings.TrimSpace(conversation.Kind)
+	if conversation.Kind == "" {
+		conversation.Kind = "discussion"
+	}
+	conversation.RuntimeSessionID = strings.TrimSpace(conversation.RuntimeSessionID)
 	conversation.AssistantID = strings.TrimSpace(conversation.AssistantID)
 	conversation.ModelID = strings.TrimSpace(conversation.ModelID)
 	conversation.ThinkingEffort = strings.TrimSpace(conversation.ThinkingEffort)
-	if !stableIDPattern.MatchString(conversation.ID) || conversation.Name == "" || len(conversation.Name) > 128 || conversation.AssistantID == "" || conversation.ModelID == "" || conversation.ThinkingEffort == "" || (conversation.AssistantBackend != "codex" && conversation.AssistantBackend != "kimi") {
+	// Empty assistant identity represents human-only discussion. Keep the
+	// legacy backend column valid so existing releases can still read it.
+	if conversation.AssistantID == "" {
+		conversation.AssistantBackend, conversation.ModelID, conversation.ThinkingEffort = "codex", "", ""
+	}
+	if !stableIDPattern.MatchString(conversation.ID) || conversation.Name == "" || len(conversation.Name) > 128 || (conversation.AssistantID != "" && (conversation.ModelID == "" || conversation.ThinkingEffort == "")) || (conversation.AssistantBackend != "codex" && conversation.AssistantBackend != "kimi") {
 		return Conversation{}, errors.New("invalid shared conversation")
+	}
+	if conversation.Kind != "discussion" && conversation.Kind != "personal_task" {
+		return Conversation{}, errors.New("invalid shared conversation")
+	}
+	// A personal task only points at a runtime session on the creator's own
+	// userhost; assistant membership does not apply to it.
+	if conversation.Kind == "personal_task" && (conversation.CreatorUserID <= 0 || !stableIDPattern.MatchString(conversation.RuntimeSessionID) || conversation.AssistantID != "") {
+		return Conversation{}, errors.New("invalid personal task conversation")
 	}
 	project, err := s.ProjectForUser(ctx, conversation.ProjectID, userID, true)
 	if err != nil || project.State != "active" {
 		return Conversation{}, ErrForbidden
 	}
 	stamp := s.now().UTC().UnixMilli()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO shared_conversations(id,project_id,name,assistant_id,assistant_backend,model_id,thinking_effort,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'idle',?,?)`, conversation.ID, conversation.ProjectID, conversation.Name, conversation.AssistantID, conversation.AssistantBackend, conversation.ModelID, conversation.ThinkingEffort, stamp, stamp)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO shared_conversations(id,project_id,name,assistant_id,assistant_backend,model_id,thinking_effort,state,created_at,updated_at,kind,creator_user_id,runtime_session_id) VALUES(?,?,?,?,?,?,?,'idle',?,?,?,?,?)`, conversation.ID, conversation.ProjectID, conversation.Name, conversation.AssistantID, conversation.AssistantBackend, conversation.ModelID, conversation.ThinkingEffort, stamp, stamp, conversation.Kind, conversation.CreatorUserID, conversation.RuntimeSessionID)
 	if err != nil {
+		return Conversation{}, err
+	}
+	if err := s.seedConversationAssistant(ctx, conversation); err != nil {
 		return Conversation{}, err
 	}
 	return s.ConversationForUser(ctx, conversation.ID, userID, true)
@@ -72,12 +99,12 @@ func (s *Store) ConversationForUser(ctx context.Context, conversationID string, 
 	var hidden, pinned int
 	var pinnedAt sql.NullInt64
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT c.id,c.project_id,p.name,m.role,c.name,c.assistant_id,c.assistant_backend,c.model_id,c.thinking_effort,c.state,c.last_ai_message_seq,COALESCE(us.pinned,0),us.pinned_at,COALESCE(v.hidden,0),c.created_at,c.updated_at
+	err := s.db.QueryRowContext(ctx, `SELECT c.id,c.project_id,p.name,m.role,c.name,c.assistant_id,c.assistant_backend,c.model_id,c.thinking_effort,c.state,c.last_ai_message_seq,COALESCE(us.pinned,0),us.pinned_at,COALESCE(v.hidden,0),c.created_at,c.updated_at,EXISTS(SELECT 1 FROM shared_ai_runs r WHERE r.conversation_id=c.id),c.kind,c.creator_user_id,c.runtime_session_id
 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id
 JOIN shared_members m ON m.project_id=p.id AND m.user_id=? AND m.state='accepted'
 LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=?
 LEFT JOIN shared_conversation_user_state us ON us.conversation_id=c.id AND us.user_id=?
-WHERE c.id=? AND p.state IN ('active','transfer_pending')`, userID, userID, userID, strings.TrimSpace(conversationID)).Scan(&value.ID, &value.ProjectID, &value.ProjectName, &value.Role, &value.Name, &value.AssistantID, &value.AssistantBackend, &value.ModelID, &value.ThinkingEffort, &value.State, &value.LastAIMessageSeq, &pinned, &pinnedAt, &hidden, &created, &updated)
+WHERE c.id=? AND p.state IN ('active','transfer_pending') AND (c.kind='discussion' OR c.creator_user_id=?)`, userID, userID, userID, strings.TrimSpace(conversationID), userID).Scan(&value.ID, &value.ProjectID, &value.ProjectName, &value.Role, &value.Name, &value.AssistantID, &value.AssistantBackend, &value.ModelID, &value.ThinkingEffort, &value.State, &value.LastAIMessageSeq, &pinned, &pinnedAt, &hidden, &created, &updated, &value.AssistantLocked, &value.Kind, &value.CreatorUserID, &value.RuntimeSessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Conversation{}, ErrNotFound
 	}
@@ -93,11 +120,12 @@ WHERE c.id=? AND p.state IN ('active','transfer_pending')`, userID, userID, user
 		value.PinnedAt = &stamp
 	}
 	value.CreatedAt, value.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
-	return value, nil
+	value.Assistants, err = s.assistantMembers(ctx, value.ProjectID, value.ID)
+	return value, err
 }
 
 func (s *Store) ListConversations(ctx context.Context, userID int64, includeHidden bool) ([]Conversation, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.id FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=? LEFT JOIN shared_conversation_user_state us ON us.conversation_id=c.id AND us.user_id=? WHERE (? OR COALESCE(v.hidden,0)=0) ORDER BY COALESCE(us.pinned,0) DESC,us.pinned_at DESC,c.updated_at DESC,c.id`, userID, userID, userID, includeHidden)
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' LEFT JOIN shared_conversation_visibility v ON v.conversation_id=c.id AND v.user_id=? LEFT JOIN shared_conversation_user_state us ON us.conversation_id=c.id AND us.user_id=? WHERE (? OR COALESCE(v.hidden,0)=0) AND (c.kind='discussion' OR c.creator_user_id=?) ORDER BY COALESCE(us.pinned,0) DESC,us.pinned_at DESC,c.updated_at DESC,c.id`, userID, userID, userID, includeHidden, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +180,15 @@ func (s *Store) UpdateConversationMetadata(ctx context.Context, conversationID s
 		return Conversation{}, err
 	}
 	defer tx.Rollback()
-	var authorized int
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' WHERE c.id=?)`, userID, conversationID).Scan(&authorized); err != nil {
+	var role, kind string
+	if err := tx.QueryRowContext(ctx, `SELECT m.role,c.kind FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' WHERE c.id=? AND (c.kind='discussion' OR c.creator_user_id=?)`, userID, conversationID, userID).Scan(&role, &kind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Conversation{}, ErrNotFound
+		}
 		return Conversation{}, err
 	}
-	if authorized == 0 {
-		return Conversation{}, ErrNotFound
+	if name != nil && kind != "personal_task" && role != "owner" {
+		return Conversation{}, ErrForbidden
 	}
 	if name != nil {
 		if _, err := tx.ExecContext(ctx, `UPDATE shared_conversations SET name=?,updated_at=? WHERE id=?`, nextName, s.now().UTC().UnixMilli(), conversationID); err != nil {
@@ -184,16 +215,43 @@ func (s *Store) UpdateConversationMetadata(ctx context.Context, conversationID s
 	return s.ConversationForUser(ctx, conversationID, userID, true)
 }
 
-func (s *Store) UpdateConversationRuntime(ctx context.Context, conversationID string, userID int64, modelID, thinkingEffort string) (Conversation, error) {
-	modelID, thinkingEffort = strings.TrimSpace(modelID), strings.TrimSpace(thinkingEffort)
-	if modelID == "" || len(modelID) > 256 || thinkingEffort == "" || len(thinkingEffort) > 32 {
-		return Conversation{}, errors.New("shared conversation runtime configuration is invalid")
+func (s *Store) DeleteConversation(ctx context.Context, conversationID string, userID int64) error {
+	conversationID = strings.TrimSpace(conversationID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE shared_conversations SET model_id=?,thinking_effort=?,updated_at=? WHERE id=? AND state='idle' AND EXISTS(SELECT 1 FROM shared_members m WHERE m.project_id=shared_conversations.project_id AND m.user_id=? AND m.state='accepted')`, modelID, thinkingEffort, s.now().UTC().UnixMilli(), strings.TrimSpace(conversationID), userID)
+	defer tx.Rollback()
+	var role, state, kind string
+	if err := tx.QueryRowContext(ctx, `SELECT m.role,c.state,c.kind FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members m ON m.project_id=c.project_id AND m.user_id=? AND m.state='accepted' WHERE c.id=? AND (c.kind='discussion' OR c.creator_user_id=?)`, userID, conversationID, userID).Scan(&role, &state, &kind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	// A personal task belongs to its creator alone; the visibility predicate
+	// above has already established that the requester is the creator.
+	if kind != "personal_task" && role != "owner" {
+		return ErrForbidden
+	}
+	if state != "idle" {
+		return ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM shared_ai_runs WHERE conversation_id=?`, conversationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM shared_conversations WHERE id=?`, conversationID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UpdateConversationRuntime(ctx context.Context, conversationID string, userID int64, modelID, thinkingEffort string) (Conversation, error) {
+	current, err := s.ConversationForUser(ctx, conversationID, userID, true)
 	if err != nil {
 		return Conversation{}, err
 	}
-	if err := requireOne(result, ErrConflict); err != nil {
+	if _, err := s.UpdateAssistantSettings(ctx, current.ProjectID, current.AssistantID, userID, modelID, thinkingEffort); err != nil {
 		return Conversation{}, err
 	}
 	return s.ConversationForUser(ctx, conversationID, userID, true)
@@ -237,11 +295,11 @@ func (s *Store) ListMessagesForUserAfter(ctx context.Context, userID, after int6
 	if limit < 1 || limit > 200 {
 		limit = 200
 	}
-	return s.listMessages(ctx, `m.seq>? AND EXISTS(SELECT 1 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members sm ON sm.project_id=c.project_id AND sm.user_id=? AND sm.state='accepted' WHERE c.id=m.conversation_id)`, []any{after, userID, limit})
+	return s.listMessages(ctx, `m.seq>? AND EXISTS(SELECT 1 FROM shared_conversations c JOIN shared_projects p ON p.id=c.project_id AND p.state IN ('active','transfer_pending') JOIN shared_members sm ON sm.project_id=c.project_id AND sm.user_id=? AND sm.state='accepted' WHERE c.id=m.conversation_id AND (c.kind='discussion' OR c.creator_user_id=?))`, []any{after, userID, userID, limit})
 }
 
 func (s *Store) listMessages(ctx context.Context, where string, args []any) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT m.seq,m.id,m.conversation_id,m.author_user_id,m.author_name,m.kind,m.body,m.mentions_json,m.attachments_json,m.created_at FROM shared_messages m WHERE `+where+` ORDER BY m.seq LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT m.seq,m.id,m.conversation_id,m.author_user_id,m.author_name,m.kind,m.body,m.mentions_json,m.attachments_json,m.created_at,m.author_assistant_id FROM shared_messages m WHERE `+where+` ORDER BY m.seq LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +310,7 @@ func (s *Store) listMessages(ctx context.Context, where string, args []any) ([]M
 		var author sql.NullInt64
 		var mentions, attachments string
 		var created int64
-		if err := rows.Scan(&value.Seq, &value.ID, &value.Conversation, &author, &value.AuthorName, &value.Kind, &value.Body, &mentions, &attachments, &created); err != nil {
+		if err := rows.Scan(&value.Seq, &value.ID, &value.Conversation, &author, &value.AuthorName, &value.Kind, &value.Body, &mentions, &attachments, &created, &value.AuthorAssistantID); err != nil {
 			return nil, err
 		}
 		if author.Valid {

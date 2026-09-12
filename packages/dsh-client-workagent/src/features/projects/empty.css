@@ -1,0 +1,43 @@
+.workagent-project-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed var(--dsw-color-border);
+  border-radius: 16px;
+  padding: 56px 24px;
+  color: var(--dsw-color-muted);
+  background: var(--dsw-color-panel);
+}
+.workagent-project-empty > svg {
+  color: var(--dsw-color-accent);
+}
+.workagent-project-empty > strong {
+  color: var(--dsw-color-text);
+  font-size: calc(16px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-project-empty p {
+  margin: 0;
+  text-align: center;
+}
+@media (max-width: 700px) {
+  .workagent-project-intro {
+    flex-direction: row;
+    align-items: center;
+  }
+  .workagent-workspace-card {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+  .workagent-workspace-card .workagent-actions {
+    grid-column: 1;
+    grid-row: 3;
+    margin-top: 8px;
+  }
+  .workagent-project-toolbar {
+    gap: 8px;
+  }
+  .workagent-project-search {
+    padding: 0 10px;
+  }
+}

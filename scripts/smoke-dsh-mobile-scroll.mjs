@@ -74,13 +74,15 @@ try {
       };
       const list = document.querySelector(".workagent-message-list");
       list.scrollTop = 0;
+      window.scrollTo(0, 0);
+      const scroller = innerWidth <= 760 ? document.scrollingElement : list;
       return {
         composer: bounds(".workagent-conversation-composer"),
         header: bounds(".workagent-overlay-header"),
         bell: bounds(".workagent-top-notifications svg"),
         folder: bounds(".workagent-files-toggle svg"),
-        listHeight: list.clientHeight,
-        scrollHeight: list.scrollHeight,
+        listHeight: scroller.clientHeight,
+        scrollHeight: scroller.scrollHeight,
         viewportHeight: window.innerHeight,
       };
     });
@@ -114,7 +116,7 @@ try {
       const box = await list.boundingBox();
       const cdp = await context.newCDPSession(page);
       const x = box.x + box.width / 2;
-      const y = box.y + box.height - 12;
+      const y = Math.min(box.y + box.height - 12, viewport.height - 12);
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchStart",
         touchPoints: [{ x, y }],
@@ -132,7 +134,7 @@ try {
       });
       await page.waitForTimeout(350);
       assert(
-        await list.evaluate((el) => el.scrollTop > 0),
+        await list.evaluate((el) => innerWidth <= 760 ? scrollY > 0 : el.scrollTop > 0),
         "Touch swipe must scroll messages",
       );
       await cdp.detach();
@@ -155,9 +157,10 @@ try {
         .querySelector(".workagent-overlay-header")
         .getBoundingClientRect().top,
     }));
-    assert.equal(after.scroll, 0);
+    assert.equal(after.scroll, viewport.width <= 760 ? 400 : 0);
     assert.equal(after.outer, 0);
-    assert(after.inner > 0);
+    if (viewport.width <= 760) assert.equal(after.inner, 0);
+    else assert(after.inner > 0);
     assert.equal(after.composer, before.composer.bottom);
     assert.equal(after.header, before.header.top);
     report.checks.push({ viewport, before, after });

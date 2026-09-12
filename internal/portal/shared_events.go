@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -93,6 +94,15 @@ func (s *Server) sharedEventStream(writer http.ResponseWriter, request *http.Req
 			if !open {
 				return
 			}
+			if value.Kind == "refresh" {
+				if value.AuthorUserID != nil && *value.AuthorUserID == user.ID {
+					if _, err := fmt.Fprint(writer, "event: change\ndata: {\"type\":\"refresh\"}\n\n"); err != nil {
+						return
+					}
+					flusher.Flush()
+				}
+				continue
+			}
 			if value.Seq <= lastID {
 				continue
 			}
@@ -111,6 +121,33 @@ func (s *Server) sharedEventStream(writer http.ResponseWriter, request *http.Req
 			flusher.Flush()
 		}
 	}
+}
+
+// An invalidation carries no project or member data. Recipients reload through
+// the current ACLs, including a member who has just lost access.
+func (s *Server) sharedRefreshAudience(ctx context.Context, userID int64) map[int64]bool {
+	users := map[int64]bool{userID: true}
+	projects, err := s.modules.Collaboration.ListProjects(ctx, userID, true)
+	if err != nil {
+		return users
+	}
+	for _, project := range projects {
+		members, err := s.modules.Collaboration.Members(ctx, project.ID, userID)
+		if err == nil {
+			for _, member := range members {
+				users[member.UserID] = true
+			}
+		}
+		if project.CurrentRole == "owner" {
+			invites, err := s.modules.Collaboration.ProjectInvites(ctx, project.ID, userID)
+			if err == nil {
+				for _, invite := range invites {
+					users[invite.TargetUserID] = true
+				}
+			}
+		}
+	}
+	return users
 }
 
 func writeSharedSSE(writer http.ResponseWriter, currentUserID int64, value collaboration.Message) bool {

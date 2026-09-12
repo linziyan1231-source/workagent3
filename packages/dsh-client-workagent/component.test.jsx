@@ -3,12 +3,33 @@ import React from "react";
 import * as primitives from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+function changeField(element, event) {
+  if (element.matches(".workagent-composer-input")) {
+    element.textContent = event.target.value;
+    fireEvent.input(element);
+  } else fireEvent.change(element, event);
+}
+const effectDisposers = [];
+afterEach(() => {
+  cleanup();
+  for (const dispose of effectDisposers.splice(0).reverse()) dispose();
+});
 
 let registration;
 let client;
@@ -24,8 +45,16 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  client = registration.factory((name) =>
+    name === "react" ? React : primitives,
+  );
   sessionStorage.clear();
-  window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -45,9 +74,13 @@ beforeEach(() => {
   });
   document.head.innerHTML = "";
   document.body.innerHTML = "";
+  const sidebar = document.createElement("aside");
+  sidebar.className = "hHd-Xa_root hHd-Xa_collapsed";
+  document.body.append(sidebar);
   window.localStorage.clear();
   window.history.replaceState({}, "", "/");
   vi.restoreAllMocks();
+  window.scrollTo = vi.fn();
 });
 
 function compose(
@@ -65,7 +98,11 @@ function compose(
   const ctx = {
     ...services,
     theme,
-    effect: (callback) => callback(),
+    effect: (callback) => {
+      const dispose = callback();
+      if (typeof dispose === "function") effectDisposers.push(dispose);
+      return dispose;
+    },
     locale: { setLocale: vi.fn() },
     settingsScope: {
       bind: () => localeScope,
@@ -89,6 +126,87 @@ function compose(
 }
 
 describe("WorkAgent dsh slot components", () => {
+  it("collapses extra agents, keeps the selected agent visible and persists order from settings", async () => {
+    const presets = Array.from({ length: 6 }, (_, index) => ({
+      id: `agent-${index}`,
+      name: `Agent ${index}`,
+      engine: "codex",
+      enabled: true,
+      source: "builtin",
+    }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(String(path).endsWith("/presets") ? presets : []),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const entries = compose();
+    const Picker = entries.find(
+      (entry) => entry.options.id === "workagent-agent-picker",
+    ).Component;
+    const Settings = entries.find(
+      (entry) => entry.options.id === "workagent-presets",
+    ).Component;
+    const view = render(
+      <>
+        <Picker />
+        <Settings />
+      </>,
+    );
+    await screen.findByRole("radio", { name: "Agent 0" });
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "更多 Agent，3 个" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Agent 5" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(
+      screen
+        .getByRole("radio", { name: "Agent 5" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "上移 Agent 1" }));
+    expect(
+      JSON.parse(localStorage.getItem("workagent.agent-order.v1")).slice(0, 2),
+    ).toEqual(["agent-1", "agent-0"]);
+    expect(screen.getAllByRole("radio")[0].textContent).toContain("Agent 1");
+    view.unmount();
+    render(<Picker />);
+    expect((await screen.findAllByRole("radio"))[0].textContent).toContain(
+      "Agent 1",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "更多 Agent，3 个" }));
+    fireEvent.keyDown(screen.getByRole("radio", { name: "Agent 2" }), {
+      key: "Escape",
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "更多 Agent，3 个" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("defaults chat uploads to the project and persists the general setting", () => {
+    const Settings = compose().find(
+      (entry) => entry.options.id === "workagent-upload-project",
+    ).Component;
+    const view = render(<Settings />);
+    expect(
+      screen
+        .getByRole("switch", { name: "上传文件保存到当前项目" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(
+      screen.getByRole("switch", { name: "上传文件保存到当前项目" }),
+    );
+    expect(localStorage.getItem("workagent.upload-to-project")).toBe("false");
+    view.unmount();
+    render(<Settings />);
+    expect(
+      screen
+        .getByRole("switch", { name: "上传文件保存到当前项目" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+  });
   it("creates a weekly continuation and edits a versioned cron schedule", async () => {
     window.history.replaceState({}, "", "/?workagent=automations");
     let definitions = [];
@@ -109,6 +227,18 @@ describe("WorkAgent dsh slot components", () => {
           ];
           value = definitions[0];
         } else if (url.endsWith("/automations")) value = definitions;
+        else if (url.endsWith("/completion-notifications"))
+          value = {
+            enabled: false,
+            targetId: "",
+            targets: [
+              {
+                id: "wechat-chat",
+                label: "微信 · 私聊 · 我的微信",
+                connected: true,
+              },
+            ],
+          };
         else if (url.endsWith("/presets"))
           value = [{ id: "kimi", name: "Kimi", engine: "kimi", enabled: true }];
         else if (url.endsWith("/workspaces"))
@@ -145,13 +275,17 @@ describe("WorkAgent dsh slot components", () => {
       ["执行频率", "weekly"],
       ["执行方式", "existing"],
     ])
-      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      changeField(screen.getByLabelText(label), { target: { value } });
     expect(screen.queryByRole("option", { name: "其他项目" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("继续的对话"), {
+    changeField(screen.getByLabelText("继续的对话"), {
       target: { value: "continued" },
     });
-    fireEvent.change(screen.getByLabelText("结果通知"), {
+    changeField(screen.getByLabelText("结果通知"), {
       target: { value: "on_failure" },
+    });
+    fireEvent.click(screen.getByLabelText("开启消息提醒"));
+    changeField(screen.getByLabelText("消息提醒到"), {
+      target: { value: "wechat-chat" },
     });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
     await screen.findByRole("button", { name: "编辑任务" });
@@ -160,12 +294,14 @@ describe("WorkAgent dsh slot components", () => {
       executionMode: "existing",
       conversationId: "continued",
       notificationPolicy: "on_failure",
+      messageNotificationEnabled: true,
+      messageNotificationTargetId: "wechat-chat",
     });
     fireEvent.click(screen.getByRole("button", { name: "编辑任务" }));
-    fireEvent.change(screen.getByLabelText("执行频率"), {
+    changeField(screen.getByLabelText("执行频率"), {
       target: { value: "cron" },
     });
-    fireEvent.change(screen.getByLabelText("Cron 表达式"), {
+    changeField(screen.getByLabelText("Cron 表达式"), {
       target: { value: "0 8 * * 1-5" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存任务" }));
@@ -214,12 +350,14 @@ describe("WorkAgent dsh slot components", () => {
     ).Component;
     const view = render(<Component />);
     const toggle = await screen.findByRole("switch", { name: "任务完成提醒" });
-    expect(toggle.checked).toBe(false);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
-    fireEvent.change(screen.getByRole("combobox", { name: "接收聊天" }), {
+    changeField(screen.getByRole("combobox", { name: "接收聊天" }), {
       target: { value: "target-1" },
     });
-    expect(screen.queryByRole("textbox", { name: "WorkAgent 访问网址" })).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "WorkAgent 访问网址" }),
+    ).toBeNull();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
     ).toBe(false);
@@ -228,9 +366,12 @@ describe("WorkAgent dsh slot components", () => {
     expect(saved).toMatchObject({
       enabled: true,
       targetId: "target-1",
-
     });
-    expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")[1].body)).not.toHaveProperty("baseURL");
+    expect(
+      JSON.parse(
+        fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")[1].body,
+      ),
+    ).not.toHaveProperty("baseURL");
     expect(screen.getByText("渠道未连接")).toBeTruthy();
     expect(screen.getByRole("button", { name: "重试推送" }).disabled).toBe(
       false,
@@ -362,6 +503,7 @@ describe("WorkAgent dsh slot components", () => {
       view.container.querySelector(".workagent-file-preview-pane.is-maximized"),
     ).toBeNull();
     expect(screen.queryByRole("combobox", { name: "文件侧栏项目" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开项目回收站" })).toBeNull();
     expect(
       fetchMock.mock.calls.some(([path]) =>
         String(path).includes("/other-project/"),
@@ -378,6 +520,127 @@ describe("WorkAgent dsh slot components", () => {
     );
     expect(
       screen.getByText("<script>window.unsafe = true</script>中文内容"),
+    ).toBeTruthy();
+    view.unmount();
+  });
+
+  it("opens the current shared project's recycle bin beside the plus button in the same file manager", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?workagent=shared&project=shared-project&discussion=discussion",
+    );
+    const file = {
+      name: "当前文件.txt",
+      path: "当前文件.txt",
+      kind: "file",
+      size: 30,
+    };
+    const trashFile = {
+      id: "deleted-file",
+      name: "已删除.txt",
+      path: "资料/已删除.txt",
+      kind: "file",
+      size: 20,
+      deletedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+    };
+    const root = "/api/portal/shared-workspaces/shared-project";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (path) => {
+        const url = new URL(String(path), "http://localhost");
+        let payload = [];
+        if (url.pathname.endsWith("/shared-projects"))
+          payload = {
+            projects: [
+              {
+                id: "shared-project",
+                name: "当前协作项目",
+                currentRole: "owner",
+              },
+            ],
+          };
+        else if (url.pathname.endsWith("/shared-conversations"))
+          payload = {
+            conversations: [
+              {
+                id: "discussion",
+                project_id: "shared-project",
+                name: "项目讨论",
+                state: "idle",
+              },
+            ],
+          };
+        else if (url.pathname.endsWith("/shared-invites"))
+          payload = { invites: [] };
+        else if (url.pathname.endsWith("/shared-messages"))
+          payload = { messages: [] };
+        else if (url.pathname.endsWith("/members")) payload = { members: [] };
+        else if (url.pathname === `${root}/files`) payload = [file];
+        else if (url.pathname === `${root}/trash`)
+          payload = {
+            entries: [trashFile],
+            usedBytes: 20,
+            projectUsedBytes: 20,
+            limitBytes: 60 * 1024 ** 3,
+            retentionDays: 7,
+          };
+        return Response.json(payload);
+      });
+    const Page = compose().find(
+      (entry) => entry.options.id === "workagent-page",
+    ).Component;
+    const view = render(<Page />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "文件", exact: true }),
+    );
+    await screen.findByRole("button", { name: file.name, exact: true });
+    const plus = screen.getByRole("button", { name: "新建文件夹" });
+    const recycle = screen.getByRole("button", { name: "打开项目回收站" });
+    expect(plus.nextElementSibling).toBe(recycle);
+    expect(recycle.className).toBe(plus.className);
+    expect(recycle.querySelector("svg").getAttribute("width")).toBe(
+      plus.querySelector("svg").getAttribute("width"),
+    );
+    const manager = view.container.querySelector(".workagent-file-manager");
+    const toolbar = view.container.querySelector(".workagent-file-toolbar");
+    fireEvent.click(recycle);
+    await screen.findByRole("button", { name: `操作 ${trashFile.name}` });
+    expect(view.container.querySelector(".workagent-file-manager")).toBe(
+      manager,
+    );
+    expect(view.container.querySelector(".workagent-file-toolbar")).toBe(
+      toolbar,
+    );
+    expect(screen.getByLabelText("当前文件目录").textContent).toBe(
+      "项目文件 / 回收站",
+    );
+    expect(screen.queryByRole("button", { name: "上传文件" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: file.name, exact: true }),
+    ).toBeNull();
+    const beforeReturn = fetchMock.mock.calls.filter(([path]) =>
+      String(path).startsWith(`${root}/files`),
+    ).length;
+    fireEvent.click(screen.getByRole("button", { name: "返回项目文件" }));
+    await screen.findByRole("button", { name: file.name, exact: true });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([path]) =>
+          String(path).startsWith(`${root}/files`),
+        ).length,
+      ).toBeGreaterThan(beforeReturn),
+    );
+    expect(
+      fetchMock.mock.calls
+        .filter(([path]) => String(path).includes("/trash"))
+        .map(([path]) => String(path)),
+    ).toEqual([`${root}/trash`]);
+    fireEvent.click(screen.getByRole("button", { name: `操作 ${file.name}` }));
+    fireEvent.click(screen.getByRole("button", { name: "删除", exact: true }));
+    expect(
+      screen.getByText(/文件将移入项目回收站，最多保留 7 天/),
     ).toBeTruthy();
     view.unmount();
   });
@@ -499,7 +762,7 @@ describe("WorkAgent dsh slot components", () => {
     ).Component;
     const view = render(<Sidebar />);
     await screen.findByRole("button", { name: "notes.txt", exact: true });
-    fireEvent.change(screen.getByLabelText("选择上传文件"), {
+    changeField(screen.getByLabelText("选择上传文件"), {
       target: { files: [new File(["replacement"], "notes.txt")] },
     });
     await screen.findByText("notes.txt：同名文件已存在，请换一个名称。");
@@ -513,7 +776,7 @@ describe("WorkAgent dsh slot components", () => {
     view.unmount();
   });
 
-  it("accepts a 1 GB file and rejects larger files before sending them", async () => {
+  it("accepts a 5 GB file and rejects larger files before sending them", async () => {
     localStorage.setItem("workagent.files.open", "true");
     localStorage.setItem("workagent.hero.workspace", "project");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -523,8 +786,8 @@ describe("WorkAgent dsh slot components", () => {
             init.method === "POST"
               ? {
                   id: "upload",
-                  size: 1024 ** 3,
-                  offset: 1024 ** 3,
+                  size: 5 * 1024 ** 3,
+                  offset: 5 * 1024 ** 3,
                   path: "large.bin",
                 }
               : String(path).endsWith("/workspaces")
@@ -540,8 +803,8 @@ describe("WorkAgent dsh slot components", () => {
     const view = render(<Sidebar />);
     await screen.findByLabelText("选择上传文件");
     const file = new File(["fixture"], "large.bin");
-    Object.defineProperty(file, "size", { value: 1024 ** 3 });
-    fireEvent.change(screen.getByLabelText("选择上传文件"), {
+    Object.defineProperty(file, "size", { value: 5 * 1024 ** 3 });
+    changeField(screen.getByLabelText("选择上传文件"), {
       target: { files: [file] },
     });
     await screen.findByText("已上传 1 个文件");
@@ -549,15 +812,15 @@ describe("WorkAgent dsh slot components", () => {
       expect.stringContaining("/uploads"),
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining('"size":1073741824'),
+        body: expect.stringContaining('"size":5368709120'),
       }),
     );
     const oversized = new File(["fixture"], "oversized.bin");
-    Object.defineProperty(oversized, "size", { value: 1024 ** 3 + 1 });
-    fireEvent.change(screen.getByLabelText("选择上传文件"), {
+    Object.defineProperty(oversized, "size", { value: 5 * 1024 ** 3 + 1 });
+    changeField(screen.getByLabelText("选择上传文件"), {
       target: { files: [oversized] },
     });
-    await screen.findByText("oversized.bin：超过 1 GB");
+    await screen.findByText("oversized.bin：超过 5 GB");
     expect(
       fetchMock.mock.calls.filter(
         ([, init]) => init?.method === "POST" && init?.body !== undefined,
@@ -595,18 +858,18 @@ describe("WorkAgent dsh slot components", () => {
       const view = render(<Component />);
       const input = screen.getByLabelText(label);
       const submit = vi
-        .spyOn(input.form, "requestSubmit")
+        .spyOn(input.closest("form"), "requestSubmit")
         .mockImplementation(() => {});
       await act(async () => {});
       fireEvent.compositionStart(input);
-      fireEvent.change(input, { target: { value: "nihao" } });
+      changeField(input, { target: { value: "nihao" } });
       expect(
         fireEvent.keyDown(input, { key: "Enter", isComposing: true }),
       ).toBe(true);
       expect(submit).not.toHaveBeenCalled();
-      expect(input.value).toBe("nihao");
+      expect(input.textContent).toBe("nihao");
       fireEvent.compositionEnd(input, { data: "你好" });
-      fireEvent.change(input, { target: { value: "你好" } });
+      changeField(input, { target: { value: "你好" } });
       // Some IMEs end composition before their confirming keydown, but retain 229.
       expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(
         true,
@@ -615,7 +878,7 @@ describe("WorkAgent dsh slot components", () => {
         true,
       );
       expect(submit).not.toHaveBeenCalled();
-      expect(input.value).toBe("你好");
+      expect(input.textContent).toBe("你好");
       expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 13 })).toBe(
         false,
       );
@@ -656,12 +919,21 @@ describe("WorkAgent dsh slot components", () => {
     expect(document.title).toBe("WorkAgent");
   });
 
-  it("removes the host configuration-file action", async () => {
+  it("hides only the host configuration-file action", async () => {
     compose();
+    const panel = document.createElement("div");
+    panel.className = "VOzbGW_panel";
+    panel.innerHTML =
+      '<header class="VOzbGW_header"><div class="VOzbGW_actions"></div></header>';
     const button = document.createElement("button");
     button.textContent = "打开配置文件";
-    document.body.append(button);
-    await waitFor(() => expect(document.body.contains(button)).toBe(false));
+    panel.querySelector(".VOzbGW_actions").append(button);
+    document.body.append(panel);
+    await waitFor(() => expect(button.hidden).toBe(true));
+    const userButton = document.createElement("button");
+    userButton.textContent = "打开配置文件";
+    document.body.append(userButton);
+    expect(userButton.hidden).toBe(false);
   });
 
   it("keeps the product title when the upstream renderer selects a session", async () => {
@@ -679,7 +951,7 @@ describe("WorkAgent dsh slot components", () => {
     ).Component;
     const { unmount } = render(<Typography />);
     expect(screen.getByLabelText("字体大小").value).toBe("13");
-    fireEvent.change(screen.getByLabelText("字体大小"), {
+    changeField(screen.getByLabelText("字体大小"), {
       target: { value: "16" },
     });
     expect(localStorage.getItem("workagent.font-size")).toBe("16");
@@ -791,12 +1063,12 @@ describe("WorkAgent dsh slot components", () => {
     render(<Overlay />);
     await screen.findByText("品牌设计");
     expect(screen.queryByLabelText("新项目名称")).toBeNull();
-    fireEvent.change(screen.getByLabelText("搜索项目"), {
+    changeField(screen.getByLabelText("搜索项目"), {
       target: { value: " RESEARCH " },
     });
     expect(screen.queryByText("品牌设计")).toBeNull();
     expect(screen.getByText("Research")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("搜索项目"), {
+    changeField(screen.getByLabelText("搜索项目"), {
       target: { value: "找不到" },
     });
     expect(screen.getByText("没有找到匹配的项目")).toBeTruthy();
@@ -887,20 +1159,31 @@ describe("WorkAgent dsh slot components", () => {
           });
         const url = String(path);
         if (init.method === "POST") {
-          name = JSON.parse(init.body).destination.split("/").pop();
-          return new Response(null, { status: 204 });
+          const { moves } = JSON.parse(init.body);
+          name = moves[0].destination.split("/").pop();
+          return new Response(
+            JSON.stringify({
+              id: "rename-1",
+              state: "completed",
+              applied: 1,
+              moves,
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
         }
         if (init.method === "DELETE") {
           removed = true;
           return new Response(null, { status: 204 });
         }
-        const payload = url.includes("/files?path=")
-          ? removed
-            ? []
-            : [{ name, path: `资料/${name}`, kind: "file" }]
-          : url.endsWith("/files")
-            ? [{ name: "资料", path: "资料", kind: "directory" }]
-            : [{ id: "project-1", name: "项目" }];
+        const payload = url.endsWith("/files?path=")
+          ? [{ name: "资料", path: "资料", kind: "directory" }]
+          : url.includes("/files?path=")
+            ? removed
+              ? []
+              : [{ name, path: `资料/${name}`, kind: "file" }]
+            : url.endsWith("/workspaces")
+              ? [{ id: "project-1", name: "项目" }]
+              : [];
         return new Response(JSON.stringify(payload), {
           headers: { "Content-Type": "application/json" },
         });
@@ -914,13 +1197,22 @@ describe("WorkAgent dsh slot components", () => {
       await screen.findByRole("button", { name: "资料", exact: true }),
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "重命名 原稿.txt" }),
+      await screen.findByRole("button", { name: "操作 原稿.txt" }),
     );
-    fireEvent.change(screen.getByLabelText("文件名"), {
+    fireEvent.click(
+      screen.getByRole("button", { name: "重命名", exact: true }),
+    );
+    changeField(screen.getByLabelText("文件名"), {
       target: { value: "定稿.txt" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    const download = await screen.findByRole("link", { name: "下载 定稿.txt" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "操作 定稿.txt" }),
+    );
+    const download = await screen.findByRole("link", {
+      name: "下载",
+      exact: true,
+    });
     expect(download.getAttribute("href")).toContain(
       encodeURIComponent("资料/定稿.txt"),
     );
@@ -928,15 +1220,17 @@ describe("WorkAgent dsh slot components", () => {
       "/api/runtime/v1/workspaces/project-1/move",
       expect.objectContaining({
         body: JSON.stringify({
-          source: "资料/原稿.txt",
-          destination: "资料/定稿.txt",
+          moves: [{ source: "资料/原稿.txt", destination: "资料/定稿.txt" }],
         }),
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "删除 定稿.txt" }));
-    expect(removed).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "删除", exact: true }));
-    expect(await screen.findByText("此文件夹还没有文件")).toBeTruthy();
+    expect(removed).toBe(false);
+    expect(screen.getByRole("form", { name: "删除文件" })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认删除", exact: true }),
+    );
+    expect(await screen.findByText("空文件夹")).toBeTruthy();
     expect(removed).toBe(true);
   });
 
@@ -975,7 +1269,15 @@ describe("WorkAgent dsh slot components", () => {
         expect.objectContaining({ method: "PATCH" }),
       ),
     );
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+    expect(
+      JSON.parse(
+        fetchMock.mock.calls.find(
+          ([url, options]) =>
+            url === "/api/runtime/v1/mcp-servers/docs" &&
+            options?.method === "PATCH",
+        )[1].body,
+      ),
+    ).toEqual({
       enabled: false,
     });
   });
@@ -1000,10 +1302,10 @@ describe("WorkAgent dsh slot components", () => {
       });
     const mcp = compose().find((entry) => entry.options.id === "workagent-mcp");
     const { container } = render(React.createElement(mcp.Component));
-    fireEvent.change(screen.getByLabelText("名称"), {
+    changeField(screen.getByLabelText("名称"), {
       target: { value: "Docs" },
     });
-    fireEvent.change(screen.getByLabelText("服务地址"), {
+    changeField(screen.getByLabelText("服务地址"), {
       target: { value: "https://example.com/mcp" },
     });
     fireEvent.submit(screen.getByLabelText("服务地址").closest("form"));
@@ -1032,20 +1334,23 @@ describe("WorkAgent dsh slot components", () => {
           });
         const target = String(path);
         const payload = target.includes("/marketplace")
-          ? { entries: [] }
-          : target.includes("skill-market")
-            ? init.method === "POST"
-              ? {}
-              : {
-                  skills: [
-                    {
-                      id: "writing",
-                      name: "Writing helper",
-                      version: "1.0.0",
-                    },
-                  ],
-                }
-            : [];
+          ? init.method === "POST"
+            ? {}
+            : {
+                entries: [
+                  {
+                    id: "writing-version",
+                    seriesId: "writing",
+                    kind: "skill",
+                    name: "Writing helper",
+                    version: "1.0.0",
+                    publisher: "alice",
+                  },
+                ],
+              }
+          : target.includes("/workspaces")
+            ? []
+            : { projects: [] };
         return new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -1059,7 +1364,7 @@ describe("WorkAgent dsh slot components", () => {
     fireEvent.click(screen.getByRole("button", { name: "获取" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/portal/skill-market/install",
+        "/api/portal/marketplace/install",
         expect.objectContaining({ method: "POST" }),
       ),
     );
@@ -1163,7 +1468,7 @@ describe("WorkAgent dsh slot components", () => {
     );
     const { container } = render(React.createElement(section.Component));
     expect(screen.queryByLabelText("模型")).toBeNull();
-    fireEvent.change(screen.getByLabelText("名称"), {
+    changeField(screen.getByLabelText("名称"), {
       target: { value: "Writer" },
     });
     fireEvent.submit(container.querySelector("form"));
@@ -1184,7 +1489,7 @@ describe("WorkAgent dsh slot components", () => {
       mcpServerIds: [],
     });
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
-    fireEvent.change(screen.getByLabelText("名称"), {
+    changeField(screen.getByLabelText("名称"), {
       target: { value: "Editor" },
     });
     fireEvent.submit(container.querySelector("form"));
@@ -1194,17 +1499,22 @@ describe("WorkAgent dsh slot components", () => {
         expect.objectContaining({ method: "PATCH" }),
       ),
     );
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     fireEvent.click(await screen.findByRole("button", { name: "删除" }));
-    expect(confirm).toHaveBeenCalledWith(
-      "确定删除助手“Editor”？此操作无法撤销。",
-    );
+    expect(
+      await screen.findByRole("alertdialog", { name: "删除助手" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("确定删除助手“Editor”？此操作无法撤销。"),
+    ).toBeTruthy();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE"),
     ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "取消", exact: true }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.getByText("Editor", { selector: "strong" })).toBeTruthy();
-    confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await screen.findByRole("alertdialog", { name: "删除助手" });
+    fireEvent.click(screen.getByRole("button", { name: "删除助手" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/runtime/v1/presets/new",
@@ -1334,18 +1644,18 @@ describe("WorkAgent dsh slot components", () => {
       });
     let view = mount();
     await expectChoice("first", "low");
-    fireEvent.change(screen.getByLabelText("模型"), {
+    changeField(screen.getByLabelText("模型"), {
       target: { value: "second" },
     });
-    fireEvent.change(screen.getByLabelText("思考级别"), {
+    changeField(screen.getByLabelText("思考级别"), {
       target: { value: "high" },
     });
     await expectChoice("second", "high");
-    fireEvent.change(screen.getByLabelText("模型"), {
+    changeField(screen.getByLabelText("模型"), {
       target: { value: "first" },
     });
     await expectChoice("first", "low");
-    fireEvent.change(screen.getByLabelText("模型"), {
+    changeField(screen.getByLabelText("模型"), {
       target: { value: "second" },
     });
     await expectChoice("second", "high");
@@ -1409,9 +1719,38 @@ describe("WorkAgent dsh slot components", () => {
   });
 
   it("shows remaining percentages in user settings without dollar amounts", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async path => new Response(JSON.stringify(String(path) === "/api/quota/dollars" ? {budgets:[{pool:"codex",dailyUsd:2,weeklyUsd:5,dailyLimitUsd:40,weeklyLimitUsd:80},{pool:"kimi",dailyUsd:1,weeklyUsd:3,dailyLimitUsd:10,weeklyLimitUsd:20}]} : []),{headers:{"Content-Type":"application/json"}}));
-    const Component=compose().find(entry=>entry.options.id==="workagent-quota").Component;
-    const view=render(<Component />);
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            String(path) === "/api/quota/dollars"
+              ? {
+                  budgets: [
+                    {
+                      pool: "codex",
+                      dailyUsd: 2,
+                      weeklyUsd: 5,
+                      dailyLimitUsd: 40,
+                      weeklyLimitUsd: 80,
+                    },
+                    {
+                      pool: "kimi",
+                      dailyUsd: 1,
+                      weeklyUsd: 3,
+                      dailyLimitUsd: 10,
+                      weeklyLimitUsd: 20,
+                    },
+                  ],
+                }
+              : [],
+          ),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const Component = compose().find(
+      (entry) => entry.options.id === "workagent-quota",
+    ).Component;
+    const view = render(<Component />);
     expect(await screen.findByText("95%")).toBeTruthy();
     expect(screen.getByText("94%")).toBeTruthy();
     expect(view.container.textContent).not.toMatch(/\$|美元/);
@@ -1505,7 +1844,7 @@ describe("WorkAgent dsh slot components", () => {
 
     const projectSelect = await screen.findByLabelText("个人项目");
     expect(screen.getByRole("option", { name: "不使用项目" })).toBeTruthy();
-    fireEvent.change(projectSelect, { target: { value: "workspace-2" } });
+    changeField(projectSelect, { target: { value: "workspace-2" } });
     expect(projectSelect.value).toBe("workspace-2");
     const projectButton = screen.getByRole("button", { name: "设计项目" });
     fireEvent.click(projectButton);
@@ -1545,7 +1884,7 @@ describe("WorkAgent dsh slot components", () => {
 
     expect(await screen.findByText("设计评审")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "搜索对话" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索对话" }), {
+    changeField(screen.getByRole("textbox", { name: "搜索对话" }), {
       target: { value: "没有结果" },
     });
     expect(screen.getByText("没有匹配的对话")).toBeTruthy();
@@ -1668,7 +2007,6 @@ describe("WorkAgent dsh slot components", () => {
   it("keeps only failed conversations selected after a partial batch delete", async () => {
     let removed = false;
     const calls = [];
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (path, init = {}) => {
         const target = String(path);
@@ -1713,6 +2051,10 @@ describe("WorkAgent dsh slot components", () => {
     fireEvent.click(screen.getByRole("button", { name: "多选对话" }));
     fireEvent.click(screen.getByRole("button", { name: "全选当前列表" }));
     fireEvent.click(screen.getByRole("button", { name: "删除选中（2）" }));
+    expect(calls).toHaveLength(0);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "确认", exact: true }),
+    );
     await screen.findByRole("button", { name: "删除选中（1）" });
     expect(screen.getByRole("alert").textContent).toContain("失败项");
     expect(screen.getByLabelText("选择对话 失败项").checked).toBe(true);
@@ -1723,6 +2065,39 @@ describe("WorkAgent dsh slot components", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
+        if (String(path).endsWith("/completion-notifications"))
+          return new Response(
+            JSON.stringify({
+              enabled: false,
+              targetId: "",
+              mutedSessions: [],
+              sessionSettings: {},
+              targets: [
+                {
+                  id: "wechat-chat",
+                  label: "微信 · 我的微信",
+                  connected: true,
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        if (String(path).endsWith("/completion-notifications/session"))
+          return new Response(
+            JSON.stringify({
+              enabled: false,
+              targetId: "",
+              mutedSessions: [],
+              sessionSettings: {
+                "session-1": {
+                  enabled: true,
+                  targetId: "wechat-chat",
+                },
+              },
+              targets: [],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
         if (String(path).includes("/interactions?"))
           return new Response("[]", {
             headers: { "content-type": "application/json" },
@@ -1758,12 +2133,22 @@ describe("WorkAgent dsh slot components", () => {
     );
     render(React.createElement(sidebar.Component));
     fireEvent.click(
-      await screen.findByRole("button", { name: "编辑项目 旧项目" }),
+      await screen.findByRole("button", { name: "项目操作 旧项目" }),
     );
+    await screen.findByRole("dialog", { name: "项目操作" });
+    fireEvent.click(screen.getByRole("button", { name: "置顶项目" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "项目操作 旧项目" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "项目操作 旧项目" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "管理" }));
     const projectName = screen
       .getByRole("dialog", { name: "重命名" })
       .querySelector("input");
-    fireEvent.change(projectName, { target: { value: "新项目" } });
+    changeField(projectName, { target: { value: "新项目" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1773,7 +2158,30 @@ describe("WorkAgent dsh slot components", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "编辑对话 旧对话" }));
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(await screen.findByRole("button", { name: "消息提醒" }));
+    expect(
+      screen.getByRole("dialog", { name: "消息提醒" }).textContent,
+    ).toContain("项目：旧项目 · 对话：旧对话");
+    expect((await screen.findByLabelText("当前会话接收聊天")).value).toBe(
+      "wechat-chat",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "开启消息提醒" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runtime/v1/completion-notifications/session",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            sessionId: "session-1",
+            enabled: true,
+            targetId: "wechat-chat",
+          }),
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑对话 旧对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "管理对话" }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1820,16 +2228,16 @@ describe("WorkAgent dsh slot components", () => {
     render(React.createElement(overlay.Component));
     await screen.findByRole("option", { name: "Kimi" });
     expect(screen.queryByRole("option", { name: "Disabled" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("任务名称"), {
+    changeField(screen.getByLabelText("任务名称"), {
       target: { value: "进展汇总" },
     });
-    fireEvent.change(screen.getByLabelText("执行助手"), {
+    changeField(screen.getByLabelText("执行助手"), {
       target: { value: "kimi" },
     });
-    fireEvent.change(screen.getByLabelText("所属项目"), {
+    changeField(screen.getByLabelText("所属项目"), {
       target: { value: "project" },
     });
-    fireEvent.change(screen.getByLabelText("任务内容"), {
+    changeField(screen.getByLabelText("任务内容"), {
       target: { value: "汇总项目进展" },
     });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
@@ -1884,27 +2292,70 @@ describe("WorkAgent dsh slot components", () => {
   });
 
   it("clears the successful home draft and allows another send without remounting", async () => {
-    let turns=0;
-    vi.spyOn(globalThis,"fetch").mockImplementation(async (path,init={})=>{
-      const url=String(path);let payload=[];
-      if(init.method==="POST"&&url.endsWith("/sessions"))payload={id:`created-${turns}`};
-      else if(init.method==="POST"&&url.endsWith("/turns")){turns++;payload={};}
-      else if(url.endsWith("/presets"))payload=[{id:"builtin-general",engine:"codex",name:"Codex",enabled:true}];
-      else if(url.endsWith("/model-options"))payload=[{engine:"codex",state:"ready",models:[{id:"test-model",name:"test",isDefault:true,reasoning:[]}]}];
-      return new Response(JSON.stringify(payload),{headers:{"Content-Type":"application/json"}});
-    });
-    const Component=compose().find(e=>e.options.id==="workagent-workspace-composer").Component;
-    const view=render(<Component/>);
-    await waitFor(()=>expect(screen.getByLabelText("模型").value).toBe("test-model"));
-    for(const value of ["test connection","second message"]){
-      fireEvent.change(screen.getByLabelText("输入消息"),{target:{value}});
-      await waitFor(()=>expect(screen.getByRole("button",{name:"发送消息"}).disabled).toBe(false));
-      fireEvent.click(screen.getByRole("button",{name:"发送消息"}));
-      await waitFor(()=>expect(screen.getByLabelText("输入消息").value).toBe(""));
+    let turns = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path, init = {}) => {
+        const url = String(path);
+        let payload = [];
+        if (init.method === "POST" && url.endsWith("/sessions"))
+          payload = { id: `created-${turns}` };
+        else if (init.method === "POST" && url.endsWith("/turns")) {
+          turns++;
+          payload = {};
+        } else if (url.endsWith("/presets"))
+          payload = [
+            {
+              id: "builtin-general",
+              engine: "codex",
+              name: "Codex",
+              enabled: true,
+            },
+          ];
+        else if (url.endsWith("/model-options"))
+          payload = [
+            {
+              engine: "codex",
+              state: "ready",
+              models: [
+                {
+                  id: "test-model",
+                  name: "test",
+                  isDefault: true,
+                  reasoning: [],
+                },
+              ],
+            },
+          ];
+        return new Response(JSON.stringify(payload), {
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+    const Component = compose().find(
+      (e) => e.options.id === "workagent-workspace-composer",
+    ).Component;
+    const view = render(<Component />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("模型").value).toBe("test-model"),
+    );
+    for (const value of ["test connection", "second message"]) {
+      changeField(screen.getByLabelText("输入消息"), {
+        target: { value },
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "发送消息" }).disabled).toBe(
+          false,
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+      await waitFor(() =>
+        expect(screen.getByLabelText("输入消息").textContent).toBe(""),
+      );
     }
-    expect(turns).toBe(2);view.unmount();
+    expect(turns).toBe(2);
+    view.unmount();
   });
-  it("creates team work from the new-conversation composer", async () => {
+  it("keeps collaboration out of the personal home composer", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (path, init = {}) => {
@@ -1918,16 +2369,39 @@ describe("WorkAgent dsh slot components", () => {
           });
         const target = String(path);
         let payload = [];
+        if (target.includes("shared-projects?"))
+          return Response.json({
+            projects: [
+              { id: "shared-project", name: "员工项目", hidden: false },
+            ],
+          });
+        if (target.endsWith("shared-invites"))
+          return Response.json({ invites: [] });
+        if (target.includes("shared-conversations?"))
+          return Response.json({
+            conversations: [
+              {
+                id: "discussion",
+                project_id: "shared-project",
+                name: "项目讨论",
+              },
+            ],
+          });
+        if (target.endsWith("/members")) return Response.json({ members: [] });
+        if (target.endsWith("/shared-messages"))
+          return Response.json({
+            message: { id: "saved" },
+            ai_status: "not_requested",
+          });
         if (init.method === "POST" && target.endsWith("/teams"))
           payload = {
             id: "team-1",
             members: [{ sessionId: "team-session-1" }],
           };
+        else if (init.method === "POST" && target.endsWith("/sessions"))
+          payload = { id: "personal-session" };
         else if (init.method === "POST" && target.endsWith("/turns"))
-          return new Response(JSON.stringify({ error: "turn_not_started" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
+          payload = {};
         else if (target.endsWith("/presets"))
           payload = [
             {
@@ -1969,20 +2443,68 @@ describe("WorkAgent dsh slot components", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("模型").value).toBe("test-model"),
     );
-    fireEvent.click(screen.getByRole("checkbox", { name: "团队模式" }));
-    fireEvent.change(screen.getByLabelText("团队项目"), {
-      target: { value: "team-project" },
-    });
-    fireEvent.change(screen.getByLabelText("输入消息"), {
+    expect(screen.queryByRole("checkbox", { name: "协作模式" })).toBeNull();
+    expect(screen.queryByLabelText("协作项目")).toBeNull();
+    changeField(screen.getByLabelText("输入消息"), {
       target: { value: "Investigate" },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runtime/v1/teams",
+        "/api/runtime/v1/sessions",
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    expect(
+      fetchMock.mock.calls.some(
+        ([path, init]) =>
+          String(path).endsWith("/teams") && init?.method === "POST",
+      ),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([path]) =>
+        String(path).endsWith("/shared-messages"),
+      ),
+    ).toBe(false);
+  });
+
+  it("expands file management immediately below its project with an upload chooser", async () => {
+    window.history.replaceState({}, "", "/?workagent=workspaces");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            String(path).endsWith("/workspaces")
+              ? [
+                  { id: "first", name: "First" },
+                  { id: "second", name: "Second" },
+                ]
+              : [],
+          ),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const Overlay = compose().find(
+      (entry) => entry.options.id === "workagent-page",
+    ).Component;
+    const view = render(<Overlay />);
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "管理文件" }))[0],
+    );
+    await screen.findByText("此项目还没有文件");
+    const cards = view.container.querySelectorAll(".workagent-workspace-card");
+    const browser = screen.getByLabelText("项目文件");
+    expect(cards[0].nextElementSibling).toBe(browser);
+    expect(browser.nextElementSibling).toBe(cards[1]);
+    expect(screen.getByRole("button", { name: "上传文件" })).toBeTruthy();
+    expect(screen.getByLabelText("选择上传文件").multiple).toBe(true);
+    fireEvent.click(screen.getAllByRole("button", { name: "管理文件" })[1]);
+    await waitFor(() =>
+      expect(cards[1].nextElementSibling).toBe(
+        screen.getByLabelText("项目文件"),
+      ),
+    );
+    expect(cards[0].nextElementSibling).toBe(cards[1]);
   });
 
   it("browses and previews workspace text files", async () => {
@@ -2001,9 +2523,11 @@ describe("WorkAgent dsh slot components", () => {
           status: 200,
           headers: { "Content-Type": "text/plain" },
         });
-      const payload = String(path).endsWith("/files")
+      const payload = String(path).includes("/files?")
         ? [{ name: "notes.txt", path: "notes.txt", kind: "file" }]
-        : [{ id: "workspace-1", name: "Project" }];
+        : String(path).endsWith("/workspaces")
+          ? [{ id: "workspace-1", name: "Project" }]
+          : [];
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -2015,7 +2539,7 @@ describe("WorkAgent dsh slot components", () => {
     render(React.createElement(overlay.Component));
     fireEvent.click(await screen.findByRole("button", { name: "管理文件" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "预览 notes.txt" }),
+      await screen.findByRole("button", { name: "notes.txt", exact: true }),
     );
     expect(await screen.findByText("hello workspace")).toBeTruthy();
   });
@@ -2161,17 +2685,25 @@ describe("conversation controls", () => {
     const open = vi.fn();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        async (path) =>
-          new Response(
-            JSON.stringify(
-              String(path).endsWith("/sessions/session-main")
-                ? { id: "session-main", engine: "codex", title: "Native title" }
-                : [],
-            ),
+      .mockImplementation(async (path, init) => {
+        if (String(path) === "/api/session.prompt") {
+          const { payload } = JSON.parse(init.body);
+          return new Response(
+            JSON.stringify({
+              result: await prompt(payload.content, payload.mode),
+            }),
             { headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify(
+            String(path).endsWith("/sessions/session-main")
+              ? { id: "session-main", engine: "codex", title: "Native title" }
+              : [],
           ),
-      );
+          { headers: { "content-type": "application/json" } },
+        );
+      });
     const previous = globalThis.EventSource;
     const eventSource = vi.fn();
     globalThis.EventSource = class {
@@ -2228,7 +2760,7 @@ describe("conversation controls", () => {
         ),
       ).toBe(false);
       expect(eventSource).not.toHaveBeenCalled();
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "next request" },
       });
       fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -2256,13 +2788,13 @@ describe("conversation controls", () => {
         ok: false,
         error: { code: "quota-exceeded", message: "native quota rejected" },
       });
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "keep rejected input" },
       });
       fireEvent.click(screen.getByRole("button", { name: "发送" }));
       await screen.findByText("native quota rejected");
       await waitFor(() =>
-        expect(screen.getByLabelText("继续对话").value).toBe(
+        expect(screen.getByLabelText("继续对话").textContent).toBe(
           "keep rejected input",
         ),
       );
@@ -2438,21 +2970,29 @@ describe("conversation controls", () => {
     const open = vi.fn();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        async (path) =>
-          new Response(
-            JSON.stringify(
-              String(path).endsWith("/sessions")
-                ? [main, side]
-                : String(path).endsWith("/session-main")
-                  ? main
-                  : String(path).endsWith("/session-side")
-                    ? side
-                    : [],
-            ),
+      .mockImplementation(async (path, init) => {
+        if (String(path) === "/api/session.prompt") {
+          const { payload } = JSON.parse(init.body);
+          return new Response(
+            JSON.stringify({
+              result: await prompt(payload.content, payload.mode),
+            }),
             { headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify(
+            String(path).endsWith("/sessions")
+              ? [main, side]
+              : String(path).endsWith("/session-main")
+                ? main
+                : String(path).endsWith("/session-side")
+                  ? side
+                  : [],
           ),
-      );
+          { headers: { "content-type": "application/json" } },
+        );
+      });
     const Component = compose(undefined, {
       sessions: {
         binding: (id) => bindings[id],
@@ -2466,7 +3006,7 @@ describe("conversation controls", () => {
     try {
       await screen.findByText("main canonical");
       await screen.findByText("side canonical");
-      fireEvent.change(screen.getByLabelText("侧聊消息"), {
+      changeField(screen.getByLabelText("侧聊消息"), {
         target: { value: "side only" },
       });
       fireEvent.submit(screen.getByLabelText("侧聊消息").closest("form"));
@@ -2597,7 +3137,7 @@ describe("conversation controls", () => {
     };
     try {
       await screen.findByText("agent reply");
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "unsent main draft" },
       });
       f.fetchMock.mockImplementation((path, init) => {
@@ -2624,11 +3164,13 @@ describe("conversation controls", () => {
       navigate("navigation-delayed");
       await screen.findByText("Delayed chat");
       expect(screen.queryByText("agent reply")).toBeNull();
-      expect(screen.getByLabelText("继续对话").value).toBe("");
+      expect(screen.getByLabelText("继续对话").textContent).toBe("");
       delayMain = true;
       navigate("session-main");
       expect(screen.getByText("agent reply")).toBeTruthy();
-      expect(screen.getByLabelText("继续对话").value).toBe("unsent main draft");
+      expect(screen.getByLabelText("继续对话").textContent).toBe(
+        "unsent main draft",
+      );
       await act(async () =>
         resolveHistory(
           new Response(
@@ -2704,7 +3246,7 @@ describe("conversation controls", () => {
       expect(localStorage.getItem(key)).toBeNull();
       expect(fixture.rows.map((row) => row.id)).toEqual(["side-other"]);
       expect(screen.getByText("Main")).toBeTruthy();
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "/btw" },
       });
       fireEvent.click(
@@ -2731,8 +3273,18 @@ describe("conversation controls", () => {
     try {
       fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
       const editor = screen.getByLabelText("编辑消息");
-      expect(editor.value).toBe("original text");
-      fireEvent.change(editor, { target: { value: "corrected text" } });
+      expect(editor.textContent).toBe("original text");
+      fireEvent.compositionStart(editor);
+      fireEvent.keyDown(editor, {
+        key: "Enter",
+        keyCode: 229,
+        isComposing: true,
+      });
+      expect(
+        f.fetchMock.mock.calls.some(([path]) => String(path).endsWith("/fork")),
+      ).toBe(false);
+      fireEvent.compositionEnd(editor, { data: "中文" });
+      changeField(editor, { target: { value: "中文第一行\n第二行" } });
       fireEvent.click(screen.getByRole("button", { name: "保存并重发" }));
       await waitFor(() =>
         expect(f.fetchMock).toHaveBeenCalledWith(
@@ -2740,13 +3292,15 @@ describe("conversation controls", () => {
           expect.objectContaining({
             body: JSON.stringify({
               messageId: "m1",
-              replacementContent: "corrected text",
+              replacementContent: "中文第一行\n第二行",
             }),
           }),
         ),
       );
       expect(await screen.findByRole("alert")).toBeTruthy();
-      expect(screen.getByLabelText("编辑消息").value).toBe("corrected text");
+      expect(screen.getByLabelText("编辑消息").textContent).toBe(
+        "中文第一行\n第二行",
+      );
       fireEvent.click(screen.getByRole("button", { name: "取消编辑" }));
       expect(screen.queryByLabelText("编辑消息")).toBeNull();
     } finally {
@@ -2800,27 +3354,42 @@ describe("conversation controls", () => {
   });
   it("confirms mobile branches before creating a conversation", async () => {
     const f = mountChat();
-    window.matchMedia = vi.fn(() => ({ matches: true }));
-    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    window.matchMedia = vi.fn(() => ({
+      matches: true,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    HTMLDialogElement.prototype.showModal = function () {
+      this.open = true;
+    };
     try {
       await screen.findByText("agent reply");
-      fireEvent.click(screen.getByRole("button", { name: "分支", exact: true }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "分支", exact: true }),
+      );
       await screen.findByText("从这里创建分支？");
-      const forks = () => f.fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/fork"));
+      const forks = () =>
+        f.fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/fork"));
       expect(forks()).toHaveLength(0);
       fireEvent.click(screen.getByRole("button", { name: "继续当前对话" }));
       expect(forks()).toHaveLength(0);
-      fireEvent.click(screen.getByRole("button", { name: "分支", exact: true }));
-      fireEvent.click(screen.getByRole("button", { name: "创建分支", exact: true }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "分支", exact: true }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "创建分支", exact: true }),
+      );
       await waitFor(() => expect(forks()).toHaveLength(1));
-    } finally { f.done(); }
+    } finally {
+      f.done();
+    }
   });
   it("sends input through steer while keeping the stop control available", async () => {
     const f = mountChat(true, "steer");
     try {
       await screen.findByText("Main");
       await act(async () => f.streams[0].onopen());
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "change direction" },
       });
       fireEvent.click(await screen.findByRole("button", { name: "发送" }));
@@ -2831,7 +3400,9 @@ describe("conversation controls", () => {
         ),
       );
       expect(await screen.findByRole("alert")).toBeTruthy();
-      expect(screen.getByLabelText("继续对话").value).toBe("change direction");
+      expect(screen.getByLabelText("继续对话").textContent).toBe(
+        "change direction",
+      );
       expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
     } finally {
       f.done();
@@ -2852,7 +3423,7 @@ describe("conversation controls", () => {
           "",
         );
         for (const gesture of ["click", "enter", "ctrl", "meta"]) {
-          fireEvent.change(input, { target: { value: gesture } });
+          changeField(input, { target: { value: gesture } });
           if (gesture === "click") fireEvent.click(send);
           else
             fireEvent.keyDown(input, {
@@ -2907,7 +3478,7 @@ describe("conversation controls", () => {
     const f = mountChat();
     try {
       await screen.findByText("Main");
-      fireEvent.change(screen.getByLabelText("继续对话"), {
+      changeField(screen.getByLabelText("继续对话"), {
         target: { value: "/btw quick question" },
       });
       fireEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -2999,7 +3570,7 @@ describe("model defaults settings", () => {
     };
   }
   const change = (label, value) =>
-    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    changeField(screen.getByLabelText(label), { target: { value } });
   const choice = (modelId, effort, permission = "workspace_write") =>
     waitFor(() => {
       expect(screen.getByLabelText("模型").value).toBe(modelId);
@@ -3240,9 +3811,220 @@ describe("model defaults settings", () => {
 
   it("localizes Full Access in upstream settings controls", async () => {
     setup();
+    const conversation = document.createElement("div");
+    conversation.className = "wSkVaW_root";
     const button = document.createElement("button");
+    button.className = "Sh0Q9G_trigger";
     button.textContent = "Full Access";
-    document.body.append(button);
+    conversation.append(button);
+    document.body.append(conversation);
     await waitFor(() => expect(button.textContent).toBe("完全访问"));
+  });
+});
+
+describe("shared project task home", () => {
+  function fixture({ failFirstTurn = false } = {}) {
+    let turns = 0;
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (path, init = {}) => {
+        const url = String(path);
+        if (url.includes("shared-projects"))
+          return Response.json({
+            projects: [
+              { id: "shared-a", name: "品牌体验升级", currentRole: "owner" },
+              { id: "shared-b", name: "季度研究", currentRole: "member" },
+            ],
+          });
+        if (url.endsWith("/presets"))
+          return Response.json([
+            {
+              id: "builtin-general",
+              name: "General",
+              engine: "harness",
+              enabled: true,
+            },
+            { id: "kimi-agent", name: "Kimi", engine: "kimi", enabled: true },
+          ]);
+        if (url.endsWith("/model-options"))
+          return Response.json(
+            ["harness", "kimi"].map((engine) => ({
+              engine,
+              models: [
+                {
+                  id: engine + "-model",
+                  name: engine + " model",
+                  reasoning: [
+                    { id: "low", name: "低" },
+                    { id: "high", name: "高" },
+                  ],
+                },
+              ],
+            })),
+          );
+        if (url.endsWith("/workspaces"))
+          return Response.json([{ id: "mine", name: "我的文件夹" }]);
+        if (url.endsWith("/sessions") && init.method === "POST")
+          return Response.json({ id: "new-shared-session" });
+        if (url.endsWith("/turns") && init.method === "POST") {
+          turns++;
+          if (failFirstTurn && turns === 1)
+            return Response.json(
+              { error: "temporary failure" },
+              { status: 503 },
+            );
+        }
+        if (url.endsWith("/shared-personal-tasks"))
+          return Response.json({
+            operation: { state: "ready" },
+            session: {
+              id: "new-shared-session",
+              workspaceId: "shared:shared-a",
+            },
+          });
+        if (url.endsWith("/shared-invites"))
+          return Response.json({ invites: [] });
+        if (url.includes("shared-conversations?"))
+          return Response.json({ conversations: [] });
+        if (url === "/api/speech/capability")
+          return Response.json({ enabled: false });
+        return Response.json([]);
+      });
+    localStorage.setItem("workagent.hero.workspace", "mine");
+    window.history.replaceState(
+      {},
+      "",
+      "/?workagent=shared&project=shared-a&personal=new",
+    );
+    const clear = vi.fn();
+    const entries = compose(undefined, { sessions: { clear } });
+    const Home = entries.find(
+      (e) => e.options.id === "workagent-workspace-composer",
+    ).Component;
+    const Picker = entries.find(
+      (e) => e.options.id === "workagent-agent-picker",
+    ).Component;
+    const Overlay = entries.find(
+      (e) => e.options.id === "workagent-page",
+    ).Component;
+    render(
+      <>
+        <Picker />
+        <Home />
+        <Overlay />
+      </>,
+    );
+    return { fetch, clear };
+  }
+  it("reuses the normal agent and composer slots with a fixed shared project and chosen runtime options", async () => {
+    const { fetch, clear } = fixture();
+    await screen.findByText("品牌体验升级");
+    expect(screen.queryByLabelText("个人项目")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(clear).toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("radio", { name: "Kimi" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("模型").value).toBe("kimi-model"),
+    );
+    fireEvent.change(screen.getByLabelText("思考级别"), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText("权限"), {
+      target: { value: "read_only" },
+    });
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("workagent:hero-workspace", { detail: "mine" }),
+      ),
+    );
+    expect(screen.getByText("品牌体验升级")).toBeTruthy();
+    expect(localStorage.getItem("workagent.hero.workspace")).toBe("mine");
+    changeField(screen.getByLabelText("输入消息"), {
+      target: { value: "整理共享项目" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() =>
+      expect(location.search).toContain("session=new-shared-session"),
+    );
+    expect(location.search).toContain("workagent=shared");
+    const calls = fetch.mock.calls.filter(
+      ([, init]) => init?.method === "POST",
+    );
+    expect(
+      JSON.parse(
+        calls.find(([url]) => String(url).endsWith("/shared-personal-tasks"))[1]
+          .body,
+      ),
+    ).toEqual({
+      project_id: "shared-a",
+      operation_id: expect.any(String),
+      options: {
+        engine: "kimi",
+        title: "整理共享项目",
+        presetId: "kimi-agent",
+        modelId: "kimi-model",
+        thinkingEffort: "high",
+        permissionMode: "read_only",
+      },
+    });
+    expect(calls.some(([url]) => String(url).endsWith("/sessions"))).toBe(
+      false,
+    );
+  });
+  it("keeps project drafts separate and hands a failed first turn to normal exact-ID retry", async () => {
+    const { fetch } = fixture({ failFirstTurn: true });
+    await screen.findByText("品牌体验升级");
+    changeField(screen.getByLabelText("输入消息"), {
+      target: { value: "A 的草稿" },
+    });
+    act(() => {
+      history.pushState(
+        {},
+        "",
+        "/?workagent=shared&project=shared-b&personal=new",
+      );
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("季度研究");
+    expect(screen.getByLabelText("输入消息").textContent).toBe("");
+    act(() => {
+      history.pushState(
+        {},
+        "",
+        "/?workagent=shared&project=shared-a&personal=new",
+      );
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("品牌体验升级");
+    expect(screen.getByLabelText("输入消息").textContent).toBe("A 的草稿");
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() =>
+      expect(location.search).toContain("session=new-shared-session"),
+    );
+    const receipt = JSON.parse(
+      sessionStorage.getItem("workagent.draft.delivery.new-shared-session"),
+    )[0];
+    const turn = fetch.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith("/turns") && init?.method === "POST",
+    );
+    expect(receipt).toMatchObject({
+      status: "failed",
+      text: "A 的草稿",
+      id: JSON.parse(turn[1].body).messageId,
+    });
+    expect(
+      fetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/sessions") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+    expect(
+      fetch.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/shared-personal-tasks") &&
+          init?.method === "POST",
+      ),
+    ).toHaveLength(1);
   });
 });

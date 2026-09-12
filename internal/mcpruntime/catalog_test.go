@@ -42,6 +42,20 @@ func TestCatalogRejectsUnsafeRemoteAndRelativeStdioTransports(t *testing.T) {
 	}
 }
 
+func TestCatalogAcceptsEmployeeLocalHTTPMCP(t *testing.T) {
+	catalog, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	for _, endpoint := range []string{"http://127.0.0.1:3000/mcp", "http://[::1]:3000/mcp", "http://localhost:3000/mcp"} {
+		_, err := catalog.Create(t.Context(), Server{ID: endpoint, Name: endpoint, Source: "user", Enabled: true, Transport: Transport{Kind: "http", URL: endpoint}, ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "none", Health: "unknown"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestCatalogRejectsUnsafeCredentialNames(t *testing.T) {
 	catalog, err := Open(":memory:")
 	if err != nil {

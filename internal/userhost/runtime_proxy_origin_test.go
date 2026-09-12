@@ -25,7 +25,7 @@ func TestPublicPluginInventoryUsesInternalOriginAfterPortalValidation(t *testing
 	}))
 	defer harness.Close()
 	target, _ := url.Parse(harness.URL)
-	gateway := httptest.NewServer(newRuntimeGatewayHandlerWithControl(nil, nil, nil, nil, nil, nil, nil, target, "runtime-token", nil, nil, nil, "", nil, nil, nil))
+	gateway := httptest.NewServer(newRuntimeGatewayHandlerWithControl(nil, nil, nil, nil, nil, nil, nil, target, "runtime-token", nil, nil, nil, "", nil, nil, nil, ""))
 	defer gateway.Close()
 	gatewayURL, _ := url.Parse(gateway.URL)
 	data, _ := store.Open(":memory:")

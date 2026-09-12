@@ -18,7 +18,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     writeFileSync(marker, "initialized", { encoding: "utf8", mode: 0o600 });
     reply(request.id, {
       protocolVersion: request.params.protocolVersion,
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       serverInfo: { name: "workagent-mcp-smoke", version: "1" },
     });
     return;
@@ -40,5 +40,34 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       content: [{ type: "text", text: "pong" }],
       isError: false,
     });
+    return;
+  }
+  if (request.method === "resources/list") {
+    reply(request.id, {
+      resources: [
+        {
+          uri: "fixture://resource",
+          name: "Fixture resource",
+          mimeType: "text/plain",
+        },
+      ],
+    });
+    return;
+  }
+  if (request.method === "resources/templates/list") {
+    reply(request.id, { resourceTemplates: [] });
+    return;
+  }
+  if (request.method === "resources/read") {
+    reply(request.id, {
+      contents: [
+        {
+          uri: "fixture://resource",
+          mimeType: "text/plain",
+          text: "shared resource",
+        },
+      ],
+    });
+    return;
   }
 });

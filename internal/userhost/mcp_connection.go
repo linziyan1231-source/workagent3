@@ -30,7 +30,7 @@ type mcpProcessAssigner interface {
 	AssignPID(uint32) error
 }
 
-func testMCPConnection(catalog *mcpruntime.Catalog, credentials projectionCredentialResolver, publisher mcpProjectionPublisher, assigners ...mcpProcessAssigner) http.HandlerFunc {
+func testMCPConnection(catalog *mcpruntime.Catalog, credentials projectionCredentialResolver, publisher mcpProjectionPublisher, professionalDatabaseURL string, assigners ...mcpProcessAssigner) http.HandlerFunc {
 	var assigner mcpProcessAssigner
 	if len(assigners) > 0 {
 		assigner = assigners[0]
@@ -45,7 +45,7 @@ func testMCPConnection(catalog *mcpruntime.Catalog, credentials projectionCreden
 			writeRuntimeError(writer, http.StatusInternalServerError, "mcp_catalog_failed")
 			return
 		}
-		testErr := initializeMCP(request.Context(), server, credentials, assigner)
+		testErr := initializeMCP(request.Context(), server, credentials, professionalDatabaseURL, assigner)
 		if testErr == nil {
 			server.Health = "healthy"
 		} else {
@@ -68,12 +68,12 @@ func testMCPConnection(catalog *mcpruntime.Catalog, credentials projectionCreden
 	}
 }
 
-func initializeMCP(ctx context.Context, server mcpruntime.Server, credentials projectionCredentialResolver, assigner mcpProcessAssigner) error {
+func initializeMCP(ctx context.Context, server mcpruntime.Server, credentials projectionCredentialResolver, professionalDatabaseURL string, assigner mcpProcessAssigner) error {
 	switch server.Transport.Kind {
 	case "stdio":
 		return initializeStdioMCP(ctx, server, credentials, assigner)
 	case "http":
-		return initializeHTTPMCP(ctx, server, credentials)
+		return initializeHTTPMCP(ctx, server, credentials, professionalDatabaseURL)
 	default:
 		return fmt.Errorf("mcp_connection_test_unsupported:%s", server.Transport.Kind)
 	}
@@ -213,7 +213,7 @@ func stdioMCPEnvironment(values map[string]string) []string {
 	return environment
 }
 
-func initializeHTTPMCP(ctx context.Context, server mcpruntime.Server, credentials projectionCredentialResolver) error {
+func initializeHTTPMCP(ctx context.Context, server mcpruntime.Server, credentials projectionCredentialResolver, professionalDatabaseURL string) error {
 	if !server.Enabled {
 		return errors.New("mcp_server_disabled")
 	}
@@ -260,7 +260,7 @@ func initializeHTTPMCP(ctx context.Context, server mcpruntime.Server, credential
 		httpRequest.Header.Set(name, value)
 	}
 	client := &http.Client{
-		Transport:     &http.Transport{DialContext: guardedMCPDialer(server.Source == "managed")},
+		Transport:     &http.Transport{DialContext: guardedMCPDialer(server.Source == "managed" || (professionalDatabaseURL != "" && server.Transport.URL == professionalDatabaseURL))},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("mcp_redirect_rejected") },
 		Timeout:       15 * time.Second,
 	}

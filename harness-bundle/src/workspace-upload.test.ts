@@ -33,9 +33,9 @@ async function* chunks(size: number) {
   }
 }
 
-it("streams exactly 1 GB to disk and back, and rejects one extra byte without replacing it", async () => {
+it("streams exactly 5 GB to disk and back, and rejects one extra byte without replacing it", async () => {
   const { store, id, root } = setup();
-  expect(MAX_UPLOAD_BYTES).toBe(1024 ** 3);
+  expect(MAX_UPLOAD_BYTES).toBe(5 * 1024 ** 3);
   const entry = await store.writeStream(
     id,
     "large.bin",
@@ -58,7 +58,7 @@ it("streams exactly 1 GB to disk and back, and rejects one extra byte without re
     { name: "large.bin", size: MAX_UPLOAD_BYTES },
   ]);
   expect(readdirSync(join(root, ".workagent/uploads"))).toEqual([]);
-}, 60000);
+}, 300000);
 
 it("keeps existing files and cleans partial uploads after interruption or a concurrent exclusive upload", async () => {
   const { store, id, root } = setup();
@@ -146,6 +146,20 @@ it("serves authenticated streaming uploads and downloads and rejects oversized h
       status: 413,
       body: '{"error":"request_too_large"}',
     });
+    const resumableOversized = await fetch(`${base}/uploads`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        path: "oversized.bin",
+        name: "oversized.bin",
+        size: MAX_UPLOAD_BYTES + 1,
+        lastModified: 0,
+      }),
+    });
+    expect(resumableOversized.status).toBe(413);
+    expect(await resumableOversized.json()).toEqual({
+      error: "request_too_large",
+    });
     expect(existsSync(join(root, "too-large.bin"))).toBe(false);
     const chunkedOversized = await fetch(
       `${base}/content?path=chunked-too-large.bin`,
@@ -189,4 +203,4 @@ it("serves authenticated streaming uploads and downloads and rejects oversized h
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
-}, 30000);
+}, 300000);

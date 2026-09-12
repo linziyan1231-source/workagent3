@@ -116,12 +116,15 @@ describe("SharedTurnController end-to-end contract", () => {
       assistantBody: "Shared answer",
       recovered: false,
     }));
-    const reserve = vi.fn(async () => settledReservation);
+    const reserve = vi.fn(async () => ({
+      ...settledReservation,
+      status: "reserved" as const,
+    }));
     const settle = vi.fn(async () => undefined);
     const route = sharedTurnRoute(
       new QuotaSharedTurnRunner(
         { executeSharedTurn, cancelSharedTurn: vi.fn() },
-        { reserve, settle },
+        { lookup: vi.fn(async () => settledReservation), reserve, settle },
         new SharedTurnQuotaJournal(mkdtempSync(join(tmpdir(), "wire-quota-"))),
       ),
     );
@@ -171,7 +174,14 @@ describe("SharedTurnController end-to-end contract", () => {
           }),
           cancelSharedTurn: vi.fn(),
         },
-        { reserve: vi.fn(async () => settledReservation), settle },
+        {
+          lookup: vi.fn(async () => settledReservation),
+          reserve: vi.fn(async () => ({
+            ...settledReservation,
+            status: "reserved" as const,
+          })),
+          settle,
+        },
         journal,
       ),
     );

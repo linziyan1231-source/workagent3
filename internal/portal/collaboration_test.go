@@ -327,6 +327,9 @@ func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
 	if accepted := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`); accepted.Code != http.StatusOK {
 		t.Fatalf("accept = %d %s", accepted.Code, accepted.Body.String())
 	}
+	if response := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectBody.Project.ID+"/assistant-invites", `{"assistant_id":"codex"}`); response.Code != 201 {
+		t.Fatalf("assistant invite: %d %s", response.Code, response.Body.String())
+	}
 	conversation := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-conversations", `{"project_id":"`+projectBody.Project.ID+`","name":"Review","assistant_id":"codex","assistant_backend":"codex","model_id":"gpt-5","thinking_effort":"medium"}`)
 	if conversation.Code != http.StatusCreated {
 		t.Fatalf("create conversation = %d %s", conversation.Code, conversation.Body.String())
@@ -345,15 +348,23 @@ func TestCollaborationConversationMessageAndSSEReplay(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"body":"Hello Bob"`) || strings.Contains(listed.Body.String(), `"is_current_user":true`) {
 		t.Fatalf("member messages = %d %s", listed.Code, listed.Body.String())
 	}
-	updated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","name":"Renamed","pinned":true}`)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Renamed"`) || !strings.Contains(updated.Body.String(), `"pinned":true`) {
-		t.Fatalf("updated conversation = %d %s", updated.Code, updated.Body.String())
+	updated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","name":"Renamed"}`)
+	if updated.Code != http.StatusForbidden {
+		t.Fatalf("member renamed conversation = %d %s", updated.Code, updated.Body.String())
+	}
+	updated = collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","pinned":true}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Review"`) || !strings.Contains(updated.Body.String(), `"pinned":true`) {
+		t.Fatalf("updated conversation pin = %d %s", updated.Code, updated.Body.String())
 	}
 	ownerView := collaborationRequest(t, handler, alice.session, http.MethodGet, "/api/portal/shared-conversations?id="+conversationBody.Conversation.ID, "")
 	if ownerView.Code != http.StatusOK || strings.Contains(ownerView.Body.String(), `"pinned":true`) {
 		t.Fatalf("member pin leaked to owner = %d %s", ownerView.Code, ownerView.Body.String())
 	}
 	runtimeUpdated := collaborationRequest(t, handler, bob.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","model_id":"gpt-5","thinking_effort":"high"}`)
+	if runtimeUpdated.Code != http.StatusForbidden {
+		t.Fatalf("member changed assistant runtime: %d", runtimeUpdated.Code)
+	}
+	runtimeUpdated = collaborationRequest(t, handler, alice.session, http.MethodPatch, "/api/portal/shared-conversations", `{"conversation_id":"`+conversationBody.Conversation.ID+`","model_id":"gpt-5","thinking_effort":"high"}`)
 	if runtimeUpdated.Code != http.StatusOK || !strings.Contains(runtimeUpdated.Body.String(), `"thinking_effort":"high"`) {
 		t.Fatalf("updated shared runtime = %d %s", runtimeUpdated.Code, runtimeUpdated.Body.String())
 	}
@@ -431,7 +442,7 @@ func TestSharedInviteNotificationDeepLinksToInvitePopover(t *testing.T) {
 		t.Fatal(err)
 	}
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform, Notifications: notices})
+	server, err := NewWithModules(users, legacyAssistantCatalog(t), false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform, Notifications: notices})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,12 +463,18 @@ func TestSharedInviteNotificationDeepLinksToInvitePopover(t *testing.T) {
 	if err != nil || len(feed) != 1 {
 		t.Fatalf("bob feed = %#v, %v", feed, err)
 	}
-	if feed[0].Kind != "shared_invite" || feed[0].DeepLink != "/guid?open=shared-invites" {
+	var inviteBody struct {
+		Invite collaboration.Invite `json:"invite"`
+	}
+	if err := json.Unmarshal(invited.Body.Bytes(), &inviteBody); err != nil {
+		t.Fatal(err)
+	}
+	if feed[0].Kind != "shared_invite" || feed[0].DeepLink != "/?workagent=shared&invite="+inviteBody.Invite.ID {
 		t.Fatalf("invite notification = %#v", feed[0])
 	}
 }
 
-func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, *fakeSharedProjectPlatform, collaborationTestUser, collaborationTestUser) {
+func collaborationTestServer(t *testing.T, configure ...func(*Server)) (http.Handler, *collaboration.Store, *fakeSharedProjectPlatform, collaborationTestUser, collaborationTestUser) {
 	t.Helper()
 	users, err := store.Open(":memory:")
 	if err != nil {
@@ -486,9 +503,12 @@ func collaborationTestServer(t *testing.T) (http.Handler, *collaboration.Store, 
 	alice := create("alice", "S-1-5-21-1000", "alice-collaboration-session")
 	bob := create("bob", "S-1-5-21-2000", "bob-collaboration-session")
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform})
+	server, err := NewWithModules(users, legacyAssistantCatalog(t), false, Modules{ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData, SharedProjects: platform, SharedFiles: platform, SharedTurns: platform})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, apply := range configure {
+		apply(server)
 	}
 	return server.Handler(), collaborationData, platform, alice, bob
 }

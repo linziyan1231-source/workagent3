@@ -13,6 +13,11 @@ import type {
   NativeEngineStatus,
 } from "./types.js";
 import type { ResolvedMcpServer } from "../mcp-projection.js";
+import { SHARED_TRASH_TOOL_TIMEOUT_MS } from "../shared-trash-client.js";
+import { withSkillCatalog } from "./skills.js";
+import { join, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { parse as parseToml } from "smol-toml";
 
 type ObjectValue = Record<string, unknown>;
 type ThreadResponse = { thread: { id: string } };
@@ -56,15 +61,21 @@ const text = (value: unknown, key: string): string | undefined => {
 
 export const codexPermissions = (
   mode: import("./types.js").EngineSessionOptions["permissionMode"],
+  policy?: EngineSessionOptions["approvalPolicy"],
 ) => {
+  const approvalPolicy = policy === "never" ? "never" : "on-request";
   if (mode === "read_only") {
-    return { approvalPolicy: "on-request", sandbox: "read-only" } as const;
+    return { approvalPolicy, sandbox: "read-only" } as const;
   }
   if (mode === "full_access") {
     return { approvalPolicy: "never", sandbox: "danger-full-access" } as const;
   }
   return {
-    approvalPolicy: mode === "workspace_write" ? "on-request" : "never",
+    approvalPolicy: policy
+      ? approvalPolicy
+      : mode === "workspace_write"
+        ? "on-request"
+        : "never",
     sandbox: "workspace-write",
   } as const;
 };
@@ -148,13 +159,14 @@ export class CodexBridge implements EngineBridge {
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     const modelId = codexModel(options?.modelId);
+    await this.#configureSkillRoots(rpc, options);
     const result = await rpc.request<ThreadResponse>("thread/start", {
       cwd: workspace,
       ...(modelId === undefined ? {} : { model: modelId }),
-      ...codexPermissions(options?.permissionMode),
+      ...codexPermissions(options?.permissionMode, options?.approvalPolicy),
       serviceName: "workagent3",
       config: {
-        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+        ...codexCapabilityConfig(options, workspace),
       },
     });
     const session = new CodexSession(
@@ -169,7 +181,7 @@ export class CodexBridge implements EngineBridge {
       options,
     );
     this.#sessions.set(result.thread.id, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async resume(
@@ -180,12 +192,13 @@ export class CodexBridge implements EngineBridge {
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     const modelId = codexModel(options?.modelId);
+    await this.#configureSkillRoots(rpc, options);
     await rpc.request("thread/resume", {
       threadId: nativeId,
       cwd: workspace,
-      ...codexPermissions(options?.permissionMode),
+      ...codexPermissions(options?.permissionMode, options?.approvalPolicy),
       config: {
-        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+        ...codexCapabilityConfig(options, workspace),
       },
     });
     const session = new CodexSession(
@@ -200,7 +213,7 @@ export class CodexBridge implements EngineBridge {
       options,
     );
     this.#sessions.set(nativeId, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async fork(
@@ -212,14 +225,15 @@ export class CodexBridge implements EngineBridge {
   ): Promise<BridgeSession> {
     const rpc = await this.#connection();
     const modelId = codexModel(options?.modelId);
+    await this.#configureSkillRoots(rpc, options);
     const result = await rpc.request<ThreadResponse>("thread/fork", {
       threadId: nativeId,
       ...(lastTurnId === undefined ? {} : { lastTurnId }),
       cwd: workspace,
       ...(modelId === undefined ? {} : { model: modelId }),
-      ...codexPermissions(options?.permissionMode),
+      ...codexPermissions(options?.permissionMode, options?.approvalPolicy),
       config: {
-        mcp_servers: projectCodexMcpServers(options?.mcpServers ?? []),
+        ...codexCapabilityConfig(options, workspace),
       },
     });
     const session = new CodexSession(
@@ -232,7 +246,7 @@ export class CodexBridge implements EngineBridge {
       options,
     );
     this.#sessions.set(result.thread.id, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async probe(): Promise<void> {
@@ -264,6 +278,18 @@ export class CodexBridge implements EngineBridge {
     this.#child = undefined;
     this.#starting = undefined;
     this.#sessions.clear();
+  }
+
+  async #configureSkillRoots(
+    rpc: JsonLineRpc,
+    options?: EngineSessionOptions,
+  ): Promise<void> {
+    if (!options?.catalogSkills?.length) return;
+    await rpc.request("skills/extraRoots/set", {
+      extraRoots: [
+        ...new Set(options.catalogSkills.map((skill) => skill.root)),
+      ],
+    });
   }
 
   async #connection(): Promise<JsonLineRpc> {
@@ -342,6 +368,66 @@ export class CodexBridge implements EngineBridge {
   }
 }
 
+export function codexCapabilityConfig(
+  options?: EngineSessionOptions,
+  workspace?: string,
+) {
+  const projectNames = new Set<string>();
+  if (workspace) {
+    let directory = workspace;
+    while (true) {
+      const config = join(directory, ".codex", "config.toml");
+      if (existsSync(config)) {
+        const parsed = parseToml(readFileSync(config, "utf8"));
+        for (const name of Object.keys(parsed.mcp_servers ?? {}))
+          projectNames.add(name);
+      }
+      const parent = dirname(directory);
+      if (parent === directory || existsSync(join(directory, ".git"))) break;
+      directory = parent;
+    }
+  }
+  const selected = new Set(options?.skills?.map((skill) => skill.entry.id));
+  return {
+    mcp_servers: {
+      ...Object.fromEntries(
+        Object.entries(options?.nativeMcpConfig ?? {}).filter(
+          ([name]) => !projectNames.has(name),
+        ),
+      ),
+      ...projectCodexMcpServers(
+        (options?.mcpServers ?? []).filter(
+          ({ server }) =>
+            !server.transport.globalSource ||
+            !projectNames.has(server.transport.nativeName ?? ""),
+        ),
+      ),
+    },
+    ...(options?.catalogSkills
+      ? {
+          skills: {
+            config: [
+              ...(options.nativeSkillPaths ?? [])
+                .filter(
+                  (path) =>
+                    !options.catalogSkills!.some(
+                      (skill) =>
+                        join(skill.entry.referenceDirectory!, "SKILL.md") ===
+                        path,
+                    ),
+                )
+                .map((path) => ({ path, enabled: false })),
+              ...options.catalogSkills.map((skill) => ({
+                path: join(skill.entry.referenceDirectory!, "SKILL.md"),
+                enabled: selected.has(skill.entry.id),
+              })),
+            ],
+          },
+        }
+      : {}),
+  };
+}
+
 export const projectCodexMcpServers = (
   servers: readonly ResolvedMcpServer[],
 ): Record<string, Record<string, unknown>> =>
@@ -354,23 +440,28 @@ export const projectCodexMcpServers = (
           : { enabled_tools: server.allowedTools };
       if (server.transport.kind === "stdio")
         return [
-          server.id,
+          server.transport.nativeName ?? server.id,
           {
             command: server.transport.command,
             args: server.transport.args,
             env: projection.environment,
-            required: true,
+            ...(server.id === "workagent-shared-trash"
+              ? { tool_timeout_sec: SHARED_TRASH_TOOL_TIMEOUT_MS / 1000 }
+              : {}),
+            ...(server.transport.globalSource ? { enabled: true } : {}),
+            required: !server.transport.globalSource,
             ...policy,
           },
         ];
       if (server.transport.kind === "sse")
         throw new Error(`unsupported_mcp_transport:codex:sse:${server.id}`);
       return [
-        server.id,
+        server.transport.nativeName ?? server.id,
         {
           url: server.transport.url,
           http_headers: projection.headers,
-          required: true,
+          ...(server.transport.globalSource ? { enabled: true } : {}),
+          required: !server.transport.globalSource,
           ...policy,
         },
       ];
@@ -384,10 +475,15 @@ export class CodexSession implements BridgeSession {
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
   #activeTurn: string | undefined;
+  #connected = true;
   readonly #approvals: NativeApprovalWaits;
   #approvalEnabled = false;
   readonly #modelId: string | undefined;
   readonly #thinkingEffort: string | undefined;
+  readonly #messageKinds = new Map<
+    string,
+    "commentary" | "question" | "answer"
+  >();
 
   constructor(
     rpc: JsonLineRpc,
@@ -468,13 +564,19 @@ export class CodexSession implements BridgeSession {
   }
 
   async close(): Promise<void> {
+    this.#connected = false;
     this.#approvalEnabled = false;
     this.#approvals.abort();
     await this.#rpc.request("thread/unsubscribe", { threadId: this.nativeId });
     this.#closed();
   }
 
+  get connected(): boolean {
+    return this.#connected;
+  }
+
   disconnected(): void {
+    this.#connected = false;
     this.#approvalEnabled = false;
     this.#approvals.abort();
     if (this.#activeTurn === undefined) return;
@@ -540,6 +642,23 @@ export class CodexSession implements BridgeSession {
     const turnId =
       text(params, "turnId") ?? text(turn, "id") ?? this.#activeTurn;
     if (turnId === undefined) return;
+    if (
+      (method === "item/started" || method === "item/completed") &&
+      text(item, "type") === "agentMessage"
+    ) {
+      const id = text(item, "id");
+      const phase = text(item, "phase");
+      // The pinned Codex app-server projects async prompts as agentMessage
+      // items using the tool call ID. Ordinary model messages use message IDs.
+      const kind = id?.startsWith("call_")
+        ? "question"
+        : phase === "commentary"
+          ? "commentary"
+          : phase === "final_answer"
+            ? "answer"
+            : undefined;
+      if (id && kind) this.#messageKinds.set(id, kind);
+    }
     if (method === "turn/plan/updated") {
       this.#emit({
         type: "process.updated",
@@ -594,6 +713,9 @@ export class CodexSession implements BridgeSession {
           turnId,
           delta,
           ...(messageId === undefined ? {} : { messageId }),
+          ...(messageId && this.#messageKinds.has(messageId)
+            ? { kind: this.#messageKinds.get(messageId)! }
+            : {}),
         });
       return;
     }
@@ -621,6 +743,9 @@ export class CodexSession implements BridgeSession {
         turnId,
         content: text(item, "text") ?? "",
         ...(itemId === undefined ? {} : { messageId: itemId }),
+        ...(itemId && this.#messageKinds.has(itemId)
+          ? { kind: this.#messageKinds.get(itemId)! }
+          : {}),
       });
       return;
     }
@@ -673,6 +798,7 @@ export class CodexSession implements BridgeSession {
       return;
     }
     if (method === "turn/completed") {
+      this.#messageKinds.clear();
       const status = text(turn, "status");
       this.#approvalEnabled = false;
       this.#approvals.abort();

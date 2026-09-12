@@ -25,6 +25,7 @@ type Skill struct {
 	RequiredMCP []string `json:"requiredMcpServerIds,omitempty"`
 }
 type Connector struct {
+	ManagedService  string               `json:"managedService,omitempty"`
 	ID              string               `json:"id"`
 	Name            string               `json:"name"`
 	Description     string               `json:"description"`
@@ -52,17 +53,23 @@ type Bundle struct {
 	Assistant *Assistant  `json:"assistant,omitempty"`
 }
 type Entry struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Version     string    `json:"version"`
-	Publisher   string    `json:"publisher"`
-	CreatedAt   time.Time `json:"createdAt"`
-	Skills      []string  `json:"skills"`
-	MCP         []string  `json:"mcp"`
-	CanDelete   bool      `json:"canDelete"`
-	Installed   bool      `json:"installed"`
+	ID               string    `json:"id"`
+	Kind             string    `json:"kind"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	Version          string    `json:"version"`
+	Publisher        string    `json:"publisher"`
+	CreatedAt        time.Time `json:"createdAt"`
+	Skills           []string  `json:"skills"`
+	MCP              []string  `json:"mcp"`
+	CanDelete        bool      `json:"canDelete"`
+	Installed        bool      `json:"installed"`
+	SeriesID         string    `json:"seriesId"`
+	ReleaseNotes     string    `json:"releaseNotes"`
+	Revoked          bool      `json:"revoked"`
+	InstalledVersion string    `json:"installedVersion,omitempty"`
+	SelectedID       string    `json:"selectedId,omitempty"`
+	UpdateAvailable  bool      `json:"updateAvailable"`
 }
 type Installation struct {
 	Skills      map[string]string `json:"skills"`
@@ -88,7 +95,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.migrateVersions(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Publish(ctx context.Context, e Entry, b Bundle) error {
@@ -102,14 +114,28 @@ func (s *Store) Publish(ctx context.Context, e Entry, b Bundle) error {
 	if len(data) > 72<<20 {
 		return errors.New("market_bundle_too_large")
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO marketplace_entries(id,kind,name,description,version,publisher,created_at,bundle) VALUES(?,?,?,?,?,?,?,?)`, e.ID, e.Kind, e.Name, e.Description, e.Version, e.Publisher, time.Now().UTC().Format(time.RFC3339Nano), data)
+	if e.SeriesID == "" {
+		_ = s.db.QueryRowContext(ctx, `SELECT series_id FROM marketplace_entries WHERE publisher=? AND kind=? AND name=? ORDER BY created_at,id LIMIT 1`, e.Publisher, e.Kind, e.Name).Scan(&e.SeriesID)
+		if e.SeriesID == "" {
+			e.SeriesID = e.ID
+		}
+	} else {
+		var publisher, kind string
+		if err := s.db.QueryRowContext(ctx, `SELECT publisher,kind FROM marketplace_entries WHERE series_id=? LIMIT 1`, e.SeriesID).Scan(&publisher, &kind); err != nil {
+			return ErrNotFound
+		}
+		if publisher != e.Publisher || kind != e.Kind {
+			return ErrForbidden
+		}
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO marketplace_entries(id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes) VALUES(?,?,?,?,?,?,?,?,?,?)`, e.ID, e.Kind, e.Name, e.Description, e.Version, e.Publisher, time.Now().UTC().Format(time.RFC3339Nano), data, e.SeriesID, e.ReleaseNotes)
 	return err
 }
 func (s *Store) Get(ctx context.Context, id string) (Entry, Bundle, error) {
 	var e Entry
 	var data []byte
 	var stamp string
-	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,bundle FROM marketplace_entries WHERE id=? AND listed=1`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &data)
+	err := s.db.QueryRowContext(ctx, `SELECT id,kind,name,description,version,publisher,created_at,bundle,series_id,release_notes,revoked FROM marketplace_entries WHERE id=? AND listed=1 AND revoked=0`, id).Scan(&e.ID, &e.Kind, &e.Name, &e.Description, &e.Version, &e.Publisher, &stamp, &data, &e.SeriesID, &e.ReleaseNotes, &e.Revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, Bundle{}, ErrNotFound
 	}

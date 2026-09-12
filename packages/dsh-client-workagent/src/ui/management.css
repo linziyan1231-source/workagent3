@@ -1,0 +1,178 @@
+/* Shared management-page components. */
+.workagent-section,
+.workagent-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.workagent-section > h2 {
+  margin: 0;
+  color: var(--dsw-color-text);
+  font-size: calc(22px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
+.workagent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.workagent-card {
+  padding: 16px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  background: var(--dsw-color-panel);
+}
+
+.workagent-card > strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
+.workagent-workspace-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
+}
+
+.workagent-workspace-card {
+  display: flex;
+  min-height: 112px;
+  flex-direction: column;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgb(36 54 92 / 4%);
+}
+
+.workagent-workspace-card > strong > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.workagent-workspace-card > strong .workagent-icon {
+  color: var(--dsw-color-accent);
+}
+
+.workagent-workspace-card .workagent-actions {
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.workagent-message-highlight {
+  outline: 3px solid var(--dsw-color-accent);
+  outline-offset: 3px;
+}
+
+.workagent-form {
+  --workagent-form-control-height: 40px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px 16px;
+  padding: 18px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  background: var(--dsw-color-panel);
+}
+
+.workagent-form label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  color: var(--dsw-color-text);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.5;
+}
+
+.workagent-form label:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.workagent-form label:has(> input[type="checkbox"]),
+.workagent-form label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workagent-form input[type="checkbox"],
+.workagent-form input[type="radio"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 0;
+}
+
+.workagent-form input,
+.workagent-form select,
+.workagent-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  padding: 9px 11px;
+  font: inherit;
+}
+
+.workagent-form
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.workagent-form select {
+  appearance: none;
+  min-width: 0;
+  height: var(--workagent-form-control-height);
+  min-height: var(--workagent-form-control-height);
+}
+
+.workagent-form select {
+  padding-right: 36px;
+}
+
+.workagent-form label:has(> select)::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  bottom: calc(var(--workagent-form-control-height) / 2 - 3px);
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--dsw-color-muted);
+  border-bottom: 1.5px solid var(--dsw-color-muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.workagent-form input:focus,
+.workagent-form select:focus,
+.workagent-form textarea:focus {
+  border-color: var(--dsw-color-accent);
+  box-shadow: 0 0 0 2px var(--dsw-color-accent-soft);
+}
+
+.workagent-form textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.workagent-form > .workagent-button {
+  align-self: end;
+  justify-self: start;
+  min-width: 104px;
+  min-height: var(--workagent-form-control-height);
+}
+
+.workagent-form > button[type="submit"] {
+  border-color: var(--dsw-color-accent);
+  background: var(--dsw-color-accent);
+  color: var(--dsw-color-on-accent);
+}
+
+.workagent-form > button[type="submit"]:hover:not(:disabled) {
+  border-color: var(--dsw-color-accent);
+  background: var(--dsw-color-accent);
+}

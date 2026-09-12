@@ -30,10 +30,18 @@ const projection = (value: unknown): readonly ResolvedSkill[] => {
 };
 
 export class SkillProjectionStore {
+  nativeSkillPaths: string[] = [];
   readonly #skills = new Map<string, ResolvedSkill>();
 
   replace(value: unknown): void {
     const projected = projection(value);
+    const paths = object(value).nativeSkillPaths ?? [];
+    if (
+      !Array.isArray(paths) ||
+      paths.some((path) => typeof path !== "string" || !isAbsolute(path))
+    )
+      throw new Error("invalid_native_skill_paths");
+    this.nativeSkillPaths = paths;
     const next = new Map<string, ResolvedSkill>();
     for (const skill of projected) {
       if (next.has(skill.entry.id)) throw new Error("duplicate_skill");

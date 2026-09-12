@@ -1,7 +1,7 @@
 param([Parameter(Mandatory)][string]$SettingsPath)
 # PowerShell 7, administrator/SYSTEM deployment input kept outside product code.
 # Settings: managerPath, expectedRelease, release, lockPath, evidenceRoot,
-# archiveRoot, wrappers[], serviceTasks[], employeeSIDs[], systemHelperPath,
+# archiveRoot, wrappers[], serviceTasks[], employeeSIDs[] (explicit start requests), systemHelperPath,
 # healthURL. Candidate must already be complete, immutable and Users RX.
 $ErrorActionPreference='Stop'
 $s=Get-Content -LiteralPath $SettingsPath -Raw|ConvertFrom-Json
@@ -23,10 +23,17 @@ function Pause-Runtimes {
 }
 function Start-Runtimes {
  foreach($task in $s.serviceTasks){Start-ScheduledTask -TaskName $task}
- foreach($sid in $s.employeeSIDs){if((Start-UserhostViaSystem $sid) -notmatch 'START_OK'){throw "Employee start failed: $sid"}}
+ foreach($sid in $restartSIDs){if((Start-UserhostViaSystem $sid) -notmatch 'START_OK'){throw "Employee start failed: $sid"}}
 }
 try {
  $manager=Get-Content -LiteralPath $s.managerPath -Raw|ConvertFrom-Json
+ # Update every configured employee, including idle accounts created after the
+ # settings file. Preserve on-demand startup for those that were not running.
+ $configuredSIDs=@(Get-ChildItem -LiteralPath $manager.dataRootBase -Directory | Where-Object { $_.Name -like 'S-1-*' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'runtime\userhost.json')) } | Select-Object -ExpandProperty Name)
+ $runningHosts=@(Get-CimInstance Win32_Process | Where-Object Name -eq 'userhost.exe')
+ $runningSIDs=@($configuredSIDs | Where-Object { $config=Join-Path $manager.dataRootBase "$_\runtime\userhost.json"; @($runningHosts | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($config,[StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 })
+ $restartSIDs=@(@($s.employeeSIDs)+$runningSIDs | Sort-Object -Unique)
+ $s.employeeSIDs=@($configuredSIDs+@($s.employeeSIDs) | Sort-Object -Unique)
  $previousProfile=Join-Path $s.expectedRelease 'profiles\workagent'
  $profile=Join-Path $s.release 'profiles\workagent'
  if($manager.harnessProfileSource -ne $previousProfile){throw 'Active release changed; rebase candidate'}
@@ -75,7 +82,7 @@ try {
    $ready=$false
    try{
     $ready=(Invoke-RestMethod $s.healthURL -TimeoutSec 5).status -eq 'healthy'
-    foreach($sid in $s.employeeSIDs){
+    foreach($sid in $restartSIDs){
      $token=[IO.File]::ReadAllText((Join-Path $manager.dataRootBase "$sid\runtime\portal-registration.token")).Trim()
      $uri=([Uri]$s.healthURL).GetLeftPart([UriPartial]::Authority)+"/internal/runtime/lease?sid=$sid"
      if((Invoke-WebRequest $uri -Headers @{Authorization="Bearer $token"} -TimeoutSec 5).StatusCode -ne 204){$ready=$false}
@@ -90,7 +97,13 @@ try {
   }
   $processes=@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($s.release+'\',[StringComparison]::OrdinalIgnoreCase)}|Select-Object Name,ProcessId,CommandLine)
   foreach($name in @('portal.exe','employee-manager.exe')){if(@($processes|Where-Object Name -eq $name).Count -ne 1){throw "Missing new process: $name"}}
-  if(@($processes|Where-Object Name -eq 'userhost.exe').Count -ne $s.employeeSIDs.Count){throw 'UserHost release mismatch'}
+  foreach($hostProcess in Get-CimInstance Win32_Process | Where-Object Name -eq 'userhost.exe'){
+   foreach($sid in $s.employeeSIDs){
+    $config=Join-Path $manager.dataRootBase "$sid\runtime\userhost.json"
+    if($hostProcess.CommandLine -and $hostProcess.CommandLine.Contains($config,[StringComparison]::OrdinalIgnoreCase) -and $hostProcess.ExecutablePath -ne (Join-Path $s.release 'userhost.exe')){throw "UserHost release mismatch: $sid"}
+   }
+  }
+  if(@($processes|Where-Object Name -eq 'userhost.exe').Count -lt $restartSIDs.Count){throw 'Expected employee runtime missing'}
   Write-Json (Join-Path $s.evidenceRoot 'activation.json') @{release=$s.release;processes=$processes;health='healthy';browserAcceptance='pending'}
  }catch{
   $failure=$_;Pause-Runtimes

@@ -22,9 +22,8 @@ type runtimeReserveInput struct {
 	ModelID        string `json:"modelId"`
 	EstimatedUnits int64  `json:"estimatedUnits"`
 	Engine         string `json:"engine,omitempty"`
-	// PayerSID scopes a shared-run reservation to the frozen payer (the member
-	// who mentioned the assistant) while the caller authenticates as the
-	// runtime owner SID.
+	// PayerSID is a compatibility hint checked against Portal admission.
+	// It never grants permission to charge another account.
 	PayerSID string `json:"payerSid,omitempty"`
 }
 
@@ -33,15 +32,6 @@ type runtimeSettleInput struct {
 	SID         string `json:"sid"`
 	ActualUnits int64  `json:"actualUnits"`
 	PayerSID    string `json:"payerSid,omitempty"`
-}
-
-// runtimePayer returns the SID the reservation belongs to: the caller's own
-// SID, or the frozen shared-run payer when one is pinned.
-func runtimePayer(sid, payerSID string) string {
-	if payerSID != "" {
-		return payerSID
-	}
-	return sid
 }
 
 // RuntimeHandler exposes only the minimal quota capability required by a
@@ -93,14 +83,29 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 				writeRuntimeError(writer, http.StatusUnauthorized, "registration_rejected")
 				return
 			}
-			reservation, err := store.ReserveForSID(request.Context(), runtimePayer(input.SID, input.PayerSID), ReserveRequest{
-				RunID: input.RunID, SID: runtimePayer(input.SID, input.PayerSID), ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits, Engine: input.Engine,
+			reservation, err := store.ReserveRuntime(request.Context(), input.SID, input.PayerSID, ReserveRequest{
+				RunID: input.RunID, ModelID: input.ModelID, EstimatedUnits: input.EstimatedUnits, Engine: input.Engine,
 			})
 			if err != nil {
 				writeQuotaError(writer, err)
 				return
 			}
-			if _, err := store.db.ExecContext(request.Context(), `INSERT OR IGNORE INTO quota_gateway_run_owners(run_id,sid) VALUES(?,?)`, input.RunID, input.SID); err != nil {
+			writeRuntimeJSON(writer, http.StatusOK, reservation)
+		case "/internal/runtime/quota/lookup":
+			var input struct {
+				SID   string `json:"sid"`
+				RunID string `json:"runId"`
+			}
+			if !decodeRuntimeInput(request, &input) {
+				writeRuntimeError(writer, 400, "invalid_request")
+				return
+			}
+			if !authorizer.RuntimeRegistrationAuthorized(request.Context(), input.SID, credential) {
+				writeRuntimeError(writer, 401, "registration_rejected")
+				return
+			}
+			reservation, err := store.LookupRuntimeRun(request.Context(), input.SID, input.RunID)
+			if err != nil {
 				writeQuotaError(writer, err)
 				return
 			}
@@ -115,7 +120,7 @@ func RuntimeHandler(store *Store, authorizer RuntimeAuthorizer) http.Handler {
 				writeRuntimeError(writer, http.StatusUnauthorized, "registration_rejected")
 				return
 			}
-			if err := store.SettleForSID(request.Context(), runtimePayer(input.SID, input.PayerSID), SettleRequest{RunID: input.RunID, ActualUnits: input.ActualUnits}); err != nil {
+			if err := store.SettleRuntime(request.Context(), input.SID, input.PayerSID, SettleRequest{RunID: input.RunID, ActualUnits: input.ActualUnits}); err != nil {
 				writeQuotaError(writer, err)
 				return
 			}
@@ -138,6 +143,8 @@ func writeQuotaError(writer http.ResponseWriter, err error) {
 		writeRuntimeError(writer, http.StatusServiceUnavailable, "quota_usage_stale")
 	case errors.Is(err, ErrUsagePending):
 		writeRuntimeError(writer, http.StatusConflict, "quota_usage_pending")
+	case errors.Is(err, ErrRunNotAccepted):
+		writeRuntimeError(writer, http.StatusConflict, "quota_run_not_accepted")
 	case errors.Is(err, ErrExceeded):
 		writeRuntimeError(writer, http.StatusTooManyRequests, "quota_exceeded")
 	case errors.Is(err, ErrModelUnauthorized):

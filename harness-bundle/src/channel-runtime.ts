@@ -10,6 +10,8 @@ export function channelAssistantContext(
   return [
     prompt.trim(),
     ...skills.map((skill) => {
+      if (skill.entry.referenceDirectory)
+        return `可用技能 ${skill.entry.name}：${skill.entry.description}。需要时先读取 ${join(skill.entry.referenceDirectory, "SKILL.md")}，再按其说明使用同目录资源。`;
       const parts = skill.entry.relativePath.replaceAll("\\", "/").split("/");
       if (parts[0] === basename(skill.root)) parts.shift();
       if (

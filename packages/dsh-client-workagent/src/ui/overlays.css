@@ -1,0 +1,124 @@
+.workagent-muted {
+  color: var(--dsw-color-muted);
+}
+
+.workagent-error {
+  color: var(--dsw-color-danger);
+}
+
+.workagent-actions {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.workagent-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 6px;
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  cursor: pointer;
+  padding: 7px 12px;
+}
+
+.workagent-button:hover:not(:disabled) {
+  border-color: #c4bfdc;
+  background: var(--dsw-color-accent-soft);
+}
+
+.workagent-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.workagent-button.is-danger {
+  border-color: #f4c7c3;
+  color: var(--dsw-color-danger);
+}
+
+:is(
+  .workagent-footer,
+  .workagent-sidebar-heading-actions button,
+  .workagent-sidebar-search-toggle,
+  .workagent-sidebar-project-row button,
+  .workagent-sidebar-session button,
+  .workagent-agent,
+  .workagent-workspace-trigger,
+  .workagent-workspace-menu button,
+  .workagent-composer-send,
+  .workagent-button
+):focus-visible {
+  outline: 2px solid rgb(56 103 240 / 65%);
+  outline-offset: 2px;
+}
+
+.workagent-overlay {
+  pointer-events: auto;
+  position: fixed;
+  inset: 0 0 0 280px;
+  z-index: 20;
+  overflow: auto;
+  background: var(--dsw-color-bg);
+  color: var(--dsw-color-text);
+}
+
+.workagent-overlay-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 120px 1fr 120px;
+  align-items: center;
+  height: var(--workagent-header-height);
+  box-sizing: border-box;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--dsw-color-border);
+  background: rgb(247 248 250 / 92%);
+  backdrop-filter: blur(12px);
+}
+
+.workagent-overlay-header h1 {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+  font-size: calc(17px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
+.workagent-overlay-back {
+  justify-self: start;
+  border-color: transparent;
+  background: transparent;
+}
+
+.workagent-overlay-close {
+  justify-self: end;
+  width: 34px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.workagent-overlay-content {
+  box-sizing: border-box;
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  padding: 32px 40px 64px;
+}
+
+.workagent-overlay-content:has(> .workagent-conversation-workspace) {
+  container-type: inline-size;
+  display: flex;
+  width: min(100%, 1080px);
+  min-height: 0;
+  overflow: hidden;
+  padding-top: 20px;
+  padding-bottom: 24px;
+}

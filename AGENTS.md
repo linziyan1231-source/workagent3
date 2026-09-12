@@ -1,13 +1,23 @@
 Record reusable guidance here only you think is necessary.
 
 ## Engineering Principles
+
+- Optimize for maintainability, not plugin count. Prefer clear ownership, ordinary modules and small interfaces for actual dependencies; introduce plugin machinery only for a concrete maintenance, replacement or lifecycle need. Static composition and coordinated releases are acceptable.
+- Judge module boundaries by whether a feature change can be completed mainly inside its owning module and verified with that module's independent tests. Keep feature state, API behavior and feature-specific UI together; shared layers must not import business features. Do not replace hidden shared scope with a generic service locator.
 - Do not over-defend: defensive code should target failures that can actually happen. Skip guards for practically impossible cases — e.g. nil-checking a value the constructor guarantees, avoid using Hash and SHA256, or error-handling a `json.Marshal` of plain scalar structs. Such branches are dead code and only add noise.
 
+## Frontend Typography
+
+- Follow `docs/frontend-ui-standards.md`. All editable phone inputs, including upstream settings, portalled dialogs and contenteditable composers, have fixed minimum computed font sizes by UI font setting: compact 16px, standard 16px, large 18px, extra large 20px. Apply in portrait and landscape; retain manual browser zoom. Required physical-device acceptance includes iPhone 17 Pro Max with compact and iPhone 17/17 Pro with standard; desktop emulation is not proof of native focus zoom behavior.
+
 ## Deployment
+
+- Once a fix or change is complete and verified locally, proceed directly to candidate build and deployment without stopping to ask for deployment approval; the user has pre-authorized this flow.
 
 - The user promoted the existing environment on `106.53.187.253` to production on 2026-09-09. Its current public entry is port `42761`, forwarded to Portal `127.0.0.1:18300`; the domain is undecided. The historical `C:\WorkAgent3Test` directory name does not make it a disposable test environment. The one-time authorization to discard historical test archives does not authorize deleting future production data.
 
 - Serialize release activation across concurrent tasks. Check the active release immediately before switching; coordinate with other tasks and reuse a verified release that already contains the changes.
+- Inventory all current employee runtime configurations before activation; never reuse a fixed two-account SID list. Verify every configured employee's software/profile/launch pointers, including accounts whose runtimes start on demand.
 - Runtime and UI changes require immutable candidate validation and deployment to the authorized environment. The existing local SSH verification tunnel is `http://127.0.0.1:18300`; it now reaches the production environment, so do not use it for destructive test fixtures.
 - Publish immutable, side-by-side releases under `C:\WorkAgent3Test\releases\<version>`; never overwrite an active release or clear persistent data. Keep the previous Portal wrapper and employee-manager configuration available for rollback.
 - A release containing runtime or UI changes must keep Portal, UserHost, Web, and the complete Harness profile on one release version. Update both the Portal wrapper and employee-manager runtime/profile pointers, then restart both employee runtimes with references to the same public software version.

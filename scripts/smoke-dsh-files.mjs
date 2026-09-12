@@ -186,12 +186,25 @@ await withPage(
       await panel
         .getByRole("button", { name: "操作 定稿.txt", exact: true })
         .click();
-      await panel.getByRole("button", { name: "移动", exact: true }).click();
+      await panel.getByRole("button", { name: "移动到…", exact: true }).click();
+      const chooser = panel.getByRole("dialog", { name: "移动到文件夹" });
+      await chooser
+        .getByRole("button", { name: "📁 归档", exact: true })
+        .click();
+      await chooser
+        .getByRole("button", { name: "移动到这里", exact: true })
+        .click();
       await panel
-        .getByRole("textbox", { name: "目标相对路径", exact: true })
-        .fill("归档/最终稿.txt");
+        .getByRole("button", { name: "操作 定稿.txt", exact: true })
+        .click();
+      await panel.getByRole("button", { name: "重命名", exact: true }).click();
+      await panel
+        .getByRole("textbox", { name: "文件名", exact: true })
+        .fill("最终稿.txt");
       await panel.getByRole("button", { name: "保存", exact: true }).click();
-      await panel.getByRole("button", { name: "归档", exact: true }).click();
+      const archiveFolder = panel.getByRole("button", { name: "归档", exact: true });
+      if (await archiveFolder.getAttribute("aria-expanded") === "true") await archiveFolder.click();
+      await archiveFolder.click();
       await panel
         .getByRole("button", { name: "最终稿.txt", exact: true })
         .waitFor();

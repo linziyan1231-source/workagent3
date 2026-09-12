@@ -17,6 +17,7 @@ import (
 
 	"workagent3/internal/audit"
 	"workagent3/internal/auth"
+	"workagent3/internal/collaboration"
 	"workagent3/internal/contracts"
 	"workagent3/internal/marketplace"
 	"workagent3/internal/runtimeapi"
@@ -37,6 +38,7 @@ type Server struct {
 	modules       Modules
 	sharedEvents  *sharedEventHub
 	migrationJobs *migrationJobTracker
+	personalTasks *personalTaskService
 }
 
 type ModelAccessPort interface {
@@ -58,11 +60,14 @@ type SpeechQuotaPort interface {
 // SharedRunQuotaPort reserves shared AI run quota against the frozen payer SID
 // (the member who mentioned the assistant) before the owner Runtime starts.
 type SharedRunQuotaPort interface {
-	ReserveSharedRun(context.Context, string, string, string, string, int64) error
+	ReserveSharedRun(context.Context, contracts.SharedRunQuotaRequest) error
 	// ReleaseSharedRun settles the reservation with zero usage when the run
 	// never reached the owner Runtime, so the admission reservation cannot
 	// leak in the reserved state.
 	ReleaseSharedRun(context.Context, string, string) error
+	PendingSharedRuns(context.Context) ([]contracts.PendingQuotaRun, error)
+	RecoverSharedRunAuthorization(context.Context, contracts.SharedRunIdentity) error
+	ReconcileSettlements(context.Context) error
 }
 
 type SpeechPort interface {
@@ -104,24 +109,27 @@ type AuditPort interface {
 }
 
 type Modules struct {
-	Storage            StoragePort
-	ModelAccess        ModelAccessPort
-	Quota              QuotaUsagePort
-	SpeechQuota        SpeechQuotaPort
-	SharedRunQuota     SharedRunQuotaPort
-	Speech             SpeechPort
-	Settings           SettingsPort
-	SkillMarket        SkillMarketPort
-	Marketplace        *marketplace.Store
-	Collaboration      CollaborationPort
-	SharedProjects     SharedProjectPlatformPort
-	SharedFiles        SharedFilePlatformPort
-	SharedTurns        SharedTurnRunner
-	ChatForward        ChatForwardPort
-	IM                 IMPort
-	Notifications      NotificationsPort
-	Audit              AuditPort
-	EmployeeManagement EmployeeManagementPort
+	ProfessionalDatabase ProfessionalDatabasePort
+	Storage              StoragePort
+	ModelAccess          ModelAccessPort
+	Quota                QuotaUsagePort
+	SpeechQuota          SpeechQuotaPort
+	SharedRunQuota       SharedRunQuotaPort
+	Speech               SpeechPort
+	Settings             SettingsPort
+	SkillMarket          SkillMarketPort
+	Marketplace          *marketplace.Store
+	Collaboration        CollaborationPort
+	SharedProjects       SharedProjectPlatformPort
+	SharedFiles          SharedFilePlatformPort
+	SharedTrash          SharedTrashPort
+	SharedTurns          SharedTurnRunner
+	PersonalTaskRuntime  PersonalTaskRuntime
+	ChatForward          ChatForwardPort
+	IM                   IMPort
+	Notifications        NotificationsPort
+	Audit                AuditPort
+	EmployeeManagement   EmployeeManagementPort
 }
 
 func New(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter, secure bool) (*Server, error) {
@@ -142,7 +150,15 @@ func NewWithModules(data *store.Store, runtimes runtimeapi.EmployeeRuntimeRouter
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour, modules: modules, sharedEvents: newSharedEventHub(), migrationJobs: newMigrationJobTracker()}, nil
+	server := &Server{store: data, runtimes: runtimes, now: time.Now, secure: secure, dummyHash: dummyHash, sessionLife: 12 * time.Hour, modules: modules, sharedEvents: newSharedEventHub(), migrationJobs: newMigrationJobTracker()}
+	if modules.Collaboration != nil {
+		runtime := modules.PersonalTaskRuntime
+		if runtime == nil {
+			runtime = newRuntimePersonalTasks(runtimes)
+		}
+		server.personalTasks = &personalTaskService{store: modules.Collaboration, runtime: runtime, users: data}
+	}
+	return server, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -166,11 +182,12 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/portal/admin/user-jobs", s.requireUser(s.requireAdmin(s.adminUserJob)))
 	mux.HandleFunc("GET /api/portal/admin/users/usage", s.requireUser(s.requireAdmin(s.adminUsersUsage)))
 	mux.HandleFunc("GET /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
- mux.HandleFunc("GET /api/quota/dollars",s.requireUser(s.dollarBudgets))
- mux.HandleFunc("GET /api/portal/admin/usage",s.requireUser(s.dollarUsage))
+	mux.HandleFunc("GET /api/quota/dollars", s.requireUser(s.dollarBudgets))
+	mux.HandleFunc("GET /api/portal/admin/usage", s.requireUser(s.dollarUsage))
 	mux.HandleFunc("POST /api/portal/admin/quotas", s.requireUser(s.adminQuotas))
 	mux.HandleFunc("POST /api/portal/admin/users/{action}", s.requireUser(s.requireAdmin(s.adminUserAction)))
 	mux.HandleFunc("POST /api/portal/admin/users/kimi-datasource", s.requireUser(s.requireAdmin(s.adminKimiDatasource)))
+	mux.HandleFunc("POST /api/portal/admin/marketplace/professional-database", s.requireUser(s.requireAdmin(s.publishProfessionalDatabase)))
 	mux.HandleFunc("GET /api/portal/admin/audit", s.requireUser(s.adminAuditEvents))
 	mux.HandleFunc("GET /api/portal/admin/audit/export", s.requireUser(s.adminAuditExport))
 	mux.HandleFunc("GET /api/portal/admin/migrations", s.requireUser(s.adminMigrations))
@@ -200,6 +217,16 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("DELETE /api/portal/marketplace", s.requireUser(s.marketCatalog))
 	mux.HandleFunc("POST /api/portal/marketplace", s.requireUser(s.publishMarketEntry))
 	mux.HandleFunc("POST /api/portal/marketplace/install", s.requireUser(s.installMarketEntry))
+	mux.HandleFunc("GET /api/portal/marketplace/versions", s.requireUser(s.marketVersions))
+	mux.HandleFunc("POST /api/portal/marketplace/update", s.requireUser(s.marketUpdate))
+	mux.HandleFunc("GET /api/portal/admin/marketplace", s.requireUser(s.requireAdmin(s.adminMarket)))
+	mux.HandleFunc("POST /api/portal/admin/marketplace", s.requireUser(s.requireAdmin(s.adminMarket)))
+	mux.HandleFunc("GET /api/portal/shared-projects/{id}/capabilities", s.requireUser(s.projectSubscriptions))
+	mux.HandleFunc("POST /api/portal/shared-projects/{id}/capabilities", s.requireUser(s.projectSubscriptions))
+	mux.HandleFunc("DELETE /api/portal/shared-projects/{id}/capabilities", s.requireUser(s.projectSubscriptions))
+	mux.HandleFunc("GET /api/portal/projects/{id}/capabilities", s.requireUser(s.personalProjectSubscriptions))
+	mux.HandleFunc("POST /api/portal/projects/{id}/capabilities", s.requireUser(s.personalProjectSubscriptions))
+	mux.HandleFunc("DELETE /api/portal/projects/{id}/capabilities", s.requireUser(s.personalProjectSubscriptions))
 	mux.HandleFunc("POST /api/portal/skill-market", s.requireUser(s.publishMarketSkill))
 	mux.HandleFunc("POST /api/portal/skill-market/install", s.requireUser(s.installMarketSkill))
 	mux.HandleFunc("DELETE /api/portal/skill-market", s.requireUser(s.deleteMarketSkill))
@@ -207,6 +234,15 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/shared-projects", s.requireUser(s.sharedProjects))
 	mux.HandleFunc("PATCH /api/portal/shared-projects/{id}", s.requireUser(s.sharedProject))
 	mux.HandleFunc("GET /api/portal/shared-projects/{id}/members", s.requireUser(s.sharedProjectMembers))
+	mux.HandleFunc("GET /api/portal/shared-projects/{id}/assistants", s.requireUser(s.sharedAssistantMembers))
+	mux.HandleFunc("GET /api/portal/shared-projects/{id}/assistant-options", s.requireUser(s.sharedAssistantOptions))
+	mux.HandleFunc("POST /api/portal/shared-projects/{id}/assistant-invites", s.requireUser(s.sharedAssistantInvite))
+	mux.HandleFunc("PATCH /api/portal/shared-projects/{id}/assistants/{assistantID}", s.requireUser(s.sharedAssistantSettings))
+	mux.HandleFunc("DELETE /api/portal/shared-projects/{id}/assistants/{assistantID}", s.requireUser(s.sharedAssistantSettings))
+	mux.HandleFunc("POST /api/portal/shared-projects/{id}/discussion", s.requireUser(s.sharedDefaultDiscussion))
+	mux.HandleFunc("GET /api/portal/shared-projects/{id}/invites", s.requireUser(s.sharedOutgoingInvites))
+	mux.HandleFunc("DELETE /api/portal/shared-invites/{id}", s.requireUser(s.sharedRevokeInvite))
+	mux.HandleFunc("PUT /api/portal/shared-conversations/{id}/assistant", s.requireUser(s.sharedBindAssistant))
 	mux.HandleFunc("POST /api/portal/shared-projects/{id}/invites", s.requireUser(s.sharedProjectInvites))
 	mux.HandleFunc("POST /api/portal/shared-projects/{id}/invite-links", s.requireUser(s.sharedProjectInviteLinkCreate))
 	mux.HandleFunc("DELETE /api/portal/shared-projects/{id}/invite-links/{token}", s.requireUser(s.sharedProjectInviteLinkRevoke))
@@ -223,13 +259,18 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/portal/shared-users", s.requireUser(s.sharedUsers))
 	mux.HandleFunc("GET /api/portal/shared-members", s.requireUser(s.sharedMembers))
 	mux.HandleFunc("GET /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
+	mux.HandleFunc("GET /api/portal/shared-personal-tasks", s.requireUser(s.personalTaskOperations))
+	mux.HandleFunc("POST /api/portal/shared-personal-tasks", s.requireUser(s.personalTaskOperations))
+	mux.HandleFunc("DELETE /api/portal/shared-personal-tasks", s.requireUser(s.personalTaskOperations))
 	mux.HandleFunc("POST /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
 	mux.HandleFunc("PATCH /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
+	mux.HandleFunc("DELETE /api/portal/shared-conversations", s.requireUser(s.sharedConversations))
 	mux.HandleFunc("GET /api/portal/shared-messages", s.requireUser(s.sharedMessages))
 	mux.HandleFunc("POST /api/portal/shared-messages", s.requireUser(s.sharedMessages))
 	mux.HandleFunc("POST /api/portal/shared-runs/cancel", s.requireUser(s.cancelSharedRun))
 	mux.HandleFunc("GET /api/portal/shared-events", s.requireUser(s.sharedEventStream))
 	mux.HandleFunc("POST /api/portal/shared-files", s.requireUser(s.sharedFiles))
+	mux.HandleFunc("/api/portal/shared-workspaces/{id}/{rest...}", s.requireUser(s.sharedWorkspaceHTTP))
 	mux.HandleFunc("POST /api/portal/shared-office-preview", s.requireUser(s.sharedOfficePreview))
 	mux.HandleFunc("GET /api/portal/shared-office-preview", s.requireUser(s.sharedOfficePreviewContent))
 	mux.HandleFunc("POST /api/stt", s.requireUser(s.speech))
@@ -383,6 +424,18 @@ func (s *Server) installMarketSkill(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	defer clear(pack.Archive)
+	if s.modules.Marketplace != nil {
+		if err = s.importLegacyMarket(request.Context(), user); err != nil {
+			marketError(writer, err)
+			return
+		}
+		s.modules.Marketplace.InstallMu.Lock()
+		defer s.modules.Marketplace.InstallMu.Unlock()
+		if _, _, err = s.modules.Marketplace.Get(request.Context(), "legacy-"+input.ID); err != nil {
+			marketError(writer, err)
+			return
+		}
+	}
 	endpoint, err := s.runtimes.Resolve(request.Context(), user.SID)
 	if err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "runtime_unavailable")
@@ -527,16 +580,37 @@ func (s *Server) requireUser(next userHandler) http.HandlerFunc {
 			return
 		}
 		markAudit(request, user.Username, false)
+		if strings.HasPrefix(request.URL.Path, "/api/runtime/") || (strings.HasPrefix(request.URL.Path, "/api/") && !strings.HasPrefix(request.URL.Path, "/api/portal/")) {
+			if err := s.applyMarketActions(request.Context(), user); err != nil {
+				writeError(writer, 503, "market_security_update_pending")
+				return
+			}
+		}
+		sharedMutation := s.modules.Collaboration != nil && strings.HasPrefix(request.URL.Path, "/api/portal/shared-") && request.Method != http.MethodGet && request.Method != http.MethodHead && !strings.HasSuffix(request.URL.Path, "shared-messages") && !strings.HasSuffix(request.URL.Path, "shared-office-preview")
+		if strings.Contains(request.URL.Path, "/uploads") && !strings.HasSuffix(request.URL.Path, "/complete") {
+			sharedMutation = false
+		}
+		if sharedMutation {
+			audience := s.sharedRefreshAudience(request.Context(), user.ID)
+			defer func() {
+				for id := range s.sharedRefreshAudience(request.Context(), user.ID) {
+					audience[id] = true
+				}
+				for id := range audience {
+					s.sharedEvents.publish(collaboration.Message{Kind: "refresh", AuthorUserID: &id})
+				}
+			}()
+		}
 		next(writer, request, user)
 	}
 }
 
 func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Remember bool   `json:"remember"`
-		UseRemembered bool `json:"useRemembered"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		Remember      bool   `json:"remember"`
+		UseRemembered bool   `json:"useRemembered"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(request.Body, 4*1024))
 	decoder.DisallowUnknownFields()
@@ -785,6 +859,9 @@ func (s *Server) proxyDsh(writer http.ResponseWriter, request *http.Request, use
 }
 
 func (s *Server) proxyRuntimePath(writer http.ResponseWriter, request *http.Request, user store.User, stripPrefix string) {
+	if s.interceptPersonalTaskDeletion(writer, request, user) {
+		return
+	}
 	if tracker, ok := s.runtimes.(interface{ BeginRequest(string) (func(), error) }); ok {
 		done, err := tracker.BeginRequest(user.SID)
 		if err != nil {
@@ -843,6 +920,10 @@ const frontendCookie = "workagent_frontend"
 // all of the old client's absolute asset URLs continue to resolve together.
 func (s *Server) webSurface(legacy http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/guid" && request.URL.Query().Get("open") == "shared-invites" {
+			http.Redirect(writer, request, "/?frontend=dsh&workagent=shared&view=invites", http.StatusTemporaryRedirect)
+			return
+		}
 		if request.URL.Path == "/" {
 			// The same URL serves login or DSH according to the session cookie.
 			// Never reuse one surface's document after login or logout.
@@ -889,7 +970,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		frameAncestors := "'none'"
 		previewPath := strings.ToLower(request.URL.Query().Get("path"))
-		workspacePDFPreview := strings.HasPrefix(request.URL.Path, "/api/runtime/v1/workspaces/") && strings.HasSuffix(request.URL.Path, "/content") && request.URL.Query().Get("preview") == "1" && strings.HasSuffix(previewPath, ".pdf")
+		workspacePDFPreview := (strings.HasPrefix(request.URL.Path, "/api/runtime/v1/workspaces/") || strings.HasPrefix(request.URL.Path, "/api/portal/shared-workspaces/")) && strings.HasSuffix(request.URL.Path, "/content") && request.URL.Query().Get("preview") == "1" && strings.HasSuffix(previewPath, ".pdf")
 		// Converted Office previews are PDFs rendered in the same sandboxed
 		// iframe pipeline, so they get the same frame-ancestors exception.
 		officePreview := strings.HasPrefix(request.URL.Path, "/api/runtime/v1/office-preview/content/") || request.URL.Path == "/api/portal/shared-office-preview"

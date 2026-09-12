@@ -70,10 +70,23 @@ const projection = (value: unknown): readonly ResolvedMcpServer[] => {
 };
 
 export class McpProjectionStore {
+  nativeNames: readonly string[] = [];
+  nativeConfig: Record<string, Record<string, unknown>> = {};
   readonly #servers = new Map<string, ResolvedMcpServer>();
 
   replace(value: unknown): void {
     const projected = projection(value);
+    const names = object(value).nativeNames;
+    if (
+      names !== undefined &&
+      (!Array.isArray(names) || names.some((name) => typeof name !== "string"))
+    )
+      throw new Error("invalid_native_mcp_names");
+    this.nativeNames = (names ?? []) as string[];
+    this.nativeConfig = (object(value).nativeConfig ?? {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
     const next = new Map<string, ResolvedMcpServer>();
     for (const server of projected) {
       if (next.has(server.server.id)) throw new Error("duplicate_mcp_server");

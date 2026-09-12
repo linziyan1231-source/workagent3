@@ -22,6 +22,7 @@ import {
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import { nativeEngineEnvironment } from "./environment.js";
+import { kimiSkillDirectories, withSkillCatalog } from "./skills.js";
 import type {
   BridgeEvent,
   BridgeSession,
@@ -196,15 +197,22 @@ export const applyKimiOptions = async (
     return;
   }
   const terms = {
-    read_only: ["plan", "read", "ask", "default"],
-    workspace_write: ["acceptedit", "edit", "agent", "auto", "yolo"],
-    full_access: ["yolonosandbox", "nosandbox", "bypass", "full"],
+    read_only: ["plan", "readonly"],
+    workspace_write: ["acceptedit", "acceptedits", "workspacewrite", "auto"],
+    full_access: [
+      "yolo",
+      "yolonosandbox",
+      "dangerfullaccess",
+      "nosandbox",
+      "bypass",
+      "full",
+      "fullaccess",
+    ],
   }[options.permissionMode];
   const target = modes.availableModes.find((mode) => {
-    const value = `${mode.id} ${mode.name}`
-      .toLowerCase()
-      .replace(/[^a-z]/g, "");
-    return terms.some((term) => value.includes(term));
+    return [mode.id, mode.name].some((value) =>
+      terms.includes(value.toLowerCase().replace(/[^a-z]/g, "")),
+    );
   });
   if (target === undefined && options.requirePermission)
     throw new Error("engine_permission_unavailable");
@@ -252,12 +260,56 @@ export class KimiBridge implements EngineBridge {
   #child: ChildProcessWithoutNullStreams | undefined;
   #connection: ClientSideConnection | undefined;
   #starting: Promise<ClientSideConnection> | undefined;
+  readonly #scoped = new Map<string, KimiBridge>();
+  readonly #skillDirectories: readonly string[] | undefined;
+  // Model discovery spawns a dedicated ACP process per call; cache briefly so
+  // bursts of UI selectors cannot flood the host with short-lived processes.
+  #models:
+    | {
+        expires: number;
+        value: Promise<import("./types.js").EngineModel[]>;
+      }
+    | undefined;
 
-  constructor(binary = process.env.WORKAGENT_KIMI_BIN ?? "kimi") {
+  constructor(
+    binary = process.env.WORKAGENT_KIMI_BIN ?? "kimi",
+    skillDirectories?: readonly string[],
+  ) {
     this.#binary = binary;
+    this.#skillDirectories = skillDirectories;
+  }
+
+  #forSkills(
+    workspace: string,
+    options?: EngineSessionOptions,
+  ): KimiBridge | undefined {
+    if (this.#skillDirectories || options?.skills === undefined)
+      return undefined;
+    const directories = kimiSkillDirectories(workspace, options);
+    const key = JSON.stringify(directories);
+    let bridge = this.#scoped.get(key);
+    if (!bridge) {
+      bridge = new KimiBridge(this.#binary, directories);
+      this.#scoped.set(key, bridge);
+    }
+    return bridge;
   }
 
   async listModels(): Promise<import("./types.js").EngineModel[]> {
+    const cached = this.#models;
+    if (cached && cached.expires > Date.now()) return cached.value;
+    const value = this.#probeModels();
+    this.#models = { expires: Date.now() + 60_000, value };
+    try {
+      return await value;
+    } catch (error) {
+      // A failed probe is never cached; the next caller retries.
+      if (this.#models?.value === value) this.#models = undefined;
+      throw error;
+    }
+  }
+
+  async #probeModels(): Promise<import("./types.js").EngineModel[]> {
     // A dedicated ACP process isolates the discovery session from active tasks.
     const probe = new KimiBridge(this.#binary);
     const workspace = await mkdtemp(join(tmpdir(), "workagent-models-"));
@@ -284,6 +336,8 @@ export class KimiBridge implements EngineBridge {
     onEvent: (event: BridgeEvent) => void,
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
+    const scoped = this.#forSkills(workspace, options);
+    if (scoped) return scoped.create(workspace, onEvent, options);
     const connection = await this.#connect();
     let result;
     try {
@@ -312,7 +366,7 @@ export class KimiBridge implements EngineBridge {
       },
     );
     this.#sessions.set(result.sessionId, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async resume(
@@ -321,6 +375,8 @@ export class KimiBridge implements EngineBridge {
     onEvent: (event: BridgeEvent) => void,
     options?: import("./types.js").EngineSessionOptions,
   ): Promise<BridgeSession> {
+    const scoped = this.#forSkills(workspace, options);
+    if (scoped) return scoped.resume(nativeId, workspace, onEvent, options);
     const connection = await this.#connect();
     let result;
     try {
@@ -352,7 +408,7 @@ export class KimiBridge implements EngineBridge {
       },
     );
     this.#sessions.set(nativeId, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async fork(
@@ -362,6 +418,9 @@ export class KimiBridge implements EngineBridge {
     options?: import("./types.js").EngineSessionOptions,
     lastTurnId?: string,
   ): Promise<BridgeSession> {
+    const scoped = this.#forSkills(workspace, options);
+    if (scoped)
+      return scoped.fork(nativeId, workspace, onEvent, options, lastTurnId);
     if (lastTurnId !== undefined)
       throw new Error("engine_capability_unsupported:kimi:fork_at_turn");
     const connection = await this.#connect();
@@ -393,7 +452,7 @@ export class KimiBridge implements EngineBridge {
       },
     );
     this.#sessions.set(result.sessionId, session);
-    return session;
+    return withSkillCatalog(session, options);
   }
 
   async probe(): Promise<void> {
@@ -421,6 +480,10 @@ export class KimiBridge implements EngineBridge {
   }
 
   async close(): Promise<void> {
+    await Promise.all(
+      [...this.#scoped.values()].map((bridge) => bridge.close()),
+    );
+    this.#scoped.clear();
     for (const session of this.#sessions.values()) session.disconnected();
     this.#child?.kill();
     this.#child = undefined;
@@ -441,13 +504,33 @@ export class KimiBridge implements EngineBridge {
   async #start(): Promise<ClientSideConnection> {
     if (process.env.KIMI_CODE_HOME === undefined)
       throw new Error("KIMI_CODE_HOME is required for the native Kimi engine");
-    const child = spawn(this.#binary, ["acp"], {
-      env: nativeEngineEnvironment(process.env, "KIMI_CODE_HOME"),
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    const child = spawn(
+      this.#binary,
+      [
+        ...(this.#skillDirectories ?? []).flatMap((path) => [
+          "--skills-dir",
+          path,
+        ]),
+        "acp",
+      ],
+      {
+        env: nativeEngineEnvironment(process.env, "KIMI_CODE_HOME"),
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
     this.#child = child;
-    child.stderr.resume();
+    // Keep the last stderr chunk so a silent early exit still leaves a
+    // diagnosable cause in the failure message.
+    let stderrTail = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderrTail = (stderrTail + chunk).slice(-8192);
+    });
+    const stderrDetail = () => {
+      const tail = stderrTail.trim().slice(-400);
+      return tail ? `: ${tail}` : "";
+    };
     // Wait for the spawn to succeed before wiring the connection: a failed
     // spawn rejects here with the real cause instead of escaping as an
     // uncaught child error event or surfacing as an opaque stream error.
@@ -478,13 +561,15 @@ export class KimiBridge implements EngineBridge {
       child.once("exit", (code) =>
         reject(
           new Error(
-            `engine_start_failed:kimi acp exited with ${code ?? "no status"}`,
+            `engine_start_failed:kimi acp exited with ${code ?? "no status"}${stderrDetail()}`,
           ),
         ),
       );
     });
-    child.once("exit", () => {
-      for (const session of this.#sessions.values()) session.disconnected();
+    child.once("exit", (code) => {
+      const detail = `kimi acp exited with ${code ?? "no status"}${stderrDetail()}`;
+      for (const session of this.#sessions.values())
+        session.disconnected(detail);
       this.#sessions.clear();
       this.#child = undefined;
       this.#connection = undefined;
@@ -566,6 +651,7 @@ export class KimiSession implements BridgeSession {
   readonly #emit: (event: BridgeEvent) => void;
   readonly #closed: () => void;
   #activeTurn: string | undefined;
+  #connected = true;
   #assistantText = "";
   #completion: Promise<void> | undefined;
   #steering = false;
@@ -683,11 +769,17 @@ export class KimiSession implements BridgeSession {
   }
 
   async close(): Promise<void> {
+    this.#connected = false;
     await this.cancel();
     this.#closed();
   }
 
-  disconnected(): void {
+  get connected(): boolean {
+    return this.#connected;
+  }
+
+  disconnected(detail?: string): void {
+    this.#connected = false;
     this.#approvalEnabled = false;
     this.#approvals.abort();
     const turnId = this.#activeTurn;
@@ -697,7 +789,7 @@ export class KimiSession implements BridgeSession {
         type: "turn.failed",
         turnId,
         code: "kimi_disconnected",
-        message: "Kimi process disconnected",
+        message: `Kimi process disconnected${detail ? ` (${detail})` : ""}`,
       });
   }
 

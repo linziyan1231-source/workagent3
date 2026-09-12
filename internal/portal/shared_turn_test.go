@@ -65,7 +65,7 @@ func sharedTurnQuotaServer(t *testing.T, budgetLimit int64) (http.Handler, *quot
 		t.Fatal(err)
 	}
 	platform := &fakeSharedProjectPlatform{}
-	server, err := NewWithModules(users, StaticRouter{}, false, Modules{
+	server, err := NewWithModules(users, legacyAssistantCatalog(t), false, Modules{
 		ModelAccess: collaborationModelAccess{}, Collaboration: collaborationData,
 		SharedProjects: platform, SharedFiles: platform, SharedTurns: platform,
 		SharedRunQuota: quotas, Notifications: notices,
@@ -94,6 +94,9 @@ func sharedTurnConversation(t *testing.T, handler http.Handler, alice, bob colla
 	}
 	if accepted := collaborationRequest(t, handler, bob.session, http.MethodPost, "/api/portal/shared-invites/"+inviteBody.Invite.ID+"/accept", `{}`); accepted.Code != http.StatusOK {
 		t.Fatalf("accept = %d %s", accepted.Code, accepted.Body.String())
+	}
+	if response := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-projects/"+projectBody.Project.ID+"/assistant-invites", `{"assistant_id":"codex"}`); response.Code != 201 {
+		t.Fatalf("assistant invite: %d %s", response.Code, response.Body.String())
 	}
 	conversation := collaborationRequest(t, handler, alice.session, http.MethodPost, "/api/portal/shared-conversations", `{"project_id":"`+projectBody.Project.ID+`","name":"Review","assistant_id":"codex","assistant_backend":"codex","model_id":"gpt-5","thinking_effort":"medium"}`)
 	var conversationBody struct {

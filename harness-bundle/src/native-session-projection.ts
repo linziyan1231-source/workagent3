@@ -1,3 +1,4 @@
+import type { SessionEvent } from "@deepseek-ai/dsh-session";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ProjectionDefinition } from "@deepseek-ai/dsh-session-projection";
 import { z } from "zod";
@@ -10,9 +11,12 @@ const message = z.object({
   text: z.string(),
   createdAt: z.string(),
   nativeTurnId: z.string().optional(),
+  kind: z.enum(["commentary", "question", "answer"]).optional(),
+  replyTo: z.object({ id: z.string(), text: z.string() }).optional(),
 });
 const fact = z.record(z.string(), z.json());
 const stateSchema = z.object({
+  sequence: z.number().int(),
   messages: z.array(message),
   lastEvent: fact.optional(),
   draft: z.string(),
@@ -45,9 +49,10 @@ declare module "@deepseek-ai/dsh-session-projection" {
 
 export const nativeSessionProjection: ProjectionDefinition<"nativeSession"> = {
   key: "nativeSession",
-  stateVersion: 2,
+  stateVersion: 6,
   stateSchema: projectionSchema,
   init: () => ({
+    sequence: -1,
     messages: [],
     draft: "",
     progress: "",
@@ -59,73 +64,8 @@ export const nativeSessionProjection: ProjectionDefinition<"nativeSession"> = {
     capabilities: {},
   }),
   apply(state, event) {
-    if (event.type === "workagent/native/message")
-      return { ...state, messages: [...state.messages, event.data] };
-    if (event.type === "turn/start")
-      return {
-        ...state,
-        draft: "",
-        progress: "",
-        activity: { state: "running" },
-      };
-    if (event.type === "turn/end")
-      return {
-        ...state,
-        draft: "",
-        progress: "",
-        activeTool: false,
-        activity: {
-          state: "idle",
-          ...(event.data.reason.kind === "interrupted"
-            ? { message: "native_turn_interrupted" }
-            : event.data.reason.kind === "error"
-              ? { message: event.data.reason.error.message }
-              : {}),
-        },
-      };
-    if (event.type !== "workagent/native/event") return state;
-    const data = event.data;
-    const next = { ...state, lastEvent: data };
-    if (data.type === "assistant.delta" && typeof data.delta === "string")
-      next.draft += data.delta;
-    if (
-      data.type === "assistant.completed" ||
-      ["turn.completed", "turn.cancelled", "turn.failed"].includes(data.type)
-    )
-      next.draft = "";
-    if (data.type === "session.metadata") next.metadata = data;
-    if (data.type === "turn.retrying")
-      next.activity = {
-        state: "retrying",
-        ...(typeof data.message === "string" ? { message: data.message } : {}),
-      };
-    if (data.type.startsWith("tool.") && typeof data.toolCallId === "string")
-      next.tools = {
-        ...state.tools,
-        [data.toolCallId]: { ...state.tools[data.toolCallId], ...data },
-      };
-    if (data.type.startsWith("tool."))
-      next.activeTool = Object.values(next.tools).some(
-        (tool) => tool.type !== "tool.completed" && tool.turnId === data.turnId,
-      );
-    if (data.type.startsWith("tool."))
-      next.progress = next.activeTool ? "正在执行工具…" : "";
-    if (data.type === "session.capabilities") next.capabilities = data;
-    if (data.type === "process.updated" && typeof data.processId === "string") {
-      const previous = state.processes[data.processId];
-      next.processes = {
-        ...state.processes,
-        [data.processId]: {
-          ...previous,
-          ...data,
-          text:
-            typeof data.delta === "string"
-              ? `${previous?.text || ""}${data.delta}`
-              : data.text || "",
-        },
-      };
-    }
-    return next;
+    const next = applyNativeEvent(state, event);
+    return next === state ? state : { ...next, sequence: event.seq };
   },
   wire: { viewSchema: projectionSchema, view: (state) => state },
 };
@@ -135,4 +75,125 @@ export function registerNativeSessionProjection(ctx: Context): () => void {
     ...nativeSessionProjection,
     wire: nativeSessionProjection.wire!,
   });
+}
+
+function applyNativeEvent(
+  state: NativeSessionProjection,
+  event: SessionEvent,
+): NativeSessionProjection {
+  if (
+    event.type === "workagent/native/message" ||
+    event.type === "workagent/native/message-kind"
+  ) {
+    const row =
+      event.type === "workagent/native/message"
+        ? event.data
+        : {
+            ...state.messages.find((row) => row.id === event.data.id)!,
+            kind: event.data.kind,
+          };
+    if (!row.id) return state;
+    if (row.role === "assistant" && row.kind === "commentary") {
+      const processId = `commentary-${row.id}`;
+      return {
+        ...state,
+        messages: state.messages.filter((message) => message.id !== row.id),
+        processes: {
+          ...state.processes,
+          [processId]: {
+            processId,
+            kind: "commentary",
+            text: row.text,
+            turnId: row.nativeTurnId || "",
+          },
+        },
+      };
+    }
+    return {
+      ...state,
+      messages:
+        event.type === "workagent/native/message"
+          ? [...state.messages, row]
+          : state.messages.map((message) =>
+              message.id === row.id ? row : message,
+            ),
+    };
+  }
+  if (event.type === "turn/start")
+    return {
+      ...state,
+      draft: "",
+      progress: "",
+      activity: { state: "running" },
+    };
+  if (event.type === "turn/end")
+    return {
+      ...state,
+      draft: "",
+      progress: "",
+      activeTool: false,
+      activity: {
+        state: "idle",
+        ...(event.data.reason.kind === "interrupted"
+          ? { message: "native_turn_interrupted" }
+          : event.data.reason.kind === "error"
+            ? { message: event.data.reason.error.message }
+            : {}),
+      },
+    };
+  if (event.type !== "workagent/native/event") return state;
+  const data = event.data;
+  const next = { ...state, lastEvent: data };
+  if (data.type === "assistant.delta" && typeof data.delta === "string") {
+    if (data.kind === "commentary") {
+      const processId = `commentary-${data.messageId}`;
+      next.processes = {
+        ...state.processes,
+        [processId]: {
+          processId,
+          kind: "commentary",
+          turnId: data.turnId || "",
+          text: `${state.processes[processId]?.text || ""}${data.delta}`,
+        },
+      };
+    } else next.draft += data.delta;
+  }
+  if (
+    data.type === "assistant.completed" ||
+    ["turn.completed", "turn.cancelled", "turn.failed"].includes(data.type)
+  )
+    next.draft = "";
+  if (data.type === "session.metadata") next.metadata = data;
+  if (data.type === "turn.retrying")
+    next.activity = {
+      state: "retrying",
+      ...(typeof data.message === "string" ? { message: data.message } : {}),
+    };
+  if (data.type.startsWith("tool.") && typeof data.toolCallId === "string")
+    next.tools = {
+      ...state.tools,
+      [data.toolCallId]: { ...state.tools[data.toolCallId], ...data },
+    };
+  if (data.type.startsWith("tool."))
+    next.activeTool = Object.values(next.tools).some(
+      (tool) => tool.type !== "tool.completed" && tool.turnId === data.turnId,
+    );
+  if (data.type.startsWith("tool."))
+    next.progress = next.activeTool ? "正在执行工具…" : "";
+  if (data.type === "session.capabilities") next.capabilities = data;
+  if (data.type === "process.updated" && typeof data.processId === "string") {
+    const previous = state.processes[data.processId];
+    next.processes = {
+      ...state.processes,
+      [data.processId]: {
+        ...previous,
+        ...data,
+        text:
+          typeof data.delta === "string"
+            ? `${previous?.text || ""}${data.delta}`
+            : data.text || "",
+      },
+    };
+  }
+  return next;
 }

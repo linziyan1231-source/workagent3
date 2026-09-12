@@ -115,7 +115,7 @@ try {
         parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
       return {
         title: size(".pXSMma_headlineText"),
-        input: size(".workagent-hero-composer textarea"),
+        input: size(".workagent-hero-composer .workagent-composer-input"),
         projectInput: size(".workagent-project-name"),
         controls: [
           ".workagent-agent",

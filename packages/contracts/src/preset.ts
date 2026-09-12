@@ -18,7 +18,7 @@ export const presetDefinitionSchema = z.object({
   source: presetSourceSchema,
   name: z.string().trim().min(1).max(120),
   description: z.string().max(1000),
-  avatar: z.string().max(2048).nullable(),
+  avatar: z.string().max(65_536).nullable(),
   enabled: z.boolean(),
   engine: engineIdSchema,
   modelId: z.string().min(1).nullable(),
@@ -69,15 +69,7 @@ export const presetBindingSchema = z.object({
   presetId: z.string().min(1),
   presetVersion: z.number().int().positive(),
   resolvedSnapshot: resolvedPresetSnapshotSchema,
+  // Preserve a task's original configuration when a project subscription is removed.
+  projectBase: resolvedPresetSnapshotSchema.optional(),
 });
 export type PresetBinding = z.infer<typeof presetBindingSchema>;
-
-export type PresetRuntimePort = {
-  list(): readonly PresetDefinition[];
-  get(id: string): PresetDefinition | undefined;
-  create(input: PresetMutation): PresetDefinition;
-  update(id: string, input: Partial<PresetMutation>): PresetDefinition;
-  copy(id: string, name: string): PresetDefinition;
-  delete(id: string): void;
-  resolve(id: string): PresetBinding;
-};

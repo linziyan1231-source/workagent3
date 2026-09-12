@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@deepseek-ai/dsh-host-webserver@0.1.1-rc.2': bb6eca3cc399f48c5c0bea13c4f9d1892f909533de542c29ae273a3d7591cdb6
-  '@deepseek-ai/dsh-web-frontend@0.1.1-rc.2': 65ebe823b5a3948fb4522adf1cfbf2ae3bd11a80e80b0c1005d2d9eb37221a8e
+  '@deepseek-ai/dsh-web-frontend@0.1.1-rc.2': 06b55c28062b7b43c3826fde48d9d3431ee228da155d7fade8ce72728b0b0ebe
 
 importers:
 
@@ -121,6 +121,9 @@ importers:
       croner:
         specifier: 9.1.0
         version: 9.1.0
+      smol-toml:
+        specifier: 1.4.2
+        version: 1.4.2
       zod:
         specifier: 4.5.2
         version: 4.5.2
@@ -181,6 +184,12 @@ importers:
       '@testing-library/react':
         specifier: 16.3.0
         version: 16.3.0(@testing-library/dom@10.4.1)(@types/react-dom@19.1.7(@types/react@19.1.10))(@types/react@19.1.10)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@workagent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       jsdom:
         specifier: 26.1.0
         version: 26.1.0
@@ -4878,6 +4887,10 @@ packages:
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
+  smol-toml@1.4.2:
+    resolution: {integrity: sha512-rInDH6lCNiEyn3+hH8KVGFdbjc099j47+OSgbMrfDYX1CmXLfdKd7qi6IfcWj2wFxvSVkuI46M+wPGYfEOEj6g==}
+    engines: {node: '>= 18'}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -7753,7 +7766,7 @@ snapshots:
       '@deepseek-ai/dsh-storage-json': 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-storage@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))
       '@deepseek-ai/dsh-subprocess': 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-system-prompt': 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))
-      '@deepseek-ai/dsh-web-frontend': 0.1.1-rc.2(patch_hash=65ebe823b5a3948fb4522adf1cfbf2ae3bd11a80e80b0c1005d2d9eb37221a8e)
+      '@deepseek-ai/dsh-web-frontend': 0.1.1-rc.2(patch_hash=06b55c28062b7b43c3826fde48d9d3431ee228da155d7fade8ce72728b0b0ebe)
       '@deepseek-ai/dsh-workspace': 0.1.1-rc.2(ca1aef6913f66bb64a14405a8170db89)
       '@deepseek-ai/schemastery': 3.18.1
       commander: 15.0.0
@@ -7802,7 +7815,7 @@ snapshots:
       - react-dom
       - utf-8-validate
 
-  '@deepseek-ai/dsh-web-frontend@0.1.1-rc.2(patch_hash=65ebe823b5a3948fb4522adf1cfbf2ae3bd11a80e80b0c1005d2d9eb37221a8e)': {}
+  '@deepseek-ai/dsh-web-frontend@0.1.1-rc.2(patch_hash=06b55c28062b7b43c3826fde48d9d3431ee228da155d7fade8ce72728b0b0ebe)': {}
 
   '@deepseek-ai/dsh-web-search-deepseek@0.1.1-rc.2(8e47c89c848a591c17689609bee09251)':
     dependencies:
@@ -10663,6 +10676,8 @@ snapshots:
       side-channel-weakmap: 1.0.2
 
   siginfo@2.0.0: {}
+
+  smol-toml@1.4.2: {}
 
   source-map-js@1.2.1: {}
 

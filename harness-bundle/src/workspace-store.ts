@@ -11,6 +11,7 @@ import {
 import {
   basename,
   dirname,
+  extname,
   isAbsolute,
   join,
   relative,
@@ -19,9 +20,11 @@ import {
 import { randomUUID } from "node:crypto";
 import { link, open, rename, rm, writeFile } from "node:fs/promises";
 import { isUtf8 } from "node:buffer";
+import { FileMoves } from "./file-moves.js";
 import { ResumableUploads } from "./resumable-upload.js";
 
-export const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+import { MAX_UPLOAD_BYTES } from "@workagent/contracts/upload-policy";
+export { MAX_UPLOAD_BYTES } from "@workagent/contracts/upload-policy";
 
 export type Workspace = {
   id: string;
@@ -33,6 +36,7 @@ export type Workspace = {
 };
 
 export type WorkspaceEntry = {
+  fileId?: string;
   name: string;
   path: string;
   kind: "directory" | "file";
@@ -41,6 +45,7 @@ export type WorkspaceEntry = {
 };
 
 export type WorkspaceAsset = {
+  fileId?: string;
   id: string;
   workspaceId: string;
   sessionId: string;
@@ -130,25 +135,35 @@ const validateRelativePath = (value: string, allowEmpty = true): string => {
 
 export class WorkspaceStore {
   readonly uploads: ResumableUploads;
+  readonly moves: FileMoves;
   readonly #root: string;
   readonly #indexPath: string;
   readonly #assetIndexPath: string;
+  readonly #attachmentRoot: string;
   readonly #workspaces = new Map<string, Workspace>();
   readonly #assets = new Map<string, WorkspaceAsset>();
 
-  constructor(root: string, dshHome: string) {
+  constructor(
+    root: string,
+    dshHome: string,
+    readonly shared = false,
+    readonly recycleShared?: (projectId: string, path: string) => Promise<unknown>,
+  ) {
     if (!isAbsolute(root)) throw new Error("workspace root must be absolute");
     this.#root = resolve(root);
     this.#indexPath = join(dshHome, "workagent", "workspaces.json");
     this.#assetIndexPath = join(dshHome, "workagent", "workspace-assets.json");
+    this.#attachmentRoot = join(dshHome, "workagent", "chat-attachments");
     this.uploads = new ResumableUploads(
       join(dshHome, "workagent", "uploads"),
       (id, path) => {
         this.#resolve(id, path, true, true);
       },
-      (id, path, stream) => this.writeStream(id, path, stream, false),
+      (id, path, stream, conflict) =>
+        this.writeStream(id, path, stream, false, conflict === "rename"),
+      true,
     );
-    mkdirSync(this.#root, { recursive: true, mode: 0o700 });
+    if (!shared) mkdirSync(this.#root, { recursive: true, mode: 0o700 });
     if (existsSync(this.#indexPath)) {
       const parsed: unknown = JSON.parse(readFileSync(this.#indexPath, "utf8"));
       if (!Array.isArray(parsed) || !parsed.every(validWorkspace))
@@ -164,6 +179,34 @@ export class WorkspaceStore {
         throw new Error("WorkAgent workspace asset index is invalid");
       for (const asset of parsed) this.#assets.set(asset.id, asset);
     }
+    this.moves = new FileMoves(
+      join(dshHome, "workagent", "file-moves.json"),
+      (id, path, missing) => {
+        if (
+          path
+            .replaceAll("\\", "/")
+            .split("/")
+            .some((part) => part.toLowerCase().startsWith(".workagent"))
+        )
+          throw new Error("invalid_move");
+        return this.#resolve(id, path, false, missing);
+      },
+      (id, moves) => {
+        for (const move of moves)
+          for (const asset of this.#assets.values()) {
+            if (
+              asset.workspaceId === id &&
+              (asset.path === move.source ||
+                asset.path.startsWith(move.source + "/"))
+            ) {
+              asset.path =
+                move.destination + asset.path.slice(move.source.length);
+              asset.name = basename(asset.path);
+            }
+          }
+        this.#saveAssets();
+      },
+    );
   }
 
   list(): Workspace[] {
@@ -173,6 +216,20 @@ export class WorkspaceStore {
   }
 
   get(id: string): Workspace | undefined {
+    if (this.shared) {
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(id)) return undefined;
+      const root = join(this.#root, id);
+      if (!existsSync(root)) return undefined;
+      const stat = lstatSync(root);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined;
+      return {
+        id,
+        name: id,
+        directory: id,
+        scope: "team",
+        createdAt: stat.birthtime.toISOString(),
+      };
+    }
     return this.#workspaces.get(id);
   }
 
@@ -226,6 +283,7 @@ export class WorkspaceStore {
     const trashRoot = join(this.#root, ".workagent-project-trash");
     mkdirSync(trashRoot, { mode: 0o700, recursive: true });
     renameSync(source, join(trashRoot, `${Date.now()}-${randomUUID()}-${id}`));
+    this.moves.removeWorkspace(id);
     this.#workspaces.delete(id);
     for (const [assetId, asset] of this.#assets) {
       if (asset.workspaceId === id) this.#assets.delete(assetId);
@@ -238,12 +296,29 @@ export class WorkspaceStore {
     return this.#workspaceRoot(id);
   }
 
-  locate(id: string, reference: string): WorkspaceEntry {
-    const path = (isAbsolute(reference) ? relative(this.#workspaceRoot(id), reference) : reference).replaceAll("\\", "/");
+  locate(
+    id: string,
+    reference: string,
+    fileId?: string,
+    historical = false,
+  ): WorkspaceEntry {
+    let path = (
+      isAbsolute(reference)
+        ? relative(this.#workspaceRoot(id), reference)
+        : reference
+    ).replaceAll("\\", "/");
+    if (fileId || historical) path = this.moves.reference(id, path, fileId);
     const absolute = this.#resolve(id, path, false);
     const stat = statSync(absolute);
     if (!stat.isFile()) throw new Error("not_a_file");
-    return { path, name: basename(absolute), kind: "file", size: stat.size, modifiedAt: stat.mtime.toISOString() };
+    return {
+      fileId: this.moves.identify(id, path),
+      path,
+      name: basename(absolute),
+      kind: "file",
+      size: stat.size,
+      modifiedAt: stat.mtime.toISOString(),
+    };
   }
 
   listFiles(id: string, path = ""): WorkspaceEntry[] {
@@ -261,6 +336,7 @@ export class WorkspaceStore {
         const stat = statSync(absolute);
         const child = path === "" ? entry.name : `${path}/${entry.name}`;
         return {
+          fileId: this.moves.identify(id, child),
           name: entry.name,
           path: child,
           kind: entry.isDirectory() ? "directory" : "file",
@@ -284,7 +360,13 @@ export class WorkspaceStore {
     return readFileSync(absolute);
   }
 
-  async readStream(id: string, path: string) {
+  async readStream(
+    id: string,
+    path: string,
+    fileId?: string,
+    historical = false,
+  ) {
+    if (fileId || historical) path = this.moves.reference(id, path, fileId);
     const file = await open(this.#resolve(id, path, false), "r");
     try {
       const stat = await file.stat();
@@ -301,13 +383,36 @@ export class WorkspaceStore {
     path: string,
     content: AsyncIterable<Uint8Array>,
     overwrite = true,
+    renameOnConflict = false,
   ): Promise<WorkspaceEntry> {
-    const absolute = this.#resolve(id, path, false, true);
-    if (!overwrite && existsSync(absolute))
+    this.moves.writes.set(id, (this.moves.writes.get(id) ?? 0) + 1);
+    try {
+      return await this.#writeStream(
+        id,
+        path,
+        content,
+        overwrite,
+        renameOnConflict,
+      );
+    } finally {
+      this.moves.writes.set(id, (this.moves.writes.get(id) ?? 1) - 1);
+    }
+  }
+
+  async #writeStream(
+    id: string,
+    path: string,
+    content: AsyncIterable<Uint8Array>,
+    overwrite = true,
+    renameOnConflict = false,
+  ): Promise<WorkspaceEntry> {
+    let absolute = this.#resolve(id, path, false, true);
+    if (!overwrite && !renameOnConflict && existsSync(absolute))
       throw new Error("destination_exists");
-    const staging = this.#resolve(id, ".workagent/uploads", false, true);
+    const storage = this.#storage(id, validateRelativePath(path, false));
+    const staging = join(storage.root, ".workagent", "uploads");
     mkdirSync(staging, { recursive: true, mode: 0o700 });
-    this.#assertNoLinks(this.#workspaceRoot(id), staging, false);
+    this.#assertNoLinks(storage.root, staging, false);
     const temporary = join(staging, `${randomUUID()}.part`);
     const file = await open(temporary, "wx", 0o600);
     async function* limited() {
@@ -328,20 +433,28 @@ export class WorkspaceStore {
       // Recheck after the upload: folders may have changed while receiving it.
       this.#resolve(id, path, false, true);
       mkdirSync(dirname(absolute), { recursive: true, mode: 0o700 });
-      this.#assertNoLinks(this.#workspaceRoot(id), dirname(absolute), false);
+      this.#assertNoLinks(storage.root, dirname(absolute), false);
       if (overwrite) await rename(temporary, absolute);
       else {
-        try {
-          // Publish the complete file exclusively, including concurrent uploads.
-          await link(temporary, absolute);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "EEXIST")
-            throw new Error("destination_exists");
-          throw error;
+        const extension = extname(path);
+        const stem = path.slice(0, path.length - extension.length);
+        let suffix = 0;
+        for (;;) {
+          try {
+            // Atomically publish once; conflicts reuse the same completed bytes.
+            await link(temporary, absolute);
+            break;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+            if (!renameOnConflict) throw new Error("destination_exists");
+            path = `${stem} (${++suffix})${extension}`;
+            absolute = this.#resolve(id, path, false, true);
+          }
         }
       }
       const stat = statSync(absolute);
       return {
+        fileId: this.moves.identify(id, validateRelativePath(path, false)),
         name: basename(absolute),
         path: validateRelativePath(path, false),
         kind: "file",
@@ -404,6 +517,7 @@ export class WorkspaceStore {
     }
     const stat = statSync(absolute);
     return {
+      fileId: this.moves.identify(id, validateRelativePath(path, false)),
       name: basename(absolute),
       path: validateRelativePath(path, false),
       kind: "file",
@@ -419,6 +533,14 @@ export class WorkspaceStore {
         (asset) =>
           asset.workspaceId === workspaceId && asset.sessionId === sessionId,
       )
+      .map((asset) => {
+        if (
+          !asset.fileId &&
+          existsSync(this.#resolve(workspaceId, asset.path, false, true))
+        )
+          asset.fileId = this.moves.identify(workspaceId, asset.path);
+        return asset;
+      })
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -504,16 +626,25 @@ export class WorkspaceStore {
   }
 
   move(id: string, source: string, destination: string): void {
-    const from = this.#resolve(id, source, false);
-    const to = this.#resolve(id, destination, false, true);
-    if (existsSync(to)) throw new Error("destination_exists");
-    mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
-    this.#assertNoLinks(this.#workspaceRoot(id), dirname(to), true);
-    renameSync(from, to);
+    const result = this.moves.request(id, [{ source, destination }]);
+    if (result.state === "failed") throw new Error(result.error);
   }
 
-  delete(id: string, path: string): void {
+  delete(id: string, path: string): void | Promise<void> {
     const source = this.#resolve(id, path, false);
+    if (this.shared) {
+      const recycle = this.recycleShared;
+      if (!recycle) throw new Error("shared_trash_unavailable");
+      this.moves.writes.set(id, (this.moves.writes.get(id) ?? 0) + 1);
+      return (async () => {
+        try {
+          await recycle(id, path);
+          this.moves.deleted(id, path);
+        } finally {
+          this.moves.writes.set(id, (this.moves.writes.get(id) ?? 1) - 1);
+        }
+      })();
+    }
     const trashRoot = join(this.#workspaceRoot(id), ".workagent-trash");
     mkdirSync(trashRoot, { mode: 0o700, recursive: true });
     const target = join(
@@ -521,17 +652,18 @@ export class WorkspaceStore {
       `${Date.now()}-${randomUUID()}-${basename(source)}`,
     );
     renameSync(source, target);
+    this.moves.deleted(id, path);
   }
 
   #workspaceRoot(id: string): string {
-    if (id !== "default" && !this.#workspaces.has(id))
+    if ((this.shared || id !== "default") && !this.get(id))
       throw new Error("workspace_not_found");
     const root = join(
       this.#root,
       id === "default"
         ? ".workagent-unassigned"
         : validComponent(
-            this.#workspaces.get(id)!.directory ?? id,
+            this.get(id)!.directory ?? id,
             "unsafe_workspace_root",
           ),
     );
@@ -550,13 +682,34 @@ export class WorkspaceStore {
     allowMissing = false,
   ): string {
     const normalized = validateRelativePath(path, allowEmpty);
-    const root = this.#workspaceRoot(id);
-    const target = resolve(root, normalized);
+    const { root, path: storedPath } = this.#storage(id, normalized);
+    const target = resolve(root, storedPath);
     const rel = relative(root, target);
     if (rel.startsWith("..") || isAbsolute(rel))
       throw new Error("path_outside_workspace");
     this.#assertNoLinks(root, target, allowMissing);
     return target;
+  }
+
+  /** Virtual attachment paths resolve outside project files, under employee data. */
+  #storage(id: string, path: string): { root: string; path: string } {
+    const project = this.#workspaceRoot(id);
+    const prefix = ".workagent-attachments/";
+    if (!path.startsWith(prefix)) return { root: project, path };
+    const root = join(
+      this.#attachmentRoot,
+      validComponent(id, "invalid_workspace_name"),
+    );
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    this.#assertNoLinks(dirname(this.#attachmentRoot), root, false);
+    return { root, path: path.slice(prefix.length) };
+  }
+
+  referencePath(id: string, path: string, fileId?: string): string {
+    path = this.moves.reference(id, path, fileId);
+    const absolute = this.#resolve(id, path, false);
+    if (!statSync(absolute).isFile()) throw new Error("not_a_file");
+    return absolute;
   }
 
   #assertNoLinks(root: string, target: string, allowMissing: boolean): void {
@@ -584,6 +737,7 @@ export class WorkspaceStore {
   }
 
   #addAsset(asset: WorkspaceAsset): WorkspaceAsset {
+    asset.fileId = this.moves.identify(asset.workspaceId, asset.path);
     this.#assets.set(asset.id, asset);
     this.#saveAssets();
     return asset;

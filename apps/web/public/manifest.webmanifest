@@ -1,0 +1,8 @@
+{
+  "id": "/",
+  "name": "WorkAgent",
+  "short_name": "WorkAgent",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone"
+}

@@ -35,6 +35,8 @@ export const automationDefinitionSchema = z.object({
     .min(1)
     .max(64 * 1024),
   notificationPolicy: z.enum(["none", "on_failure", "always"]),
+  messageNotificationEnabled: z.boolean().default(false),
+  messageNotificationTargetId: z.string().min(1).nullable().default(null),
   executionMode: z
     .enum(["new_conversation", "existing"])
     .default("new_conversation"),
@@ -59,6 +61,8 @@ export const automationMutationSchema = automationDefinitionSchema.pick({
   workspaceId: true,
   input: true,
   notificationPolicy: true,
+  messageNotificationEnabled: true,
+  messageNotificationTargetId: true,
   executionMode: true,
   conversationId: true,
   skillId: true,

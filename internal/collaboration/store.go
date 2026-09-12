@@ -17,6 +17,8 @@ var (
 	ErrForbidden       = errors.New("shared project access forbidden")
 	ErrConflict        = errors.New("shared project conflict")
 	ErrInviteExpired   = errors.New("shared project invite expired")
+	ErrInvitePending   = errors.New("shared_invite_already_pending")
+	ErrMemberExists    = errors.New("shared_member_already_exists")
 	ErrTransferPending = errors.New("shared ownership transfer pending")
 )
 
@@ -214,8 +216,6 @@ CREATE TABLE IF NOT EXISTS shared_ai_runs (
   created_at INTEGER NOT NULL,
   finished_at INTEGER
 );
-CREATE UNIQUE INDEX IF NOT EXISTS shared_ai_one_active
-ON shared_ai_runs(conversation_id) WHERE state='running';
 CREATE TABLE IF NOT EXISTS shared_ai_run_payers (
   run_id TEXT NOT NULL REFERENCES shared_ai_runs(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL,
@@ -228,7 +228,16 @@ CREATE TABLE IF NOT EXISTS shared_ai_run_payers (
 	if err != nil {
 		return fmt.Errorf("migrate collaboration database: %w", err)
 	}
-	return s.ensureOwnershipTransferFinalizedColumn(ctx)
+	if err := s.ensureOwnershipTransferFinalizedColumn(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateAssistantMembers(ctx); err != nil {
+		return err
+	}
+	if err := s.migratePersonalTaskColumns(ctx); err != nil {
+		return err
+	}
+	return s.migratePersonalTaskOperations(ctx)
 }
 
 func (s *Store) ensureOwnershipTransferFinalizedColumn(ctx context.Context) error {
@@ -257,6 +266,42 @@ func (s *Store) ensureOwnershipTransferFinalizedColumn(ctx context.Context) erro
 	}
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE shared_ownership_transfers ADD COLUMN finalized_at INTEGER`); err != nil {
 		return fmt.Errorf("add ownership transfer finalization marker: %w", err)
+	}
+	return nil
+}
+
+// SQLite cannot add a CHECK constraint through ALTER TABLE, so the
+// conversation kind domain is validated in CreateConversation instead.
+func (s *Store) migratePersonalTaskColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(shared_conversations)`)
+	if err != nil {
+		return err
+	}
+	present := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		present[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, column := range []struct{ name, definition string }{
+		{"kind", "kind TEXT NOT NULL DEFAULT 'discussion'"},
+		{"creator_user_id", "creator_user_id INTEGER NOT NULL DEFAULT 0"},
+		{"runtime_session_id", "runtime_session_id TEXT NOT NULL DEFAULT ''"},
+	} {
+		if present[column.name] {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE shared_conversations ADD COLUMN "+column.definition); err != nil {
+			return fmt.Errorf("add conversation %s column: %w", column.name, err)
+		}
 	}
 	return nil
 }
@@ -466,9 +511,18 @@ func (s *Store) CreateInvite(ctx context.Context, invite Invite) (Invite, error)
 		return Invite{}, err
 	}
 	if exists != 0 {
-		return Invite{}, ErrConflict
+		return Invite{}, ErrMemberExists
 	}
 	stamp := s.now().UTC()
+	if _, err := s.db.ExecContext(ctx, `UPDATE shared_invites SET status='expired',acted_at=? WHERE project_id=? AND target_user_id=? AND status='pending' AND expires_at<=?`, stamp.UnixMilli(), invite.ProjectID, invite.TargetUserID, stamp.UnixMilli()); err != nil {
+		return Invite{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM shared_invites WHERE project_id=? AND target_user_id=? AND status IN ('pending','accepting'))`, invite.ProjectID, invite.TargetUserID).Scan(&exists); err != nil {
+		return Invite{}, err
+	}
+	if exists != 0 {
+		return Invite{}, ErrInvitePending
+	}
 	if !invite.ExpiresAt.After(stamp) {
 		return Invite{}, ErrInviteExpired
 	}
@@ -515,6 +569,9 @@ func (s *Store) BeginInviteAcceptance(ctx context.Context, inviteID string, targ
 	}
 	if expectedTarget != targetUserID {
 		return Member{}, ErrForbidden
+	}
+	if status == "expired" {
+		return Member{}, ErrInviteExpired
 	}
 	if status != "pending" || projectState != "active" {
 		return Member{}, ErrConflict
@@ -629,6 +686,9 @@ func (s *Store) RevokeInvite(ctx context.Context, inviteID string, ownerUserID i
 }
 
 func (s *Store) InvitesForTarget(ctx context.Context, targetUserID int64) ([]Invite, error) {
+	if _, err := s.db.ExecContext(ctx, `UPDATE shared_invites SET status='expired',acted_at=? WHERE target_user_id=? AND status='pending' AND expires_at<=?`, s.now().UnixMilli(), targetUserID, s.now().UnixMilli()); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM shared_invites WHERE target_user_id=? AND status='pending' ORDER BY created_at,id`, targetUserID)
 	if err != nil {
 		return nil, err

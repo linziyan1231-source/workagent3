@@ -39,6 +39,34 @@ describe("platform quota configuration", () => {
 });
 
 describe("PlatformQuotaClient", () => {
+  it("looks up a saved admission with only the authenticated runtime SID and run ID", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          runId: "shared-1",
+          sid: "S-1-5-21-999",
+          modelId: "model",
+          period: "daily",
+          periodKey: "2026-09-12",
+          reservedUnits: 100,
+          actualUnits: null,
+          status: "reserved",
+          accepted: false,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = PlatformQuotaClient.fromEnvironment(environment)!;
+    const value = await client.lookup("shared-1");
+    expect(value.accepted).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      "http://127.0.0.1:8088/internal/runtime/quota/lookup",
+    );
+    expect(JSON.parse(String(fetch.mock.calls[0]![1].body))).toEqual({
+      sid: environment.WORKAGENT_EMPLOYEE_SID,
+      runId: "shared-1",
+    });
+  });
   it("authenticates and injects the configured SID into reserve and settle", async () => {
     const fetch = vi
       .fn()

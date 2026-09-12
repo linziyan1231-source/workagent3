@@ -1,7 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { automationMutationSchema } from "@workagent/contracts";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import { AutomationScheduler, AutomationStore } from "./automation-store.js";
 
 const json = (
@@ -140,9 +140,9 @@ export class AutomationController {
         handler,
       });
       scheduler.start();
-      return () => {
-        scheduler.stop();
+      return async () => {
         unregister();
+        await scheduler.stop();
       };
     }, "workagent-automation: routes and scheduler");
   }

@@ -1,0 +1,203 @@
+.workagent-market-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.workagent-market-toolbar input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  font: inherit;
+}
+.workagent-market-publish,
+.workagent-market-credentials {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--dsw-color-border);
+  background: var(--dsw-color-panel);
+  padding: 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+}
+.workagent-market-fields {
+  display: grid;
+  gap: 12px;
+}
+.workagent-market-publish {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 18px 20px;
+  box-shadow: none;
+}
+.workagent-market-publish > h3,
+.workagent-market-publish > p,
+.workagent-market-publish > label:has(select[required]),
+.workagent-market-publish > .workagent-market-fields {
+  grid-column: 1 / -1;
+}
+.workagent-market-publish > h3 {
+  margin: 0;
+  font-size: calc(18px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+.workagent-market-publish p {
+  max-width: 76ch;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.65;
+}
+.workagent-market-publish label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  color: var(--dsw-color-text);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  font-weight: 500;
+}
+.workagent-market-publish input,
+.workagent-market-publish select,
+.workagent-market-publish textarea {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  background: var(--dsw-color-bg);
+  color: var(--dsw-color-text);
+  box-shadow: none;
+  font: inherit;
+  font-weight: 400;
+}
+.workagent-market-publish :is(input, select, textarea):focus {
+  border-color: var(--dsw-color-accent);
+  outline: 2px solid var(--dsw-color-accent-soft);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+.workagent-market-publish select {
+  padding-right: 36px;
+  cursor: pointer;
+}
+.workagent-market-publish label:has(> select)::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  bottom: 17px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--dsw-color-muted);
+  border-bottom: 1.5px solid var(--dsw-color-muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.workagent-market-publish .workagent-market-fields {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 18px 20px;
+}
+.workagent-market-publish
+  .workagent-market-fields
+  > :is(label:has(textarea), p) {
+  grid-column: 1 / -1;
+}
+.workagent-market-publish textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+.workagent-market-publish > button[type="submit"] {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 104px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsw-color-text);
+  color: var(--dsw-color-panel);
+  box-shadow: none;
+}
+.workagent-market-publish > button[type="submit"]:hover:not(:disabled) {
+  background: var(--dsw-color-text);
+  opacity: 0.88;
+}
+.workagent-market-publish p,
+.workagent-market-credentials p {
+  color: var(--dsw-color-muted);
+  margin: 0;
+}
+.workagent-section[data-workagent-section="市场"] .workagent-actions {
+  flex-wrap: wrap;
+}
+.workagent-section[data-workagent-section="市场"] .workagent-actions > p {
+  flex-basis: 100%;
+  margin: 0 0 6px;
+}
+.workagent-market-dependencies {
+  color: var(--dsw-color-muted);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-market-detail p {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.workagent-market-quota-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.workagent-market-quota {
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  padding: 12px;
+  min-width: 0;
+}
+.workagent-market-quota h4,
+.workagent-market-quota p {
+  margin: 0 0 6px;
+}
+.workagent-market-quota .workagent-market-quota-count {
+  font-size: calc(22px * var(--workagent-font-scale, 0.928571));
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-color-text);
+}
+@media (max-width: 420px) {
+  .workagent-market-quota-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.workagent-form:has(.workagent-capability-picker)
+  > label:has(input[name="modelId"]) {
+  grid-column: 1 / -1;
+}
+.workagent-form .workagent-capability-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-color-text);
+}
+.workagent-form .workagent-capability-options input[type="checkbox"] {
+  width: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .workagent-market-toolbar {
+    flex-wrap: wrap;
+  }
+  .workagent-market-publish {
+    padding: 14px;
+  }
+  .workagent-market-publish,
+  .workagent-market-publish .workagent-market-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

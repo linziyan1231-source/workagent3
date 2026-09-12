@@ -62,14 +62,15 @@ func run() error {
 		SID: config.SID, DataRoot: config.DataRoot, Command: config.HarnessCommand,
 		CodexCommand: config.CodexCommand, KimiCommand: config.KimiCommand,
 		Arguments: config.HarnessArguments, Profile: config.Profile, Limits: config.Limits,
-		StartupTimeout:     time.Duration(config.StartupTimeoutSeconds) * time.Second,
-		ManagedSkillsRoot:  config.ManagedSkillsRoot,
-		ManagedToolsRoot:   config.ManagedToolsRoot,
-		ManagedMCPServers:  config.ManagedMCPServers,
-		PublicBaseURL:      config.PublicBaseURL,
-		PlatformURL:        config.PortalURL,
-		PlatformCredential: credential,
-		HarnessModel:       config.HarnessModel, ModelGatewayBaseURL: config.ModelGatewayBaseURL,
+		StartupTimeout:          time.Duration(config.StartupTimeoutSeconds) * time.Second,
+		ManagedSkillsRoot:       config.ManagedSkillsRoot,
+		ManagedToolsRoot:        config.ManagedToolsRoot,
+		ManagedMCPServers:       config.ManagedMCPServers,
+		ProfessionalDatabaseURL: config.ProfessionalDatabaseURL,
+		PublicBaseURL:           config.PublicBaseURL,
+		PlatformURL:             config.PortalURL,
+		PlatformCredential:      credential,
+		HarnessModel:            config.HarnessModel, ModelGatewayBaseURL: config.ModelGatewayBaseURL,
 	})
 	if err != nil {
 		return err

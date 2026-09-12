@@ -56,7 +56,7 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := skills.List(t.Context())
-	if err != nil || len(entries) != 17 {
+	if err != nil || len(entries) != 16 {
 		t.Fatalf("release entries = %#v, %v", entries, err)
 	}
 	for _, entry := range entries {
@@ -88,12 +88,6 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		}
 		if strings.HasPrefix(entry.ID, "wiki-") && (len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "python") {
 			t.Fatalf("Wiki skill dependency state = %#v", entry)
-		}
-		if entry.ID == "weixin-file-send" {
-			protocol, err := os.ReadFile(filepath.Join(skills.DirectoryFor(entry), "SKILL.md"))
-			if entry.Enabled || err != nil || !strings.Contains(string(protocol), "[WORKAGENT_CHANNEL_SEND]") {
-				t.Fatalf("Weixin delivery must remain disabled with an explicit protocol until its connector is ready: %#v, %v", entry, err)
-			}
 		}
 	}
 	err = filepath.Walk(release, func(path string, info os.FileInfo, walkErr error) error {

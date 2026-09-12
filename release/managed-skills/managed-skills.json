@@ -100,15 +100,6 @@
       "requiredCommands": ["officecli"]
     },
     {
-      "id": "weixin-file-send",
-      "name": "weixin-file-send",
-      "description": "Return an existing workspace file or image through a WorkAgent channel connector.",
-      "version": "0.1.0",
-      "relativePath": "weixin-file-send",
-      "enabledByDefault": false,
-      "requiredMcpServerIds": []
-    },
-    {
       "id": "wiki-dream",
       "name": "wiki-dream",
       "description": "Run an incremental or weekly deep maintenance cycle for an OKF project wiki.",

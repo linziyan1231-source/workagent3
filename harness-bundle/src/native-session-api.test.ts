@@ -118,7 +118,12 @@ it("routes native execution through the port using the standard client and reads
       })
     ).result,
   ).toEqual({ ok: true, value: { accepted: true } });
-  expect(f.port.prompt).toHaveBeenCalledWith(f.id, "hello world", "queue");
+  expect(f.port.prompt).toHaveBeenCalledWith(
+    f.id,
+    "hello world",
+    "queue",
+    expect.any(String),
+  );
   expect((await f.client.sessions.cancel({ sessionId: f.id })).result.ok).toBe(
     true,
   );

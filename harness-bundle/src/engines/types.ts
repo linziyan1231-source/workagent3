@@ -62,55 +62,21 @@ export class NativeApprovalWaits {
   }
 }
 
-export type BridgeEvent =
-  | {
-      type: "process.updated";
-      turnId: string;
-      processId: string;
-      kind: "plan" | "reasoning";
-      text?: string;
-      delta?: string;
-      data?: JsonValue;
-    }
-  | { type: "turn.started"; turnId: string }
-  | { type: "turn.retrying"; turnId: string; message: string }
-  | {
-      type: "assistant.delta";
-      turnId: string;
-      delta: string;
-      messageId?: string;
-    }
-  | {
-      type: "assistant.completed";
-      turnId: string;
-      content: string;
-      messageId?: string;
-    }
-  | { type: "turn.completed"; turnId: string }
-  | ({
-      type: "tool.started";
-      turnId: string;
-      toolCallId: string;
-      tool: string;
-    } & ToolDetails)
-  | ({
-      type: "tool.completed";
-      tool?: string;
-      turnId: string;
-      toolCallId: string;
-      failed: boolean;
-    } & ToolDetails)
-  | ({
-      type: "tool.updated";
-      turnId: string;
-      toolCallId: string;
-      tool?: string;
-    } & ToolDetails)
-  | { type: "turn.cancelled"; turnId: string }
-  | { type: "turn.failed"; turnId: string; code: string; message: string };
-
+type ExecutionEvent = Exclude<
+  Extract<import("@workagent/contracts").EngineEvent, { turnId: string }>,
+  { type: "approval.requested" | "approval.resolved" }
+>;
+type EventPayload<T> = T extends unknown
+  ? Omit<T, "eventId" | "occurredAt" | "sessionId">
+  : never;
+// Native adapters emit the payload of the actual public event contract. The
+// Runtime adds its durable session envelope; there is no second event protocol.
+export type BridgeEvent = EventPayload<ExecutionEvent>;
 export type BridgeSession = {
   readonly nativeId: string;
+  // False once the backing engine process is gone; the runtime must
+  // re-activate instead of reusing the dead session.
+  readonly connected: boolean;
   readonly permissionMode?:
     | EngineSessionOptions["permissionMode"]
     | "manual_approval";
@@ -168,6 +134,13 @@ export type EngineModel = {
 };
 
 export type EngineSessionOptions = {
+  approvalPolicy?: "on_risk" | "never";
+  systemPrompt?: string;
+  nativeSkillPaths?: readonly string[];
+  skills?: readonly import("../skill-projection.js").ResolvedSkill[];
+  catalogSkills?: readonly import("../skill-projection.js").ResolvedSkill[];
+  nativeMcpNames?: readonly string[];
+  nativeMcpConfig?: Record<string, Record<string, unknown>>;
   requirePermission?: boolean;
   requestApproval?: (
     request: NativeApprovalRequest,

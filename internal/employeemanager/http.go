@@ -12,10 +12,19 @@ import (
 
 func Handler(service *Service, token string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/runtime/ensure",func(w http.ResponseWriter,r *http.Request){
-		var input struct{SID string `json:"sid"`}
-		if !decode(r,&input){http.Error(w,"invalid request",400);return}
-		err:=service.EnsureRuntime(r.Context(),input.SID);respond(w,map[string]bool{"started":err==nil},err)
+	mux.HandleFunc("GET /v1/professional-database/{sid}", service.professionalDatabaseHTTP)
+	mux.HandleFunc("POST /v1/professional-database/{sid}/connection", service.professionalDatabaseHTTP)
+	mux.HandleFunc("POST /v1/shared-trash/{id}", service.sharedTrashHTTP)
+	mux.HandleFunc("POST /v1/runtime/ensure", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			SID string `json:"sid"`
+		}
+		if !decode(r, &input) {
+			http.Error(w, "invalid request", 400)
+			return
+		}
+		err := service.EnsureRuntime(r.Context(), input.SID)
+		respond(w, map[string]bool{"started": err == nil}, err)
 	})
 	mux.HandleFunc("GET /v1/storage/{sid}", func(w http.ResponseWriter, r *http.Request) {
 		value, err := service.StorageUsage(r.Context(), r.PathValue("sid"), nil)
@@ -115,7 +124,7 @@ func Handler(service *Service, token string) http.Handler {
 		}
 		respond(w, result, err)
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		expected, actual := []byte("Bearer "+token), []byte(r.Header.Get("Authorization"))
 		if len(expected) != len(actual) || subtle.ConstantTimeCompare(expected, actual) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -126,6 +135,12 @@ func Handler(service *Service, token string) http.Handler {
 		r = r.WithContext(withAuditScope(r.Context(), r.Header.Get(actorHeader), r.Header.Get(correlationHeader)))
 		mux.ServeHTTP(w, r)
 	})
+	root := http.NewServeMux()
+	if service.ProfessionalDatabaseHandler != nil {
+		root.Handle("/professional-database/", http.StripPrefix("/professional-database", service.ProfessionalDatabaseHandler))
+	}
+	root.Handle("/", protected)
+	return root
 }
 
 func decode(r *http.Request, value any) bool {

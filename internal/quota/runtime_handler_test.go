@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"workagent3/internal/contracts"
 )
 
 type runtimeCredentialStub map[string]string
@@ -102,17 +103,22 @@ func TestRuntimeQuotaHandlerSharedRunBillsFrozenPayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := RuntimeHandler(store, runtimeCredentialStub{owner: "owner-secret"})
+	if response := invokeRuntimeQuota(handler, "/internal/runtime/quota/reserve", `{"runId":"forged","sid":"`+owner+`","modelId":"gpt-5","estimatedUnits":2048,"payerSid":"`+payer+`"}`, "owner-secret", "127.0.0.1:55000"); response.Code != http.StatusNotFound {
+		t.Fatalf("unadmitted shared reserve: %d", response.Code)
+	}
+	if err := store.ReserveSharedRun(t.Context(), contracts.SharedRunQuotaRequest{RunID: "run-shared-1", OwnerSID: owner, PayerSID: payer, ModelID: "gpt-5", EstimatedUnits: 2048}); err != nil {
+		t.Fatal(err)
+	}
+	beforeClaim := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":0}`, "owner-secret", "127.0.0.1:55000")
+	if beforeClaim.Code != http.StatusConflict || !strings.Contains(beforeClaim.Body.String(), "quota_run_not_accepted") {
+		t.Fatalf("settlement before claim: %d %s", beforeClaim.Code, beforeClaim.Body.String())
+	}
 	reserved := invokeRuntimeQuota(handler, "/internal/runtime/quota/reserve", `{"runId":"run-shared-1","sid":"`+owner+`","modelId":"gpt-5","estimatedUnits":2048,"payerSid":"`+payer+`"}`, "owner-secret", "127.0.0.1:55000")
 	if reserved.Code != http.StatusOK || !strings.Contains(reserved.Body.String(), `"sid":"`+payer+`"`) {
 		t.Fatalf("payer reserve response %d: %s", reserved.Code, reserved.Body.String())
 	}
-	// Without the frozen payer pin the owner credential cannot touch the
-	// payer's reservation.
-	denied := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":0}`, "owner-secret", "127.0.0.1:55000")
-	if denied.Code != http.StatusNotFound {
-		t.Fatalf("unpinned settle returned %d: %s", denied.Code, denied.Body.String())
-	}
-	settled := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":1500,"payerSid":"`+payer+`"}`, "owner-secret", "127.0.0.1:55000")
+	// Payer is now inferred from persisted admission; the runtime need not send it.
+	settled := invokeRuntimeQuota(handler, "/internal/runtime/quota/settle", `{"runId":"run-shared-1","sid":"`+owner+`","actualUnits":1500}`, "owner-secret", "127.0.0.1:55000")
 	if settled.Code != http.StatusNoContent {
 		t.Fatalf("payer settle response %d: %s", settled.Code, settled.Body.String())
 	}

@@ -37,10 +37,10 @@ async function check(formSelector, kind, agent, width) {
   await page.setViewportSize({ width, height: 900 });
   await page.waitForTimeout(350);
   const form = page.locator(formSelector);
-  const input = form.locator("textarea");
+  const input = form.locator(".workagent-composer-input");
   await input.fill("test");
   const value = await form.evaluate((form) => {
-    const input = form.querySelector("textarea"),
+    const input = form.querySelector(".workagent-composer-input"),
       r = form.getBoundingClientRect(),
       ir = input.getBoundingClientRect();
     const selects = [
@@ -167,7 +167,7 @@ try {
         queue.textContent = "排队消息";
         form.prepend(queue);
         const gap =
-          form.querySelector("textarea").getBoundingClientRect().top -
+          form.querySelector(".workagent-composer-input").getBoundingClientRect().top -
           queue.getBoundingClientRect().bottom;
         queue.remove();
         return gap;

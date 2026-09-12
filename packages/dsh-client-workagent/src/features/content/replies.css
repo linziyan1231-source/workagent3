@@ -1,0 +1,39 @@
+.workagent-question.is-answered {
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.workagent-question.is-answered summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+  line-height: 1.5;
+}
+.workagent-question.is-answered details[open] > .workagent-markdown {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--dsw-color-border);
+}
+.workagent-reply-reference {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 0 7px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-color-muted);
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-caption);
+  line-height: 1.5;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workagent-reply-reference:hover {
+  color: var(--dsw-color-text);
+}

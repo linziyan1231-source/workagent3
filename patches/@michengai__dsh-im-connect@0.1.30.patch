@@ -48,45 +48,142 @@ index 67b8945..ac3c260 100644
          async send(chatId, text) {
              if (!broker)
                  throw new Error('wecom: 尚未连接');
+diff --git a/lib/channels/weixin.js b/lib/channels/weixin.js
+index 4c23327..f9fe967 100644
+--- a/lib/channels/weixin.js
++++ b/lib/channels/weixin.js
+@@ -546,7 +546,7 @@ export function createWeixinChannel(config, log, stateDir) {
+     // ── 出站：文本 / 媒体 / typing ────────────────────────────────
+     async function sendRaw(toUserId, item, clientId) {
+         const contextToken = state.contextTokens[toUserId];
+-        await request('/ilink/bot/sendmessage', {
++        const body = {
+             msg: {
+                 from_user_id: '',
+                 to_user_id: toUserId,
+@@ -557,7 +557,22 @@ export function createWeixinChannel(config, log, stateDir) {
+                 item_list: [item],
+             },
+             base_info: { channel_version: '1.0.0' },
+-        }, 15_000);
++        };
++        // ret=-2 多为突发限流，退避重试；prepare failed 是会话上下文过期，重试无效，直接给出指引。
++        for (let attempt = 1; ; attempt++) {
++            try {
++                await request('/ilink/bot/sendmessage', body, 15_000);
++                return;
++            }
++            catch (error) {
++                const message = error instanceof Error ? error.message : String(error);
++                if (message.includes('prepare failed'))
++                    throw new Error('该聊天的会话上下文已过期，请让用户从微信端给机器人发一条消息后重试');
++                if (!message.includes('ret=-2') || attempt >= 3)
++                    throw error;
++                await sleepWithSignal(attempt * 1500, lifecycle?.signal);
++            }
++        }
+     }
+     async function sendText(toUserId, text) {
+         await sendRaw(toUserId, { type: ITEM_TEXT, text_item: { text } }, `dsh-im-connect:${Date.now()}:${Math.floor(Math.random() * 1e6)}`);
 diff --git a/lib/client.js b/lib/client.js
-index faab1f2..19ec68b 100644
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -18,8 +18,8 @@ window.__ModuleLoader__.load({
+@@ -18,9 +18,9 @@
      const IM_LOCALE_NS = "im-connect";
      const IM_LOCALES = {
        zh: {
 -        "settings.label": "IM助理", "settings.title": "IM机器人", "settings.description": "管理各渠道账号。每个账号独立选择工作区、模型和权限，配置仅保存在本机。",
 -        "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
-+        "settings.label": "IM助理", "settings.title": "消息渠道", "settings.description": "管理各渠道账号。每个账号独立选择工作区、助手、模型和权限，配置仅保存在本机。",
-+        "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、助手、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "未批准用户可以发起聊天，但不能批准工具调用。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
-         "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
+-        "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
++        "settings.label": "IM助理", "settings.title": "消息渠道", "settings.description": "管理各渠道账号。项目、助手、模型和权限用于新建任务；继续已有任务时保留原配置。",
++        "settings.aria": "IM助理", "settings.selectAccountTitle": "选择一个账号", "settings.selectAccountDescription": "从左侧选择账号，查看并修改工作区、助手、模型和权限配置。", "settings.noAccountsTitle": "还没有接入账号", "settings.noAccountsDescription": "请在左侧选择对应渠道，然后点击“添加账号”。", "settings.publicChatNotice": "访问个人项目和任务需要账号绑定身份或已批准的用户；允许私聊不等于授予项目访问权限。", "pending.notice": "有访问请求。批准后该用户才能驱动本机助手。", "action.approve": "批准", "action.deny": "拒绝", "loading": "加载中…",
++        "account.workspace": "工作区", "account.currentWorkspace": "当前工作区", "account.selectWorkspace": "请选择工作区", "account.selectModel": "请选择模型", "account.selectPermission": "请选择权限", "account.privateAccess": "私聊准入", "account.privateApproved": "仅已批准用户", "account.privateAll": "允许所有私聊用户", "account.idleMinutes": "空闲检查", "account.idleMinutesPlaceholder": "默认 30", "account.idleMinutesUnit": "分钟", "account.idlePolicy": "空闲后", "account.idleAsk": "询问（默认）", "account.idleContinue": "继续当前任务", "account.idleNew": "在默认项目新建任务", "account.autoNameNote": "绑定成功后会自动生成账号名，无需手动填写。", "account.defaultName": "{channel}账号 {count}",
          "account.countZero": "0 个账号", "account.countOnline": "{online} / {total} 在线", "account.countOffline": "{total} / {total} 离线", "account.statusProcessing": "处理中…", "account.statusOnline": "在线", "account.statusOffline": "离线", "account.statusRunning": "运行正常", "account.statusNotConnected": "未连接", "account.receive": "接收消息", "account.receiveDescription": "关闭后保留账号配置，但不接收新消息", "account.removeConfirm": "确定移除这个账号？本机保存的配置和凭据将一并删除。",
          "action.addAccount": "添加账号", "action.generateQr": "生成二维码", "action.checkConnection": "检查连接", "action.reconnectAccount": "重新连接", "action.removeAccount": "移除接入", "status.saving": "保存中…", "status.saved": "已保存",
-@@ -359,6 +359,13 @@ window.__ModuleLoader__.load({
-     };
+         "channel.dingtalk": "钉钉", "channel.feishu": "飞书", "channel.lark": "Lark", "channel.weixin": "微信", "channel.wecom": "企业微信", "channel.qq": "QQ", "channel.telegram": "Telegram",
+@@ -39,7 +39,7 @@
+       en: {
+         "settings.label": "IM Assistant", "settings.title": "IM Bots", "settings.description": "Manage accounts across channels. Each account has its own workspace, model, and permission settings, stored only on this machine.",
+         "settings.aria": "IM Assistant", "settings.selectAccountTitle": "Select an account", "settings.selectAccountDescription": "Choose an account on the left to view and edit its workspace, model, and permissions.", "settings.noAccountsTitle": "No accounts connected", "settings.noAccountsDescription": "Choose a channel on the left, then select Add account.", "settings.publicChatNotice": "Unapproved users can start chats, but they cannot approve tool calls.", "pending.notice": "There are access requests. Approve a user before they can control the local assistant.", "action.approve": "Approve", "action.deny": "Deny", "loading": "Loading…",
+-        "account.workspace": "Workspace", "account.currentWorkspace": "Current workspace", "account.selectWorkspace": "Select a workspace", "account.selectModel": "Select a model", "account.selectPermission": "Select a permission", "account.privateAccess": "Private chat access", "account.privateApproved": "Approved users only", "account.privateAll": "Allow all DM users", "account.autoNameNote": "The account name is generated automatically after setup.", "account.defaultName": "{channel} account {count}",
++        "account.workspace": "Workspace", "account.currentWorkspace": "Current workspace", "account.selectWorkspace": "Select a workspace", "account.selectModel": "Select a model", "account.selectPermission": "Select a permission", "account.privateAccess": "Private chat access", "account.privateApproved": "Approved users only", "account.privateAll": "Allow all DM users", "account.idleMinutes": "Idle check", "account.idleMinutesPlaceholder": "Default 30", "account.idleMinutesUnit": "min", "account.idlePolicy": "When idle", "account.idleAsk": "Ask (default)", "account.idleContinue": "Continue current task", "account.idleNew": "New task in default project", "account.autoNameNote": "The account name is generated automatically after setup.", "account.defaultName": "{channel} account {count}",
+         "account.countZero": "0 accounts", "account.countOnline": "{online} / {total} online", "account.countOffline": "{total} / {total} offline", "account.statusProcessing": "Processing…", "account.statusOnline": "Online", "account.statusOffline": "Offline", "account.statusRunning": "Running normally", "account.statusNotConnected": "Not connected", "account.receive": "Receive messages", "account.receiveDescription": "Turn this off to keep the account settings without receiving new messages", "account.removeConfirm": "Remove this account? Its saved settings and credentials will also be deleted.",
+         "action.addAccount": "Add account", "action.generateQr": "Generate QR code", "action.checkConnection": "Check", "action.reconnectAccount": "Reconnect", "action.removeAccount": "Remove", "status.saving": "Saving…", "status.saved": "Saved",
+         "channel.dingtalk": "DingTalk", "channel.feishu": "Feishu", "channel.lark": "Lark", "channel.weixin": "WeChat", "channel.wecom": "WeCom", "channel.qq": "QQ", "channel.telegram": "Telegram",
+@@ -199,7 +199,7 @@
+ .ima-inspector-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;padding-top:18px;border-top:1px solid var(--ima-line)}.ima-inspector-actions .ima-btn{flex:none;min-width:0;min-height:36px;padding:0 8px;font-size:12px;white-space:nowrap}.ima-inspector-actions .danger{margin-left:auto;color:var(--ima-danger);border-color:color-mix(in srgb,var(--ima-danger) 35%,transparent)}
+ .ima-save-note{min-height:18px;color:var(--ima-muted);font-size:11px}.ima-save-note.ok{color:var(--ima-ok)}
+ .ima-modal.ima-account-modal{width:min(560px,100%);max-height:min(760px,calc(100vh - 48px));overflow:auto}.ima-setup-section{margin:4px 0 14px;padding-bottom:14px;border-bottom:1px solid var(--ima-line)}
+-.ima-account-settings{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ima-account-settings.compact{grid-template-columns:1fr}.ima-picker-field{display:flex;min-width:0;flex-direction:column;gap:7px}.ima-picker-field.wide{grid-column:1/-1}.ima-picker-label{color:var(--ima-muted);font-size:12px;font-weight:550}.ima-account-picker{width:100%}.ima-account-picker .ima-chip-btn{width:100%;height:auto;min-height:44px;justify-content:flex-start;padding:8px 12px;border:1px solid var(--ima-line);border-radius:9px;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.04));color:var(--ima-text);font-size:13px;text-align:left}.ima-account-picker .ima-chip-btn:hover,.ima-account-picker.is-open .ima-chip-btn{border-color:var(--ima-accent);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.04));box-shadow:0 0 0 2px color-mix(in srgb,var(--ima-accent) 18%,transparent)}.ima-account-picker .ima-chip-label{flex:1}.ima-account-picker .ima-chip-btn em{margin-left:auto}.ima-account-picker .ima-chip-menu{width:100%;min-width:100%;max-height:min(320px,calc(100vh - 120px))}.ima-account-picker.ima-model-select .ima-chip-btn{border-radius:9px}.ima-account-picker.ima-model-select .ima-chip-menu{width:max(100%,320px);min-width:100%}.ima-account-settings .ima-chip-dialog{grid-column:1/-1;margin-top:0}.ima-picker-note{grid-column:1/-1;color:var(--ima-muted);font-size:11px;line-height:1.5}.ima-picker-note.warning{color:var(--ima-warning)}
++.ima-account-settings{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ima-account-settings.compact{grid-template-columns:1fr}.ima-picker-field{display:flex;min-width:0;flex-direction:column;gap:7px}.ima-picker-field.wide{grid-column:1/-1}.ima-picker-label{color:var(--ima-muted);font-size:12px;font-weight:550}.ima-account-picker{width:100%}.ima-account-picker .ima-chip-btn{width:100%;height:auto;min-height:44px;justify-content:flex-start;padding:8px 12px;border:1px solid var(--ima-line);border-radius:9px;background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.04));color:var(--ima-text);font-size:13px;text-align:left}.ima-account-picker .ima-chip-btn:hover,.ima-account-picker.is-open .ima-chip-btn{border-color:var(--ima-accent);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.04));box-shadow:0 0 0 2px color-mix(in srgb,var(--ima-accent) 18%,transparent)}.ima-account-picker .ima-chip-label{flex:1}.ima-account-picker .ima-chip-btn em{margin-left:auto}.ima-account-picker .ima-chip-menu{width:100%;min-width:100%;max-height:min(320px,calc(100vh - 120px))}.ima-account-picker.ima-model-select .ima-chip-btn{border-radius:9px}.ima-account-picker.ima-model-select .ima-chip-menu{width:max(100%,320px);min-width:100%}.ima-account-settings .ima-chip-dialog{grid-column:1/-1;margin-top:0}.ima-picker-note{grid-column:1/-1;color:var(--ima-muted);font-size:11px;line-height:1.5}.ima-picker-note.warning{color:var(--ima-warning)}.ima-idle-wrap{position:relative;display:flex;align-items:center}.ima-idle-input{width:100%;min-height:44px;padding:8px 40px 8px 12px;border-radius:9px;border:1px solid var(--ima-line);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.04));color:var(--ima-text);font-size:13px;box-sizing:border-box;appearance:textfield;-moz-appearance:textfield}.ima-idle-input::-webkit-outer-spin-button,.ima-idle-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.ima-idle-input:hover{border-color:var(--ima-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--ima-accent) 18%,transparent)}.ima-idle-input:focus{border-color:var(--ima-accent);outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--ima-accent) 18%,transparent)}.ima-idle-unit{position:absolute;right:12px;color:var(--ima-muted);font-size:12px;pointer-events:none}
+ @media(max-width:1280px){[role="dialog"][aria-labelledby]:has(.ima-account-page){width:min(920px,calc(100vw - 48px));max-width:min(920px,calc(100vw - 48px))}.ima-account-shell{grid-template-columns:minmax(300px,340px) minmax(320px,1fr)}}
+ @media(max-width:850px){[role="dialog"][aria-labelledby]:has(.ima-account-page){width:calc(100vw - 32px);max-width:calc(100vw - 32px)}.ima-account-shell{grid-template-columns:1fr}.ima-platforms{border-right:0;border-bottom:1px solid var(--ima-line)}.ima-inspector{padding:18px}}
+ @media(max-width:620px){.ima-account-settings{grid-template-columns:1fr}.ima-picker-field.wide{grid-column:auto}.ima-account-picker.ima-model-select .ima-chip-menu{width:100%}}
+@@ -351,35 +351,41 @@
+       return translated === key ? t("qr.default") : translated;
+     }
+ 
+-    let openImSession = (id) => {
+-      try {
+-        if (window.__dshSessionsOpen) { window.__dshSessionsOpen(id); return true; }
+-      } catch { /* ignore */ }
+-      return false;
+-    };
      const openListedSession = (id, hostOpen) => {
        if (!id) return;
-+      if (String(id).startsWith("session-channel-")) {
+-      if (String(id).startsWith("im:")) {
+-        api("/sessions/ensure", {
+-          method: "POST",
+-          headers: { "content-type": "application/json" },
+-          body: JSON.stringify({ sessionId: id }),
+-        }).then((data) => {
+-          if (!data.ok) { console.warn("[dsh-im-connect] 无法恢复会话", data.error || id); return; }
+-          const tryOpen = (left) => {
+-            if (openImSession(id) || left <= 0) return;
+-            setTimeout(() => tryOpen(left - 1), 80);
+-          };
+-          tryOpen(20);
+-        }).catch((error) => console.warn("[dsh-im-connect] 无法恢复会话", id, error));
++      // 通过宿主（WorkAgent）的链接拦截导航打开会话：收起移动端抽屉、pushState
++      // 挂载会话 overlay；宿主没有拦截时退化为整页跳转，行为同原先 location.assign。
++      const navigateToSession = () => {
 +        const url = new URL(window.location.href);
 +        url.searchParams.set("frontend", "dsh");
++        url.searchParams.set("sidebar", "channels");
++        url.searchParams.delete("workagent");
 +        url.searchParams.set("session", id);
-+        window.location.assign(url);
-+        return;
-+      }
-       if (String(id).startsWith("im:")) {
-         api("/sessions/ensure", {
-           method: "POST",
-@@ -379,7 +386,7 @@ window.__ModuleLoader__.load({
++        const anchor = document.createElement("a");
++        anchor.href = url.href;
++        anchor.style.display = "none";
++        document.body.appendChild(anchor);
++        anchor.click();
++        anchor.remove();
++      };
++      if (!String(id).startsWith("im:")) {
++        navigateToSession();
+         return;
+       }
+-      if (typeof hostOpen === "function") hostOpen(id);
+-      else openImSession(id);
++      // im: 会话先在服务端恢复 engine，再由 overlay 等待会话出现在列表后绑定，
++      // 避免 ctx.sessions.open 盲重试在移动端冷启动超时导致“点了没反应”。
++      api("/sessions/ensure", {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({ sessionId: id }),
++      }).then((data) => {
++        if (!data.ok) { console.warn("[dsh-im-connect] 无法恢复会话", data.error || id); return; }
++        navigateToSession();
++      }).catch((error) => console.warn("[dsh-im-connect] 无法恢复会话", id, error));
      };
      let channelSkin = "native";
-
+ 
 -    function BindModal({ ch, onClose, onConnected, catalog, permissions, workspaces, defaults, createWorkspace, pickDirectory, modelT, permissionT, t = fallbackT }) {
-+    function BindModal({ ch, onClose, onConnected, catalog, assistants, permissions, workspaces, defaults, createWorkspace, pickDirectory, modelT, permissionT, t = fallbackT }) {
++    function BindModal({ ch, onClose, onConnected, catalog, assistants, permissions, workspaces, workspaceStatus, defaults, createWorkspace, modelT, permissionT, t = fallbackT }) {
        const hasQr = ch.kind === "qr" || ch.kind === "qr-or-credentials";
        const hasManual = ch.kind === "credentials" || ch.kind === "qr-or-credentials";
        const [tab, setTab] = useState(hasQr ? "qr" : "manual");
-@@ -391,6 +398,7 @@ window.__ModuleLoader__.load({
+@@ -391,11 +397,14 @@
        const [success, setSuccess] = useState("");
        const [settings, setSettings] = useState(() => ({
          cwd: defaults && defaults.cwd || "",
@@ -94,7 +191,14 @@ index faab1f2..19ec68b 100644
          provider: defaults && defaults.assistant && defaults.assistant.provider || "",
          model: defaults && defaults.assistant && defaults.assistant.model || "",
          reasoningEffort: defaults && defaults.assistant && defaults.assistant.reasoningEffort || "",
-@@ -515,7 +523,7 @@ window.__ModuleLoader__.load({
+         permission: defaults && defaults.permission || "",
+         privateAccess: "approved",
++        idleMinutes: null,
++        idlePolicy: null,
+       }));
+       const alive = useRef(true);
+ 
+@@ -515,11 +524,11 @@
              h(AccountSettingsPicker, {
                value: settings,
                onChange: (patch) => setSettings((current) => ({ ...current, ...patch })),
@@ -102,11 +206,51 @@ index faab1f2..19ec68b 100644
 +              catalog, assistants,
                permissions,
                workspaces,
++              workspaceStatus,
                createWorkspace,
-@@ -714,6 +722,14 @@ window.__ModuleLoader__.load({
+-              pickDirectory,
+               modelT,
+               permissionT,
+               showAutoNameNote: true,
+@@ -714,6 +723,104 @@
        );
      }
-
+ 
++    function IdleMinutesInput(props) {
++      const normalized = props.value === undefined || props.value === null ? null : props.value;
++      const [text, setText] = useState(normalized === null ? "" : String(normalized));
++      useEffect(() => {
++        setText(normalized === null ? "" : String(normalized));
++      }, [normalized]);
++      const commit = () => {
++        const raw = text.trim();
++        const parsed = Number(raw);
++        const next = raw === "" || !Number.isFinite(parsed) ? null : Math.min(10080, Math.max(0, Math.round(parsed)));
++        setText(next === null ? "" : String(next));
++        if (next !== normalized) props.onCommit(next);
++      };
++      return h("div", { className: "ima-idle-wrap" },
++        h("input", {
++          className: "ima-idle-input",
++          type: "number",
++          min: 0,
++          max: 10080,
++          step: 1,
++          value: text,
++          placeholder: props.placeholder,
++          "aria-label": props.ariaLabel,
++          onChange: (event) => setText(event.target.value),
++          onBlur: commit,
++          onKeyDown: (event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } },
++        }),
++        h("span", { className: "ima-idle-unit" }, props.unit),
++      );
++    }
++
++    function idlePolicyLabel(policy, t) {
++      return policy === "继续" ? t("account.idleContinue") : policy === "新建" ? t("account.idleNew") : t("account.idleAsk");
++    }
++
 +    function reasoningEffortLabel(id, name) {
 +      return ({
 +        none: "无", minimal: "最低", low: "低", medium: "中",
@@ -115,10 +259,65 @@ index faab1f2..19ec68b 100644
 +      })[id] || name || id;
 +    }
 +
++    const PROJECTS_CHANGED_EVENT = "workagent:projects-changed";
++    async function projectRequest(url, init) {
++      const response = await fetch(url, init);
++      const data = await response.json();
++      if (!response.ok || data.ok === false) {
++        const messages = { workspace_directory_exists: "同名项目已存在，请选择已有项目或更换名称。", invalid_workspace_name: "请输入有效的项目名称。", quota_exceeded: "存储空间不足，无法创建项目。" };
++        throw new Error(messages[data.error] || "项目操作失败，请重试。");
++      }
++      return data;
++    }
++    function useProjectWorkspaces() {
++      const [items, setItems] = useState([]);
++      const [projectError, setProjectError] = useState("");
++      const [loading, setLoading] = useState(true);
++      const revision = useRef(0);
++      const pendingCreated = useRef(null);
++      const refreshProjects = useCallback(async () => {
++        const request = ++revision.current;
++        try {
++          const data = await projectRequest(API_BASE + "/projects");
++          const rows = data.projects.map((row) => ({ id: row.id, title: row.name === "Personal workspace" ? "个人项目" : row.name, path: row.cwd }));
++          if (request === revision.current) { setItems(rows); setProjectError(""); }
++          return rows;
++        } catch (error) {
++          if (request === revision.current) setProjectError("项目列表加载失败，请重试。");
++          throw error;
++        } finally {
++          if (request === revision.current) setLoading(false);
++        }
++      }, []);
++      useEffect(() => {
++        const refresh = () => { void refreshProjects().catch(() => {}); };
++        refresh();
++        window.addEventListener(PROJECTS_CHANGED_EVENT, refresh);
++        window.addEventListener("focus", refresh);
++        return () => { revision.current++; window.removeEventListener(PROJECTS_CHANGED_EVENT, refresh); window.removeEventListener("focus", refresh); };
++      }, [refreshProjects]);
++      const createWorkspace = async ({ name }) => {
++        // A successful creation must not be repeated if only the following list read failed.
++        if (!pendingCreated.current || pendingCreated.current.name !== name) {
++          const project = await projectRequest("/api/runtime/v1/workspaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, scope: "personal" }) });
++          pendingCreated.current = { id: project.id, name };
++          window.dispatchEvent(new Event(PROJECTS_CHANGED_EVENT));
++        }
++        let rows;
++        try { rows = await refreshProjects(); }
++        catch { throw new Error("项目已创建，但列表加载失败。请重试，不会重复创建。"); }
++        const created = rows.find((row) => row.id === pendingCreated.current.id);
++        if (!created) throw new Error("项目已创建，暂未出现在列表中，请重试。");
++        pendingCreated.current = null;
++        return created;
++      };
++      return { items, projectError, loading, refreshProjects, createWorkspace };
++    }
++
      function AccountSettingsPicker(props) {
        const t = props.t || fallbackT;
        const modelT = props.modelT || ((key) => key);
-@@ -729,10 +745,13 @@ window.__ModuleLoader__.load({
+@@ -729,10 +836,13 @@
        const [fullAccessAcknowledged, setFullAccessAcknowledged] = useState(false);
        const items = props.workspaces || [];
        const providers = props.catalog || [];
@@ -132,7 +331,7 @@ index faab1f2..19ec68b 100644
        const cwd = value.cwd || "";
        const permission = value.permission || "";
        const privateAccess = value.privateAccess === "all" ? "all" : "approved";
-@@ -757,11 +776,11 @@ window.__ModuleLoader__.load({
+@@ -757,11 +867,11 @@
        const efforts = reasoning
          ? [
              ...(reasoning.defaultEffort ? [] : [{ id: "", name: modelT("effort.providerDefault") }]),
@@ -146,9 +345,58 @@ index faab1f2..19ec68b 100644
          : "";
        const permissionOptions = permissions.map((item) => ({ ...item, label: permissionLabel(item, t) }));
        const currentPermission = permissionOptions.find((item) => item.value === permission);
-@@ -832,25 +851,36 @@ window.__ModuleLoader__.load({
+@@ -772,11 +882,13 @@
+ 
+       const addWorkspace = (path) => {
+         const next = (path || "").trim();
+-        if (!next) { setHint(t("error.chooseWorkspace")); return Promise.resolve(); }
++        if (!next) { setHint("请输入项目名称。"); return Promise.resolve(); }
+         if (typeof props.createWorkspace !== "function") { setHint(t("error.workspaceUnavailable")); return Promise.resolve(); }
++        if (addBusy) return Promise.resolve();
++        setHint("");
+         setAddBusy(true);
+-        return Promise.resolve(props.createWorkspace({ path: next })).then((created) => {
+-          const cwdPath = (created && (created.path || created.cwd)) || next;
++        return Promise.resolve(props.createWorkspace({ name: next })).then((created) => {
++          const cwdPath = created.path;
+           update({ cwd: cwdPath });
+           setAdding(false);
+           setAddPath("");
+@@ -786,13 +898,7 @@
+       };
+       const onAddWorkspace = () => {
+         setOpen("");
+-        if (typeof props.pickDirectory === "function") {
+-          Promise.resolve(props.pickDirectory()).then((picked) => picked && addWorkspace(picked)).catch(() => {
+-            setAdding(true);
+-            setAddPath("");
+-          });
+-          return;
+-        }
++        setHint("");
+         setAdding(true);
+         setAddPath("");
+       };
+@@ -820,37 +926,50 @@
+           ariaLabel: props.workspaceLabel || t("account.workspace"),
+           className: "ima-account-picker",
+         },
+-          items.length === 0 && h("div", { className: "ima-chip-empty" }, t("composer.noWorkspaces")),
++          props.workspaceStatus?.error && h("div", { className: "ima-chip-empty", role: "alert" }, props.workspaceStatus.error),
++          props.workspaceStatus?.error && h(ChipRow, { label: "重试加载项目", onClick: () => { void props.workspaceStatus.retry().catch(() => {}); } }),
++          items.length === 0 && !props.workspaceStatus?.error && h("div", { className: "ima-chip-empty" }, props.workspaceStatus?.loading ? "正在加载项目…" : t("composer.noWorkspaces")),
+           ...items.map((item) => h(ChipRow, {
+             key: item.path,
+             icon: h(FolderIcon),
+             label: item.title || item.path,
+-            hint: item.title ? item.path : "",
++            
+             active: item.path === cwd,
+             onClick: () => { update({ cwd: item.path }); setOpen(""); },
+           })),
            h("div", { className: "ima-chip-split" }),
-           h(ChipRow, { icon: h(PlusIcon), label: t("composer.addWorkspace"), onClick: onAddWorkspace }),
+-          h(ChipRow, { icon: h(PlusIcon), label: t("composer.addWorkspace"), onClick: onAddWorkspace }),
++          h(ChipRow, { icon: h(PlusIcon), label: "添加工作区（新建项目文件）", onClick: onAddWorkspace }),
          ), true),
 -        field("model", modelT("menu.model"), h(ChipMenu, {
 +        field("model", "助手与模型", h(ChipMenu, {
@@ -188,7 +436,7 @@ index faab1f2..19ec68b 100644
                  h("div", { className: "ima-model-group-title" }, group.name),
                  ...group.models.map((item) => h(ModelChoiceRow, {
                    key: item.value,
-@@ -859,7 +889,9 @@ window.__ModuleLoader__.load({
+@@ -859,7 +978,9 @@
                    active: item.provider === provider && item.model === model,
                    onClick: () => {
                      const nextEffort = (item.reasoning && item.reasoning.defaultEffort) || "";
@@ -199,7 +447,45 @@ index faab1f2..19ec68b 100644
                      setOpen("");
                    },
                  })),
-@@ -1002,11 +1034,11 @@ window.__ModuleLoader__.load({
+@@ -899,13 +1020,32 @@
+           h(ChipRow, { icon: h(ShieldIcon), label: t("account.privateApproved"), active: privateAccess === "approved", onClick: () => { update({ privateAccess: "approved" }); setOpen(""); } }),
+           h(ChipRow, { icon: h(ShieldIcon), label: t("account.privateAll"), active: privateAccess === "all", onClick: () => { update({ privateAccess: "all" }); setOpen(""); } }),
+         ), true),
++        field("idlePolicy", t("account.idlePolicy"), h(ChipMenu, {
++          open: open === "idlePolicy",
++          onToggle: (next) => setOpen(next ? "idlePolicy" : ""),
++          icon: h(IconSliders),
++          label: idlePolicyLabel(value.idlePolicy, t),
++          ariaLabel: t("account.idlePolicy"),
++          className: "ima-account-picker",
++        },
++          h(ChipRow, { icon: h(IconSliders), label: t("account.idleAsk"), active: !value.idlePolicy || value.idlePolicy === "询问", onClick: () => { update({ idlePolicy: null }); setOpen(""); } }),
++          h(ChipRow, { icon: h(IconSliders), label: t("account.idleContinue"), active: value.idlePolicy === "继续", onClick: () => { update({ idlePolicy: "继续" }); setOpen(""); } }),
++          h(ChipRow, { icon: h(IconSliders), label: t("account.idleNew"), active: value.idlePolicy === "新建", onClick: () => { update({ idlePolicy: "新建" }); setOpen(""); } }),
++        )),
++        field("idleMinutes", t("account.idleMinutes"), h(IdleMinutesInput, {
++          value: value.idleMinutes,
++          placeholder: t("account.idleMinutesPlaceholder"),
++          ariaLabel: t("account.idleMinutes"),
++          unit: t("account.idleMinutesUnit"),
++          onCommit: (next) => update({ idleMinutes: next }),
++        })),
+         privateAccess === "all" && h("div", { className: "ima-picker-note warning" }, t("settings.publicChatNotice")),
+-        adding && h("div", { className: "ima-chip-dialog" },
+-          h("strong", null, t("composer.addWorkspace")),
+-          h("input", { value: addPath, placeholder: t("composer.workspacePath"), "aria-label": t("composer.workspacePath"), onChange: (event) => setAddPath(event.target.value) }),
++        adding && h("form", { className: "ima-chip-dialog", onSubmit: (event) => { event.preventDefault(); if (!addBusy) void addWorkspace(addPath); } },
++          h("strong", null, "添加工作区（新建项目文件）"),
++          h("input", { value: addPath, placeholder: "项目名称", "aria-label": "项目名称", autoFocus: true, required: true, maxLength: 120, disabled: addBusy, onChange: (event) => setAddPath(event.target.value) }),
+           h("div", { className: "ima-chip-dialog-actions" },
+-            h("button", { className: "ima-btn", onClick: () => { setAdding(false); setAddPath(""); } }, t("action.cancel")),
+-            h("button", { className: "ima-btn primary", disabled: addBusy || !addPath.trim(), onClick: () => addWorkspace(addPath) }, addBusy ? t("action.adding") : t("action.confirm")),
++            h("button", { className: "ima-btn", type: "button", disabled: addBusy, onClick: () => { setAdding(false); setAddPath(""); } }, t("action.cancel")),
++            h("button", { className: "ima-btn primary", type: "submit", disabled: addBusy || !addPath.trim() }, addBusy ? "创建中…" : "创建"),
+           ),
+         ),
+         hint && h("div", { className: "ima-picker-note" }, hint),
+@@ -1002,11 +1142,11 @@
        const efforts = reasoning
          ? [
              ...(reasoning.defaultEffort ? [] : [{ id: "", name: props.modelT("effort.providerDefault") }]),
@@ -213,7 +499,7 @@ index faab1f2..19ec68b 100644
          : "";
        const permissionOptions = permissions.map((item) => ({
          ...item,
-@@ -1117,6 +1149,7 @@ window.__ModuleLoader__.load({
+@@ -1117,6 +1257,7 @@
                ariaLabel: props.modelT("trigger.selectAria"),
              },
                modelPane === "root" && [
@@ -221,25 +507,25 @@ index faab1f2..19ec68b 100644
                  h(ChipRow, {
                    key: "model",
                    kv: true,
-@@ -1207,7 +1240,7 @@ window.__ModuleLoader__.load({
+@@ -1207,7 +1348,7 @@
        );
      }
-
+ 
 -    function AccountInspector({ account, catalog, permissions, workspaces, createWorkspace, pickDirectory, modelT, permissionT, t, onAction, onSave }) {
-+    function AccountInspector({ account, catalog, assistants, permissions, workspaces, createWorkspace, pickDirectory, modelT, permissionT, t, onAction, onSave }) {
++    function AccountInspector({ account, catalog, assistants, permissions, workspaces, workspaceStatus, createWorkspace, modelT, permissionT, t, onAction, onSave }) {
        const [draft, setDraft] = useState(account);
        const [note, setNote] = useState("");
        const saveSeq = useRef(0);
-@@ -1215,7 +1248,7 @@ window.__ModuleLoader__.load({
+@@ -1215,7 +1356,7 @@
          saveSeq.current += 1;
          setDraft(account);
          setNote("");
 -      }, [account.id, account.cwd, account.permission, account.privateAccess, account.receiveEnabled, account.assistant && account.assistant.provider, account.assistant && account.assistant.model, account.assistant && account.assistant.reasoningEffort]);
-+      }, [account.id, account.cwd, account.permission, account.privateAccess, account.receiveEnabled, account.assistant && account.assistant.presetId, account.assistant && account.assistant.provider, account.assistant && account.assistant.model, account.assistant && account.assistant.reasoningEffort]);
++      }, [account.id, account.cwd, account.permission, account.privateAccess, account.idleMinutes, account.idlePolicy, account.receiveEnabled, account.assistant && account.assistant.presetId, account.assistant && account.assistant.provider, account.assistant && account.assistant.model, account.assistant && account.assistant.reasoningEffort]);
        const save = (patch) => {
          const seq = ++saveSeq.current;
          const next = { ...draft, ...patch };
-@@ -1224,6 +1257,7 @@ window.__ModuleLoader__.load({
+@@ -1224,21 +1365,25 @@
          return onSave(account.id, {
            name: next.name,
            cwd: next.cwd,
@@ -247,7 +533,13 @@ index faab1f2..19ec68b 100644
            provider: next.assistant.provider,
            model: next.assistant.model,
            reasoningEffort: next.assistant.reasoningEffort || null,
-@@ -1235,10 +1269,11 @@ window.__ModuleLoader__.load({
+           permission: next.permission,
+           privateAccess: next.privateAccess,
++          idleMinutes: next.idleMinutes ?? null,
++          idlePolicy: next.idlePolicy ?? null,
+         }).then((ok) => {
+           if (seq === saveSeq.current) setNote(ok ? "status.saved" : "error.save");
+           return ok;
          });
        };
        const applySettings = (patch) => {
@@ -260,7 +552,7 @@ index faab1f2..19ec68b 100644
            ...(Object.prototype.hasOwnProperty.call(patch, "provider") ? { provider: patch.provider } : {}),
            ...(Object.prototype.hasOwnProperty.call(patch, "model") ? { model: patch.model } : {}),
            ...(Object.prototype.hasOwnProperty.call(patch, "reasoningEffort") ? { reasoningEffort: patch.reasoningEffort || undefined } : {}),
-@@ -1258,7 +1293,7 @@ window.__ModuleLoader__.load({
+@@ -1258,11 +1403,11 @@
            h(AccountSettingsPicker, {
              value: draft,
              onChange: applySettings,
@@ -268,17 +560,25 @@ index faab1f2..19ec68b 100644
 +            catalog, assistants,
              permissions,
              workspaces,
++            workspaceStatus,
              createWorkspace,
-@@ -1292,7 +1327,7 @@ window.__ModuleLoader__.load({
+-            pickDirectory,
+             modelT,
+             permissionT,
+             compact: true,
+@@ -1292,8 +1437,9 @@
        const [editing, setEditing] = useState(null);
        const [selected, setSelected] = useState(storedAccountSelection);
        const [expanded, setExpanded] = useState({ weixin: true });
 -      const [catalog, setCatalog] = useState({ providers: [], permissions: [], assistant: null, cwd: "", permission: "" });
+-      const workspaces = props.useWorkspaces ? (props.useWorkspaces((state) => state && state.items || []) || []) : [];
 +      const [catalog, setCatalog] = useState({ providers: [], assistants: [], permissions: [], assistant: null, cwd: "", permission: "" });
-       const workspaces = props.useWorkspaces ? (props.useWorkspaces((state) => state && state.items || []) || []) : [];
++      const { items: workspaces, projectError, loading: projectsLoading, refreshProjects, createWorkspace } = useProjectWorkspaces();
++      const workspaceStatus = { loading: projectsLoading, error: projectError, retry: refreshProjects };
        const refreshSeq = useRef(0);
        const selectAccount = useCallback((id) => {
-@@ -1323,7 +1358,7 @@ window.__ModuleLoader__.load({
+         const next = id || "";
+@@ -1323,7 +1469,7 @@
          ensureStyle();
          refresh();
          api("/assistant").then((data) => {
@@ -287,24 +587,249 @@ index faab1f2..19ec68b 100644
          }).catch(() => undefined);
        }, [refresh]);
        useEffect(() => { const timer = setInterval(refresh, 4000); return () => clearInterval(timer); }, [refresh]);
-@@ -1411,6 +1446,7 @@ window.__ModuleLoader__.load({
+@@ -1364,6 +1510,9 @@
+           ),
+         ),
+         error && h("div", { className: "ima-error" }, error),
++        projectsLoading && h("div", { role: "status" }, "正在加载项目…"),
++        projectError && h("div", { className: "ima-error", role: "alert" }, projectError,
++          h("button", { className: "ima-btn", onClick: () => { void refreshProjects().catch(() => {}); } }, "重试加载项目")),
+         pending.length > 0 && h("div", { className: "ima-pending" },
+           h("div", null, t("pending.notice")),
+           ...pending.map((p) => h("div", { key: p.channelId + p.userId, className: "ima-pending-row" },
+@@ -1411,10 +1560,11 @@
                  ? h(AccountInspector, {
                      account: selectedAccount,
                      catalog: catalog.providers,
 +          assistants: catalog.assistants,
                      permissions: catalog.permissions,
                      workspaces,
-                     createWorkspace: props.createWorkspace,
-@@ -1431,6 +1467,7 @@ window.__ModuleLoader__.load({
+-                    createWorkspace: props.createWorkspace,
+-                    pickDirectory: props.pickDirectory,
++                    workspaceStatus,
++                    createWorkspace,
+                     modelT: props.modelT,
+                     permissionT: props.permissionT,
+                     t,
+@@ -1431,10 +1581,11 @@
          editing && h(BindModal, {
            ch: (channels || []).find((item) => item.id === editing) || { id: editing, label: editing, kind: "qr", fields: [] },
            catalog: catalog.providers,
 +          assistants: catalog.assistants,
            permissions: catalog.permissions,
            workspaces,
-           createWorkspace: props.createWorkspace,
-@@ -2229,10 +2266,16 @@ window.__ModuleLoader__.load({
-
+-          createWorkspace: props.createWorkspace,
+-          pickDirectory: props.pickDirectory,
++          workspaceStatus,
++          createWorkspace,
+           modelT: props.modelT,
+           permissionT: props.permissionT,
+           defaults: catalog,
+@@ -1674,7 +1825,7 @@
+       return ReactDOM.createPortal(node, document.body);
+     }
+ 
+-    function ChannelSessionRow({ sess, selected, onOpen, onChanged, skin, sessionActions, sessionById, menuOpen, onMenuChange }) {
++    function ChannelSessionRow({ sess, selected, onOpen, onChanged, skin, sessionActions, sessionById, menuOpen, onMenuChange, sidebarUI }) {
+       const t = arguments[0].t || fallbackT;
+       const menu = !!menuOpen;
+       const setMenu = (next) => onMenuChange(!!next);
+@@ -1686,6 +1837,8 @@
+       const [hoverOpen, setHoverOpen] = useState(false);
+       const [hoverStyle, setHoverStyle] = useState({});
+       const title = sess.title || sess.chatId;
++      const subtitle = sess.workspaceName && sess.chatTitle && sess.chatTitle !== sess.chatId && sess.chatTitle !== title ? `${sess.chatTitle} · ${sess.workspaceName}` : '';
++      const displayTitle = subtitle ? `${subtitle} / ${title}` : title;
+       const native = skin !== "codex";
+       const running = !!(sess.running || (sessionById && sessionById[sess.sessionId] && sessionById[sess.sessionId].running));
+       const showHover = () => {
+@@ -1751,6 +1904,18 @@
+           body: JSON.stringify(Object.assign({ sessionId: sess.sessionId }, extra || {})),
+         }).then((data) => { if (data.ok) syncList(data.groups); }).catch(() => undefined);
+       };
++      if (renaming && sidebarUI) {
++        return h(sidebarUI.Dialog, {
++          title: t("rail.rename"), as: "form", onClose: () => { setRenaming(false); setDraft(title); },
++          onSubmit: (event) => { event.preventDefault(); setRenaming(false); run("rename", { title: draft.trim() || title }); },
++        }, h("input", {
++          value: draft, autoFocus: true, "aria-label": t("rail.renameAria"),
++          onChange: (event) => setDraft(event.target.value),
++        }), h("div", { className: "workagent-dialog-actions" },
++          h("button", { type: "submit", className: "workagent-button", disabled: !draft.trim() }, "保存"),
++          h("button", { type: "button", className: "workagent-button", onClick: () => { setRenaming(false); setDraft(title); } }, "取消"),
++        ));
++      }
+       if (renaming) {
+         return h("div", { className: rowClass },
+           h("input", {
+@@ -1773,6 +1938,32 @@
+         { id: "fork", label: t("rail.fork"), icon: h(IconBranch), go: () => run("fork") },
+         { id: "archive", label: t("rail.archive"), icon: h(IconArchive), go: () => run("archive") },
+       ];
++      if (sidebarUI) {
++        return h(React.Fragment, null,
++          h(sidebarUI.Row, {
++            title, subtitle, selected,
++            status: h(sidebarUI.Status, { running }),
++            meta: relativeTime(sess.updatedAt, t),
++            buttonProps: { title: displayTitle },
++            rowProps: {
++              "data-channel-session": sess.sessionId,
++              onContextMenu: (event) => { event.preventDefault(); onMenuChange(true, event); },
++            },
++            onOpen: () => { setMenu(false); onOpen(sess.sessionId); },
++            actions: h(sidebarUI.Action, {
++              label: t("action.more", { channel: title }),
++              "data-ima-session-more": "", "aria-haspopup": "dialog", "aria-expanded": menu,
++              onClick: (event) => onMenuChange(!menu, event),
++            }),
++          }),
++          menu && h(sidebarUI.Dialog, {
++            title, onClose: () => setMenu(false), "data-ima-session-menu": "",
++          }, h(sidebarUI.ActionList, null, menuItems.map((item) => h("button", {
++            key: item.id, type: "button", className: "workagent-button",
++            onClick: () => { setMenu(false); item.go(); },
++          }, item.icon, item.label)))),
++        );
++      }
+       return h("div", {
+         ref: rowRef,
+         className: native ? ("ima-n-sess" + (selected ? " on" : "") + (menu ? " menu-on" : "")) : rowClass,
+@@ -1786,7 +1977,9 @@
+         onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); hideHover(); onMenuChange(true, e); },
+       },
+         native && h("span", { className: "ima-n-slot" }, running ? h(RunningStateDot) : null),
+-        h("span", { className: native ? "ima-n-title" : "dcu-wb-session-title" }, title),
++        h("span", { className: "ima-task-label", title: displayTitle },
++          h("span", { className: native ? "ima-n-title" : "dcu-wb-session-title" }, title),
++          subtitle && h("span", { className: "ima-task-subtitle" }, subtitle)),
+         native && h("span", { className: "ima-n-time" }, relativeTime(sess.updatedAt, t)),
+         h("span", { className: native ? "ima-n-acts" : "dcu-wb-actions" },
+           h("button", {
+@@ -1838,6 +2031,28 @@
+       }));
+     }
+ 
++    function SharedChannelHeader({ sidebarUI: UI, query, sort, groupMode, onQuery, onSort, onGroupMode, t }) {
++      const [searching, setSearching] = useState(false);
++      const [filtering, setFiltering] = useState(false);
++      return h(React.Fragment, null,
++        h(UI.Header, {
++          title: t("rail.workspace"),
++          actions: h(React.Fragment, null,
++            h(UI.Action, { icon: searching ? "close" : "search", label: searching ? "关闭搜索" : t("rail.search"), "aria-pressed": searching,
++              onClick: () => { setSearching(!searching); if (searching) onQuery(""); } }),
++            h(UI.Action, { icon: "settings", label: t("rail.filter"), "aria-expanded": filtering, onClick: () => setFiltering(!filtering) }),
++          ),
++        }),
++        searching && h(UI.Search, { value: query, autoFocus: true, "aria-label": t("rail.search"), placeholder: t("rail.searchPlaceholder"), onChange: (event) => onQuery(event.target.value) }),
++        filtering && h("div", { className: "workagent-sidebar-filter" },
++          h("label", null, t("rail.group"), h("select", { value: groupMode, onChange: (event) => onGroupMode(event.target.value) },
++            h("option", { value: "workspace" }, t("rail.byWorkspace")), h("option", { value: "list" }, t("rail.list")))),
++          h("label", null, t("rail.sort"), h("select", { value: sort, onChange: (event) => onSort(event.target.value) },
++            h("option", { value: "manual" }, t("rail.manual")), h("option", { value: "time" }, t("rail.recent")))),
++        ),
++      );
++    }
++
+     function ChannelRailView(props) {
+       const t = props.t || fallbackT;
+       const [groups, setGroups] = useState([]);
+@@ -1863,7 +2078,7 @@
+         return () => clearInterval(timer);
+       }, []);
+       useEffect(() => {
+-        if (!openMenu) return undefined;
++        if (!openMenu || props.sidebarUI) return undefined;
+         const onPointerDown = (event) => {
+           const target = event.target;
+           if (target && target.closest && target.closest("[data-ima-session-menu],[data-ima-session-more]")) return;
+@@ -1898,8 +2113,40 @@
+         visibleGroups.splice(0, visibleGroups.length);
+         if (sessions.length) visibleGroups.push({ id: "__flat__", label: "", sessions });
+       }
++      if (props.sidebarUI) {
++        const UI = props.sidebarUI;
++        const renderSession = (sess) => h(ChannelSessionRow, {
++          key: `${sess.channel}:${sess.kind}:${sess.chatId}`,
++          sess, selected: selectedId === sess.sessionId, sessionById: props.sessionById,
++          menuOpen: openMenu && openMenu.id === sess.sessionId ? openMenu : null,
++          onMenuChange: (next, event) => setOpenMenu((current) => {
++            if (!next) return current && current.id === sess.sessionId ? null : current;
++            const point = pointerPoint(event);
++            return { id: sess.sessionId, x: point.x, y: point.y };
++          }),
++          onOpen: open, onChanged: setGroups, skin, t, sidebarUI: UI,
++          sessionActions: {
++            renameSession: props.renameSession, archiveSession: props.archiveSession,
++            deleteSession: props.deleteSession, forkSession: props.forkSession, openPath: props.openPath,
++          },
++        });
++        return h("section", { className: "workagent-sidebar-browser workagent-channel-sidebar", "aria-label": t("rail.channels") },
++          h(SharedChannelHeader, { sidebarUI: UI, query, sort, groupMode, onQuery: setQuery, onSort: setSort, onGroupMode: setGroupMode, t }),
++          h("div", { className: "workagent-sidebar-projects" },
++            error && h("div", { className: "workagent-sidebar-empty", role: "alert" }, error),
++            !error && visibleGroups.length === 0 && h("div", { className: "workagent-sidebar-empty" }, t("rail.empty")),
++            ...visibleGroups.map((group) => groupMode === "list"
++              ? h("div", { key: group.id, className: "workagent-sidebar-project-sessions workagent-sidebar-standalone" }, group.sessions.map(renderSession))
++              : h(UI.Group, {
++                  key: group.id, title: channelLabel(group, t), icon: h(Logo, { id: group.id, small: true }),
++                  expanded: !folded[group.id], onToggle: () => setFolded({ ...folded, [group.id]: !folded[group.id] }),
++                }, group.sessions.map(renderSession))),
++          ),
++        );
++      }
+       return h("div", { className: native ? "ima-native ima-rail" : "dcu-wb ima-rail" },
+         h("style", null, WB_CSS),
++        h("style", null, '.ima-task-label{display:flex;flex:1;min-width:0;flex-direction:column;line-height:1.45}.ima-task-label>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ima-task-subtitle{font-size:11px;color:var(--dsw-alias-label-tertiary,#68778d)}.ima-n-sess:has(.ima-task-subtitle){height:auto;min-height:46px}'),
+         h(ChannelWorkspaceHead, { query, sort, groupMode, onQuery: setQuery, onSort: setSort, onGroupMode: setGroupMode, t }),
+         h("div", { className: native ? "ima-native-tree" : "dcu-wb-tree", role: "tree" },
+           error && h("div", { className: native ? "ima-native-empty" : "dcu-wb-empty" }, error),
+@@ -1926,7 +2173,7 @@
+                 ],
+             ),
+             (groupMode === "list" || !folded[g.id]) && visible.length > 0 && visible.map((sess) => h(ChannelSessionRow, {
+-                key: sess.sessionId,
++                key: `${sess.channel}:${sess.kind}:${sess.chatId}`,
+                 sess,
+                 selected: selectedId === sess.sessionId,
+                 sessionById: props.sessionById,
+@@ -1957,8 +2204,7 @@
+     function isTaskSessionItem(item) {
+       if (!item) return false;
+       if (item.blank) return false;
+-      if (item.origin === "im" || item.origin === "subagent") return false;
+-      return !String(item.id || "").startsWith("im:");
++      return item.origin !== "subagent";
+     }
+ 
+     function TaskList(props) {
+@@ -2040,7 +2286,7 @@
+     }
+ 
+     function filterTaskSessions(state) {
+-      return filterSessionsByIm(state, false);
++      return state || { ids: [], byId: {}, current: null };
+     }
+ 
+     function filterChannelSessions(state) {
+@@ -2214,25 +2460,18 @@
+       return false;
+     }
+ 
+-    function pickOfficialWorkspaces(ctx) {
+-      const entries = (ctx.slots.entries && ctx.slots.entries("sidebar.workspaces")) || [];
+-      for (const item of entries) {
+-        if (!item || !item.component) continue;
+-        if (item.component.__imConnectWrapped) continue;
+-        if (item.component.__imConnectOriginal) continue;
+-        if (item.component.__dshNativeTabHost) continue;
+-        if (item.component.__dshAutomationWrapped) continue;
+-        return item;
+-      }
+-      return null;
+-    }
+-
      function apply(ctx) {
        ensureStyle();
 -      ctx.effect(() => ctx.locale.register(IM_LOCALE_NS, IM_LOCALES), "im-connect: dictionaries");
@@ -323,8 +848,14 @@ index faab1f2..19ec68b 100644
        const subscribeLocale = (listener) => ctx.locale.subscribe(listener);
        const localeSnapshot = () => ctx.locale.getSnapshot();
        function LocalizedChannelRail(props) {
-@@ -2253,9 +2296,9 @@ window.__ModuleLoader__.load({
-       };
+@@ -2247,20 +2486,14 @@
+         useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
+         return h(SettingsPage, Object.assign({}, props, { t, permissionT, modelT }));
+       }
+-      openImSession = (id) => {
+-        try { ctx.sessions.open(id); return true; }
+-        catch (error) { console.warn("[dsh-im-connect] 无法打开会话", id, error); return false; }
+-      };
        ctx.slots.inject("settings.section", () => ctx.slots.register({
            name: "settings.section",
 -          id: "im-assistant",
@@ -336,6 +867,84 @@ index faab1f2..19ec68b 100644
            icon: "chat",
            locale: IM_LOCALE_NS,
          inject: () => ({
+-          createWorkspace: (input) => ctx.workspaces.create(input),
+-          pickDirectory: () => ctx.workspaces.pickDirectory(),
+           permissionT,
+           modelT,
+         }),
+@@ -2290,8 +2523,7 @@
+ 
+       // 只包一层官方任务树，绝不在通知回调里再 register，否则会把启动卡在 Loading plugins。
+       ctx.slots.inject("sidebar.workspaces", () => {
+-        let wrappedEntry = null;
+-        let originalComp = null;
++        let wrapped = null;
+         let removeInsertedTab = () => {};
+         let stopInsertedTabLocale = () => {};
+         let insertedTabRegistry = null;
+@@ -2305,11 +2537,12 @@
+         };
+         const unwrap = () => {
+           clearInsertedTab();
+-          if (wrappedEntry && originalComp) {
+-            try { wrappedEntry.component = originalComp; } catch { /* ignore */ }
++          if (wrapped) {
++            const { entry, component, original, registry } = wrapped;
++            if (entry.component === component) entry.component = original;
++            if (entry.__dshNativeTabs === registry) delete entry.__dshNativeTabs;
+           }
+-          wrappedEntry = null;
+-          originalComp = null;
++          wrapped = null;
+         };
+         const insertChannelTab = (entry) => {
+           const registry = findNativeTabRegistry(entry);
+@@ -2347,21 +2580,22 @@
+               unwrap();
+               return;
+             }
+-            const entries = (ctx.slots.entries && ctx.slots.entries("sidebar.workspaces")) || [];
+-            const occupant = entries.find((item) => item && item.component);
+-            if (occupant && (occupant.component.__dshNativeTabHost || occupant.component.__dshAutomationWrapped || findNativeTabRegistry(occupant))) {
++            // Follow the elected sidebar, including late higher-priority registrations
++            // and fallback after an entry unloads or abdicates.
++            const occupant = ctx.slots.entriesOfSlot("sidebar.workspaces")[0];
++            if (wrapped && (wrapped.entry !== occupant || wrapped.entry.component !== wrapped.component)) unwrap();
++            if (!occupant) {
++              clearInsertedTab();
++              return;
++            }
++            if (occupant.component.__dshNativeTabHost || occupant.component.__dshAutomationWrapped || findNativeTabRegistry(occupant)) {
+               insertChannelTab(occupant);
+               return;
+             }
+-            if (wrappedEntry && wrappedEntry.component && wrappedEntry.component.__imConnectWrapped) {
+-              insertChannelTab(wrappedEntry);
+-              return;
+-            }
+-            const official = pickOfficialWorkspaces(ctx);
+-            if (!official || official.component.__imConnectWrapped || official.component.__dshNativeTabHost) return;
+-            originalComp = official.component;
++            clearInsertedTab();
++            const originalComp = occupant.component;
+             const registry = createNativeTabRegistry(originalComp);
+-            attachNativeTabRegistry(official, registry);
++            attachNativeTabRegistry(occupant, registry);
+             function ImNativeWorkspaceShell(innerProps) {
+               return h(LocalizedSessionSwitcher, Object.assign({}, innerProps, { officialTree: originalComp, nativeTabs: registry }));
+             }
+@@ -2370,8 +2604,8 @@
+             ImNativeWorkspaceShell.__imConnectOriginal = originalComp;
+             ImNativeWorkspaceShell.__dshNativeTabHost = true;
+             attachNativeTabRegistry(ImNativeWorkspaceShell, registry);
+-            official.component = ImNativeWorkspaceShell;
+-            wrappedEntry = official;
++            occupant.component = ImNativeWorkspaceShell;
++            wrapped = { entry: occupant, component: ImNativeWorkspaceShell, original: originalComp, registry };
+           } catch (error) {
+             console.warn("[dsh-im-connect] 包裹官方任务树失败", error);
+           } finally {
+
 diff --git a/lib/engine/assistant-settings.d.ts b/lib/engine/assistant-settings.d.ts
 index 1353db7..042a5b6 100644
 --- a/lib/engine/assistant-settings.d.ts
@@ -376,36 +985,58 @@ index 25aa9ab..9398456 100644
  export function pickAssistantModel(...candidates) {
      for (const item of candidates) {
 diff --git a/lib/engine/gateway.js b/lib/engine/gateway.js
-index 8c203dd..efa0cb1 100644
+index 8c203dd..463dd68 100644
 --- a/lib/engine/gateway.js
 +++ b/lib/engine/gateway.js
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
  import { ApprovalBroker } from './approval.js';
 +import { handleWorkagentCommand, checkWorkagentIdle } from './workagent-commands.js';
++import { createWorkagentHost } from './workagent-host.js';
  import { SessionMerger } from './merge.js';
  import { SessionRouter } from './router.js';
  import { isImSessionId } from './session-id.js';
-@@ -311,6 +312,10 @@ export class ImEngine {
+@@ -225,10 +227,19 @@ export class ImEngine {
+                 await this.rejectUnauthorized(channelId, channel, msg);
+                 return;
+             }
++            // Unified projects include the employee's webpage history. Public DM
++            // admission or a group mention alone does not grant project access.
++            if (this.ctx.get('workagentChannels').handles(this.resolveConfig(channelId).provider)
++                && !this.userAllowed(channelId, msg.userId) && channel.authorizes?.(msg.userId ?? '') !== true) {
++                await this.rejectUnauthorized(channelId, channel, msg);
++                return;
++            }
+             const text = msg.text.trim();
+             const kind = msg.kind === 'group' ? 'group' : 'dm';
+             const binding = this.router.lookup(channelId, kind, msg.chatId);
+-            if (text.startsWith('/')) {
++            const saved = binding && createWorkagentHost(this).record(binding.key);
++            const choosing = saved?.pendingSelection || (saved?.pendingInput && /^[123]$/.test(text));
++            if (text.startsWith('/') || (saved?.collaboration && !msg.workagentContinue) || (choosing && !this.questions.has(binding.sessionId) && !this.broker.has(binding.sessionId))) {
+                 const command = text.split(/\s+/, 1)[0]?.toLowerCase();
+                 if ((command === '/new' || command === '/clear')
+                     && binding
+@@ -311,6 +322,10 @@ export class ImEngine {
          }
      }
      async handleCommand(channel, msg) {
 +        try {
-+            const reply = await handleWorkagentCommand(this, channel, msg);
++            const reply = await handleWorkagentCommand(createWorkagentHost(this), channel, msg);
 +            if (reply !== undefined) return reply;
 +        } catch (error) { return `命令未完成：${error instanceof Error ? error.message : '请稍后重试'}`; }
          const [raw] = msg.text.trim().split(/\s+/);
          const cmd = raw?.toLowerCase();
          const kind = msg.kind === 'group' ? 'group' : 'dm';
-@@ -334,6 +339,8 @@ export class ImEngine {
+@@ -334,6 +349,8 @@ export class ImEngine {
          const kind = msg.kind === 'group' ? 'group' : 'dm';
          const title = (msg.username || msg.text || msg.chatId).slice(0, 40);
          const binding = await this.router.getOrCreate(channel.id, kind, msg.chatId, title);
-+        if (!await checkWorkagentIdle(this, channel, msg, binding)) return;
-+        if (binding.handle?.workagent) this.store.upsert(binding.key, {...this.store.get(binding.key),lastInputAt:new Date().toISOString()});
++        if (!await checkWorkagentIdle(createWorkagentHost(this), channel, msg, binding)) return;
++        createWorkagentHost(this).recordInput(binding);
          const content = [];
          if (msg.text.trim())
              content.push({ type: 'text', text: msg.text.trim() });
-@@ -349,12 +356,12 @@ export class ImEngine {
+@@ -349,12 +366,10 @@ export class ImEngine {
              this.sessionActors.set(binding.sessionId, msg.userId);
          this.streams.reset(`${channel.id}:${msg.chatId}`);
          await channel.sendAction?.(msg.chatId, 'typing').catch(() => undefined);
@@ -418,13 +1049,79 @@ index 8c203dd..efa0cb1 100644
 +        const message = {
 +            id: crypto.randomUUID(), role: 'user', content, source: { kind: 'user' },
 +        };
-+        if (binding.handle?.workagent) {
-+            await binding.handle.followup(message, (event) => this.onSessionEvent({ id: binding.sessionId }, event));
-+        } else this.router.followup(binding, message);
++        await createWorkagentHost(this).followup(binding, message);
          this.log(`[${channel.id}] 已注入 ${binding.sessionId}`);
      }
      async answerApproval(channelId, msg, allow) {
-@@ -779,4 +786,4 @@ export class ImEngine {
+@@ -372,18 +387,21 @@ export class ImEngine {
+             await this.channels.get(channelId)?.send(msg.chatId, allow ? '已批准。' : '已拒绝。');
+         return ok;
+     }
++    interactionBinding(sessionId) {
++        return createWorkagentHost(this).interactionBinding(sessionId);
++    }
+     async onApproval(req, next) {
+         const currentContract = req.agent !== undefined;
+         const rawSessionId = req.agent?.session?.id ?? req.agent?.id ?? req.session?.id;
+         const sessionId = rawSessionId ? String(rawSessionId) : '';
+-        if (!sessionId || !isImSessionId(sessionId))
++        if (!sessionId || !this.interactionBinding(sessionId))
+             return next();
+         if (req.signal?.aborted)
+             return currentContract ? 'cancelled' : next();
+         const result = await this.runInteraction(sessionId, async () => {
+             if (this.disposed || req.signal?.aborted)
+                 return currentContract ? 'cancelled' : DELEGATE_INTERACTION;
+-            const binding = this.router.bindingForSession(sessionId);
++            const binding = this.interactionBinding(sessionId);
+             const channel = binding ? this.channels.get(binding.channelId) : undefined;
+             if (!binding || !channel)
+                 return DELEGATE_INTERACTION;
+@@ -433,7 +451,7 @@ export class ImEngine {
+     async onUserQuestions(req, next) {
+         const rawSessionId = req.agent?.session?.id ?? req.agent?.id;
+         const sessionId = rawSessionId ? String(rawSessionId) : '';
+-        if (!sessionId || !isImSessionId(sessionId))
++        if (!sessionId || !this.interactionBinding(sessionId))
+             return next();
+         const questions = req.questions;
+         if (!Array.isArray(questions)
+@@ -443,7 +461,7 @@ export class ImEngine {
+         if (req.signal?.aborted) {
+             throw req.signal.reason ?? new DOMException('Aborted', 'AbortError');
+         }
+-        const initialBinding = this.router.bindingForSession(sessionId);
++        const initialBinding = this.interactionBinding(sessionId);
+         const actor = this.sessionActors.get(sessionId);
+         if (initialBinding?.kind === 'group' && !actor)
+             return next();
+@@ -454,7 +472,7 @@ export class ImEngine {
+             if (req.signal?.aborted) {
+                 throw req.signal.reason ?? new DOMException('Aborted', 'AbortError');
+             }
+-            const binding = this.router.bindingForSession(sessionId);
++            const binding = this.interactionBinding(sessionId);
+             const channel = binding ? this.channels.get(binding.channelId) : undefined;
+             if (!binding || !channel)
+                 return DELEGATE_INTERACTION;
+@@ -651,11 +669,12 @@ export class ImEngine {
+         lines.push('', '请精准回复「批准」或「拒绝」（也支持：同意 / 不同意 / yes / allow / no / reject）。');
+         return lines.join('\n');
+     }
+-    async onSessionEvent(session, event) {
++    async onSessionEvent(session, event, replyBinding) {
+         const sessionId = session.id ? String(session.id) : '';
+-        if (!isImSessionId(sessionId))
+-            return;
+-        const binding = this.router.bindingForSession(sessionId);
++        // Managed tasks relay only the input that came from this exact chat.
++        // Global Harness events and webpage turns must not duplicate that relay.
++        if (!replyBinding && (this.ctx.get('workagentChannels').listSessionIds().includes(sessionId) || !isImSessionId(sessionId))) return;
++        const binding = replyBinding || this.router.bindingForSession(sessionId);
+         const channel = binding ? this.channels.get(binding.channelId) : undefined;
+         if (!binding || !channel)
+             return;
+@@ -779,4 +798,4 @@ export class ImEngine {
          return { status: 'delivered', deliveredAny };
      }
  }
@@ -432,10 +1129,18 @@ index 8c203dd..efa0cb1 100644
 \ No newline at end of file
 +//# sourceMappingURL=gateway.js.map
 diff --git a/lib/engine/router.js b/lib/engine/router.js
-index dee9b60..566f838 100644
+index dee9b60..b6338f8 100644
 --- a/lib/engine/router.js
 +++ b/lib/engine/router.js
-@@ -135,7 +135,7 @@ export class SessionRouter {
+@@ -107,6 +107,7 @@ export class SessionRouter {
+         this.store.upsert(sessionKeyOf(rec.channel, rec.kind, rec.chatId), {
+             ...rec,
+             title,
++            chatTitle: title,
+             updatedAt: new Date().toISOString(),
+         });
+         return true;
+@@ -135,7 +136,7 @@ export class SessionRouter {
              const canListStored = typeof persistence?.list === "function";
              if (!canListLive && !canListStored)
                  return undefined;
@@ -444,7 +1149,7 @@ index dee9b60..566f838 100644
              if (canListLive && live.list) {
                  for (const session of live.list())
                      ids.add(String(session.id));
-@@ -205,10 +205,11 @@ export class SessionRouter {
+@@ -205,10 +206,11 @@ export class SessionRouter {
      }
      async create(channelId, kind, chatId, title, preferredSessionId) {
          const key = sessionKeyOf(channelId, kind, chatId);
@@ -458,15 +1163,14 @@ index dee9b60..566f838 100644
          }
          catch (error) {
              if (!preferredSessionId || !isIdCollision(error))
-@@ -232,6 +233,17 @@ export class SessionRouter {
+@@ -232,6 +234,16 @@ export class SessionRouter {
          return binding;
      }
      async resume(record) {
 +        const service = this.ctx.get('workagentChannels');
 +        const config = record.workagentConfig || this.resolveConfig(record.channel);
-+        if (record.sessionId.startsWith('session-channel-')) {
-+            if (!service.handles(config.provider)) return undefined;
-+            const handle = await service.open(config, record.sessionId, record.title, sessionKeyOf(record.channel, record.kind, record.chatId));
++        if (service.listSessionIds().includes(record.sessionId)) {
++            const handle = await service.resume(sessionKeyOf(record.channel, record.kind, record.chatId), record.sessionId);
 +            if (!handle) return undefined;
 +            return { key: sessionKeyOf(record.channel, record.kind, record.chatId),
 +                channelId: record.channel, kind: record.kind, chatId: record.chatId,
@@ -504,7 +1208,7 @@ index dee9b60..566f838 100644
 \ No newline at end of file
 +//# sourceMappingURL=router.js.map
 diff --git a/lib/engine/session-id.js b/lib/engine/session-id.js
-index 39ee519..bea71a1 100644
+index 39ee519..f03cd1c 100644
 --- a/lib/engine/session-id.js
 +++ b/lib/engine/session-id.js
 @@ -12,7 +12,7 @@ export function createImSessionId(channel, kind, chatId, now = Date.now()) {
@@ -516,6 +1220,26 @@ index 39ee519..bea71a1 100644
  }
  const CHANNEL_IDS = ['dingtalk', 'feishu', 'lark', 'weixin', 'wecom', 'qq', 'telegram'];
  const STAMP_RE = /^\d{13,}$/;
+@@ -40,16 +40,12 @@ export function parseImSessionId(sessionId) {
+ export function isImOrigin(origin) {
+     return origin === IM_ORIGIN;
+ }
+-/** 任务列表可见：排除 IM 与子 agent。 */
++/** 任务列表包含 IM 发起的任务，仅排除空白项与子 agent。 */
+ export function isTaskSession(input) {
+     if (input.blank === true)
+         return false;
+-    if (isImOrigin(input.origin))
+-        return false;
+-    if (typeof input.id === 'string' && isImSessionId(input.id))
+-        return false;
+     if (input.origin === 'subagent')
+         return false;
+     return true;
+ }
+-//# sourceMappingURL=session-id.js.map
+\ No newline at end of file
++//# sourceMappingURL=session-id.js.map
 diff --git a/lib/engine/types.d.ts b/lib/engine/types.d.ts
 index bee91bf..f8fb0c5 100644
 --- a/lib/engine/types.d.ts
@@ -535,114 +1259,227 @@ index bee91bf..f8fb0c5 100644
 -//# sourceMappingURL=types.d.ts.map
 \ No newline at end of file
 +//# sourceMappingURL=types.d.ts.map
-diff --git a/.cache/channel-assistants/after/lib/engine/workagent-commands.js b/lib/engine/workagent-commands.js
+diff --git a/lib/engine/workagent-commands.js b/lib/engine/workagent-commands.js
 new file mode 100644
-index 0000000..0584983
+index 0000000..36bd237
 --- /dev/null
 +++ b/lib/engine/workagent-commands.js
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,213 @@
 +import { sessionKeyOf } from './session-id.js';
-+const aliases = { '/help':'帮助', '/帮助':'帮助', '/new':'新对话', '/clear':'新对话', '/新对话':'新对话', '/history':'历史', '/历史':'历史', '/switch':'切换', '/切换':'切换', '/projects':'项目', '/项目':'项目', '/model':'模型', '/模型':'模型', '/continue':'继续', '/继续':'继续', '/compact':'压缩', '/压缩':'压缩', '/rename':'重命名', '/重命名':'重命名', '/quota':'额度', '/额度':'额度', '/cancel':'取消', '/取消':'取消', '/idle':'空闲', '/空闲':'空闲', '/策略':'策略' };
-+const help = '直接发消息继续当前会话。\n/新对话 [项目序号或 ID]\n/项目 查看项目\n/历史 查看本聊天历史\n/切换 序号或会话 ID\n/模型 [序号或模型 ID]\n/继续 继续空闲前的会话\n/压缩 压缩当前上下文\n/重命名 新名称\n/额度 查看当前模型额度\n/空闲 分钟（0 表示不检查）\n/策略 询问、继续或新建\n/取消 取消待续接消息或停止当前执行\n/帮助';
-+const choice = (rows, value) => rows.find((row) => row.id === value) || (/^[1-9]\d*$/.test(value) ? rows[Number(value)-1] : undefined);
-+export async function handleWorkagentCommand(engine, channel, msg) {
-+  const [raw, ...parts] = msg.text.trim().split(/\s+/);
-+  const command = aliases[raw.toLowerCase()];
-+  if (!command) return undefined;
-+  const service = engine.ctx.get('workagentChannels');
-+  const config = engine.resolveConfig(channel.id);
++
++const aliases = { '/help':'帮助', '/帮助':'帮助', '/status':'当前', '/当前':'当前', '/new':'新对话', '/clear':'新对话', '/新对话':'新对话', '/history':'历史', '/历史':'历史', '/switch':'切换', '/切换':'切换', '/projects':'项目', '/项目':'项目', '/model':'模型', '/模型':'模型', '/continue':'继续', '/继续':'继续', '/compact':'压缩', '/压缩':'压缩', '/rename':'重命名', '/重命名':'重命名', '/quota':'额度', '/额度':'额度', '/cancel':'取消', '/取消':'取消', '/idle':'空闲', '/空闲':'空闲', '/策略':'策略' };
++const help = '网页与 IM 共用项目和任务。直接发消息继续当前任务。\n/当前 查看当前项目和任务\n/新对话 [项目] 选择最近任务或新建（支持 /新 等首字简写）\n/项目 查看项目\n/切换 [任务序号、名称或 ID]\n/历史 查看可继续的任务\n/模型 [序号或模型 ID]\n/继续 继续空闲前的任务\n/压缩 压缩当前上下文\n/重命名 新名称\n/额度 查看当前模型额度\n/空闲 分钟（0 表示不检查）\n/策略 询问、继续或新建\n/取消 取消选择或停止当前执行\n/帮助';
++const choice = (rows, value) => rows.find(row => row.id === value) || (/^[1-9]\d*$/.test(value) ? rows[Number(value)-1] : rows.filter(row => (row.name || row.title) === value).length === 1 ? rows.find(row => (row.name || row.title) === value) : undefined);
++const label = row => `项目：${row.workspaceName || row.workspaceId || '默认项目'}\n任务：${row.title}\n任务 ID：${row.id}`;
++aliases['/补充'] = aliases['/steer'] = '补充';
++aliases['/停止'] = aliases['/stop'] = '停止';
++const sharedHelp = '协作仅接收 Agent 完成提醒和产物，发消息或控制执行请去网页操作。\n/历史 [n] 最近 n 条消息（默认 2），连续发送向前翻页，有新消息时从最新处重拉\n/新对话 或 /切换 返回普通任务。/补充 和 /停止 仅用于普通任务。';
++const sharedError = error => ({ shared_project_forbidden:'你已没有这个协作项目的访问权限。', shared_project_not_found:'协作项目不存在或你已退出，请去网页查看。' })[error.message] || '协作操作失败，请去网页查看或稍后重试。';
++
++export async function handleWorkagentCommand(runtime, channel, msg) {
++  const service = runtime.service;
++  const config = runtime.configuration(channel.id);
 +  if (!service.handles(config.provider)) return undefined;
-+  const argument = parts.join(' ');
 +  const kind = msg.kind === 'group' ? 'group' : 'dm';
 +  const key = sessionKeyOf(channel.id, kind, msg.chatId);
-+  if (command === '帮助') return help;
++  const saved = runtime.record(key);
++  const update = values => runtime.update(key, values);
++  const [raw, ...parts] = msg.text.trim().split(/\s+/);
++  let command = aliases[raw.toLowerCase()], argument = parts.join(' ');
++  // 首字前缀匹配：/新、/新对 等都应命中 /新对话；命中多个不同命令时要求补全。
++  if (!command && raw.length > 1 && raw.startsWith('/')) {
++    const matched = [...new Set(Object.keys(aliases).filter(key => key.startsWith(raw.toLowerCase())).map(key => aliases[key]))];
++    if (matched.length === 1) command = matched[0];
++    else if (matched.length > 1) return `命令不明确：${matched.map(name => `/${name}`).join('、')}，请补全后再试。`;
++  }
++  const history = () => runtime.history(key);
++  const shared = saved?.collaboration;
++  if (shared && ['补充','停止'].includes(command)) return '协作暂不支持通过 IM 发消息或控制执行，请去网页操作。/补充 和 /停止 仅用于当前普通任务，可先 /切换 或 /新对话。';
++  if (shared && ['帮助','当前','历史'].includes(command)) {
++    if(command==='帮助') return sharedHelp;
++    try {
++      if(command==='当前') { const info=await service.collaboration.access(shared.conversationId); return `协作项目：${info.project.name}\n讨论：${info.conversation.name}\n${sharedHelp}`; }
++      if(command==='历史') {
++        if(argument && (!/^[1-9]\d*$/.test(argument) || Number(argument)>100)) return '用法：/历史 [n]，n 为 1–100 的整数，默认 2。';
++        const cursor=saved.collaborationHistory?.conversationId===shared.conversationId ? saved.collaborationHistory : {};
++        const page=await service.collaboration.history(shared.conversationId,Number(argument || 2),cursor.head || 0,cursor.before || 0);
++        const rows=page.messages;
++        update({collaborationHistory:{conversationId:shared.conversationId,head:page.head,before:rows[0]?.seq ?? cursor.before ?? 0}});
++        return rows.length ? rows.map(row=>`${row.kind==='assistant'?'Agent':'成员'} · ${row.author_name}\n${row.body}${row.attachments?.length?'\n附件：'+row.attachments.join('、'):''}`).join('\n\n')+'\n\n继续 /历史 可查看更早消息。' : '没有更早的消息了。';
++      }
++    } catch(error) {return sharedError(error);}
++  }
++  // A normal message after a shared notification must never reach the old
++  // task until its author explicitly chooses a destination.
++  if(shared && !command && !saved.pendingSelection && !saved.pendingInput) {
++    const previous=history().find(row=>row.id===saved.sessionId);
++    const minutes=saved.idleMinutes ?? config.idleMinutes ?? 30;
++    const last=Math.max(Date.parse(saved.lastInputAt || '') || 0,Date.parse(previous?.updatedAt || '') || 0);
++    const canContinue=Boolean(previous && (!minutes || previous.active || (last && Date.now()-last<minutes*60000)));
++    update({pendingInput:msg,collaborationReply:{canContinue},pendingSelection:null});
++    return '协作暂不支持直接发消息，请去网页操作。消息已暂存。\n'+(canContinue?`是否回复上一条非协作消息（${previous.title}）？\n1. 回复上一条非协作消息\n2. 在默认项目新建对话\n3. 取消`:'上一条非协作消息已超时或不存在，是否在默认项目新建对话？\n2. 新建对话\n3. 取消');
++  }
++  if(shared && !command && !saved.pendingSelection && saved.pendingInput && !['1','2','3'].includes(raw)) return saved.collaborationReply?.canContinue ? '已有待发送消息，请回复 1 回复上一条非协作消息、2 新建或 3 取消。' : '已有待发送消息，请回复 2 新建对话或 3 取消。';
++  // /新对话 会话选择分页：首页 10 个最近任务 + 默认对话，后续每页 11 个；
++  // 还有剩余时最后一项是“更多”，拉完即止。
++  const newSessionPage = (page) => {
++    const all = history();
++    const size = page === 1 ? 10 : 11;
++    const offset = page === 1 ? 0 : 10 + (page - 2) * 11;
++    const rows = all.slice(offset, offset + size);
++    const hasMore = all.length > offset + size;
++    // Pin displayed order so background completions cannot change a numeric choice.
++    update({pendingSelection:{kind:'newSession',rows,page,hasMore,userId:msg.userId}});
++    const lines = rows.map((row,index)=>`${index+1}. ${row.workspaceName} / ${row.title}${row.active ? '（运行中）' : ''}`);
++    if (page === 1) lines.push(`${rows.length+1}. 默认对话（在默认项目新建任务）`);
++    if (hasMore) lines.push(`${rows.length+(page === 1 ? 2 : 1)}. 更多`);
++    return '请选择任务或新建对话：\n'+lines.join('\n')+'\n回复编号；/取消 退出。';
++  };
++  const pending = saved?.pendingSelection;
++  let selected;
++  let idleChoice = false;
++  if (!command && !raw.startsWith('/')) {
++    if (pending) {
++      if (pending.userId && pending.userId !== msg.userId) return '请由发起选择的用户回复。';
++      if (pending.kind === 'newSession') {
++        const value = msg.text.trim();
++        if (pending.hasMore && value === String(pending.rows.length + (pending.page === 1 ? 2 : 1))) return newSessionPage(pending.page + 1);
++        if (pending.page === 1 && value === String(pending.rows.length + 1)) { command = '新对话'; argument = 'default'; }
++        else {
++          selected = choice(pending.rows, value);
++          if (!selected) return '没有找到该选项，请回复列表中的编号，或发送 /取消。';
++          command = '切换';
++          argument = selected.id;
++        }
++      } else {
++        command = pending.kind === 'project' ? '新对话' : '切换';
++        argument = msg.text.trim();
++        selected = choice(pending.rows, argument);
++        if (!selected) return '没有找到该选项，请回复列表中的编号，或发送 /取消。';
++        argument = selected.id;
++      }
++    } else if (saved?.pendingInput && ['1','2','3'].includes(raw)) {
++      command = {'1':'继续','2':'新对话','3':'取消'}[raw];
++      idleChoice = true;
++    }
++  }
++  if (!command) return undefined;
++  if (pending && /^[1-9]\d*$/.test(argument) &&
++      ((command === '切换' && pending.kind === 'session') || (command === '新对话' && pending.kind === 'project'))) {
++    const row = choice(pending.rows,argument);
++    if (!row) return '没有找到列表中的这个编号，请重新选择。';
++    argument = row.id;
++  }
++  if (command === '帮助') return help+'\n/补充 内容 补充当前普通任务（steer）\n/停止 停止当前普通任务';
++  if (shared && !['新对话','切换','空闲','策略','项目','继续','取消'].includes(command)) return sharedHelp;
++  if (shared && command==='取消' && !saved.pendingInput && !pending) return '当前没有待取消的选择。停止协作执行请发送 /停止。';
++  if (shared && command==='继续' && !saved.collaborationReply?.canContinue) return '上一条非协作消息已超时，请回复 2 新建对话或 3 取消。';
++  if (saved?.pendingInput?.userId && saved.pendingInput.userId !== msg.userId && ['继续','取消','新对话','切换'].includes(command)) return '请由发送待续接消息的用户选择。';
++  if (pending?.userId && pending.userId !== msg.userId && ['取消','新对话','切换'].includes(command)) return '请由发起选择的用户回复。';
 +  if (command === '项目') return service.projects().map((row,index)=>`${index+1}. ${row.name} (${row.id})`).join('\n') || '暂无项目。';
-+  const history = () => service.history(key);
-+  if (command === '历史' || (command === '切换' && !argument)) return history().map((row,index)=>`${index+1}. ${row.title} (${row.id})`).join('\n') || '本聊天暂无历史会话。';
-+  const binding = await engine.router.getOrCreate(channel.id,kind,msg.chatId,msg.username || msg.chatId);
-+  const saved = engine.store.get(key);
-+  if (saved?.pendingInput?.userId && saved.pendingInput.userId !== msg.userId && ['继续','取消','新对话'].includes(command)) return '请由发送待续接消息的用户选择。';
-+  const update = (values) => engine.store.upsert(key,{...engine.store.get(key),...values});
-+  if (engine.questions.has(binding.sessionId) || engine.broker.has(binding.sessionId)) return '请先完成当前问题或审批。';
++  if (command === '取消' && (saved?.pendingInput || pending)) {
++    update({pendingInput:null,pendingSelection:null,collaborationReply:null});
++    return '已取消待续接消息或选择，当前任务未改变。';
++  }
++  const binding = await runtime.binding(channel, msg);
++  const current = () => history().find(row => row.id === binding.sessionId);
++  if (runtime.awaitingInteraction(binding.sessionId)) return '请先完成当前问题或审批。';
++  if (command === '历史' || (command === '切换' && !argument)) {
++    const rows = history();
++    // Pin displayed order so background completions cannot change a numeric choice.
++    update({pendingSelection:{kind:'session',rows,userId:msg.userId}});
++    return rows.map((row,index)=>`${index+1}. ${row.workspaceName} / ${row.title}${row.active ? '（运行中）' : ''}\n${row.id}`).join('\n') + (rows.length ? '\n回复编号或发送 /切换 任务ID；/取消 退出。' : '暂无任务。');
++  }
++  if (command === '当前') return label(current());
 +  if (command === '空闲') {
-+    const minutes=Number(argument);
-+    if(!argument || !Number.isInteger(minutes) || minutes<0 || minutes>10080) return '用法：/空闲 分钟，范围 0–10080；0 表示不检查。';
++    const minutes = Number(argument);
++    if (!argument || !Number.isInteger(minutes) || minutes < 0 || minutes > 10080) return '用法：/空闲 分钟，范围 0–10080；0 表示不检查。';
 +    update({idleMinutes:minutes}); return `空闲检查已设置为 ${minutes} 分钟。`;
 +  }
-+  if(command==='策略') {
-+    if(!['询问','继续','新建'].includes(argument)) return '用法：/策略 询问、继续或新建';
++  if (command === '策略') {
++    if (!['询问','继续','新建'].includes(argument)) return '用法：/策略 询问、继续或新建';
 +    update({idlePolicy:argument}); return `空闲后将${argument}。`;
 +  }
-+  if(command==='取消') {
-+    if(saved?.pendingInput){update({pendingInput:null,lastInputAt:new Date().toISOString()});return '已取消待续接消息。';}
-+    await service.cancel(key,binding.sessionId); return '已请求停止当前执行。';
++  if (command === '取消') { await service.cancel(key,binding.sessionId); return '已请求停止当前任务。'; }
++  if (command === '停止') { await service.cancel(key,binding.sessionId); return '已请求停止当前任务。'; }
++  if (command === '补充') {
++    if (!argument) return '用法：/补充 内容（补充当前正在运行的普通任务）';
++    try { await service.steer(key,binding.sessionId,argument); }
++    catch(error) { if(error.message==='no_active_turn') return '当前任务没有正在执行，无法补充。可以直接发消息继续任务。'; throw error; }
++    update({lastInputAt:new Date().toISOString()});
++    return '已补充到当前任务。';
 +  }
-+  if(command==='继续') {
-+    update({pendingInput:null,lastInputAt:new Date().toISOString()});
-+    try { await engine.inject(channel,{...(saved?.pendingInput || {...msg,text:'请继续当前任务。'}),workagentContinue:true}); }
-+    catch(error) { if(saved?.pendingInput) update({pendingInput:saved.pendingInput}); throw error; }
-+    return '已继续当前会话。';
++  if (command === '继续') {
++    update({pendingInput:null,pendingSelection:null,collaboration:null,collaborationReply:null,lastInputAt:new Date().toISOString()});
++    try { await runtime.inject(channel,{...(saved?.pendingInput || {...msg,text:'请继续当前任务。'}),workagentContinue:true}); }
++    catch(error) { if(saved?.pendingInput) update({pendingInput:saved.pendingInput,collaboration:shared,collaborationReply:saved.collaborationReply}); throw error; }
++    return `已继续。\n${label(current())}`;
 +  }
-+  if(command==='重命名') {
-+    if(!argument) return '用法：/重命名 新名称';
-+    await service.rename(key,binding.sessionId,argument); engine.router.rename(binding.sessionId,argument); return `已重命名为 ${argument}`;
++  if (command === '重命名') {
++    if (!argument) return '用法：/重命名 新名称';
++    await service.rename(key,binding.sessionId,argument); runtime.rename(binding.sessionId,argument); return `已重命名为 ${argument}`;
 +  }
-+  if(command==='额度') {
-+    const value=await service.quota(key,binding.sessionId);
-+    return `当前模型额度（${value.period}）：上限 ${value.limitUnits}，已用 ${value.consumedUnits}，预留 ${value.reservedUnits}。`;
++  if (command === '额度') { const value=await service.quota(key,binding.sessionId); return `当前模型额度（${value.period}）：上限 ${value.limitUnits}，已用 ${value.consumedUnits}，预留 ${value.reservedUnits}。`; }
++  if (command === '压缩') { await service.compact(key,binding.sessionId); return '已提交上下文压缩。'; }
++  if (command === '模型') {
++    const catalog = await service.sessionModels(key,binding.sessionId);
++    const models = catalog.groups.flatMap(group => group.models);
++    if (!argument) return `当前模型：${catalog.current.model}\n`+models.map((row,index)=>`${index+1}. ${row.name} (${row.id})`).join('\n');
++    const model = choice(models,argument); if(!model) return '没有找到这个模型，请先发送 /模型。';
++    const workagentConfig=await service.selectModel(key,binding.sessionId,model.id); update({workagentConfig}); return `已切换到 ${model.name}`;
 +  }
-+  if(command==='压缩') { await service.compact(key,binding.sessionId); return '已提交上下文压缩。'; }
-+  if(command==='模型') {
-+    const catalog=await service.sessionModels(key,binding.sessionId);
-+    const models=catalog.groups.flatMap((group)=>group.models);
-+    if(!argument) return `当前模型：${catalog.current.model}\n`+models.map((row,index)=>`${index+1}. ${row.name} (${row.id})`).join('\n');
-+    const selected=choice(models,argument); if(!selected) return '没有找到这个模型，请先发送 /模型。';
-+    const workagentConfig=await service.selectModel(key,binding.sessionId,selected.id); update({workagentConfig}); return `已切换到 ${selected.name}`;
-+  }
-+  if(history().find((row)=>row.id===binding.sessionId)?.active) return '当前会话仍在运行，请停止或等待完成后切换。';
++  if (current()?.active) return '当前任务仍在运行，请停止或等待完成后切换。';
 +  let handle, workagentConfig;
-+  if(command==='切换') {
-+    const selected=choice(history(),argument); if(!selected) return '没有找到本聊天的这个历史会话。';
-+    if(selected.active) return '目标会话仍在运行，请稍后再切换。';
-+    if(selected.id===binding.sessionId) return '已是当前会话。';
-+    handle=await service.resume(key,selected.id);
-+    workagentConfig=service.configuration(key,selected.id);
-+  } else if(command==='新对话') {
-+    workagentConfig=saved?.workagentConfig || config;
-+    if(argument){const project=choice(service.projects(),argument);if(!project)return '没有找到项目，请先发送 /项目。';workagentConfig={...workagentConfig,cwd:project.cwd};}
-+    handle=await service.open(workagentConfig,undefined,msg.username || msg.chatId,key);
++  if (command === '切换') {
++    selected = choice(history(),argument);
++    if (!selected) return '没有找到这个任务，请先发送 /切换。';
++    if (selected.active) return '目标任务仍在运行，请稍后再切换。';
++    if (selected.id === binding.sessionId) { update({pendingSelection:null,collaboration:null,collaborationReply:null}); return `已是当前任务。\n${label(selected)}`; }
++    handle = await service.resume(key,selected.id);
++    workagentConfig = service.configuration(key,selected.id);
++  } else if (command === '新对话') {
++    const projects = service.projects();
++    if (!argument && idleChoice) argument = 'default';
++    if (!argument) return newSessionPage(1);
++    const project = choice(projects,argument);
++    if (!project) return '没有找到项目，请先发送 /项目。';
++    workagentConfig = {...config,cwd:project.cwd};
++    handle = await service.open(workagentConfig,undefined,'新任务',key);
 +  } else return undefined;
-+  if(!handle) return '暂时无法打开目标会话。';
-+  await binding.handle?.dispose();
-+  engine.router.live.set(key,{...binding,sessionId:handle.sessionId,handle});
-+  update({sessionId:handle.sessionId,title:service.history(key).find((row)=>row.id===handle.sessionId)?.title || saved?.title,workagentConfig,pendingInput:null,lastInputAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
-+  if(command==='新对话' && saved?.pendingInput) {
-+    try { await engine.inject(channel,{...saved.pendingInput,workagentContinue:true}); }
++  await runtime.replaceBinding(key, binding, handle);
++  const target = history().find(row => row.id === handle.sessionId);
++  update({sessionId:handle.sessionId,title:target.title,chatTitle:saved?.chatTitle || saved?.title || msg.username || msg.chatId,workagentConfig,collaboration:null,collaborationReply:null,pendingInput:null,pendingSelection:null,lastInputAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
++  const reply = `已${command === '新对话' ? '新建' : '切换'}。\n${label(target)}\n后续消息将继续这个任务。`;
++  if (command === '新对话' && saved?.pendingInput) {
++    await channel.send(msg.chatId,reply);
++    try { await runtime.inject(channel,{...saved.pendingInput,workagentContinue:true}); }
 +    catch(error) { update({pendingInput:saved.pendingInput}); throw error; }
++    return '';
 +  }
-+  return `已${command==='新对话'?'新建':'切换'}会话：${handle.sessionId}`;
++  return reply;
 +}
 +
-+export async function checkWorkagentIdle(engine,channel,msg,binding) {
-+  if(!binding.handle?.workagent || msg.workagentContinue) return true;
-+  const record=engine.store.get(binding.key);
-+  const service=engine.ctx.get('workagentChannels');
-+  const history=service.history(binding.key).find((row)=>row.id===binding.sessionId);
-+  const minutes=record?.idleMinutes ?? 30;
-+  const last=Math.max(Date.parse(record?.lastInputAt || '') || 0,Date.parse(history?.updatedAt || '') || 0);
-+  if(!record?.lastInputAt || !minutes || history?.active || Date.now()-last<minutes*60000) return true;
-+  const pending=record.pendingInput;
-+  if(pending){await channel.send(msg.chatId,'已有一条待续接消息。请先发送 /继续、/新对话 或 /取消。');return false;}
-+  if(record.idlePolicy==='继续') return true;
-+  engine.store.upsert(binding.key,{...record,pendingInput:msg});
-+  if(record.idlePolicy==='新建') {
-+    const reply=await handleWorkagentCommand(engine,channel,{...msg,text:'/新对话'});
-+    if(reply) await channel.send(msg.chatId,reply);
-+  } else await channel.send(msg.chatId,`会话已空闲超过 ${minutes} 分钟。消息已暂存，请发送 /继续、/新对话 或 /取消。`);
++export async function checkWorkagentIdle(runtime,channel,msg,binding) {
++  if (!runtime.managed(binding) || msg.workagentContinue) return true;
++  const record = runtime.record(binding.key);
++  const service = runtime.service;
++  const current = service.history(binding.key).find(row => row.id === binding.sessionId);
++  const accountConfig = runtime.configuration(channel.id) || {};
++  const minutes = record?.idleMinutes ?? accountConfig.idleMinutes ?? 30;
++  const policy = record?.idlePolicy ?? accountConfig.idlePolicy ?? '询问';
++  const last = Math.max(Date.parse(record?.lastInputAt || '') || 0,Date.parse(current?.updatedAt || '') || 0);
++  if (record?.pendingInput) { await channel.send(msg.chatId,'已有待续接消息，请回复 1 继续、2 新建或 3 取消。'); return false; }
++  if (!record?.lastInputAt || !minutes || current?.active || Date.now()-last < minutes*60000) return true;
++  if (policy === '继续') return true;
++  runtime.update(binding.key,{pendingInput:msg,pendingSelection:null});
++  if (policy === '新建') {
++    const reply = await handleWorkagentCommand(runtime,channel,{...msg,text:'/新对话 default'});
++    if (reply) await channel.send(msg.chatId,reply);
++  } else await channel.send(msg.chatId,`任务已空闲超过 ${minutes} 分钟。\n${label(current)}\n消息已暂存，请回复：\n1. 继续当前任务\n2. 在默认项目新建任务\n3. 取消\n也可使用 /继续、/新对话、/取消。`);
 +  return false;
 +}
 diff --git a/lib/index.js b/lib/index.js
-index cfbc91b..a1af005 100644
+index cfbc91b..98362ce 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -13,6 +13,7 @@ export const inject = [
@@ -663,7 +1500,7 @@ index cfbc91b..a1af005 100644
 +            void manager.attachMappedSessions();
 +            if (!manager.disposed) detachNotifications = ctx.get('workagentChannels').attachNotifications({
 +                targets: () => manager.notificationTargets(),
-+                send: (targetId, text) => manager.sendNotification(targetId, text),
++                send: (targetId, text, sessionId) => manager.sendNotification(targetId, text, sessionId),
 +                sendFile: (targetId, path) => manager.sendNotificationFile(targetId, path),
 +                active: () => manager.running.size > 0,
 +            });
@@ -680,18 +1517,65 @@ index cfbc91b..a1af005 100644
 \ No newline at end of file
 +//# sourceMappingURL=index.js.map
 diff --git a/lib/manager.js b/lib/manager.js
-index 40a89d1..9458d87 100644
+index 40a89d1..f9f3428 100644
 --- a/lib/manager.js
 +++ b/lib/manager.js
-@@ -5,6 +5,7 @@ import { createChannelAdapter } from './channels/factory.js';
+@@ -5,6 +5,9 @@ import { createChannelAdapter } from './channels/factory.js';
  import { CHANNEL_META, CHANNEL_ORDER, supportsQr } from './channels/meta.js';
  import { PairingHub } from './channels/qr/hub.js';
  import { SessionMapStore } from './engine/session-store.js';
 +import { sessionKeyOf } from './engine/session-id.js';
++import { createWorkagentHost } from './engine/workagent-host.js';
++import { rebindNotificationTarget } from './engine/workagent-notifications.js';
  import { createFileVault, createServiceVault, credentialRef } from './engine/credentials.js';
  import { ImEngine } from './engine/gateway.js';
  import { SeenStore } from './engine/seen-store.js';
-@@ -394,6 +395,7 @@ export class ChannelManager {
+@@ -197,15 +200,22 @@ export class ChannelManager {
+             cwd: normalizeWorkspacePath(state.cwd) ?? this.currentWorkspace(),
+             permission: normalizePermission(state.permission, this.permissionPresets().names) ?? this.currentPermission(),
+             privateAccess: state.privateAccess === 'all' ? 'all' : 'approved',
++            idleMinutes: state.idleMinutes ?? null,
++            idlePolicy: state.idlePolicy ?? null,
+             lastCheckedAt: state.lastCheckedAt,
+         };
+     }
+     channelSessions() {
+         const archived = this.archivedSessionIds();
++        const tasks = new Map(this.ctx.get('workagentChannels').history('').map(row => [row.id,row]));
+         return CHANNEL_ORDER.map((id) => ({
+             id,
+             label: CHANNEL_META[id].label,
+-            sessions: this.sessions.list().filter((item) => this.platformOf(item.channel, this.store.channels[item.channel]) === id && !archived.has(item.sessionId)),
++            sessions: this.sessions.list().filter((item) => this.platformOf(item.channel, this.store.channels[item.channel]) === id && !archived.has(item.sessionId)).map(item => {
++                const task = tasks.get(item.sessionId);
++                return {...item, chatTitle:item.chatTitle || item.chatId, title:task?.title || item.title,
++                    workspaceName:task?.workspaceName, running:task?.active};
++            }),
+         })).filter((group) => group.sessions.length > 0);
+     }
+     archivedSessionIds() {
+@@ -254,6 +264,8 @@ export class ChannelManager {
+             cwd: normalized.settings.cwd,
+             permission: normalized.settings.permission,
+             privateAccess: normalized.settings.privateAccess,
++            idleMinutes: normalized.settings.idleMinutes,
++            idlePolicy: normalized.settings.idlePolicy,
+             enabled: true,
+             receiveEnabled: true,
+             config: nextConfig,
+@@ -385,6 +397,11 @@ export class ChannelManager {
+                     }
+                     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+                     const parts = url.pathname.split('/').filter(Boolean);
++                    if (parts[2] === 'projects' && parts.length === 3) {
++                        if (req.method !== 'GET') { send(res, 405, { ok: false, error: 'method not allowed' }); return; }
++                        send(res, 200, { ok: true, projects: this.ctx.get('workagentChannels').projects() });
++                        return;
++                    }
+                     if (parts[2] === 'assistant' && parts.length === 3) {
+                         if (req.method === 'GET') {
+                             send(res, 200, {
+@@ -394,6 +411,7 @@ export class ChannelManager {
                                  permission: this.currentPermission(),
                                  permissions: this.permissionOptions(),
                                  providers: await this.listModelCatalog(),
@@ -699,7 +1583,7 @@ index 40a89d1..9458d87 100644
                              });
                              return;
                          }
-@@ -611,6 +613,12 @@ export class ChannelManager {
+@@ -611,11 +629,19 @@ export class ChannelManager {
          const normalized = this.normalizeAccountSettings(platform, input, state);
          if (!normalized.ok)
              return normalized;
@@ -712,7 +1596,14 @@ index 40a89d1..9458d87 100644
          state.name = normalized.settings.name;
          state.assistant = normalized.settings.assistant;
          state.cwd = normalized.settings.cwd;
-@@ -677,6 +685,7 @@ export class ChannelManager {
+         state.permission = normalized.settings.permission;
+         state.privateAccess = normalized.settings.privateAccess;
++        state.idleMinutes = normalized.settings.idleMinutes;
++        state.idlePolicy = normalized.settings.idlePolicy;
+         this.flush();
+         this.engine.reloadChannel(accountId);
+         return { ok: true, account: this.accountView(accountId, state) };
+@@ -677,6 +703,7 @@ export class ChannelManager {
          const next = normalizeAssistantModel(assistant ?? {});
          if (!next)
              return;
@@ -720,7 +1611,7 @@ index 40a89d1..9458d87 100644
          this.engineConfig.provider = next.provider;
          this.engineConfig.model = next.model;
          this.engineConfig.reasoningEffort = next.reasoningEffort;
-@@ -710,6 +719,32 @@ export class ChannelManager {
+@@ -710,6 +737,42 @@ export class ChannelManager {
      permissionPresets() {
          return this.ctx.permissionPresets;
      }
@@ -737,12 +1628,22 @@ index 40a89d1..9458d87 100644
 +        }
 +        return [...targets.values()];
 +    }
-+    async sendNotification(targetId, text) {
++    async sendNotification(targetId, text, sessionId) {
 +        const target = this.notificationTargets().find((row) => row.id === targetId);
 +        const channel = target && this.running.get(target.channelId);
 +        if (!channel) throw new Error('提醒渠道未连接');
 +        if (channel.sendNotification) await channel.sendNotification(target.chatId, text, target.kind);
 +        else await channel.send(target.chatId, text);
++        if (sessionId) await this.rebindNotificationTarget(target, sessionId);
++    }
++    /** 完成通知发出后把该聊天的绑定会话切到被通知任务（对齐 WorkAgent2 的通知重绑），失败只记日志。 */
++    async rebindNotificationTarget(target, sessionId) {
++        try {
++            const service = this.ctx.get?.('workagentChannels');
++            if (service) await rebindNotificationTarget(createWorkagentHost(this.engine, { service, store: this.sessions }), target, sessionId);
++        } catch (error) {
++            this.log?.warn?.('notification rebind failed', error);
++        }
 +    }
 +    async sendNotificationFile(targetId, path) {
 +        const target = this.notificationTargets().find((row) => row.id === targetId);
@@ -753,7 +1654,7 @@ index 40a89d1..9458d87 100644
      async listModelCatalog() {
          const llm = this.ctx.get?.('llm');
          const providers = llm?.listProviders?.() ?? [];
-@@ -744,6 +779,7 @@ export class ChannelManager {
+@@ -744,6 +807,7 @@ export class ChannelManager {
                  })),
              });
          }
@@ -761,7 +1662,7 @@ index 40a89d1..9458d87 100644
          return out;
      }
      async startOne(id) {
-@@ -922,7 +958,7 @@ export class ChannelManager {
+@@ -922,7 +986,7 @@ export class ChannelManager {
              const resolved = await llm.resolveModelInfo(assistant.provider, assistant.model).catch(() => undefined);
              if (resolved === undefined || resolved.reasoning !== undefined)
                  return;
@@ -770,7 +1671,7 @@ index 40a89d1..9458d87 100644
              changed = true;
              this.log(`[manager] 已清理 ${id} 的无效推理等级 ${assistant.reasoningEffort}`);
          }));
-@@ -932,12 +968,19 @@ export class ChannelManager {
+@@ -932,12 +996,19 @@ export class ChannelManager {
      normalizeAccountSettings(platform, input, previous) {
          const fallback = this.currentAssistant();
          const assistant = normalizeAssistantModel({
@@ -790,7 +1691,24 @@ index 40a89d1..9458d87 100644
          const cwd = normalizeWorkspacePath(input.cwd ?? previous.cwd ?? this.currentWorkspace());
          if (!cwd)
              return { ok: false, error: '请选择工作区' };
-@@ -989,6 +1032,7 @@ export class ChannelManager {
+@@ -945,9 +1016,15 @@ export class ChannelManager {
+         if (!permission)
+             return { ok: false, error: '请选择权限' };
+         const privateAccess = input.privateAccess === 'all' || (input.privateAccess === undefined && previous.privateAccess === 'all') ? 'all' : 'approved';
++        const idleMinutes = input.idleMinutes !== undefined ? (input.idleMinutes === null ? undefined : input.idleMinutes) : previous.idleMinutes;
++        if (idleMinutes !== undefined && (!Number.isInteger(idleMinutes) || idleMinutes < 0 || idleMinutes > 10080))
++            return { ok: false, error: '空闲检查时间必须是 0–10080 的整数分钟' };
++        const idlePolicy = input.idlePolicy !== undefined ? (input.idlePolicy === null ? undefined : input.idlePolicy) : previous.idlePolicy;
++        if (idlePolicy !== undefined && !['询问', '继续', '新建'].includes(idlePolicy))
++            return { ok: false, error: '空闲策略必须是询问、继续或新建' };
+         const count = Object.entries(this.store.channels).filter(([id, state]) => this.platformOf(id, state) === platform).length;
+         const name = String(input.name ?? previous.name ?? '').trim() || `${CHANNEL_META[platform].label}账号 ${count + 1}`;
+-        return { ok: true, settings: { name, assistant, cwd, permission, privateAccess } };
++        return { ok: true, settings: { name, assistant, cwd, permission, privateAccess, idleMinutes, idlePolicy } };
+     }
+     accountIdFor(platform, config) {
+         const identityKeys = { weixin: 'allowedUserId', wecom: 'botId', qq: 'appId', dingtalk: 'clientId', feishu: 'appId', lark: 'appId' };
+@@ -989,10 +1066,13 @@ export class ChannelManager {
          return {
              ...this.engineConfig,
              cwd: normalizeWorkspacePath(state.cwd) ?? this.engineConfig.cwd,
@@ -798,7 +1716,13 @@ index 40a89d1..9458d87 100644
              provider: assistant?.provider ?? this.engineConfig.provider,
              model: assistant?.model ?? this.engineConfig.model,
              reasoningEffort: assistant?.reasoningEffort,
-@@ -1046,11 +1090,11 @@ function pairingSettings(input) {
+             permissionPreset: normalizePermission(state.permission, this.permissionPresets().names) ?? this.engineConfig.permissionPreset,
++            idleMinutes: state.idleMinutes,
++            idlePolicy: state.idlePolicy,
+         };
+     }
+     pendingRequests() {
+@@ -1046,11 +1126,11 @@ function pairingSettings(input) {
      if (!input)
          return {};
      const out = {};
@@ -813,3 +1737,89 @@ index 40a89d1..9458d87 100644
 -//# sourceMappingURL=manager.js.map
 \ No newline at end of file
 +//# sourceMappingURL=manager.js.map
+diff --git a/lib/engine/workagent-host.js b/lib/engine/workagent-host.js
+new file mode 100644
+--- /dev/null
++++ b/lib/engine/workagent-host.js
+@@ -0,0 +1,46 @@
++import { isImSessionId } from './session-id.js';
++
++// Compatibility boundary for @michengai/dsh-im-connect 0.1.30. Only this
++// adapter reaches the engine's private router/store/interaction registries.
++// Commands and notification policies consume this port, never the engine.
++export function createWorkagentHost(engine, { service = engine.ctx.get('workagentChannels'), store = engine.store } = {}) {
++  const replaceBinding = async (key, binding, handle) => {
++    await binding.handle?.dispose();
++    engine.router.live.set(key, { ...binding, sessionId: handle.sessionId, handle });
++  };
++  return {
++    service,
++    configuration: channelId => engine.resolveConfig(channelId),
++    record: key => store.get(key),
++    update: (key, values) => store.upsert(key, { ...store.get(key), ...values }),
++    history: key => service.history(key).filter(row => !engine.router.isArchived?.(row.id)),
++    binding: (channel, msg) => engine.router.getOrCreate(channel.id, msg.kind === 'group' ? 'group' : 'dm', msg.chatId, msg.username || msg.chatId),
++    managed: binding => Boolean(binding.handle?.workagent),
++    awaitingInteraction: sessionId => engine.questions.has(sessionId) || engine.broker.has(sessionId),
++    inject: (channel, message) => engine.inject(channel, message),
++    rename: (sessionId, title) => engine.router.rename(sessionId, title),
++    replaceBinding,
++    async resumeLive(key, sessionId) {
++      const binding = engine.router.live.get(key);
++      if (!binding?.handle) return true;
++      const handle = await service.resume(key, sessionId);
++      if (!handle) return false;
++      await replaceBinding(key, binding, handle);
++      return true;
++    },
++    recordInput(binding) {
++      if (binding.handle?.workagent) store.upsert(binding.key, { ...store.get(binding.key), lastInputAt: new Date().toISOString() });
++    },
++    async followup(binding, message) {
++      if (binding.handle?.workagent) await binding.handle.followup(message, event => engine.onSessionEvent({ id: binding.sessionId }, event, binding));
++      else engine.router.followup(binding, message);
++    },
++    interactionBinding(sessionId) {
++      if (service.listSessionIds().includes(sessionId)) {
++        const key = service.activeChannel(sessionId);
++        return key ? engine.router.live.get(key) : undefined;
++      }
++      return isImSessionId(sessionId) ? engine.router.bindingForSession(sessionId) : undefined;
++    },
++  };
++}
+diff --git a/lib/engine/workagent-notifications.js b/lib/engine/workagent-notifications.js
+new file mode 100644
+--- /dev/null
++++ b/lib/engine/workagent-notifications.js
+@@ -0,0 +1,30 @@
++import { sessionKeyOf } from './session-id.js';
++
++// Delivery already succeeded. A completion may choose the next reply target,
++// but must not take over pending input, a selection, or a running task.
++export async function rebindNotificationTarget(runtime, target, sessionId) {
++  const { service } = runtime;
++  const key = sessionKeyOf(target.channelId, target.kind, target.chatId);
++  const record = runtime.record(key);
++  if (!record || !service.handles(runtime.configuration(target.channelId).provider)) return;
++  if (sessionId.startsWith('collaboration:')) {
++    if (record.pendingInput || record.pendingSelection) return;
++    const conversationId = sessionId.slice(14);
++    await service.collaboration.access(conversationId);
++    runtime.update(key, { collaboration: { conversationId } });
++    return;
++  }
++  const now = new Date().toISOString();
++  if (record.pendingInput) return;
++  if (record.sessionId === sessionId) {
++    runtime.update(key, { collaboration: null, lastInputAt: now, updatedAt: now });
++    return;
++  }
++  if (!service.listSessionIds().includes(sessionId)) return;
++  const current = service.history(key).find(row => row.id === record.sessionId);
++  if (current?.active) return;
++  const title = service.history(key).find(row => row.id === sessionId)?.title || record.title;
++  const workagentConfig = service.configuration(key, sessionId);
++  if (!await runtime.resumeLive(key, sessionId)) return;
++  runtime.update(key, { collaboration: null, sessionId, title, workagentConfig, pendingSelection: null, lastInputAt: now, updatedAt: now });
++}

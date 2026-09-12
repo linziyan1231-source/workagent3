@@ -15,32 +15,37 @@ type sharedTurnProjectResolver interface {
 }
 
 type sharedTurnRequest struct {
-	RunID            string `json:"runId"`
-	ConversationID   string `json:"conversationId"`
-	ProjectID        string `json:"projectId"`
-	Engine           string `json:"engine"`
-	ModelID          string `json:"modelId"`
-	ThinkingEffort   string `json:"thinkingEffort"`
-	Context          string `json:"context"`
-	RecoveryContext  string `json:"recoveryContext"`
-	RuntimeSessionID string `json:"runtimeSessionId,omitempty"`
-	PayerSID         string `json:"payerSid"`
-	WorkspacePath    string `json:"workspacePath"`
+	Capabilities     json.RawMessage `json:"capabilities,omitempty"`
+	QuotaModelID     string          `json:"quotaModelId,omitempty"`
+	AssistantID      string          `json:"assistantId,omitempty"`
+	RunID            string          `json:"runId"`
+	ConversationID   string          `json:"conversationId"`
+	ProjectID        string          `json:"projectId"`
+	Engine           string          `json:"engine"`
+	ModelID          string          `json:"modelId"`
+	ThinkingEffort   string          `json:"thinkingEffort"`
+	Context          string          `json:"context"`
+	RecoveryContext  string          `json:"recoveryContext"`
+	RuntimeSessionID string          `json:"runtimeSessionId,omitempty"`
+	SessionKey       string          `json:"sessionKey,omitempty"`
+	PayerSID         string          `json:"payerSid"`
+	WorkspacePath    string          `json:"workspacePath"`
 }
 
 func sharedTurnHandler(projects sharedTurnProjectResolver, target *url.URL, token string) http.HandlerFunc {
 	client := &http.Client{}
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var input sharedTurnRequest
-		decoder := json.NewDecoder(io.LimitReader(request.Body, 800*1024))
+		decoder := json.NewDecoder(io.LimitReader(request.Body, 4*1024*1024))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
 			!sharedProjectIDPattern.MatchString(strings.TrimSpace(input.ProjectID)) ||
 			!sharedProjectIDPattern.MatchString(strings.TrimSpace(input.ConversationID)) ||
 			!sharedProjectIDPattern.MatchString(strings.TrimSpace(input.RunID)) ||
+			(input.SessionKey != "" && (!strings.HasPrefix(input.SessionKey, "session-shared-") || !sharedProjectIDPattern.MatchString(input.SessionKey))) ||
 			(input.Engine != "harness" && input.Engine != "codex" && input.Engine != "kimi") ||
 			strings.TrimSpace(input.ModelID) == "" || len(input.ModelID) > 256 ||
-			(input.ThinkingEffort != "low" && input.ThinkingEffort != "medium" && input.ThinkingEffort != "high") ||
+			(strings.TrimSpace(input.ThinkingEffort) == "" || len(input.ThinkingEffort) > 32) ||
 			strings.TrimSpace(input.Context) == "" || len(input.Context) > 512*1024 ||
 			strings.TrimSpace(input.RecoveryContext) == "" || len(input.RecoveryContext) > 768*1024 ||
 			!strings.HasPrefix(input.PayerSID, "S-1-") || len(input.PayerSID) > 128 {

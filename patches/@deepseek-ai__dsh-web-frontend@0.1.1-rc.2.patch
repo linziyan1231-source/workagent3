@@ -7,11 +7,20 @@ diff --git a/dist/assets/index-ClqxG24t.js b/dist/assets/index-ClqxG24t.js
 diff --git a/dist/index.html b/dist/index.html
 --- a/dist/index.html
 +++ b/dist/index.html
-@@ -5,1 +5,3 @@
+@@ -5,1 +5,1 @@
 -    <meta name="viewport" content="width=device-width, initial-scale=1" />
 +    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-+    <meta name="apple-mobile-web-app-capable" content="yes" />
-+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-@@ -9,1 +11,1 @@
+@@ -9,1 +9,1 @@
 -    <script type="module" crossorigin src="/assets/index-ClqxG24t.js"></script>
 +    <script type="module" crossorigin src="/assets/index-ClqxG24t.js?workagent-boot=1"></script>
+diff --git a/dist/manifest.webmanifest b/dist/manifest.webmanifest
+--- a/dist/manifest.webmanifest
++++ b/dist/manifest.webmanifest
+@@ -3,2 +3,2 @@
+-  "name": "DeepSeek Harness",
+-  "short_name": "DSH",
++  "name": "WorkAgent",
++  "short_name": "WorkAgent",
+@@ -7,1 +7,1 @@
+-  "display": "fullscreen",
++  "display": "standalone",

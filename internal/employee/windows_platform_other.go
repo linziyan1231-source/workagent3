@@ -13,29 +13,30 @@ import (
 )
 
 type WindowsPlatformConfig struct {
-	MaxRunningRuntimes   int
-	StorageLimits        *contracts.StorageLimits
-	CredentialRoot       string
-	LauncherExecutable   string
-	LaunchManifestRoot   string
-	DataRootBase         string
-	UserHostExecutable   string
-	HarnessCommand       string
-	HarnessEntrypoint    string
-	CodexCommand         string
-	KimiCommand          string
-	HarnessArguments     []string
-	Profile              string
-	HarnessProfileSource string
-	ManagedSkillsRoot    string
-	ManagedToolsRoot     string
-	ManagedMCPServers    []mcpruntime.Server
-	PortalURL            string
-	PublicBaseURL        string
-	Limits               winutil.JobLimits
-	NativeModels         NativeModelProvisioner
-	HarnessModel         string
-	ModelGatewayBaseURL  string
+	MaxRunningRuntimes      int
+	StorageLimits           *contracts.StorageLimits
+	CredentialRoot          string
+	LauncherExecutable      string
+	LaunchManifestRoot      string
+	DataRootBase            string
+	UserHostExecutable      string
+	HarnessCommand          string
+	HarnessEntrypoint       string
+	CodexCommand            string
+	KimiCommand             string
+	HarnessArguments        []string
+	Profile                 string
+	HarnessProfileSource    string
+	ManagedSkillsRoot       string
+	ManagedToolsRoot        string
+	ManagedMCPServers       []mcpruntime.Server
+	ProfessionalDatabaseURL string
+	PortalURL               string
+	PublicBaseURL           string
+	Limits                  winutil.JobLimits
+	NativeModels            NativeModelProvisioner
+	HarnessModel            string
+	ModelGatewayBaseURL     string
 }
 
 type NativeModelProvisioner interface{}

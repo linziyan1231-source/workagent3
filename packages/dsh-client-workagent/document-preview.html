@@ -32,6 +32,7 @@
     }
     select {
       font: inherit;
+      font-size: var(--workagent-input-min-size, 16px);
       padding: 3px;
     }
     #pages {
@@ -93,8 +94,18 @@
     zoom.addEventListener("change", fit);
     new ResizeObserver(fit).observe(document.documentElement);
     window.addEventListener("message", async (event) => {
-      if (event.source !== parent || event.data?.type !== "workagent:document")
+      if (event.source !== parent) return;
+      if (event.data?.type === "workagent:document-typography") {
+        const size = [16, 18, 20].includes(event.data.inputSize)
+          ? event.data.inputSize
+          : 16;
+        document.documentElement.style.setProperty(
+          "--workagent-input-min-size",
+          `${size}px`,
+        );
         return;
+      }
+      if (event.data?.type !== "workagent:document") return;
       try {
         await docx.renderAsync(event.data.data, pages, pages, {
           inWrapper: false,

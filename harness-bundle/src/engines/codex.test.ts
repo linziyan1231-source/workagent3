@@ -119,6 +119,16 @@ describe("Codex MCP projection", () => {
 });
 
 describe("Codex permissions", () => {
+  it("honours a never-ask preset without granting access outside its sandbox", () => {
+    expect(codexPermissions("workspace_write", "never")).toEqual({
+      approvalPolicy: "never",
+      sandbox: "workspace-write",
+    });
+    expect(codexPermissions("read_only", "never")).toEqual({
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+  });
   it("maps the composer permission choices to native sandbox settings", () => {
     expect(codexPermissions("read_only")).toEqual({
       approvalPolicy: "on-request",

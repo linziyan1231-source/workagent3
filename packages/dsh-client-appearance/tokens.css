@@ -116,7 +116,8 @@ body[data-workagent-theme]
   ) {
   color: var(--dsw-color-muted);
 }
-body[data-workagent-theme] textarea::placeholder {
+body[data-workagent-theme] textarea::placeholder,
+body[data-workagent-theme] .workagent-composer-input::before {
   color: var(--dsw-color-muted);
 }
 body[data-workagent-theme] .workagent-composer-options select:hover {

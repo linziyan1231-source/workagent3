@@ -1,0 +1,17 @@
+.workagent-assistant-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 24px;
+}
+
+.workagent-assistant-info {
+  display: grid;
+  row-gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workagent-assistant-actions {
+  grid-column: 1 / -1;
+}

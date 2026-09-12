@@ -12,6 +12,22 @@ import {
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
 const roots: string[] = [];
+it("rejects a requested sandbox when legacy ACP only offers unrestricted execution", async () => {
+  const connection = { setSessionMode: vi.fn() };
+  await expect(
+    applyKimiOptions(
+      connection as never,
+      "session-1",
+      {
+        mcpServers: [],
+        permissionMode: "workspace_write",
+        requirePermission: true,
+      },
+      { currentModeId: "yolo", availableModes: [{ id: "yolo", name: "YOLO" }] },
+    ),
+  ).rejects.toThrow("engine_permission_unavailable");
+  expect(connection.setSessionMode).not.toHaveBeenCalled();
+});
 it("reports the native permission and does not guess for an unrecognised restored mode", () => {
   expect(kimiPermission({ modes: { currentModeId: "plan" } })).toBe(
     "read_only",

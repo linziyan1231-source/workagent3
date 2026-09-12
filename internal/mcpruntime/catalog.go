@@ -28,6 +28,9 @@ var (
 )
 
 type Transport struct {
+	ManagedService           string            `json:"managedService,omitempty"`
+	GlobalSource             string            `json:"globalSource,omitempty"`
+	NativeName               string            `json:"nativeName,omitempty"`
 	Kind                     string            `json:"kind"`
 	Command                  string            `json:"command,omitempty"`
 	Args                     []string          `json:"args,omitempty"`
@@ -91,7 +94,58 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
 	if err != nil {
 		return fmt.Errorf("migrate MCP catalog: %w", err)
 	}
-	return nil
+	_, err = c.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS native_mcp_names (name TEXT PRIMARY KEY, transport_json TEXT NOT NULL)`)
+	return err
+}
+
+func (c *Catalog) RememberNativeName(ctx context.Context, name string, transport Transport) error {
+	config := map[string]any{"enabled": false}
+	if transport.Kind == "stdio" {
+		config["command"], config["args"] = transport.Command, transport.Args
+	} else {
+		config["url"] = transport.URL
+	}
+	encoded, _ := json.Marshal(config)
+	_, err := c.db.ExecContext(ctx, `INSERT INTO native_mcp_names(name,transport_json) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET transport_json=excluded.transport_json`, name, string(encoded))
+	return err
+}
+
+func (c *Catalog) NativeConfig(ctx context.Context) (map[string]map[string]any, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT name,transport_json FROM native_mcp_names ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	config := map[string]map[string]any{}
+	for rows.Next() {
+		var name, data string
+		if err := rows.Scan(&name, &data); err != nil {
+			return nil, err
+		}
+		var value map[string]any
+		if err := json.Unmarshal([]byte(data), &value); err != nil {
+			return nil, err
+		}
+		config[name] = value
+	}
+	return config, rows.Err()
+}
+
+func (c *Catalog) NativeNames(ctx context.Context) ([]string, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT name FROM native_mcp_names ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 func (c *Catalog) Create(ctx context.Context, server Server) (Server, error) {
@@ -308,7 +362,7 @@ func validateServer(server Server) error {
 		}
 		if endpoint.Scheme != "https" {
 			host := endpoint.Hostname()
-			if server.Source != "managed" || endpoint.Scheme != "http" || !net.ParseIP(host).IsLoopback() {
+			if endpoint.Scheme != "http" || (!net.ParseIP(host).IsLoopback() && !strings.EqualFold(host, "localhost")) {
 				return errors.New("remote MCP endpoint must use HTTPS")
 			}
 		}

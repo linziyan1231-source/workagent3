@@ -23,7 +23,12 @@ export interface NativeSessionPort {
   session(id: string): Session | undefined;
   messages(id: string): StoredMessage[];
   queue(id: string): QueuedInput[];
-  prompt(id: string, content: string, mode: "queue" | "steer"): Promise<void>;
+  prompt(
+    id: string,
+    content: string,
+    mode: "queue" | "steer",
+    messageId?: string,
+  ): Promise<void>;
   cancel(id: string): Promise<void>;
   updateQueue(id: string, itemId: string, action: QueueAction): Promise<void>;
   fork(id: string, messageId?: string): Promise<RuntimeSession>;

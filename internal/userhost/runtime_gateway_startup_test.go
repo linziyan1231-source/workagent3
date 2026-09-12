@@ -72,7 +72,7 @@ func TestRuntimeGatewayServesMigrationJournalDuringStartupDelivery(t *testing.T)
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 
-	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", nil, nil, func() {})
+	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, "", target, "runtime-token", nil, nil, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,30 @@
+/* Personal tasks open the ordinary task composer in the shared project. */
+.workagent-personal-task-entry {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 14px;
+  background: var(--dsw-color-panel);
+}
+.workagent-personal-task-entry > span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.workagent-personal-task-entry strong {
+  font-weight: 600;
+}
+.workagent-personal-task-entry small {
+  color: var(--dsw-color-muted);
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.workagent-shared-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

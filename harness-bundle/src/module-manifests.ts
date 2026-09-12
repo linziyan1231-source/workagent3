@@ -29,8 +29,11 @@ export const RUNTIME_MODULES = [
     required: true,
     capabilities: ["engine.catalog", "engine.status", "engine.capabilities"],
     dependencies: [
-      { id: "model-access", contract: "ModelCatalogPort/v1" },
-      { id: "credential-broker", contract: "CredentialBrokerPort/v1" },
+      { id: "model-access", contract: "ModelAccessStore catalog projection" },
+      {
+        id: "credential-broker",
+        contract: "CredentialStatusStore and UserHost credential projection",
+      },
     ],
     dataOwner: "native engine configuration under the employee SID",
     healthCheck: "/v1/engines",
@@ -42,7 +45,8 @@ export const RUNTIME_MODULES = [
     required: true,
     capabilities: ["skill.catalog", "skill.state", "skill.binding"],
     dependencies: [],
-    dataOwner: "employee SID private installed skill catalog",
+    dataOwner:
+      "read-only projection of the installed skill catalog owned by UserHost",
     healthCheck: "/v1/skills",
   },
   {
@@ -50,11 +54,15 @@ export const RUNTIME_MODULES = [
     version: "1.0.0",
     layer: "runtime",
     required: true,
-    capabilities: ["mcp.catalog", "mcp.crud", "mcp.projection"],
+    capabilities: ["mcp.catalog", "mcp.projection"],
     dependencies: [
-      { id: "credential-broker", contract: "CredentialBrokerPort/v1" },
+      {
+        id: "credential-broker",
+        contract: "CredentialStatusStore and UserHost credential projection",
+      },
     ],
-    dataOwner: "employee SID private MCP catalog and bindings",
+    dataOwner:
+      "read-only projection of employee SID MCP configuration owned by UserHost",
     healthCheck: "/v1/mcp-servers",
   },
   {
@@ -64,10 +72,10 @@ export const RUNTIME_MODULES = [
     required: true,
     capabilities: ["preset.crud", "preset.snapshot", "preset.binding"],
     dependencies: [
-      { id: "engine-registry", contract: "EngineCatalogPort/v1" },
-      { id: "model-access", contract: "ModelAuthorizationPort/v1" },
-      { id: "skill-runtime", contract: "SkillCatalogPort/v1" },
-      { id: "mcp-runtime", contract: "McpCatalogPort/v1" },
+      { id: "engine-registry", contract: "fixed supported engine catalog" },
+      { id: "model-access", contract: "ModelAccessStore authorizationFor" },
+      { id: "skill-runtime", contract: "SkillProjectionStore" },
+      { id: "mcp-runtime", contract: "McpProjectionStore" },
     ],
     dataOwner: "employee SID private preset definitions and immutable versions",
     healthCheck: "/v1/presets",
@@ -93,8 +101,11 @@ export const RUNTIME_MODULES = [
     required: true,
     capabilities: ["session.lifecycle", "session.messages", "session.events"],
     dependencies: [
-      { id: "engine-registry", contract: "AgentEngine/v1" },
-      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+      {
+        id: "engine-registry",
+        contract: "EngineBridge and Harness agent (fixed composition)",
+      },
+      { id: "preset-runtime", contract: "PresetStore frozen version binding" },
       { id: "workspace-runtime", contract: "WorkspaceBinding/v1" },
     ],
     dataOwner: "employee SID private session index and message logs",
@@ -129,7 +140,7 @@ export const RUNTIME_MODULES = [
     ],
     dependencies: [
       { id: "personal-work", contract: "AutomationRunnerPort/v1" },
-      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+      { id: "preset-runtime", contract: "PresetStore frozen version binding" },
       { id: "workspace-runtime", contract: "WorkspaceBinding/v1" },
     ],
     dataOwner: "employee SID private automation definitions and run history",
@@ -149,7 +160,7 @@ export const RUNTIME_MODULES = [
     ],
     dependencies: [
       { id: "personal-work", contract: "TeamRunnerPort/v1" },
-      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+      { id: "preset-runtime", contract: "PresetStore frozen version binding" },
       { id: "workspace-runtime", contract: "WorkspaceBinding/v1" },
     ],
     dataOwner: "employee SID private teams, tasks, mailbox, and run history",
@@ -162,8 +173,11 @@ export const RUNTIME_MODULES = [
     required: true,
     capabilities: ["shared.turn.run", "shared.turn.cancel"],
     dependencies: [
-      { id: "engine-registry", contract: "AgentEngine/v1" },
-      { id: "preset-runtime", contract: "PresetRuntimePort/v1" },
+      {
+        id: "engine-registry",
+        contract: "EngineBridge and Harness agent (fixed composition)",
+      },
+      { id: "preset-runtime", contract: "PresetStore frozen version binding" },
     ],
     dataOwner: "owner SID private shared engine sessions",
     healthCheck: "/v1/shared-turns",

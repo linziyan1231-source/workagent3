@@ -1,0 +1,52 @@
+.workagent-capability-picker {
+  align-self: start;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workagent-capability-picker legend {
+  margin-bottom: 6px;
+}
+.workagent-capability-picker details {
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--dsw-color-panel);
+}
+.workagent-capability-picker summary {
+  cursor: pointer;
+}
+.workagent-capability-picker input[type="search"] {
+  width: 100%;
+  margin: 8px 0;
+}
+.workagent-capability-options {
+  max-height: 180px;
+  overflow: auto;
+}
+.workagent-capability-options label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+.workagent-capability-options input[type="checkbox"] {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+.workagent-capability-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.workagent-capability-selected button {
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 7px;
+  color: var(--dsw-color-text);
+  background: var(--dsw-color-accent-soft);
+  cursor: pointer;
+}

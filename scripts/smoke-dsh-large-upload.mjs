@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { baseURL, json, uniqueName, withPage } from "./smoke-dsh-helpers.mjs";
 
-const size = 1024 ** 3;
+const size = 5 * 1024 ** 3;
 const fixture = await mkdtemp(join(tmpdir(), "workagent-large-upload-"));
 try {
-  const file = await open(join(fixture, "1GB-streaming-test.bin"), "wx");
+  const file = await open(join(fixture, "5GB-streaming-test.bin"), "wx");
   await file.truncate(size);
   await file.write(Buffer.from("stream-start"), 0, 12, 0);
   await file.write(Buffer.from([73]), 0, 1, size - 1);
@@ -25,7 +25,7 @@ try {
         body: JSON.stringify({ name: uniqueName("大文件上传验收") }),
       });
       const root = `/api/runtime/v1/workspaces/${workspace.id}`;
-      const content = `${root}/content?path=1GB-streaming-test.bin`;
+      const content = `${root}/content?path=5GB-streaming-test.bin`;
       const start = performance.now();
       try {
         await page.goto(`${baseURL}/?frontend=dsh&project=${workspace.id}`);
@@ -36,41 +36,41 @@ try {
         if (await toggle.count()) await toggle.click();
         const panel = page.getByRole("complementary", { name: "项目文件侧栏" });
         await panel
-          .getByText("拖入文件上传 · 单个最大 1 GB", { exact: true })
+          .getByText("拖入文件上传 · 单个最大 5 GB", { exact: true })
           .waitFor();
         const uploaded = page.waitForResponse(
           (response) =>
             response.request().method() === "PUT" &&
-            response.url().includes("1GB-streaming-test.bin"),
+            response.url().includes("5GB-streaming-test.bin"),
           { timeout: 3600000 },
         );
         console.log(
-          "Uploading a real 1 GB file through the authenticated browser and tunnel",
+          "Uploading a real 5 GB file through the authenticated browser and tunnel",
         );
         await panel
           .getByLabel("选择上传文件")
-          .setInputFiles(join(fixture, "1GB-streaming-test.bin"));
+          .setInputFiles(join(fixture, "5GB-streaming-test.bin"));
         const response = await uploaded;
         assert.equal(response.status(), 200);
         // Large request bodies can evict the DevTools response cache. Verify the
         // persisted file with a fresh API read instead of Network.getResponseBody.
         const files = await json(page, `${root}/files`);
         assert.equal(
-          files.find((entry) => entry.path === "1GB-streaming-test.bin")?.size,
+          files.find((entry) => entry.path === "5GB-streaming-test.bin")?.size,
           size,
         );
         await panel
-          .getByRole("button", { name: "1GB-streaming-test.bin", exact: true })
+          .getByRole("button", { name: "5GB-streaming-test.bin", exact: true })
           .waitFor();
         const uploadSeconds = (performance.now() - start) / 1000;
         console.log(
-          `1 GB upload completed in ${uploadSeconds.toFixed(1)} seconds`,
+          `5 GB upload completed in ${uploadSeconds.toFixed(1)} seconds`,
         );
         await panel
           .getByLabel("选择上传文件")
           .setInputFiles(join(fixture, "too-large.bin"));
         await panel
-          .getByText("too-large.bin：超过 1 GB", { exact: true })
+          .getByText("too-large.bin：超过 5 GB", { exact: true })
           .waitFor();
         if (evidence)
           await page.screenshot({ path: join(evidence, "large-upload.png") });
@@ -114,7 +114,7 @@ try {
             JSON.stringify(report, null, 2),
           );
         console.log(
-          "1 GB browser upload, oversized rejection and complete streaming download verified",
+          "5 GB browser upload, oversized rejection and complete streaming download verified",
         );
       } finally {
         // Shrink only this generated fixture before the recoverable project removal.

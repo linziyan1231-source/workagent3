@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 
 export interface ProviderCredentialStore {
   describe(

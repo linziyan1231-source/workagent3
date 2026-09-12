@@ -39,6 +39,7 @@ const state = {
 let reloads = 0;
 const service = {
   handles: (provider) => provider === "workagent-codex",
+  listSessionIds: () => [],
   validateAssistant: (config) => {
     if (config.presetId === "disabled") throw Error("preset_disabled");
   },
@@ -91,6 +92,31 @@ assert.equal(
 );
 const disk = JSON.parse(JSON.stringify(state));
 assert.equal(normalizeAssistantModel(disk.assistant).presetId, "custom-two");
+// 空闲默认值校验与账号配置透传
+assert.equal(
+  manager.updateAccount("weixin", { idleMinutes: 45, idlePolicy: "新建" }).ok,
+  true,
+);
+assert.equal(state.idleMinutes, 45);
+assert.equal(state.idlePolicy, "新建");
+assert.equal(manager.accountEngineConfig("weixin").idleMinutes, 45);
+assert.equal(manager.accountEngineConfig("weixin").idlePolicy, "新建");
+assert.equal(manager.updateAccount("weixin", { idleMinutes: -1 }).ok, false);
+assert.equal(manager.updateAccount("weixin", { idleMinutes: 10081 }).ok, false);
+assert.equal(manager.updateAccount("weixin", { idleMinutes: 1.5 }).ok, false);
+assert.equal(manager.updateAccount("weixin", { idlePolicy: "无效" }).ok, false);
+assert.equal(
+  state.idleMinutes,
+  45,
+  "invalid idle settings must preserve saved values",
+);
+assert.equal(
+  manager.updateAccount("weixin", { idleMinutes: null, idlePolicy: null }).ok,
+  true,
+);
+assert.equal(state.idleMinutes, undefined);
+assert.equal(state.idlePolicy, undefined);
+assert.equal(manager.accountEngineConfig("weixin").idleMinutes, undefined);
 console.log(
-  "PASS assistant normalization, account save, persisted selection, command override invalidation and native thread rotation",
+  "PASS assistant normalization, account save, persisted selection, command override invalidation, native thread rotation and idle defaults",
 );

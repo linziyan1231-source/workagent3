@@ -192,20 +192,27 @@ func (s *capabilityImporter) installUploadedSkill(r *http.Request) (skillruntime
 }
 
 type importedMCP struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	URL     string            `json:"url"`
-	Type    string            `json:"type"`
-	Env     map[string]string `json:"env"`
-	Headers map[string]string `json:"headers"`
+	GlobalSource string            `json:"-"`
+	NativeName   string            `json:"-"`
+	Command      string            `json:"command"`
+	Args         []string          `json:"args"`
+	URL          string            `json:"url"`
+	Type         string            `json:"type"`
+	Env          map[string]string `json:"env"`
+	Headers      map[string]string `json:"headers"`
 }
 
 func (s *capabilityImporter) importMCP(ctx context.Context, name string, input importedMCP) (string, error) {
+	return s.importMCPRecord(ctx, name, input, nil)
+}
+
+func (s *capabilityImporter) importMCPRecord(ctx context.Context, name string, input importedMCP, existing *mcpruntime.Server) (string, error) {
 	id, err := auth.RandomToken(18)
 	if err != nil {
 		return "", err
 	}
 	transport := mcpruntime.Transport{Kind: input.Type, URL: input.URL, Command: input.Command, Args: input.Args, EnvironmentCredentialIDs: map[string]string{}, HeaderCredentialIDs: map[string]string{}}
+	transport.GlobalSource, transport.NativeName = input.GlobalSource, input.NativeName
 	if transport.Kind == "" {
 		if input.Command != "" {
 			transport.Kind = "stdio"
@@ -213,7 +220,7 @@ func (s *capabilityImporter) importMCP(ctx context.Context, name string, input i
 			transport.Kind = "http"
 		}
 	}
-	if transport.Kind == "streamable-http" {
+	if transport.Kind == "streamable-http" || transport.Kind == "streamablehttp" {
 		transport.Kind = "http"
 	}
 	created := []string{}
@@ -254,10 +261,25 @@ func (s *capabilityImporter) importMCP(ctx context.Context, name string, input i
 	if transport.Kind == "stdio" {
 		health = "needs_review"
 	}
-	_, err = s.mcp.Create(ctx, mcpruntime.Server{ID: id, Name: name, Source: "user", Enabled: true, Transport: transport, ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "none", Health: health})
+	if input.GlobalSource != "" {
+		health = "unknown"
+	}
+	server := mcpruntime.Server{ID: id, Name: name, Source: "user", Enabled: true, Transport: transport, ToolPolicy: "all", AllowedTools: []string{}, OAuthState: "none", Health: health}
+	if existing != nil {
+		server.ID, server.Enabled, server.ToolPolicy, server.AllowedTools = existing.ID, existing.Enabled, existing.ToolPolicy, existing.AllowedTools
+		_, err = s.mcp.Replace(ctx, server)
+		id = existing.ID
+	} else {
+		_, err = s.mcp.Create(ctx, server)
+	}
 	if err != nil {
 		rollback()
 		return "", err
+	}
+	if input.GlobalSource != "" {
+		if err := s.mcp.RememberNativeName(ctx, input.NativeName, transport); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }

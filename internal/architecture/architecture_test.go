@@ -12,14 +12,21 @@ import (
 )
 
 var tableOwner = map[string]string{
-	"users": "store", "sessions": "store", "runtime_credentials": "store",
+	"users": "store", "sessions": "store", "runtime_credentials": "store", "remembered_logins": "store",
+	"employee_jobs":                "employeemanager",
+	"professional_database_grants": "professionaldb", "professional_database_usage": "professionaldb", "professional_database_calls": "professionaldb",
 	"shared_projects": "collaboration", "shared_members": "collaboration", "shared_invites": "collaboration", "shared_invite_links": "collaboration", "shared_ownership_transfers": "collaboration",
-	"shared_conversations": "collaboration", "shared_conversation_visibility": "collaboration", "shared_conversation_user_state": "collaboration", "shared_messages": "collaboration",
-	"shared_ai_runs": "collaboration", "shared_ai_run_payers": "collaboration",
+	"shared_personal_task_operations": "collaboration",
+	"shared_conversations":            "collaboration", "shared_conversation_visibility": "collaboration", "shared_conversation_user_state": "collaboration", "shared_messages": "collaboration",
+	"shared_assistant_members": "collaboration", "shared_assistant_sessions": "collaboration", "shared_ai_runs": "collaboration", "shared_ai_run_payers": "collaboration",
 	"quota_budgets": "quota", "quota_reservations": "quota",
-	"quota_gateway_keys": "quota", "quota_gateway_usage": "quota",
+	"quota_run_authorizations": "quota",
+	"quota_gateway_keys":       "quota", "quota_gateway_usage": "quota",
+	"quota_overrides": "quota", "quota_gateway_checkpoint": "quota", "quota_gateway_holds": "quota", "quota_gateway_run_owners": "quota", "quota_dollar_budgets": "quota", "quota_dollar_usage": "quota",
 	"skill_market_entries": "skillmarket",
-	"notifications":        "notifications", "notification_receipts": "notifications",
+	"marketplace_entries":  "marketplace", "marketplace_installations": "marketplace", "marketplace_selections": "marketplace", "marketplace_subscriptions": "marketplace", "marketplace_actions": "marketplace", "marketplace_action_targets": "marketplace",
+	"revoked_market_skills": "skillruntime",
+	"notifications":         "notifications", "notification_receipts": "notifications",
 	"audit_events":    "audit",
 	"client_settings": "settings",
 	"model_catalog":   "modelaccess", "model_authorizations": "modelaccess", "model_downstream_keys": "modelaccess", "model_downstream_key_models": "modelaccess",
@@ -27,7 +34,9 @@ var tableOwner = map[string]string{
 	"connector_configs": "imgateway", "pairings": "imgateway", "conversation_mappings": "imgateway", "inbound_receipts": "imgateway",
 	"releases": "operations", "active_components": "operations", "activation_journal": "operations", "release_readiness": "operations",
 	"skills": "skillruntime", "mcp_servers": "mcpruntime",
-	"skill_migrations": "skillmigration", "mcp_migrations": "skillmigration",
+	"native_mcp_names":   "mcpruntime",
+	"native_skill_paths": "skillruntime",
+	"skill_migrations":   "skillmigration", "mcp_migrations": "skillmigration",
 	"preset_migrations": "skillmigration",
 }
 
@@ -106,7 +115,8 @@ func TestDataOwnersDoNotDependOnProcessOrchestration(t *testing.T) {
 		"audit": true, "collaboration": true, "credentialbroker": true, "imgateway": true,
 		"modelaccess": true, "notifications": true, "operations": true, "quota": true,
 		"settings": true, "skillmarket": true, "store": true, "skillruntime": true,
-		"mcpruntime": true, "skillmigration": true,
+		"mcpruntime": true, "skillmigration": true, "marketplace": true,
+		"professionaldb": true,
 	}
 	forbidden := []string{
 		"workagent3/internal/portal", "workagent3/internal/userhost", "workagent3/internal/employee",

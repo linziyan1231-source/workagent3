@@ -4,8 +4,6 @@ package employee
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,11 +18,6 @@ import (
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
-
-type brokerRecovery struct {
-	ID     string
-	Secret []byte
-}
 
 func (p *WindowsPlatform) InspectWindowsCredentialMigration(ctx context.Context, user store.User, pid uint32) (int, error) {
 	if _, err := p.vault(); err != nil {
@@ -43,14 +36,7 @@ func (p *WindowsPlatform) InspectWindowsCredentialMigration(ctx context.Context,
 		return 0, err
 	}
 	defer clear(data)
-	var records []brokerRecovery
-	if err := json.Unmarshal(data, &records); err != nil {
-		return 0, err
-	}
-	for _, r := range records {
-		clear(r.Secret)
-	}
-	return len(records), nil
+	return credentialbroker.RecoveryCount(data)
 }
 
 // Restore a lost vault record after restoring the original Windows SID/profile.
@@ -108,88 +94,22 @@ func (p *WindowsPlatform) BackupWindowsCredential(user store.User, pass []byte, 
 	return file.Sync()
 }
 
-func readBrokerRecovery(ctx context.Context, path string, token windows.Token) ([]byte, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return json.Marshal([]brokerRecovery{})
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	rows, err := db.QueryContext(ctx, "SELECT id,sealed_value FROM credentials WHERE length(sealed_value)>0 ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	records := []brokerRecovery{}
-	defer func() {
-		for _, r := range records {
-			clear(r.Secret)
-		}
-	}()
-	for rows.Next() {
-		var id string
-		var sealed []byte
-		if err := rows.Scan(&id, &sealed); err != nil {
-			return nil, err
-		}
-		var plain []byte
-		err := winutil.WithUserToken(token, func() error { var err error; plain, err = credentialbroker.NewUserProtector().Open(sealed); return err })
-		if err != nil {
-			return nil, fmt.Errorf("credential migration preflight cannot decrypt broker record: %w", err)
-		}
-		records = append(records, brokerRecovery{id, plain})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return json.Marshal(records)
-}
+// The lifecycle supplies impersonation; the broker owns recovery SQL and format.
+type maintenanceProtector struct{ token windows.Token }
 
+func (p maintenanceProtector) Open(value []byte) (plain []byte, err error) {
+	err = winutil.WithUserToken(p.token, func() error { plain, err = credentialbroker.NewUserProtector().Open(value); return err })
+	return
+}
+func (p maintenanceProtector) Seal(value []byte) (sealed []byte, err error) {
+	err = winutil.WithUserToken(p.token, func() error { sealed, err = credentialbroker.NewUserProtector().Seal(value); return err })
+	return
+}
+func readBrokerRecovery(ctx context.Context, path string, token windows.Token) ([]byte, error) {
+	return credentialbroker.ExportRecovery(ctx, path, maintenanceProtector{token})
+}
 func restoreBrokerRecovery(ctx context.Context, path string, token windows.Token, backup []byte) error {
-	var records []brokerRecovery
-	if err := json.Unmarshal(backup, &records); err != nil {
-		return err
-	}
-	defer func() {
-		for _, r := range records {
-			clear(r.Secret)
-		}
-	}()
-	if len(records) == 0 {
-		return nil
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, r := range records {
-		var sealed []byte
-		err := winutil.WithUserToken(token, func() error {
-			var err error
-			sealed, err = credentialbroker.NewUserProtector().Seal(r.Secret)
-			return err
-		})
-		if err != nil {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE credentials SET sealed_value=? WHERE id=?", sealed, r.ID)
-		if err != nil {
-			return err
-		}
-		count, _ := result.RowsAffected()
-		if count != 1 {
-			return errors.New("broker record disappeared during migration")
-		}
-	}
-	return tx.Commit()
+	return credentialbroker.RestoreRecovery(ctx, path, maintenanceProtector{token}, backup)
 }
 
 // Unknown user-scope secrets cannot safely be recovered by resetting a password.

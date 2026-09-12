@@ -28,6 +28,15 @@ export const createEngineSessionSchema = z.object({
   title: z.string().trim().min(1).max(200),
   workspace: z.string().min(1),
   presetId: z.string().min(1).optional(),
+  operationId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,160}$/)
+    .optional(),
+  modelId: z.string().trim().min(1).max(200).optional(),
+  thinkingEffort: z.string().trim().min(1).max(80).optional(),
+  permissionMode: z
+    .enum(["read_only", "workspace_write", "full_access"])
+    .optional(),
 });
 export type CreateEngineSession = z.infer<typeof createEngineSessionSchema>;
 
@@ -38,24 +47,28 @@ export const sendEngineTurnSchema = z.object({
 });
 export type SendEngineTurn = z.infer<typeof sendEngineTurnSchema>;
 
-export type EngineEventListener = (event: EngineEvent) => void;
-
-export type AgentEngine = {
-  readonly capabilities: EngineCapabilities;
-  readonly id: EngineId;
-  cancelTurn(input: { sessionId: string; turnId: string }): Promise<void>;
-  closeSession(sessionId: string): Promise<void>;
-  createSession(input: CreateEngineSession): Promise<{ sessionId: string }>;
-  resumeSession(sessionId: string): Promise<{ sessionId: string }>;
-  sendTurn(input: SendEngineTurn): Promise<{ turnId: string }>;
-  subscribe(sessionId: string, listener: EngineEventListener): () => void;
-};
-
 const eventBaseSchema = z.object({
   eventId: z.string().min(1),
   occurredAt: z.iso.datetime({ offset: true }),
   sessionId: z.string().min(1),
 });
+
+export const assistantMessageKindSchema = z.enum([
+  "commentary",
+  "question",
+  "answer",
+]);
+const assistantIdentity = {
+  messageId: z.string().min(1).optional(),
+  kind: assistantMessageKindSchema.optional(),
+};
+const toolDetails = {
+  input: z.json().optional(),
+  output: z.json().optional(),
+  result: z.json().optional(),
+  locations: z.json().optional(),
+  raw: z.json().optional(),
+};
 
 export const engineEventSchema = z.discriminatedUnion("type", [
   eventBaseSchema.extend({
@@ -76,14 +89,21 @@ export const engineEventSchema = z.discriminatedUnion("type", [
     turnId: z.string().min(1),
   }),
   eventBaseSchema.extend({
+    type: z.literal("turn.retrying"),
+    turnId: z.string().min(1),
+    message: z.string(),
+  }),
+  eventBaseSchema.extend({
     type: z.literal("assistant.delta"),
     turnId: z.string().min(1),
     delta: z.string(),
+    ...assistantIdentity,
   }),
   eventBaseSchema.extend({
     type: z.literal("assistant.completed"),
     turnId: z.string().min(1),
     content: z.string(),
+    ...assistantIdentity,
   }),
   eventBaseSchema.extend({
     type: z.literal("turn.completed"),
@@ -94,12 +114,22 @@ export const engineEventSchema = z.discriminatedUnion("type", [
     turnId: z.string().min(1),
     toolCallId: z.string().min(1),
     tool: z.string().min(1),
+    ...toolDetails,
+  }),
+  eventBaseSchema.extend({
+    type: z.literal("tool.updated"),
+    turnId: z.string().min(1),
+    toolCallId: z.string().min(1),
+    tool: z.string().min(1).optional(),
+    ...toolDetails,
   }),
   eventBaseSchema.extend({
     type: z.literal("tool.completed"),
     turnId: z.string().min(1),
     toolCallId: z.string().min(1),
     failed: z.boolean(),
+    tool: z.string().min(1).optional(),
+    ...toolDetails,
   }),
   eventBaseSchema.extend({
     type: z.literal("approval.requested"),
@@ -124,5 +154,7 @@ export const engineEventSchema = z.discriminatedUnion("type", [
     turnId: z.string().min(1),
   }),
   eventBaseSchema.extend({ type: z.literal("session.closed") }),
+  eventBaseSchema.extend({ type: z.literal("message.created") }),
+  eventBaseSchema.extend({ type: z.literal("queue.changed") }),
 ]);
 export type EngineEvent = z.infer<typeof engineEventSchema>;

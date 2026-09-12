@@ -5,7 +5,7 @@ import {
   teamCreateSchema,
   type TeamEvent,
 } from "@workagent/contracts";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import {
   TeamOrchestrator,
   type TeamSessionPort,
@@ -47,6 +47,7 @@ const streamEvents = (
   response: ServerResponse,
   collect: (after: number) => TeamEvent[],
   after: number,
+  signal?: AbortSignal,
 ): void => {
   response.writeHead(200, {
     "cache-control": "no-store",
@@ -56,14 +57,21 @@ const streamEvents = (
   let sequence = after;
   const timer = setInterval(publish, 250);
   timer.unref();
-  request.once("close", () => clearInterval(timer));
+  const close = () => {
+    clearInterval(timer);
+    request.removeListener("close", close);
+    signal?.removeEventListener("abort", close);
+    response.end();
+  };
+  request.once("close", close);
+  signal?.addEventListener("abort", close, { once: true });
+  if (signal?.aborted) return close();
   function publish(): void {
     let events: TeamEvent[];
     try {
       events = collect(sequence);
     } catch {
-      clearInterval(timer);
-      response.end();
+      close();
       return;
     }
     for (const event of events) {
@@ -82,6 +90,7 @@ export const createTeamHandler =
     store: TeamStore,
     orchestrator: TeamOrchestrator,
     sessions: TeamSessionPort,
+    signal?: AbortSignal,
   ) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (!authorized(request, token))
@@ -130,7 +139,13 @@ export const createTeamHandler =
         const since = Number.isSafeInteger(after) && after >= 0 ? after : 0;
         if (!request.headers.accept?.includes("text/event-stream"))
           return json(response, 200, store.allEvents(since));
-        streamEvents(request, response, store.allEvents.bind(store), since);
+        streamEvents(
+          request,
+          response,
+          store.allEvents.bind(store),
+          since,
+          signal,
+        );
         return;
       }
       const match =
@@ -307,6 +322,7 @@ export const createTeamHandler =
           response,
           (sequence) => store.events(teamId, sequence),
           since,
+          signal,
         );
         return;
       }
@@ -353,12 +369,26 @@ export class TeamController {
     orchestrator: TeamOrchestrator,
     sessions: TeamSessionPort,
   ) {
-    const handler = createTeamHandler(token, store, orchestrator, sessions);
-    ctx.effect(
-      () =>
-        ctx.webServer.register({ kind: "prefix", path: "/v1/teams", handler }),
-      "workagent-ai-team: routes",
-    );
-    orchestrator.start();
+    ctx.effect(() => {
+      const controller = new AbortController();
+      const handler = createTeamHandler(
+        token,
+        store,
+        orchestrator,
+        sessions,
+        controller.signal,
+      );
+      const unregister = ctx.webServer.register({
+        kind: "prefix",
+        path: "/v1/teams",
+        handler,
+      });
+      orchestrator.start();
+      return async () => {
+        unregister();
+        controller.abort();
+        await orchestrator.stop();
+      };
+    }, "workagent-ai-team: routes and scheduler");
   }
 }

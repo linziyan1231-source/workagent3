@@ -196,7 +196,12 @@ export function wrapNativeSessionApi(
       if (!port.owns(sessionId)) return stock.prompt(request);
       return respond(request, async () => {
         requireSession(sessionId);
-        await port.prompt(sessionId, textOnly(content), mode);
+        await port.prompt(
+          sessionId,
+          textOnly(content),
+          mode,
+          String(request.rpcId),
+        );
         return { accepted: true as const };
       });
     },

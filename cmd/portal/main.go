@@ -182,7 +182,9 @@ func run() error {
 	}
 
 	registry := runtimeapi.NewRegistry()
-	if employeeManager!=nil{registry.SetStarter(employeeManager.EnsureRuntime)}
+	if employeeManager != nil {
+		registry.SetStarter(employeeManager.EnsureRuntime)
+	}
 	if err := registerDevelopmentRuntime(data, registry); err != nil {
 		return err
 	}
@@ -212,7 +214,9 @@ func run() error {
 	}
 	if employeeManager != nil {
 		modules.EmployeeManagement = employeeManager
+		modules.ProfessionalDatabase = employeeManager
 		modules.Storage = employeeManager
+		modules.SharedTrash = employeeManager
 	}
 	server, err := portal.NewWithModules(data, registry, *secureCookie, modules)
 	if err != nil {
@@ -242,10 +246,15 @@ func run() error {
 
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/lease", runtimeapi.LeaseHandler(registry, data))
-	if employeeManager!=nil{root.Handle("/internal/runtime/control",employeeManager.RuntimeControl(registry))}
+	if employeeManager != nil {
+		root.Handle("/internal/runtime/control", employeeManager.RuntimeControl(registry))
+	}
 	root.Handle("/internal/runtime/quota/", quota.RuntimeHandler(quotas, data))
 	root.Handle("/internal/runtime/audit", audit.RuntimeHandler(auditStore, data))
 	root.Handle("/internal/runtime/notifications", notifications.RuntimeHandler(notificationStore, data))
+	root.Handle("/internal/runtime/collaboration", server.SharedChannelHandler())
+	root.Handle("/internal/runtime/market-capabilities", server.MarketRuntimeHandler())
+	root.Handle("/internal/runtime/shared-trash", server.SharedTrashRuntimeHandler())
 	if token := os.Getenv("WORKAGENT_IM_DELIVERY_TOKEN"); token != "" {
 		imHandler, err := imdelivery.NewHandler(registry, token)
 		if err != nil {
@@ -269,6 +278,13 @@ func run() error {
 	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go server.RunOwnershipTransferRecovery(shutdownContext, 5*time.Second)
+	go server.RunSharedQuotaRecovery(shutdownContext, 5*time.Second)
+	personalTaskRecoveryDone := make(chan struct{})
+	go func() {
+		defer close(personalTaskRecoveryDone)
+		server.RunPersonalTaskRecovery(shutdownContext, 5*time.Second)
+	}()
+	defer func() { stop(); <-personalTaskRecoveryDone }()
 	if *auditRetentionDays > 0 {
 		go runAuditRetention(shutdownContext, auditStore, time.Duration(*auditRetentionDays)*24*time.Hour)
 	}

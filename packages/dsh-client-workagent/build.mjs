@@ -1,39 +1,64 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { build } from "esbuild";
 import prettier from "prettier";
 
 const root = new URL("./", import.meta.url);
-const main = await readFile(new URL("src/client.js", root), "utf8");
-const features = await readFile(new URL("src/workbench.js", root), "utf8");
-let output = main.replace("// WORKBENCH_SOURCE", () =>
-  features.replace(
-    "export function createWorkbench",
-    "function createWorkbench",
-  ),
-);
-const navigation = await readFile(new URL("src/navigation.js", root), "utf8");
-output = output.replace("// NAVIGATION_SOURCE", () =>
-  navigation.replaceAll("export function", "function"),
-);
-const automations = await readFile(new URL("src/automations.js", root), "utf8");
-output = output.replace("// AUTOMATIONS_SOURCE", () =>
-  automations.replace(
-    "export function createAutomations",
-    "function createAutomations",
-  ),
-);
-const imports = await readFile(new URL("src/imports.js", root), "utf8");
-output = output.replace("// IMPORTS_SOURCE", () =>
-  imports.replace("export function createImports", "function createImports"),
-);
-const uploads = await readFile(new URL("src/uploads.js", root), "utf8");
-output = output.replace("// UPLOADS_SOURCE", () =>
-  uploads.replace("export function createUploads", "function createUploads"),
-);
-const shared = await readFile(new URL("src/shared.js", root), "utf8");
-output = output.replace("// SHARED_SOURCE", () =>
-  shared.replace("export function createShared", "function createShared"),
-);
-await writeFile(
-  new URL("client.js", root),
-  await prettier.format(output, { parser: "babel" }),
-);
+
+export async function bundleStyles({ minify = false } = {}) {
+  const result = await build({
+    absWorkingDir: fileURLToPath(root),
+    entryPoints: ["src/styles.css"],
+    bundle: true,
+    target: "es2023",
+    charset: "utf8",
+    legalComments: "none",
+    minify,
+    write: false,
+    metafile: true,
+  });
+  const code = minify
+    ? result.outputFiles[0].text
+    : await prettier.format(result.outputFiles[0].text, { parser: "css" });
+  return { code, metafile: result.metafile };
+}
+
+// DSH supplies these modules. Bundling a second React instance breaks hooks.
+export async function bundleClient() {
+  const result = await build({
+    absWorkingDir: fileURLToPath(root),
+    entryPoints: ["src/client.js"],
+    bundle: true,
+    format: "cjs",
+    platform: "browser",
+    target: "es2023",
+    charset: "utf8",
+    external: ["react", "@deepseek-ai/dsh-client-ui-primitives"],
+    write: false,
+    metafile: true,
+  });
+  const crypto = await readFile(new URL("src/host/crypto.js", root), "utf8");
+  const code = await prettier.format(
+    `${crypto}\nwindow.__ModuleLoader__.load({
+      id: "@workagent/dsh-client",
+      factory: (require) => {
+        const module = { exports: {} };
+        const exports = module.exports;
+        ${result.outputFiles[0].text}
+        return module.exports;
+      },
+    });`,
+    { parser: "babel" },
+  );
+  return { code, metafile: result.metafile };
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  const [client, styles] = await Promise.all([bundleClient(), bundleStyles()]);
+  await writeFile(new URL("client.js", root), client.code);
+  await writeFile(new URL("tokens.css", root), styles.code);
+}

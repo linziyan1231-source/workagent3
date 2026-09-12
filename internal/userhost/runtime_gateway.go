@@ -26,6 +26,7 @@ import (
 )
 
 type runtimeGateway struct {
+	butlerToken   string
 	server        *http.Server
 	catalog       *mcpruntime.Catalog
 	credentials   *credentialbroker.Store
@@ -42,7 +43,7 @@ type runtimeGateway struct {
 	deliver func(context.Context) error
 }
 
-func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, managedToolsRoot, dataRoot, ownerSID string, target *url.URL, token string, bundle *nativeauth.Bundle, auditSink *auditClient, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
+func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, managedMCPServers []mcpruntime.Server, managedToolsRoot, dataRoot, ownerSID, professionalDatabaseURL string, target *url.URL, token string, bundle *nativeauth.Bundle, auditSink *auditClient, restart func(), assigners ...mcpProcessAssigner) (*runtimeGateway, error) {
 	catalog, err := mcpruntime.Open(filepath.Join(runtimeDirectory, "mcp-catalog.db"))
 	if err != nil {
 		return nil, err
@@ -101,7 +102,18 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	}
 	skillPublisher := &harnessSkillProjectionPublisher{store: skills, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	presetPublisher := &harnessPresetMigrationPublisher{path: filepath.Join(dshHome, "workagent", "preset-migration.json"), target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}, migration: migration}
+	syncer, err := newCapabilitySync(dataRoot, &capabilityImporter{skills: skills, skillPublisher: skillPublisher, mcp: catalog, credentials: credentials, mcpPublisher: publisher})
+	if err != nil {
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
 	deliver := func(ctx context.Context) error {
+		// A malformed external installation is surfaced in settings; it must
+		// not prevent the employee from opening WorkAgent to repair it.
+		_ = syncer.run(ctx)
 		if err := publisher.Publish(ctx); err != nil {
 			return err
 		}
@@ -128,6 +140,7 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 	oauth := newMCPOAuthManager(catalog, credentials, publisher, auditSink)
 	refreshContext, cancelRefresh := context.WithCancel(context.Background())
 	go oauth.runRefresher(refreshContext)
+	go syncer.watch(refreshContext)
 	sharedProjects, err := NewSharedProjectManager(dataRoot, ownerSID)
 	if err != nil {
 		cancelRefresh()
@@ -160,8 +173,50 @@ func newRuntimeGateway(runtimeDirectory, dshHome, managedSkillsRoot string, mana
 		return nil, err
 	}
 	sharedFiles.officePreview = officePreview
-	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, runtimeSharedProjectOperator{sharedProjects}, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, assigners...)
-	return &runtimeGateway{server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
+	if auditSink != nil {
+		sharedFiles.recycle = auditSink.recycleSharedFile
+	}
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, runtimeSharedProjectOperator{sharedProjects}, sharedFiles, officePreview, filepath.Join(dataRoot, "workspace"), restart, auditSink, presetPublisher, professionalDatabaseURL, assigners...)
+	baseHandler := handler
+	butlerToken, err := auth.RandomToken(32)
+	if err != nil {
+		cancelRefresh()
+		migration.Close()
+		skills.Close()
+		credentials.Close()
+		catalog.Close()
+		return nil, err
+	}
+	handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(butlerToken)) == 1 {
+			if !allowedButlerRequest(r) {
+				writeRuntimeError(w, 403, "butler_operation_not_allowed")
+				return
+			}
+			r = r.Clone(r.Context())
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		if r.URL.Path == "/v1/capability-sync/status" || r.URL.Path == "/v1/capability-sync/run" {
+			provided, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+				writeRuntimeError(w, 401, "runtime_authentication_required")
+				return
+			}
+			if r.Method == "GET" && r.URL.Path == "/v1/capability-sync/status" {
+				syncer.status(w, r)
+				return
+			}
+			if r.Method == "POST" && r.URL.Path == "/v1/capability-sync/run" {
+				syncer.syncNow(w, r)
+				return
+			}
+			writeRuntimeError(w, 405, "method_not_allowed")
+			return
+		}
+		baseHandler.ServeHTTP(w, r)
+	})
+	return &runtimeGateway{butlerToken: butlerToken, server: &http.Server{Handler: handler}, catalog: catalog, credentials: credentials, skills: skills, migration: migration, oauth: oauth, cancelRefresh: cancelRefresh, deliver: deliver}, nil
 }
 
 func (g *runtimeGateway) Close() error {
@@ -206,10 +261,10 @@ func newRuntimeGatewayHandler(catalog *mcpruntime.Catalog, credentials runtimeCr
 }
 
 func newRuntimeGatewayHandlerWithShared(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, assigners ...mcpProcessAssigner) http.Handler {
-	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, nil, "", nil, nil, nil, assigners...)
+	return newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, skills, skillPublisher, migration, oauth, target, token, sharedProjects, nil, nil, "", nil, nil, nil, "", assigners...)
 }
 
-func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, officePreview *officePreviewService, workspaceRoot string, restart func(), auditSink *auditClient, presetPublisher *harnessPresetMigrationPublisher, assigners ...mcpProcessAssigner) http.Handler {
+func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credentials runtimeCredentialCatalog, publisher mcpProjectionPublisher, skills *skillruntime.Store, skillPublisher skillProjectionPublisher, migration *skillmigration.Store, oauth *mcpOAuthManager, target *url.URL, token string, sharedProjects sharedProjectOperator, sharedFiles sharedFileOperator, officePreview *officePreviewService, workspaceRoot string, restart func(), auditSink *auditClient, presetPublisher *harnessPresetMigrationPublisher, professionalDatabaseURL string, assigners ...mcpProcessAssigner) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	providerPublisher := &harnessProviderCredentialPublisher{credentials: credentials, target: target, token: token, client: &http.Client{Timeout: 5 * time.Second}}
 	mux := http.NewServeMux()
@@ -232,13 +287,31 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 	mux.HandleFunc("POST /v1/mcp-servers", createMCPServer(catalog, credentials, publisher, auditSink))
 	mux.HandleFunc("PATCH /v1/mcp-servers/{id}", updateMCPServer(catalog, credentials, publisher, auditSink))
 	mux.HandleFunc("DELETE /v1/mcp-servers/{id}", deleteMCPServer(catalog, publisher, auditSink))
-	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher, assigners...))
+	mux.HandleFunc("POST /v1/mcp-servers/{id}/test", testMCPConnection(catalog, credentials, publisher, professionalDatabaseURL, assigners...))
 	mux.HandleFunc("GET /v1/skills", listSkills(skills))
 	mux.HandleFunc("GET /v1/skills/export", exportUserSkill(skills))
 	mux.HandleFunc("GET /v1/skills/{id}", getSkill(skills))
 	mux.HandleFunc("PATCH /v1/skills/{id}", updateSkill(skills, skillPublisher, auditSink))
 	mux.HandleFunc("DELETE /v1/skills/{id}", deleteSkill(skills, skillPublisher, auditSink))
 	mux.HandleFunc("POST /v1/skills/market-install", installMarketSkill(skills, skillPublisher, auditSink))
+	mux.HandleFunc("POST /internal/skills/{id}/revoke", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Remove bool `json:"remove"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&input) != nil {
+			writeRuntimeError(w, 400, "invalid_market_action")
+			return
+		}
+		if err := skills.RevokeMarket(r.Context(), r.PathValue("id"), input.Remove); err != nil {
+			writeRuntimeError(w, 409, err.Error())
+			return
+		}
+		if err := skillPublisher.Publish(r.Context()); err != nil {
+			writeRuntimeError(w, 503, "skill_projection_failed")
+			return
+		}
+		writeRuntimeJSON(w, 200, map[string]bool{"applied": true})
+	})
 	if migration != nil {
 		mux.HandleFunc("GET /v1/migrations/skills-mcp", listSkillMCPMigration(migration))
 		mux.HandleFunc("POST /v1/migrations/retry", retryMigration(migration, catalog, credentials, publisher, skillPublisher, presetPublisher))
@@ -263,6 +336,14 @@ func newRuntimeGatewayHandlerWithControl(catalog *mcpruntime.Catalog, credential
 		mux.HandleFunc("POST /v1/office-preview/convert", officePreviewConvertHandler(officePreview, workspaceRoot))
 		mux.HandleFunc("GET /v1/office-preview/content/{name}", officePreviewContentHandler(officePreview))
 	}
+	// Session creation is intercepted so the browser can target a collaboration
+	// project's shared folder by id; the rewritten request still goes to the
+	// Harness through the same reverse proxy as the "/" fallback.
+	sharedBase := ""
+	if provider, ok := sharedFiles.(sharedSessionBaseProvider); ok {
+		sharedBase = provider.sharedBase()
+	}
+	mux.HandleFunc("POST /v1/sessions", sharedSessionHandler(proxy, sharedBase))
 	mux.HandleFunc("/internal/", func(writer http.ResponseWriter, _ *http.Request) {
 		writeRuntimeError(writer, http.StatusNotFound, "not_found")
 	})

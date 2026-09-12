@@ -7,6 +7,28 @@ import { PresetStore } from "./preset-store.js";
 import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 
 describe("SID-private preset store", () => {
+  it("persists independent avatars for builtins and copied assistants", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-avatar-"));
+    const open = () => new PresetStore(home, new ModelAccessStore(home));
+    const store = open();
+    const image = "data:image/webp;base64," + "A".repeat(4000);
+    store.update("builtin-codex", { avatar: image });
+    store.update("builtin-kimi", { avatar: "emoji:🦊" });
+    store.update("builtin-codex", { enabled: false });
+    const reloaded = open();
+    expect(reloaded.get("builtin-codex")?.avatar).toBe(image);
+    expect(reloaded.get("builtin-codex")?.enabled).toBe(false);
+    expect(reloaded.get("builtin-kimi")?.avatar).toBe("emoji:🦊");
+    const copied = reloaded.copy("builtin-kimi", "研究员");
+    expect(copied.avatar).toBe("emoji:🦊");
+    reloaded.update(copied.id, { avatar: "emoji:📚" });
+    reloaded.update("builtin-kimi", { avatar: null });
+    expect(open().get(copied.id)?.avatar).toBe("emoji:📚");
+    expect(open().get("builtin-kimi")?.avatar).toBeNull();
+    expect(() =>
+      reloaded.update(copied.id, { avatar: "a".repeat(65_537) }),
+    ).toThrow();
+  });
   it("defaults DSH off, migrates old defaults, and preserves explicit switches after restart", () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-presets-"));
     const store = new PresetStore(home, new ModelAccessStore(home));

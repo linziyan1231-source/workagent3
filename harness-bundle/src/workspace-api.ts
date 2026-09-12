@@ -1,8 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
 import type { Context } from "@deepseek-ai/cordis";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import { MAX_UPLOAD_BYTES, WorkspaceStore } from "./workspace-store.js";
+import { SharedTrashError } from "./shared-trash-client.js";
 
 const INLINE_PREVIEW_MEDIA_TYPES: Record<string, string> = {
   gif: "image/gif",
@@ -82,6 +83,7 @@ const uploadBody = (request: IncomingMessage) => {
 };
 
 const errorStatus = (error: unknown): [number, string] => {
+  if (error instanceof SharedTrashError) return [error.status, error.message];
   const code =
     error instanceof Error ? error.message : "workspace_operation_failed";
   if (
@@ -92,6 +94,10 @@ const errorStatus = (error: unknown): [number, string] => {
     return [404, code];
   if (code === "request_too_large") return [413, code];
   if (
+    code === "invalid_move" ||
+    code === "move_not_pending" ||
+    code === "move_not_completed" ||
+    code === "ambiguous_file_reference" ||
     code === "destination_exists" ||
     code === "workspace_directory_exists" ||
     code === "file_changed" ||
@@ -131,6 +137,7 @@ export class WorkspaceController {
     store?: WorkspaceStore,
     workspaceForSession: (sessionId: string) => string | undefined = () =>
       undefined,
+    basePath = "/v1/workspaces",
   ) {
     this.#token = token;
     if (store === undefined) {
@@ -141,13 +148,36 @@ export class WorkspaceController {
       store = new WorkspaceStore(root, dshHome);
     }
     this.#store = store;
+    ctx.effect(() => {
+      const timer = setInterval(() => {
+        store.moves.drainAll();
+      }, 1000);
+      timer.unref();
+      return () => clearInterval(timer);
+    }, "workagent-workspace-api: pending file moves");
     this.#workspaceForSession = workspaceForSession;
     ctx.effect(
       () =>
         ctx.webServer.register({
           kind: "prefix",
-          path: "/v1/workspaces",
-          handler: (request, response) => this.#handle(request, response),
+          path: basePath,
+          handler: (request, response) => {
+            if (basePath !== "/v1/workspaces") {
+              const url = new URL(request.url ?? "/", "http://runtime");
+              if (
+                !/^\/[A-Za-z0-9_-]{16,128}\/(files|content|directories|move|uploads(?:\/[A-Za-z0-9_-]+(?:\/complete)?)?|locate)$/.test(
+                  url.pathname.slice(basePath.length),
+                )
+              ) {
+                return json(response, 404, { error: "not_found" });
+              }
+              request.url =
+                "/v1/workspaces" +
+                url.pathname.slice(basePath.length) +
+                url.search;
+            }
+            return this.#handle(request, response);
+          },
         }),
       "workagent-workspace-api: workspace routes",
     );
@@ -299,10 +329,19 @@ export class WorkspaceController {
     }
     const id = decodeURIComponent(match[1] ?? "");
     const action = match[2];
-    const path = url.searchParams.get("path") ?? "";
+    let path = url.searchParams.get("path") ?? "";
     const sessionId = url.searchParams.get("sessionId") ?? "";
     if (action === "locate" && request.method === "GET") {
-      json(response, 200, this.#store.locate(id, path));
+      json(
+        response,
+        200,
+        this.#store.locate(
+          id,
+          path,
+          url.searchParams.get("fileId") ?? undefined,
+          url.searchParams.get("reference") === "1",
+        ),
+      );
       return;
     }
     if (action === "files" && request.method === "GET") {
@@ -310,6 +349,16 @@ export class WorkspaceController {
       return;
     }
     if (action === "content" && request.method === "GET") {
+      if (
+        url.searchParams.has("fileId") ||
+        url.searchParams.get("reference") === "1"
+      )
+        path = this.#store.locate(
+          id,
+          path,
+          url.searchParams.get("fileId") ?? undefined,
+          true,
+        ).path;
       const content = await this.#store.readStream(id, path);
       response.writeHead(
         200,
@@ -323,6 +372,12 @@ export class WorkspaceController {
       return;
     }
     if (action === "content" && request.method === "PATCH") {
+      if (url.searchParams.has("fileId"))
+        path = this.#store.locate(
+          id,
+          path,
+          url.searchParams.get("fileId")!,
+        ).path;
       const value = JSON.parse(
         (await body(request, 16 * 1024 * 1024)).toString("utf8"),
       ) as Record<string, unknown>;
@@ -355,7 +410,13 @@ export class WorkspaceController {
       return;
     }
     if (action === "content" && request.method === "DELETE") {
-      this.#store.delete(id, path);
+      if (url.searchParams.has("fileId"))
+        path = this.#store.moves.reference(
+          id,
+          path,
+          url.searchParams.get("fileId")!,
+        );
+      await this.#store.delete(id, path);
       response.writeHead(204);
       response.end();
       return;
@@ -369,16 +430,52 @@ export class WorkspaceController {
       response.end();
       return;
     }
+    if (action === "move" && request.method === "GET") {
+      json(response, 200, this.#store.moves.list(id));
+      return;
+    }
     if (action === "move" && request.method === "POST") {
       const input = await objectBody(request);
+      if (input.action === "lease") {
+        if (
+          typeof input.owner !== "string" ||
+          (input.path !== undefined && typeof input.path !== "string")
+        )
+          throw new Error("invalid_move");
+        this.#store.moves.lease(
+          id,
+          input.owner,
+          input.path as string | undefined,
+        );
+        json(response, 200, { ok: true });
+        return;
+      }
+      if (input.action === "undo" || input.action === "cancel") {
+        if (typeof input.id !== "string") throw new Error("invalid_move");
+        json(response, 200, this.#store.moves[input.action](id, input.id));
+        return;
+      }
+      const moves = Array.isArray(input.moves) ? input.moves : [input];
       if (
-        typeof input.source !== "string" ||
-        typeof input.destination !== "string"
+        !moves.every(
+          (m) =>
+            m &&
+            typeof m.source === "string" &&
+            typeof m.destination === "string" &&
+            (m.fileId === undefined || typeof m.fileId === "string"),
+        )
       )
-        throw new Error("invalid_relative_path");
-      this.#store.move(id, input.source, input.destination);
-      response.writeHead(204);
-      response.end();
+        throw new Error("invalid_move");
+      const result = this.#store.moves.request(
+        id,
+        moves.map((m) => ({
+          source: m.source.replaceAll("\\", "/"),
+          destination: m.destination.replaceAll("\\", "/"),
+          fileId: m.fileId,
+        })),
+        input.conflict === "rename",
+      );
+      json(response, result.state === "queued" ? 202 : 200, result);
       return;
     }
     if (action === "assets" && request.method === "GET") {

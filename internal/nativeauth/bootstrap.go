@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 const bootstrapFileName = "native-model-bootstrap-v1.json"
@@ -142,17 +144,57 @@ func Apply(dataRoot string) error {
 		"openai_base_url = " + strconv.Quote(bundle.BaseURL) + "\n" +
 		"model = " + strconv.Quote(bundle.CodexModel) + "\n" +
 		"cli_auth_credentials_store = \"file\"\n"
-	if err := writePrivate(filepath.Join(codexHome, "config.toml"), []byte(codexConfig)); err != nil {
+	if err := mergeNativeConfiguration(filepath.Join(codexHome, "config.toml"), codexConfig); err != nil {
 		return fmt.Errorf("write native Codex configuration: %w", err)
 	}
 	kimiConfig := kimiConfiguration(bundle)
-	if err := writePrivate(filepath.Join(kimiHome, "config.toml"), []byte(kimiConfig)); err != nil {
+	if err := mergeNativeConfiguration(filepath.Join(kimiHome, "config.toml"), kimiConfig); err != nil {
 		return fmt.Errorf("write native Kimi configuration: %w", err)
 	}
 	if !Ready(dataRoot) {
 		return errors.New("native model authentication readback failed")
 	}
 	return nil
+}
+
+// Refresh only managed settings. Installed capabilities and user settings survive
+// model credential rotation and employee runtime repair.
+func mergeNativeConfiguration(path, managed string) error {
+	previous := map[string]any{}
+	contents, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if len(contents) == 0 {
+		return writePrivate(path, []byte(managed))
+	}
+	if len(contents) > 0 {
+		if err := toml.Unmarshal(contents, &previous); err != nil {
+			return errors.New("existing native configuration is invalid TOML; preserved without changes")
+		}
+	}
+	updates := map[string]any{}
+	if err := toml.Unmarshal([]byte(managed), &updates); err != nil {
+		return err
+	}
+	mergeConfigurationTables(previous, updates)
+	encoded, err := toml.Marshal(previous)
+	if err != nil {
+		return err
+	}
+	return writePrivate(path, encoded)
+}
+
+func mergeConfigurationTables(target, updates map[string]any) {
+	for key, value := range updates {
+		incoming, isTable := value.(map[string]any)
+		existing, hasTable := target[key].(map[string]any)
+		if isTable && hasTable {
+			mergeConfigurationTables(existing, incoming)
+		} else {
+			target[key] = value
+		}
+	}
 }
 
 // Consume marks the staged bootstrap fully delivered to every consumer (native

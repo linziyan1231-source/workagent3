@@ -1,0 +1,33 @@
+.workagent-form.workagent-completion-form {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 640px;
+}
+
+/* Include channel header padding in its width so the caret stays inside the list. */
+.ima-account-page .ima-platform-head {
+  box-sizing: border-box;
+}
+
+.workagent-form.workagent-completion-form .workagent-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Workbench adapters share the existing employee theme. */
+.workagent-browser-notifications button {
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  color: var(--dsw-color-muted);
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  cursor: pointer;
+}
+.workagent-browser-notifications button:hover {
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+}

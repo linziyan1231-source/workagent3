@@ -30,6 +30,9 @@ type Entry struct {
 	Source               string   `json:"source"`
 	Enabled              bool     `json:"enabled"`
 	RelativePath         string   `json:"relativePath"`
+	ReferenceDirectory   string   `json:"referenceDirectory,omitempty"`
+	CompatibleEngines    []string `json:"compatibleEngines"`
+	SourceAvailable      bool     `json:"sourceAvailable"`
 	RequiredMCPServerIDs []string `json:"requiredMcpServerIds"`
 	RequiredCommands     []string `json:"requiredCommands"`
 }
@@ -72,6 +75,8 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS native_skill_paths (path TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS revoked_market_skills(id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS skills (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -91,6 +96,18 @@ CREATE TABLE IF NOT EXISTS skills (
 	_, alterErr := s.db.ExecContext(ctx, `ALTER TABLE skills ADD COLUMN required_commands_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(required_commands_json))`)
 	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column name") {
 		return fmt.Errorf("migrate skill command dependencies: %w", alterErr)
+	}
+	_, alterErr = s.db.ExecContext(ctx, `ALTER TABLE skills ADD COLUMN reference_directory TEXT NOT NULL DEFAULT ''`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column name") {
+		return fmt.Errorf("migrate skill references: %w", alterErr)
+	}
+	_, alterErr = s.db.ExecContext(ctx, `ALTER TABLE skills ADD COLUMN compatible_engines_json TEXT NOT NULL DEFAULT '["codex","kimi","harness"]'`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column name") {
+		return alterErr
+	}
+	_, alterErr = s.db.ExecContext(ctx, `ALTER TABLE skills ADD COLUMN source_available INTEGER NOT NULL DEFAULT 1`)
+	if alterErr != nil && !strings.Contains(strings.ToLower(alterErr.Error()), "duplicate column name") {
+		return alterErr
 	}
 	return nil
 }
@@ -161,6 +178,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?)`, input.ID, strings.TrimSpace(input.Name), strings
 // market version with the same id or name. User and managed packages are never
 // overwritten by a market action.
 func (s *Store) InstallMarket(ctx context.Context, input InstallInput) (Entry, error) {
+	if err := s.checkMarketRevocation(ctx, input.ID); err != nil {
+		return Entry{}, err
+	}
 	if input.Source != "market" {
 		return Entry{}, errors.New("market installation requires market source")
 	}
@@ -291,6 +311,11 @@ func (s *Store) List(ctx context.Context) ([]Entry, error) {
 }
 
 func (s *Store) SetEnabled(ctx context.Context, id string, enabled bool) (Entry, error) {
+	if enabled {
+		if err := s.checkMarketRevocation(ctx, id); err != nil {
+			return Entry{}, err
+		}
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE skills SET enabled=?,updated_at=? WHERE id=?`, enabled, s.now().UTC().UnixMilli(), id)
 	if err != nil {
 		return Entry{}, fmt.Errorf("set skill enabled state: %w", err)
@@ -412,7 +437,7 @@ func (s *Store) ExportUserPackage(ctx context.Context, name string) (Entry, []by
 	return entry, contents, nil
 }
 
-const skillSelect = `SELECT id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,required_commands_json FROM skills`
+const skillSelect = `SELECT id,name,description,version,source,enabled,relative_path,required_mcp_server_ids_json,required_commands_json,reference_directory,compatible_engines_json,source_available FROM skills`
 
 type scanner interface{ Scan(...any) error }
 
@@ -421,7 +446,8 @@ func scanEntry(row scanner) (Entry, error) {
 	var enabled int
 	var requiredMCPJSON string
 	var requiredCommandsJSON string
-	err := row.Scan(&entry.ID, &entry.Name, &entry.Description, &entry.Version, &entry.Source, &enabled, &entry.RelativePath, &requiredMCPJSON, &requiredCommandsJSON)
+	var compatibleJSON string
+	err := row.Scan(&entry.ID, &entry.Name, &entry.Description, &entry.Version, &entry.Source, &enabled, &entry.RelativePath, &requiredMCPJSON, &requiredCommandsJSON, &entry.ReferenceDirectory, &compatibleJSON, &entry.SourceAvailable)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Entry{}, ErrNotFound
 	}
@@ -436,6 +462,9 @@ func scanEntry(row scanner) (Entry, error) {
 	}
 	entry.RequiredMCPServerIDs = nonNilStrings(entry.RequiredMCPServerIDs)
 	entry.RequiredCommands = nonNilStrings(entry.RequiredCommands)
+	if err := json.Unmarshal([]byte(compatibleJSON), &entry.CompatibleEngines); err != nil {
+		return Entry{}, err
+	}
 	entry.Enabled = enabled == 1
 	return entry, nil
 }

@@ -2,12 +2,28 @@ import { z } from "zod";
 import { engineIdSchema } from "./engine.js";
 
 export const sharedTurnRequestSchema = z.object({
+  capabilities: z
+    .object({
+      skillIds: z.array(z.string()),
+      mcpServerIds: z.array(z.string()),
+      entryIds: z.array(z.string()),
+      excludedSkillIds: z.array(z.string()).default([]),
+      excludedMcpIds: z.array(z.string()).default([]),
+    })
+    .optional(),
+  assistantId: z.string().min(1).optional(),
+  sessionKey: z
+    .string()
+    .regex(/^session-shared-[A-Za-z0-9_-]+$/)
+    .max(128)
+    .optional(),
   runId: z.string().min(16).max(128),
   conversationId: z.string().min(16).max(128),
   projectId: z.string().min(16).max(128),
   engine: engineIdSchema,
   modelId: z.string().min(1).max(256),
-  thinkingEffort: z.enum(["low", "medium", "high"]),
+  thinkingEffort: z.string().trim().min(1).max(32),
+  quotaModelId: z.string().min(1).max(256).optional(),
   context: z
     .string()
     .min(1)

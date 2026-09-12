@@ -104,7 +104,10 @@ func (m *SharedProjectManager) Apply(_ context.Context, projectID string, reques
 			return err
 		}
 		projectRoot := filepath.Join(ownerRoot, projectID)
-		if err := os.Mkdir(projectRoot, 0o700); err != nil {
+		if err := os.Mkdir(projectRoot, 0o700); err != nil && !os.IsExist(err) {
+			return err
+		}
+		if err := requireNormalDirectory(projectRoot); err != nil {
 			return err
 		}
 		if err := winutil.ApplySharedProjectTree(projectRoot, m.ownerSID, nil); err != nil {

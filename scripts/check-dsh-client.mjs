@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bundleStyles } from "../packages/dsh-client-workagent/build.mjs";
 
 const root = new URL("../", import.meta.url);
 const expected = "0.1.1-rc.2";
@@ -27,12 +28,21 @@ const pluginRoot = new URL(
   "../packages/dsh-client-workagent/",
   import.meta.url,
 );
+const { metafile: styleGraph } = await bundleStyles();
+// Only CSS included in the public stylesheet owns its existing token literals.
+// JavaScript and unbundled styles retain the same color restrictions as before.
+const bundledStyles = new Set(
+  Object.keys(styleGraph.inputs)
+    .filter((path) => path.endsWith(".css"))
+    .map((path) => path.replaceAll("\\", "/")),
+);
 const files = await readdir(pluginRoot, { recursive: true });
 for (const file of files.filter(
   (name) =>
     !name.includes("node_modules") &&
     /\.(?:css|[cm]?[jt]sx?)$/.test(name) &&
-    name !== "tokens.css",
+    name !== "tokens.css" &&
+    !bundledStyles.has(name.replaceAll("\\", "/")),
 )) {
   const source = await readFile(join(fileURLToPath(pluginRoot), file), "utf8");
   if (/(?:#[0-9a-f]{3,8}\b|rgba?\s*\()/i.test(source)) {

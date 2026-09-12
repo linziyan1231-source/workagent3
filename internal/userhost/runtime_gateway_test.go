@@ -254,7 +254,7 @@ func TestRuntimeGatewayDeliversStagedBundleThroughInternalPath(t *testing.T) {
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 	bundle := &nativeauth.Bundle{FormatVersion: 1, BaseURL: "http://127.0.0.1:8317/v1", CodexAPIKey: "cpa_abcdefghijklmnopqrstuvwxyz", KimiAPIKey: "cpa_zyxwvutsrqponmlkjihgfedcba", CodexModel: "gpt-5.6-sol", KimiModel: "kimi-k3"}
-	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {})
+	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, "", target, "runtime-token", bundle, nil, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestRuntimeGatewayKeepsStagedBundleWhenProjectionFails(t *testing.T) {
 	defer downstream.Close()
 	target, _ := url.Parse(downstream.URL)
 	bundle := &nativeauth.Bundle{FormatVersion: 1, BaseURL: "http://127.0.0.1:8317/v1", CodexAPIKey: "cpa_abcdefghijklmnopqrstuvwxyz", KimiAPIKey: "cpa_zyxwvutsrqponmlkjihgfedcba", CodexModel: "gpt-5.6-sol", KimiModel: "kimi-k3"}
-	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, target, "runtime-token", bundle, nil, func() {})
+	gateway, err := newRuntimeGateway(runtimeDirectory, dshHome, "", nil, "", dataRoot, sid, "", target, "runtime-token", bundle, nil, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}

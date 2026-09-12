@@ -1,0 +1,121 @@
+/* All sidebar data sources use the same row, group and action presentation. */
+.workagent-sidebar-session .is-main,
+.workagent-sidebar-project-row .is-main {
+  font-size: var(--workagent-type-control);
+}
+.workagent-sidebar-label {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.workagent-sidebar-label > .workagent-session-title,
+.workagent-sidebar-subtitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.workagent-sidebar-subtitle,
+.workagent-sidebar-meta {
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-sidebar-session .workagent-sidebar-meta,
+.workagent-sidebar-project-row .workagent-sidebar-meta,
+.workagent-sidebar-project-row .workagent-sidebar-group-icons {
+  flex: none;
+}
+.workagent-sidebar-session .workagent-sidebar-meta,
+.workagent-sidebar-project-row .workagent-sidebar-meta {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow: visible;
+}
+.workagent-sidebar-meta > * {
+  flex: none;
+}
+.workagent-sidebar-pin {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.workagent-sidebar-pin.is-pinned {
+  color: var(--dsw-color-text);
+}
+.workagent-sidebar-pin.is-pinned path:first-child {
+  fill: currentColor;
+}
+.workagent-sidebar-group-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.workagent-sidebar-group-icons > * {
+  flex: none;
+}
+.workagent-sidebar-project-row .workagent-sidebar-group-icons > * {
+  flex: none;
+  overflow: visible;
+}
+.workagent-sidebar-project-row .workagent-sidebar-group-icons {
+  overflow: visible;
+}
+.workagent-sidebar-session:has(.is-active) {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-sidebar-session .is-active {
+  color: var(--dsw-color-accent);
+  font-weight: 500;
+}
+.workagent-sidebar-session .is-main:focus-visible,
+.workagent-sidebar-project-row .is-main:focus-visible,
+.workagent-sidebar-heading-actions > button:focus-visible {
+  outline: 2px solid var(--dsw-color-accent);
+  outline-offset: -2px;
+}
+.workagent-sidebar-session:focus-within .workagent-row-action,
+.workagent-sidebar-project-row:focus-within .workagent-row-action {
+  opacity: 1;
+}
+.workagent-sidebar-section-label {
+  padding: 4px 6px;
+  color: var(--dsw-color-text);
+  font-size: var(--workagent-type-control);
+  font-weight: 650;
+}
+.workagent-channel-sidebar .workagent-sidebar-projects {
+  flex: 1;
+}
+.workagent-channel-sidebar .workagent-sidebar-filter {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px 8px;
+}
+.workagent-channel-sidebar .workagent-sidebar-filter label {
+  min-width: 0;
+  flex: 1;
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-sidebar-filter select {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 4px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  font-size: var(--workagent-type-control);
+}
+@media (hover: none) {
+  .workagent-sidebar-session .workagent-row-action,
+  .workagent-sidebar-project-row .workagent-row-action {
+    opacity: 1;
+  }
+}

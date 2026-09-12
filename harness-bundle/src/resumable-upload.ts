@@ -13,6 +13,7 @@ import {
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { WorkspaceEntry } from "./workspace-store.js";
+import { MAX_UPLOAD_BYTES } from "@workagent/contracts/upload-policy";
 
 export type UploadSession = {
   id: string;
@@ -24,6 +25,8 @@ export type UploadSession = {
   offset: number;
   createdAt: number;
   updatedAt: number;
+  completed?: WorkspaceEntry;
+  conflict?: "rename";
 };
 const chunkLimit = 8 * 1024 * 1024;
 const lifetime = 7 * 24 * 60 * 60 * 1000;
@@ -37,7 +40,9 @@ export class ResumableUploads {
       workspaceId: string,
       path: string,
       stream: AsyncIterable<Uint8Array>,
+      conflict?: "rename",
     ) => Promise<WorkspaceEntry>,
+    readonly keepReceipts = false,
   ) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
     this.cleanup();
@@ -79,7 +84,7 @@ export class ResumableUploads {
             readFileSync(join(this.root, name), "utf8"),
           ) as UploadSession,
       )
-      .filter((row) => row.workspaceId === workspaceId)
+      .filter((row) => row.workspaceId === workspaceId && !row.completed)
       .map((row) => this.get(workspaceId, row.id));
   }
   get(workspaceId: string, id: string): UploadSession {
@@ -89,13 +94,23 @@ export class ResumableUploads {
       readFileSync(paths.metadata, "utf8"),
     ) as UploadSession;
     if (row.workspaceId !== workspaceId) throw new Error("upload_not_found");
+    if (row.completed) {
+      this.validate(workspaceId, "");
+      return row;
+    }
     this.validate(workspaceId, row.path);
     // The durable file length also recovers a crash between data and metadata writes.
     return { ...row, offset: statSync(paths.data).size };
   }
   create(
     workspaceId: string,
-    input: { path: string; name: string; size: number; lastModified: number },
+    input: {
+      path: string;
+      name: string;
+      size: number;
+      lastModified: number;
+      conflict?: "rename";
+    },
   ) {
     if (
       !input.path ||
@@ -104,15 +119,16 @@ export class ResumableUploads {
       input.name.length > 255 ||
       !Number.isSafeInteger(input.size) ||
       input.size < 0 ||
-      input.size > 1024 ** 3 ||
       !Number.isSafeInteger(input.lastModified) ||
-      input.lastModified < 0
+      input.lastModified < 0 ||
+      (input.conflict !== undefined && input.conflict !== "rename")
     )
       throw new Error("invalid_upload");
+    if (input.size > MAX_UPLOAD_BYTES) throw new Error("request_too_large");
     this.validate(workspaceId, input.path);
     this.cleanup();
     if (
-      readdirSync(this.root).filter((name) => name.endsWith(".json")).length >=
+      readdirSync(this.root).filter((name) => name.endsWith(".part")).length >=
       32
     )
       throw new Error("upload_limit_reached");
@@ -182,13 +198,21 @@ export class ResumableUploads {
     try {
       const row = this.get(workspaceId, id);
       if (row.offset !== row.size) throw new Error("upload_incomplete");
+      if (row.completed) return row.completed;
       const paths = this.#paths(id);
       async function* content() {
         yield* createReadStream(paths.data);
       }
-      const result = await this.commit(workspaceId, row.path, content());
+      const result = await this.commit(
+        workspaceId,
+        row.path,
+        content(),
+        row.conflict,
+      );
+      if (this.keepReceipts)
+        this.#save({ ...row, completed: result, updatedAt: Date.now() });
       rmSync(paths.data, { force: true });
-      rmSync(paths.metadata, { force: true });
+      if (!this.keepReceipts) rmSync(paths.metadata, { force: true });
       return result;
     } finally {
       this.#busy.delete(id);

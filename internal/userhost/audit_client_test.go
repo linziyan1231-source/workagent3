@@ -58,7 +58,7 @@ func TestSkillDisableEventFlowsToPortalAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandlerWithControl(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, store, gatewayTestPublisher{}, nil, nil, target, "token", nil, nil, nil, "", nil, client, nil)
+	handler := newRuntimeGatewayHandlerWithControl(catalog, openGatewayCredentials(t), gatewayTestPublisher{}, store, gatewayTestPublisher{}, nil, nil, target, "token", nil, nil, nil, "", nil, client, nil, "")
 
 	request := httptest.NewRequest(http.MethodPatch, "/v1/skills/user-skill", strings.NewReader(`{"enabled":false}`))
 	request.Header.Set("Authorization", "Bearer token")
@@ -109,7 +109,7 @@ func TestMCPAndOAuthEventsFlowToPortalAudit(t *testing.T) {
 	publisher := gatewayTestPublisher{}
 	oauth := newMCPOAuthManager(catalog, credentials, publisher)
 	target, _ := url.Parse("http://127.0.0.1:1")
-	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, openGatewaySkills(t), publisher, nil, oauth, target, "runtime-token", nil, nil, nil, "", nil, client, nil)
+	handler := newRuntimeGatewayHandlerWithControl(catalog, credentials, publisher, openGatewaySkills(t), publisher, nil, oauth, target, "runtime-token", nil, nil, nil, "", nil, client, nil, "")
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))

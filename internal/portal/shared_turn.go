@@ -3,6 +3,7 @@ package portal
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ func (s *Server) cancelSharedRun(writer http.ResponseWriter, request *http.Reque
 	}
 	var input struct {
 		ConversationID string `json:"conversation_id"`
+		AssistantID    string `json:"assistant_id"`
 	}
 	if !decodeJSON(request, &input, 16*1024) {
 		writeError(writer, http.StatusBadRequest, "invalid_shared_run")
@@ -31,10 +33,19 @@ func (s *Server) cancelSharedRun(writer http.ResponseWriter, request *http.Reque
 		writeError(writer, http.StatusInternalServerError, "shared_run_stop_failed")
 		return
 	}
-	run, message, err := s.modules.Collaboration.StopAIRun(request.Context(), input.ConversationID, user.ID, messageID)
+	sharedMessageMu.Lock()
+	defer sharedMessageMu.Unlock()
+	run, message, err := s.modules.Collaboration.StopAssistantRun(request.Context(), input.ConversationID, input.AssistantID, user.ID, messageID)
 	if err != nil {
 		writeCollaborationError(writer, err)
 		return
+	}
+	if s.modules.SharedRunQuota != nil {
+		// Close an undispatched admission before sending cancellation: a late
+		// runtime request must not accept work already stopped in Collaboration.
+		if err := s.modules.SharedRunQuota.ReleaseSharedRun(context.WithoutCancel(request.Context()), run.PayerSID, run.ID); err != nil && !errors.Is(err, contracts.ErrQuotaRunAccepted) {
+			log.Printf("Shared quota cancellation %s: %v", run.ID, err)
+		}
 	}
 	_ = s.modules.SharedTurns.Cancel(request.Context(), run.OwnerSID, run.ID)
 	s.sharedEvents.publish(message)
@@ -42,45 +53,138 @@ func (s *Server) cancelSharedRun(writer http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) maybeStartSharedAI(ctx context.Context, message collaboration.Message, requesterUserID int64) bool {
-	if s.modules.SharedTurns == nil {
-		return false
+	started, _ := s.startSharedAI(ctx, message, requesterUserID)
+	return started
+}
+
+type sharedAssistantOutcome struct {
+	AssistantID string `json:"assistant_id"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+func (s *Server) startSharedAssistants(ctx context.Context, message collaboration.Message, userID int64) []sharedAssistantOutcome {
+	values := []sharedAssistantOutcome{}
+	seen := map[string]bool{}
+	for _, mention := range message.Mentions {
+		if mention.Kind != "assistant" || seen[mention.ID] {
+			continue
+		}
+		seen[mention.ID] = true
+		started, reason := s.startSharedAssistant(ctx, message, userID, mention.ID)
+		status := "blocked"
+		if started {
+			status = "started"
+		} else if reason == "shared_run_busy" {
+			status = "busy"
+		}
+		values = append(values, sharedAssistantOutcome{AssistantID: mention.ID, Status: status, Reason: reason})
 	}
+	return values
+}
+func (s *Server) startSharedAI(ctx context.Context, message collaboration.Message, userID int64) (bool, string) {
+	results := s.startSharedAssistants(ctx, message, userID)
+	for _, r := range results {
+		if r.Status == "started" {
+			return true, ""
+		}
+	}
+	if len(results) > 0 {
+		return false, results[0].Reason
+	}
+	return false, ""
+}
+
+func (s *Server) startSharedAssistant(ctx context.Context, message collaboration.Message, requesterUserID int64, assistantID string) (bool, string) {
 	conversation, err := s.modules.Collaboration.ConversationForUser(ctx, message.Conversation, requesterUserID, true)
-	if err != nil || !mentionsAssistant(message.Mentions, conversation.AssistantID) {
-		return false
+	if err != nil || !mentionsAssistant(message.Mentions, assistantID) {
+		return false, ""
+	}
+	var agent collaboration.AssistantMember
+	for _, a := range conversation.Assistants {
+		if a.AssistantID == assistantID {
+			agent = a
+			break
+		}
+	}
+	if agent.AssistantID == "" {
+		return false, "invalid_shared_mention"
+	}
+	if s.modules.SharedTurns == nil {
+		return false, "shared_turn_unavailable"
+	}
+	project, err := s.modules.Collaboration.ProjectForUser(ctx, conversation.ProjectID, requesterUserID, false)
+	if err != nil {
+		return false, "shared_runtime_not_authorized"
+	}
+	owner, err := s.store.UserByID(ctx, project.OwnerUserID)
+	if err != nil {
+		return false, "shared_runtime_not_authorized"
+	}
+	if err = s.applyMarketActions(ctx, owner); err != nil {
+		return false, "market_security_update_pending"
+	}
+	capabilities, err := s.resolveProjectCapabilities(ctx, conversation.ProjectID, owner)
+	if err != nil {
+		return false, "project_capability_unavailable"
+	}
+	billingModel := agent.ModelID
+	if s.modules.ModelAccess != nil {
+		user, err := s.store.UserByID(ctx, requesterUserID)
+		if err != nil {
+			return false, "shared_runtime_not_authorized"
+		}
+		models, err := s.modules.ModelAccess.ListAuthorized(ctx, user.SID)
+		if err != nil {
+			return false, "model_access_failed"
+		}
+		billingModel = sharedBillingModel(models, agent.Backend, agent.ModelID)
+		if billingModel == "" {
+			return false, "shared_runtime_not_authorized"
+		}
+	}
+	if agent.Active {
+		return false, "shared_run_busy"
 	}
 	runID, err := auth.RandomToken(18)
 	if err != nil {
-		return false
+		return false, "shared_turn_failed"
 	}
-	run, err := s.modules.Collaboration.ReserveAIRun(ctx, runID, message, requesterUserID)
+	run, err := s.modules.Collaboration.ReserveAssistantRun(ctx, runID, message, requesterUserID, assistantID)
 	if err != nil {
-		return false
+		return false, "shared_run_busy"
 	}
-	delta, err := s.modules.Collaboration.UserMessagesRange(ctx, conversation.ID, run.ContextFromSeq, run.ContextThroughSeq)
-	if err != nil {
-		s.finishSharedAIRun(run, SharedTurnResult{}, err)
-		return false
-	}
-	full, err := s.modules.Collaboration.UserMessagesRange(ctx, conversation.ID, 0, run.ContextThroughSeq)
+	delta, err := s.modules.Collaboration.SharedMessagesRange(ctx, conversation.ID, run.ContextFromSeq, run.ContextThroughSeq)
 	if err != nil {
 		s.finishSharedAIRun(run, SharedTurnResult{}, err)
-		return false
+		return false, "shared_context_unavailable"
+	}
+	full, err := s.modules.Collaboration.SharedMessagesRange(ctx, conversation.ID, 0, run.ContextThroughSeq)
+	if err != nil {
+		s.finishSharedAIRun(run, SharedTurnResult{}, err)
+		return false, "shared_context_unavailable"
 	}
 	request := SharedTurnRequest{
-		RunID: run.ID, ConversationID: conversation.ID, ProjectID: conversation.ProjectID,
-		Engine: conversation.AssistantBackend, ModelID: conversation.ModelID, ThinkingEffort: conversation.ThinkingEffort,
-		Context: formatSharedAIContext(delta), RecoveryContext: formatSharedAIContext(full), RuntimeSessionID: run.PreviousRuntimeSessionID,
-		PayerSID: run.PayerSID,
+		Capabilities: &capabilities,
+		RunID:        run.ID, ConversationID: conversation.ID, ProjectID: conversation.ProjectID,
+		Engine: agent.Backend, ModelID: agent.ModelID, ThinkingEffort: agent.ThinkingEffort,
+		Context: formatSharedAIContext(delta), RecoveryContext: formatSharedAIContext(full), RuntimeSessionID: run.PreviousRuntimeSessionID, SessionKey: run.SessionKey,
+		PayerSID:     run.PayerSID,
+		AssistantID:  agent.AssistantID,
+		QuotaModelID: billingModel,
+	}
+	if len(request.Context) > 512*1024 || len(request.RecoveryContext) > 768*1024 {
+		s.finishSharedAIRun(run, SharedTurnResult{}, errors.New("shared_context_too_large"))
+		return false, "shared_context_too_large"
 	}
 	if s.modules.SharedRunQuota != nil {
-		if err := s.modules.SharedRunQuota.ReserveSharedRun(ctx, run.PayerSID, run.ID, conversation.ModelID, conversation.AssistantBackend, estimatedSharedTurnUnits(request.Context)); err != nil {
+		if err := s.modules.SharedRunQuota.ReserveSharedRun(ctx, contracts.SharedRunQuotaRequest{RunID: run.ID, OwnerSID: run.OwnerSID, PayerSID: run.PayerSID, ModelID: billingModel, Engine: agent.Backend, EstimatedUnits: estimatedSharedTurnUnits(request.Context)}); err != nil {
 			s.finishSharedAIRun(run, SharedTurnResult{}, err)
 			s.publishNotification(ctx, contracts.NotificationInput{
 				TargetSID: run.PayerSID, Kind: "shared_quota", Title: "Shared AI run not started",
 				Message: "Your quota could not cover the shared AI run you triggered; ask the owner or an administrator to review your budget.", DeepLink: "/",
 			})
-			return false
+			return false, "quota_exceeded"
 		}
 	}
 	go func() {
@@ -88,19 +192,21 @@ func (s *Server) maybeStartSharedAI(ctx context.Context, message collaboration.M
 		defer cancel()
 		result, runErr := s.modules.SharedTurns.Run(runContext, run.OwnerSID, request)
 		if runErr != nil && s.modules.SharedRunQuota != nil {
-			// A run that never reached the runtime-side runner (e.g. the owner
-			// Runtime rejected the turn) would otherwise leak its admission
-			// reservation in the reserved state; settle it with zero usage.
-			// When the runner did see the turn it settles on its own first, so
-			// this best-effort release is an idempotent no-op or conflict.
-			_ = s.modules.SharedRunQuota.ReleaseSharedRun(context.Background(), run.PayerSID, run.ID)
+			// Close only an admission the runtime never accepted. A transport
+			// failure after acceptance leaves accounting to durable recovery.
+			if releaseErr := s.modules.SharedRunQuota.ReleaseSharedRun(context.Background(), run.PayerSID, run.ID); releaseErr != nil {
+				log.Printf("Shared AI run %s admission remains pending: %v", run.ID, releaseErr)
+			}
 		}
 		s.finishSharedAIRun(run, result, runErr)
 	}()
-	return true
+	return true, ""
 }
 
 func mentionsAssistant(mentions []collaboration.Mention, assistantID string) bool {
+	if assistantID == "" {
+		return false
+	}
 	for _, mention := range mentions {
 		if mention.Kind == "assistant" && mention.ID == assistantID {
 			return true
@@ -111,13 +217,17 @@ func mentionsAssistant(mentions []collaboration.Mention, assistantID string) boo
 
 func formatSharedAIContext(messages []collaboration.Message) string {
 	var builder strings.Builder
-	builder.WriteString("Shared project group conversation. Treat each bracketed author as a distinct human participant and use the shared workspace.\n\n")
+	builder.WriteString("Shared project group conversation. Authors include employees and assistants; respect their labeled identities and use the shared workspace. Only the current user mention requests your reply; other assistants have independent sessions.\n\n")
 	for _, message := range messages {
 		builder.WriteString("[")
 		builder.WriteString(message.AuthorName)
 		if message.AuthorUserID != nil {
 			builder.WriteString(" user:")
 			builder.WriteString(strconv.FormatInt(*message.AuthorUserID, 10))
+		}
+		if message.AuthorAssistantID != "" {
+			builder.WriteString(" assistant:")
+			builder.WriteString(message.AuthorAssistantID)
 		}
 		builder.WriteString("]\n")
 		builder.WriteString(message.Body)
@@ -139,6 +249,9 @@ func estimatedSharedTurnUnits(context string) int64 {
 }
 
 func (s *Server) finishSharedAIRun(run collaboration.AIRun, result SharedTurnResult, runErr error) {
+	if runErr != nil {
+		log.Printf("Shared AI run %s (conversation %s, assistant %s, engine %s) failed: %v", run.ID, run.ConversationID, run.AssistantID, run.Engine, runErr)
+	}
 	messageID, err := auth.RandomToken(18)
 	if err != nil {
 		return

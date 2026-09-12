@@ -31,7 +31,9 @@ type harnessProjectionPublisher struct {
 }
 
 type harnessMCPProjection struct {
-	Servers []harnessResolvedMCPServer `json:"servers"`
+	Servers      []harnessResolvedMCPServer `json:"servers"`
+	NativeNames  []string                   `json:"nativeNames"`
+	NativeConfig map[string]map[string]any  `json:"nativeConfig"`
 }
 
 type harnessResolvedMCPServer struct {
@@ -47,6 +49,14 @@ func (p *harnessProjectionPublisher) Publish(ctx context.Context) error {
 		return err
 	}
 	projection := harnessMCPProjection{Servers: make([]harnessResolvedMCPServer, 0, len(servers))}
+	projection.NativeNames, err = p.catalog.NativeNames(ctx)
+	if err != nil {
+		return err
+	}
+	projection.NativeConfig, err = p.catalog.NativeConfig(ctx)
+	if err != nil {
+		return err
+	}
 	for _, server := range servers {
 		resolved := harnessResolvedMCPServer{Server: server, Environment: map[string]string{}, Headers: map[string]string{}, State: "ready"}
 		if !server.Enabled {

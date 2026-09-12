@@ -29,6 +29,8 @@ export const gatewayUsageSchema = z.object({
 export type GatewayUsage = z.infer<typeof gatewayUsageSchema>;
 
 export const quotaReservationSchema = z.object({
+  accepted: z.boolean().optional(),
+  alreadyAccepted: z.boolean().optional(),
   runId: z.string().min(1),
   sid: z.string().startsWith("S-1-"),
   modelId: z.string().min(1),

@@ -1,0 +1,144 @@
+.workagent-file-manager.has-preview .workagent-file-tree {
+  flex: 0 0 var(--workagent-tree-height, 28%);
+  min-height: 60px;
+}
+.workagent-file-preview-pane {
+  flex: 1 1 0;
+  min-height: 130px;
+  border-top: 0;
+}
+.workagent-file-preview-pane.is-maximized {
+  position: fixed;
+  inset: 16px;
+  z-index: 70;
+  background: var(--dsw-color-panel);
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  box-shadow: 0 0 0 100vmax #0007;
+  overflow: hidden;
+}
+.workagent-file-resizer {
+  flex: none;
+  touch-action: none;
+  position: relative;
+  z-index: 1;
+}
+.workagent-file-resizer::after {
+  content: "";
+  position: absolute;
+  background: var(--dsw-color-border);
+}
+.workagent-file-resizer:hover::after,
+.workagent-file-resizer:focus-visible::after {
+  background: var(--dsw-color-accent);
+}
+.workagent-file-resizer.is-vertical {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+}
+.workagent-file-resizer.is-vertical::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+}
+.workagent-file-resizer.is-horizontal {
+  height: 9px;
+  cursor: row-resize;
+}
+.workagent-file-resizer.is-horizontal::after {
+  top: 4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.workagent-resizing {
+  user-select: none;
+}
+.workagent-resizing iframe {
+  pointer-events: none;
+}
+@media (min-width: 1100px) {
+  body:has(.workagent-files-panel:not([hidden])) .workagent-top-actions {
+    right: calc(var(--workagent-files-width) + 22px);
+  }
+}
+@media (max-width: 1099px) {
+  .workagent-file-resizer.is-vertical {
+    display: none;
+  }
+  .workagent-file-preview-pane.is-maximized {
+    inset: 4px;
+  }
+}
+.workagent-files-panel:has(.workagent-file-preview-pane.is-maximized) {
+  z-index: 60;
+}
+
+/* Opening a file switches the entire drawer from browsing to previewing. */
+.workagent-file-manager-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.workagent-file-manager-content[hidden] {
+  display: none;
+}
+.workagent-files-panel:has(.has-preview) > .workagent-files-panel-header,
+.workagent-files-panel:has(.has-preview) > .workagent-files-project {
+  display: none;
+}
+.workagent-file-manager.has-preview .workagent-file-preview-pane > header {
+  min-height: 64px;
+}
+
+.workagent-file-tabs {
+  display: flex;
+  order: -1;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 6px;
+  flex: none;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-located-line {
+  background: #b5822440;
+  outline: 1px solid #b5822470;
+}
+.workagent-skill-suggestion textarea {
+  width: 100%;
+  box-sizing: border-box;
+  color: inherit;
+  background: transparent;
+}
+.workagent-file-tabs > span {
+  display: flex;
+  flex: none;
+}
+.workagent-file-tabs button {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  cursor: pointer;
+}
+.workagent-file-tabs button[aria-pressed="true"] {
+  background: var(--dsw-color-panel);
+  font-weight: 600;
+}
+.workagent-file-tab-content {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.workagent-file-tab-content[hidden],
+.workagent-text-editor textarea[hidden] {
+  display: none;
+}

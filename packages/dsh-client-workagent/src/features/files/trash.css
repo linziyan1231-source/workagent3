@@ -1,0 +1,125 @@
+/* Project recycle bins use the file manager's toolbar, rows and action forms. */
+.workagent-trash-summary {
+  flex: none;
+  margin: 12px 14px 8px;
+  padding: 14px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  background: var(--dsw-color-bg);
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-trash-summary-heading,
+.workagent-trash-capacity,
+.workagent-trash-list-heading,
+.workagent-trash-file-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workagent-trash-summary-heading strong {
+  color: var(--dsw-color-text);
+  font-size: var(--workagent-type-control);
+  font-weight: 550;
+}
+.workagent-trash-summary-heading > span {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--dsw-color-accent-soft);
+  color: var(--dsw-color-text);
+}
+.workagent-trash-summary p {
+  margin: 10px 0 16px;
+  line-height: 1.7;
+}
+.workagent-trash-capacity {
+  font-size: var(--workagent-type-caption);
+  font-variant-numeric: tabular-nums;
+}
+.workagent-trash-capacity > span:last-child {
+  flex: none;
+}
+.workagent-trash-summary progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  appearance: none;
+  background: var(--dsw-color-border);
+  accent-color: var(--dsw-color-accent);
+}
+.workagent-trash-summary progress::-webkit-progress-bar {
+  background: var(--dsw-color-border);
+}
+.workagent-trash-summary progress::-webkit-progress-value {
+  background: var(--dsw-color-accent);
+  border-radius: 3px;
+}
+.workagent-trash-summary progress::-moz-progress-bar {
+  background: var(--dsw-color-accent);
+}
+.workagent-trash-list-heading {
+  flex: none;
+  margin: 8px 18px 4px;
+  font-size: var(--workagent-type-caption);
+  color: var(--dsw-color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.workagent-trash-list-heading strong {
+  color: var(--dsw-color-text);
+  font-weight: 500;
+}
+.workagent-trash-list {
+  padding: 4px 10px 10px;
+}
+.workagent-trash-list > ul > li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-trash-list > ul > li:last-child {
+  border-bottom: 0;
+}
+.workagent-trash-row {
+  min-height: 48px;
+  padding-right: 2px;
+}
+.workagent-trash-row .workagent-file-tree-name {
+  gap: 9px;
+}
+.workagent-trash-row .workagent-file-tree-name > svg {
+  flex: none;
+  color: var(--dsw-color-muted);
+}
+.workagent-trash-file-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.workagent-trash-file-label > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workagent-trash-file-label > small,
+.workagent-trash-file-time {
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-trash-file-time {
+  margin: 3px 8px 4px 32px;
+  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.workagent-trash-restore-path {
+  color: var(--dsw-color-muted);
+  overflow-wrap: anywhere;
+}
+.workagent-file-row-menu > .workagent-trash-delete {
+  color: var(--dsw-color-danger);
+}

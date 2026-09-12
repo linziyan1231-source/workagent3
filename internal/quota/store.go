@@ -54,14 +54,16 @@ type ReserveRequest struct {
 }
 
 type Reservation struct {
-	RunID         string `json:"runId"`
-	SID           string `json:"sid"`
-	ModelID       string `json:"modelId"`
-	Period        Period `json:"period"`
-	PeriodKey     string `json:"periodKey"`
-	ReservedUnits int64  `json:"reservedUnits"`
-	ActualUnits   *int64 `json:"actualUnits"`
-	Status        string `json:"status"`
+	Accepted        bool   `json:"accepted"`
+	AlreadyAccepted bool   `json:"alreadyAccepted,omitempty"`
+	RunID           string `json:"runId"`
+	SID             string `json:"sid"`
+	ModelID         string `json:"modelId"`
+	Period          Period `json:"period"`
+	PeriodKey       string `json:"periodKey"`
+	ReservedUnits   int64  `json:"reservedUnits"`
+	ActualUnits     *int64 `json:"actualUnits"`
+	Status          string `json:"status"`
 }
 
 type SettleRequest struct {
@@ -181,6 +183,16 @@ ON quota_gateway_usage(sid, failed, matched_run_id, occurred_at);
 CREATE TABLE IF NOT EXISTS quota_gateway_checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), through_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS quota_gateway_holds (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), release_after_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS quota_gateway_run_owners (run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id), sid TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quota_run_authorizations (
+ run_id TEXT PRIMARY KEY REFERENCES quota_reservations(run_id),
+ owner_sid TEXT NOT NULL,
+ scope TEXT NOT NULL CHECK (scope IN ('personal','shared')),
+ engine TEXT NOT NULL,
+ model_candidates_json TEXT NOT NULL DEFAULT '[]',
+ accepted_at INTEGER,
+ settlement_units INTEGER CHECK (settlement_units >= 0),
+ completed_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS quota_dollar_budgets (sid TEXT NOT NULL,pool TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(sid,pool));
 CREATE TABLE IF NOT EXISTS quota_dollar_usage (request_id TEXT PRIMARY KEY,pool TEXT NOT NULL,usd REAL NOT NULL,estimated INTEGER NOT NULL);
 `)
@@ -284,30 +296,19 @@ func (s *Store) Reserve(ctx context.Context, request ReserveRequest) (Reservatio
 }
 
 func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservation, bool, error) {
+	return s.reserveAuthorized(ctx, request, nil)
+}
+
+func (s *Store) reserveAuthorized(ctx context.Context, request ReserveRequest, authorization *runAuthorization) (Reservation, bool, error) {
 	if err := validateReserve(request); err != nil {
 		return Reservation{}, false, err
 	}
 	if s.authorizer == nil {
 		return Reservation{}, false, errors.New("quota model authorization port is required")
 	}
-	authorized, err := s.authorizer.Authorized(ctx, request.SID, request.ModelID)
-	if err != nil {
-		return Reservation{}, false, fmt.Errorf("authorize quota model: %w", err)
-	}
-	if !authorized {
-		return Reservation{}, false, ErrModelUnauthorized
-	}
 	if request.At.IsZero() {
 		request.At = s.now()
 	}
-	var scopes []accountingScope
-	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID {
-		scopes, err = s.accountingScopes(ctx, request.SID)
-		if err != nil {
-			return Reservation{}, false, err
-		}
-	}
-
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return Reservation{}, false, fmt.Errorf("begin quota reservation: %w", err)
@@ -320,7 +321,26 @@ func (s *Store) reserve(ctx context.Context, request ReserveRequest) (Reservatio
 		if existing.SID != request.SID || existing.ModelID != request.ModelID || existing.ReservedUnits != request.EstimatedUnits {
 			return Reservation{}, true, ErrIdempotencyConflict
 		}
+		if authorization != nil {
+			if err := persistRunAuthorization(ctx, tx, request.RunID, *authorization, false); err != nil {
+				return Reservation{}, true, err
+			}
+		}
 		return existing, true, nil
+	}
+	authorized, err := s.authorizer.Authorized(ctx, request.SID, request.ModelID)
+	if err != nil {
+		return Reservation{}, false, fmt.Errorf("authorize quota model: %w", err)
+	}
+	if !authorized {
+		return Reservation{}, false, ErrModelUnauthorized
+	}
+	var scopes []accountingScope
+	if s.gatewayAccounting && request.ModelID != SpeechTranscriptionModelID {
+		scopes, err = s.accountingScopes(ctx, request.SID)
+		if err != nil {
+			return Reservation{}, false, err
+		}
 	}
 
 	period, limit, err := budgetFor(ctx, tx, request.SID, request.ModelID, request.At)
@@ -390,6 +410,12 @@ VALUES(?, ?, ?, ?, ?, ?, 'reserved', ?)`, request.RunID, request.SID, request.Mo
 	if err != nil {
 		return Reservation{}, false, fmt.Errorf("persist quota reservation: %w", err)
 	}
+	if authorization != nil {
+		authorization.ModelCandidates = s.modelCandidates(ctx, request.SID, request.ModelID)
+		if err := persistRunAuthorization(ctx, tx, request.RunID, *authorization, true); err != nil {
+			return Reservation{}, false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Reservation{}, false, fmt.Errorf("commit quota reservation: %w", err)
 	}
@@ -420,10 +446,8 @@ func (s *Store) Settle(ctx context.Context, request SettleRequest) error {
 	return s.settle(ctx, "", request)
 }
 
-// ReserveForSID prevents a scoped Runtime credential from reserving quota for
-// another employee: the pinned SID must match the request SID. The Portal uses
-// it to pin shared-run reservations to the frozen payer (the member who
-// mentioned the assistant), which may differ from the runtime owner's SID.
+// ReserveForSID is an in-process payer-scoped operation. Runtime HTTP calls
+// use ReserveRuntime, which verifies the separate execution authorization.
 func (s *Store) ReserveForSID(ctx context.Context, sid string, request ReserveRequest) (Reservation, error) {
 	if err := validateSID(sid); err != nil {
 		return Reservation{}, err
@@ -434,27 +458,14 @@ func (s *Store) ReserveForSID(ctx context.Context, sid string, request ReserveRe
 	return s.Reserve(ctx, request)
 }
 
-// ReserveSharedRun exposes a narrow resource-specific Port to the Portal for
-// shared AI runs: the reservation is pinned to the frozen payer SID at
-// admission, before the owner Runtime starts the turn.
-func (s *Store) ReserveSharedRun(ctx context.Context, sid, runID, modelID, engine string, estimatedUnits int64) error {
-	_, err := s.ReserveForSID(ctx, sid, ReserveRequest{
-		RunID: runID, SID: sid, ModelID: modelID, EstimatedUnits: estimatedUnits, Engine: engine,
-	})
-	return err
-}
-
-// ReleaseSharedRun settles a shared run admission reservation with zero
-// actual units when the run failed before reaching the owner Runtime.
-// Settlement is idempotent: when the runtime-side runner already settled the
-// reservation, a repeated settle is either a no-op (same zero units) or an
-// idempotency conflict the caller may ignore.
+// ReleaseSharedRun closes only an unaccepted admission. Once Runtime accepted
+// the run, its persisted completion and gateway drain own settlement.
 func (s *Store) ReleaseSharedRun(ctx context.Context, sid, runID string) error {
-	return s.SettleForSID(ctx, sid, SettleRequest{RunID: runID, ActualUnits: 0})
+	return s.cancelUnacceptedSharedRun(ctx, sid, runID)
 }
 
-// SettleForSID prevents a scoped Runtime credential from settling another
-// employee's reservation even if it learns a run ID.
+// SettleForSID is an in-process payer-scoped operation. Runtime credentials
+// use SettleRuntime and must match the persisted execution owner.
 func (s *Store) SettleForSID(ctx context.Context, sid string, request SettleRequest) error {
 	if err := validateSID(sid); err != nil {
 		return err
@@ -477,6 +488,10 @@ func (s *Store) SettleSpeech(ctx context.Context, runID string, actualSeconds in
 }
 
 func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (err error) {
+	return s.settleAs(ctx, sid, "", request)
+}
+
+func (s *Store) settleAs(ctx context.Context, sid, runtimeSID string, request SettleRequest) (err error) {
 	if strings.TrimSpace(request.RunID) == "" {
 		return errors.New("quota run ID is required")
 	}
@@ -509,6 +524,22 @@ func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (
 	if !found {
 		return ErrReservationNotFound
 	}
+	if runtimeSID != "" {
+		auth, found, authErr := authorizationByRun(ctx, tx, request.RunID)
+		if authErr != nil {
+			return authErr
+		}
+		if found {
+			if auth.OwnerSID != runtimeSID {
+				return ErrReservationNotFound
+			}
+			if auth.Scope == "shared" && !auth.Accepted && reservation.Status != "settled" {
+				return ErrRunNotAccepted
+			}
+		} else {
+			return ErrReservationNotFound
+		}
+	}
 	if actor == "" {
 		actor = reservation.SID
 	}
@@ -528,6 +559,15 @@ func (s *Store) settle(ctx context.Context, sid string, request SettleRequest) (
 		return ErrIdempotencyConflict
 	}
 	actual := request.ActualUnits
+	if runtimeSID != "" {
+		// Retain the first completed result across response loss and late drains.
+		if _, err := tx.ExecContext(ctx, `UPDATE quota_run_authorizations SET settlement_units=COALESCE(settlement_units,?),completed_at=COALESCE(completed_at,?) WHERE run_id=?`, actual, s.now().UnixMilli(), request.RunID); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT settlement_units FROM quota_run_authorizations WHERE run_id=?),?)`, request.RunID, actual).Scan(&actual); err != nil {
+			return err
+		}
+	}
 	var source string
 	var gatewayOwner string
 	if s.gatewayAccounting && reservation.ModelID != SpeechTranscriptionModelID {

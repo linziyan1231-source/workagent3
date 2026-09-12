@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -149,10 +150,12 @@ GROUP BY model ORDER BY model`, sid, dayStart.Unix(), at.Unix())
 }
 
 // matchGatewayUsage attributes drained gateway records to a settling
-// reservation: unmatched, successful records for the same SID whose model or
+// reservation: unmatched records for the same SID whose model or
 // alias names the reserved model, inside the window between reservation
 // creation and settlement. Matched records are pinned to the run so no later
-// settlement can count them again.
+// settlement can count them again. Authoritative gateway accounting includes
+// cancelled requests that consumed tokens; legacy estimate accounting keeps
+// its successful-request matching behavior.
 func (s *Store) matchGatewayUsage(ctx context.Context, tx *sql.Tx, reservation Reservation) (int64, bool, error) {
 	var createdAt int64
 	if err := tx.QueryRowContext(ctx, `
@@ -160,14 +163,29 @@ SELECT created_at FROM quota_reservations WHERE run_id = ?`, reservation.RunID).
 		return 0, false, fmt.Errorf("read reservation creation time: %w", err)
 	}
 	candidates := s.modelCandidates(ctx, reservation.SID, reservation.ModelID)
+	var savedCandidates string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT model_candidates_json FROM quota_run_authorizations WHERE run_id=?),'[]')`, reservation.RunID).Scan(&savedCandidates); err != nil {
+		return 0, false, err
+	}
+	var frozen []string
+	if err := json.Unmarshal([]byte(savedCandidates), &frozen); err != nil {
+		return 0, false, err
+	}
+	if len(frozen) > 0 {
+		candidates = frozen
+	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(candidates)), ", ")
-	arguments := []any{reservation.SID, time.Unix(createdAt, 0).Add(-gatewayMatchSkew).Unix(), s.now().Add(gatewayMatchSkew).Unix()}
+	arguments := []any{reservation.SID, false, time.Unix(createdAt, 0).Add(-gatewayMatchSkew).Unix(), s.now().Add(gatewayMatchSkew).Unix()}
 	if s.gatewayAccounting {
 		var owner string
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT sid FROM quota_gateway_run_owners WHERE run_id=?),?)`, reservation.RunID, reservation.SID).Scan(&owner); err != nil {
 			return 0, false, err
 		}
-		arguments = []any{owner, createdAt, s.now().Unix()}
+		var completed int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT completed_at/1000 FROM quota_run_authorizations WHERE run_id=?),?)`, reservation.RunID, s.now().Unix()).Scan(&completed); err != nil {
+			return 0, false, err
+		}
+		arguments = []any{owner, true, createdAt, completed}
 	}
 	// The candidate list appears twice: once for model, once for alias.
 	for i := 0; i < 2; i++ {
@@ -177,7 +195,7 @@ SELECT created_at FROM quota_reservations WHERE run_id = ?`, reservation.RunID).
 	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 SELECT request_id, total_tokens FROM quota_gateway_usage
-WHERE sid = ? AND failed = 0 AND matched_run_id IS NULL
+WHERE sid = ? AND (failed = 0 OR ? = 1) AND matched_run_id IS NULL
   AND occurred_at >= ? AND occurred_at <= ?
   AND (model IN (%s) OR alias IN (%s))
 ORDER BY occurred_at`, placeholders, placeholders), arguments...)

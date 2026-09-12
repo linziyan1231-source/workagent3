@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import { presetMutationSchema } from "@workagent/contracts";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 import type {
   CredentialStatusStore,
   ModelAccessStore,

@@ -66,6 +66,15 @@ func (m marketRuntime) send(ctx context.Context, method, path string, body io.Re
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		defer response.Body.Close()
+		var failure struct {
+			Error string `json:"error"`
+		}
+		if json.NewDecoder(io.LimitReader(response.Body, 8192)).Decode(&failure) == nil {
+			switch failure.Error {
+			case "market_update_session_busy", "market_skill_revoked", "market_capability_incompatible":
+				return nil, errors.New(failure.Error)
+			}
+		}
 		return nil, fmt.Errorf("market_runtime_rejected_%d", response.StatusCode)
 	}
 	return response, nil
@@ -94,10 +103,23 @@ func (s *Server) marketCatalog(w http.ResponseWriter, r *http.Request, user stor
 		for i := range b.Skills {
 			b.Skills[i].Archive = nil
 		}
-		writeJSON(w, 200, map[string]any{"entry": e, "bundle": b})
+		detail := map[string]any{"entry": e, "bundle": b}
+		usage, err := s.professionalDatabaseDetail(r.Context(), user.SID, b)
+		if err != nil {
+			marketError(w, err)
+			return
+		}
+		if usage != nil {
+			detail["professionalDatabase"] = usage
+		}
+		writeJSON(w, 200, detail)
 		return
 	}
-	entries, err := s.modules.Marketplace.List(r.Context(), user.Username, user.SID)
+	if err := s.importLegacyMarket(r.Context(), user); err != nil {
+		marketError(w, err)
+		return
+	}
+	entries, err := s.modules.Marketplace.Catalog(r.Context(), user.Username, user.SID)
 	if err != nil {
 		marketError(w, err)
 		return
@@ -120,11 +142,13 @@ func marketError(w http.ResponseWriter, err error) {
 }
 
 type marketPublishInput struct {
-	Kind        string `json:"kind"`
-	SourceID    string `json:"sourceId"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Version     string `json:"version"`
+	Kind         string `json:"kind"`
+	SourceID     string `json:"sourceId"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Version      string `json:"version"`
+	SeriesID     string `json:"seriesId"`
+	ReleaseNotes string `json:"releaseNotes"`
 }
 
 var marketVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -135,7 +159,7 @@ func (s *Server) publishMarketEntry(w http.ResponseWriter, r *http.Request, user
 		return
 	}
 	var input marketPublishInput
-	if !decodeJSON(r, &input, 16*1024) || input.SourceID == "" || !marketVersion.MatchString(input.Version) || (input.Kind != "skill" && input.Kind != "mcp" && input.Kind != "assistant") {
+	if !decodeJSON(r, &input, 32*1024) || input.SourceID == "" || len(input.ReleaseNotes) > 12000 || !marketVersion.MatchString(input.Version) || (input.Kind != "skill" && input.Kind != "mcp" && input.Kind != "assistant") {
 		writeError(w, 400, "invalid_market_publish")
 		return
 	}
@@ -153,12 +177,17 @@ func (s *Server) publishMarketEntry(w http.ResponseWriter, r *http.Request, user
 	if input.Name == "" {
 		input.Name = name
 	}
+	if input.Kind == "skill" {
+		for i := range b.Skills {
+			b.Skills[i].Version = input.Version
+		}
+	}
 	id, err := auth.RandomToken(18)
 	if err != nil {
 		writeError(w, 500, "market_publish_failed")
 		return
 	}
-	e := marketplace.Entry{ID: id, Kind: input.Kind, Name: input.Name, Description: input.Description, Version: input.Version, Publisher: user.Username}
+	e := marketplace.Entry{ID: id, Kind: input.Kind, Name: input.Name, Description: input.Description, Version: input.Version, Publisher: user.Username, SeriesID: input.SeriesID, ReleaseNotes: input.ReleaseNotes}
 	if err = s.modules.Marketplace.Publish(r.Context(), e, b); err != nil {
 		marketError(w, err)
 		return
@@ -304,6 +333,9 @@ func uniqueIDs(ids []string) []string {
 	return result
 }
 func portableConnector(source mcpruntime.Server) (marketplace.Connector, error) {
+	if source.Transport.ManagedService == professionalDatabaseService {
+		return marketplace.Connector{ID: source.ID, Name: source.Name, Description: source.Description, ManagedService: professionalDatabaseService, ToolPolicy: "all", CredentialNames: []string{}, AllowedTools: []string{}}, nil
+	}
 	if source.Source == "managed" {
 		return marketplace.Connector{ID: source.ID, Name: source.Name, Builtin: true, CredentialNames: []string{}, AllowedTools: []string{}}, nil
 	}
@@ -348,19 +380,27 @@ func (s *Server) installMarketEntry(w http.ResponseWriter, r *http.Request, user
 		writeError(w, 400, "invalid_market_install")
 		return
 	}
+	s.modules.Marketplace.InstallMu.Lock()
+	defer s.modules.Marketplace.InstallMu.Unlock()
 	e, b, err := s.modules.Marketplace.Get(r.Context(), input.ID)
 	if err != nil {
 		marketError(w, err)
 		return
 	}
-	endpoint, err := s.runtimes.Resolve(r.Context(), user.SID)
-	if err != nil {
-		writeError(w, 503, "runtime_unavailable")
+	var installed marketplace.Installation
+	previous, _, lookup := s.modules.Marketplace.Selection(r.Context(), user.SID, e.SeriesID)
+	if lookup != nil && !errors.Is(lookup, marketplace.ErrNotFound) {
+		marketError(w, lookup)
 		return
 	}
-	s.modules.Marketplace.InstallMu.Lock()
-	defer s.modules.Marketplace.InstallMu.Unlock()
-	installed, err := s.installBundle(r.Context(), marketRuntime{endpoint: endpoint}, user, e, b, input.Credentials)
+	if lookup == nil && previous.ID != e.ID {
+		installed, err = s.updateMarketVersion(r.Context(), user, e.ID, input.Credentials)
+	} else {
+		installed, err = s.installMarketVersion(r.Context(), user, e, b, input.Credentials)
+		if err == nil {
+			err = s.modules.Marketplace.Select(r.Context(), user.SID, e)
+		}
+	}
 	for _, slots := range input.Credentials {
 		for key := range slots {
 			delete(slots, key)
@@ -403,6 +443,17 @@ func (s *Server) installBundle(ctx context.Context, remote marketRuntime, user s
 				target = current.ID
 				break
 			}
+		}
+		if m.ManagedService != "" {
+			target, err = s.installProfessionalDatabase(ctx, remote, user, e, m, target)
+			if err != nil {
+				return state, err
+			}
+			state.MCP[m.ID] = target
+			if err = save(); err != nil {
+				return state, err
+			}
+			continue
 		}
 		if target != "" {
 			state.MCP[m.ID] = target

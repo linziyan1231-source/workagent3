@@ -32,27 +32,28 @@ import (
 )
 
 type WindowsPlatformConfig struct {
-	MaxRunningRuntimes   int
-	StorageLimits        *contracts.StorageLimits
-	CredentialRoot       string
-	LauncherExecutable   string
-	LaunchManifestRoot   string
-	DataRootBase         string
-	UserHostExecutable   string
-	HarnessCommand       string
-	HarnessEntrypoint    string
-	CodexCommand         string
-	KimiCommand          string
-	HarnessArguments     []string
-	Profile              string
-	HarnessProfileSource string
-	ManagedSkillsRoot    string
-	ManagedToolsRoot     string
-	ManagedMCPServers    []mcpruntime.Server
-	PortalURL            string
-	PublicBaseURL        string
-	Limits               winutil.JobLimits
-	NativeModels         NativeModelProvisioner
+	MaxRunningRuntimes      int
+	StorageLimits           *contracts.StorageLimits
+	CredentialRoot          string
+	LauncherExecutable      string
+	LaunchManifestRoot      string
+	DataRootBase            string
+	UserHostExecutable      string
+	HarnessCommand          string
+	HarnessEntrypoint       string
+	CodexCommand            string
+	KimiCommand             string
+	HarnessArguments        []string
+	Profile                 string
+	HarnessProfileSource    string
+	ManagedSkillsRoot       string
+	ManagedToolsRoot        string
+	ManagedMCPServers       []mcpruntime.Server
+	ProfessionalDatabaseURL string
+	PortalURL               string
+	PublicBaseURL           string
+	Limits                  winutil.JobLimits
+	NativeModels            NativeModelProvisioner
 	// HarnessModel and ModelGatewayBaseURL mirror the model gateway
 	// configuration so each SID UserHost can point its Harness at the shared
 	// CLIProxyAPI loopback with the configured Codex model.
@@ -75,6 +76,9 @@ func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) 
 	}
 	if config.Profile == "" || config.PortalURL == "" {
 		return nil, errors.New("Harness profile and Portal URL are required")
+	}
+	if err := userhost.ValidateProfessionalDatabaseURL(config.ProfessionalDatabaseURL); err != nil {
+		return nil, err
 	}
 	entrypoint := filepath.Clean(filepath.FromSlash(config.HarnessEntrypoint))
 	if config.HarnessEntrypoint == "" || !filepath.IsLocal(entrypoint) || entrypoint == "." {
@@ -270,9 +274,10 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 		PublicBaseURL: p.config.PublicBaseURL,
 		PortalURL:     p.config.PortalURL, RegistrationCredentialFile: credentialPath,
 		ManagedSkillsRoot: p.config.ManagedSkillsRoot, ManagedToolsRoot: p.config.ManagedToolsRoot,
-		ManagedMCPServers: expandManagedMCPServers(p.config.ManagedMCPServers, spec),
-		Limits:            p.config.Limits,
-		HarnessModel:      p.config.HarnessModel, ModelGatewayBaseURL: p.config.ModelGatewayBaseURL,
+		ManagedMCPServers:       expandManagedMCPServers(p.config.ManagedMCPServers, spec),
+		ProfessionalDatabaseURL: p.config.ProfessionalDatabaseURL,
+		Limits:                  p.config.Limits,
+		HarnessModel:            p.config.HarnessModel, ModelGatewayBaseURL: p.config.ModelGatewayBaseURL,
 	}
 }
 

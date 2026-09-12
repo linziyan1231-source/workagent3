@@ -1,0 +1,30 @@
+@media (min-width: 1100px) {
+  body:has(.workagent-files-panel:not([hidden])) .workagent-hero-composer {
+    width: calc(100% - 48px);
+    margin-inline: 24px;
+  }
+  body:has(.workagent-files-panel:not([hidden])) .wSkVaW_root {
+    margin-right: var(--workagent-files-width);
+  }
+  body:has(.workagent-files-panel:not([hidden])) .workagent-overlay {
+    right: var(--workagent-files-width);
+  }
+}
+@media (max-width: 1099px) {
+  .workagent-files-panel {
+    width: min(420px, 100vw);
+    z-index: 46;
+  }
+  .workagent-files-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    border: 0;
+    background: rgb(0 0 0 / 28%);
+  }
+  .workagent-files-panel-header button[aria-label*="放大"],
+  .workagent-files-panel-header button[aria-label*="缩小"] {
+    display: none;
+  }
+}

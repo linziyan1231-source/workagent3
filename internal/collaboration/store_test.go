@@ -409,23 +409,56 @@ func TestSharedConversationVisibilityIsPerMember(t *testing.T) {
 		t.Fatalf("member hidden conversations = %#v, %v", values, err)
 	}
 	name, pinned := "Renamed", true
-	memberView, err := store.UpdateConversationMetadata(t.Context(), conversation.ID, 2, &name, &pinned, nil)
-	if err != nil || memberView.Name != name || !memberView.Pinned || memberView.PinnedAt == nil {
-		t.Fatalf("member metadata update = %#v, %v", memberView, err)
+	if _, err := store.UpdateConversationMetadata(t.Context(), conversation.ID, 2, &name, nil, nil); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member renamed conversation = %v", err)
+	}
+	memberView, err := store.UpdateConversationMetadata(t.Context(), conversation.ID, 2, nil, &pinned, nil)
+	if err != nil || memberView.Name != "Hidden" || !memberView.Pinned || memberView.PinnedAt == nil {
+		t.Fatalf("member pin update = %#v, %v", memberView, err)
 	}
 	ownerView, err := store.ConversationForUser(t.Context(), conversation.ID, 1, true)
-	if err != nil || ownerView.Name != name || ownerView.Pinned || ownerView.PinnedAt != nil {
+	if err != nil || ownerView.Name != "Hidden" || ownerView.Pinned || ownerView.PinnedAt != nil {
 		t.Fatalf("owner metadata view = %#v, %v", ownerView, err)
 	}
-	updated, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 2, "kimi-next", "medium")
+	updated, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 1, "kimi-next", "medium")
 	if err != nil || updated.ModelID != "kimi-next" || updated.ThinkingEffort != "medium" {
 		t.Fatalf("runtime update = %#v, %v", updated, err)
 	}
-	if _, err := store.db.ExecContext(t.Context(), `UPDATE shared_conversations SET state='running' WHERE id=?`, conversation.ID); err != nil {
+	message, err := store.AddMessage(t.Context(), Message{ID: "message_running_1234", Conversation: conversation.ID, AuthorName: "Owner", Kind: "user", Body: "Run"}, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 2, "kimi-late", "low"); !errors.Is(err, ErrConflict) {
+	if _, err := store.ReserveAIRun(t.Context(), "run_running_1234567", message, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateConversationRuntime(t.Context(), conversation.ID, 1, "kimi-late", "low"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("running runtime update = %v", err)
+	}
+}
+
+func TestOnlyProjectOwnerCanDeleteConversation(t *testing.T) {
+	store := openTestStore(t)
+	project := createActiveProject(t, store)
+	invite, _ := store.CreateInvite(t.Context(), Invite{
+		ID: inviteID, ProjectID: project.ID, InviterUserID: 1, TargetUserID: 2, TargetSID: memberSID,
+		ExpiresAt: store.now().Add(time.Hour),
+	})
+	acceptInvite(t, store, invite.ID, 2)
+	conversation, err := store.CreateConversation(t.Context(), Conversation{
+		ID: "conversation_delete_123", ProjectID: project.ID, Name: "Delete me",
+		AssistantID: "kimi", AssistantBackend: "kimi", ModelID: "kimi-code", ThinkingEffort: "high",
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteConversation(t.Context(), conversation.ID, 2); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member delete = %v", err)
+	}
+	if err := store.DeleteConversation(t.Context(), conversation.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ConversationForUser(t.Context(), conversation.ID, 1, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted conversation lookup = %v", err)
 	}
 }
 

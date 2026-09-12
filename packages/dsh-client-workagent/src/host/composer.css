@@ -1,0 +1,10 @@
+.uV2eYG_card {
+  border: 1px solid var(--dsw-color-border) !important;
+  border-radius: 20px !important;
+  background: var(--dsw-color-panel) !important;
+  box-shadow: none !important;
+}
+
+.uV2eYG_card::after {
+  display: none !important;
+}

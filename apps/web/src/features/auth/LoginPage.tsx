@@ -256,7 +256,28 @@ export function LoginPage({
       if (remember) localStorage.setItem(usernameKey, username.trim());
       else localStorage.removeItem(usernameKey);
       if (!user.admin) {
-        window.location.replace("/?frontend=dsh");
+        const target = new URL("/?frontend=dsh", window.location.origin);
+        const current = new URL(window.location.href);
+        for (const key of [
+          "workagent",
+          "project",
+          "discussion",
+          "invite",
+          "token",
+          "view",
+          "session",
+        ]) {
+          const value = current.searchParams.get(key);
+          if (value) target.searchParams.set(key, value);
+        }
+        if (
+          current.pathname === "/guid" &&
+          current.searchParams.get("open") === "shared-invites"
+        ) {
+          target.searchParams.set("workagent", "shared");
+          target.searchParams.set("view", "invites");
+        }
+        window.location.replace(target.pathname + target.search + current.hash);
         return;
       }
       onAuthenticated(user);

@@ -3,25 +3,35 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename, isAbsolute, relative } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
 import { SessionStore } from "@deepseek-ai/dsh-session";
 import { NativeSessionLog } from "./native-session-log.js";
+import { FileMoves } from "./file-moves.js";
 import { RuntimeController } from "./runtime.js";
 import { SessionIndex } from "./session-index.js";
 import { MessageStore } from "./message-store.js";
 import { PresetStore } from "./preset-store.js";
 import { ModelAccessStore } from "./model-access-store.js";
+import { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
 import type { BridgeEvent, EngineSessionOptions } from "./engines/types.js";
+import { fileReferenceText } from "@workagent/contracts";
 
 const native = vi.hoisted(() => ({
   calls: [] as Array<{ method: string; content?: string; lastTurnId?: string }>,
   emit: (_event: BridgeEvent) => {},
   sequence: 0,
   rejectSteer: false,
+  rejectSend: false,
   rejectQuota: false,
   sendGate: undefined as Promise<void> | undefined,
   reserveGate: undefined as Promise<void> | undefined,
@@ -29,6 +39,8 @@ const native = vi.hoisted(() => ({
   catalogGate: undefined as Promise<void> | undefined,
   catalogReads: 0,
   resumedOptions: [] as unknown[],
+  resumedIDs: [] as string[],
+  sessions: [] as Array<{ nativeId: string; connected: boolean }>,
   createdOptions: [] as EngineSessionOptions[],
   resumeError: undefined as string | undefined,
 }));
@@ -55,6 +67,7 @@ vi.mock("./engines/codex.js", () => ({
       options?: unknown,
     ) {
       native.resumedOptions.push(options);
+      native.resumedIDs.push(_id);
       if (native.resumeError) throw new Error(native.resumeError);
       return this.session(emit);
     }
@@ -73,10 +86,12 @@ vi.mock("./engines/codex.js", () => ({
     }
     session(emit: typeof native.emit) {
       native.emit = emit;
-      return {
+      const session = {
         nativeId: `native-${++native.sequence}`,
+        connected: true,
         permissionMode: "workspace_write" as const,
         send: async (content: string) => {
+          if (native.rejectSend) throw new Error("send rejected");
           native.calls.push({ method: "send", content });
           emit({ type: "turn.started", turnId: "active" });
           await native.sendGate;
@@ -95,6 +110,8 @@ vi.mock("./engines/codex.js", () => ({
           native.emit = () => {};
         },
       };
+      native.sessions.push(session);
+      return session;
     }
     async close() {}
   },
@@ -109,6 +126,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   native.calls.length = 0;
   native.rejectSteer = false;
+  native.rejectSend = false;
   native.rejectQuota = false;
   native.sendGate = undefined;
   native.reserveGate = undefined;
@@ -116,6 +134,8 @@ afterEach(() => {
   native.catalogGate = undefined;
   native.catalogReads = 0;
   native.resumedOptions.length = 0;
+  native.resumedIDs.length = 0;
+  native.sessions.length = 0;
   native.createdOptions.length = 0;
   native.resumeError = undefined;
   for (const root of roots.splice(0))
@@ -131,7 +151,14 @@ async function fixture(
     existingHome ?? mkdtempSync(join(tmpdir(), "workagent-chat-controls-"));
   if (!existingHome) roots.push(home);
   vi.stubEnv("DSH_HOME", home);
-  const presets = new PresetStore(home, new ModelAccessStore(home));
+  const mcp = new McpCatalogStore(),
+    skills = new SkillCatalogStore();
+  const presets = new PresetStore(
+    home,
+    new ModelAccessStore(home),
+    skills,
+    mcp,
+  );
   const messages = new MessageStore(home);
   if (!existingHome) {
     new SessionIndex(home).set({
@@ -179,13 +206,36 @@ async function fixture(
   const logContext = options.canonical ? new Context() : undefined;
   if (logContext) new SessionStore(logContext);
   const log = logContext ? new NativeSessionLog(logContext, home) : undefined;
+  const moves = new FileMoves(
+    join(home, "test-file-moves.json"),
+    (_id, path) => join(home, path),
+    () => {},
+  );
   const runtime = new RuntimeController(
     ctx,
     "test-token",
-    { engineRoot: () => home } as never,
+    {
+      moves,
+      engineRoot: () => home,
+      referencePath: (_id: string, path: string) => join(home, path),
+      locate: (id: string, reference: string) => {
+        const path = isAbsolute(reference)
+          ? relative(home, reference)
+          : reference;
+        statSync(join(home, path));
+        return {
+          path,
+          name: basename(path),
+          fileId: moves.identify(id, path),
+          kind: "file",
+        };
+      },
+      listAssets: () => [],
+      registerArtifact: () => {},
+    } as never,
     presets,
-    {} as never,
-    {} as never,
+    mcp,
+    skills,
     { statusFor: () => ({ state: "ready" }) } as never,
     {
       reserve: async () => {
@@ -225,6 +275,10 @@ async function fixture(
   };
   return {
     runtime,
+    moves,
+    mcp,
+    skills,
+    presets,
     home,
     messages,
     log,
@@ -242,6 +296,218 @@ async function fixture(
     },
   };
 }
+
+it("IM steering targets the bound ordinary task and cannot control a collaboration session", async () => {
+  const f = await fixture();
+  try {
+    const service = f.runtime.channelService();
+    await expect(
+      service.steer("chat", "session-source", "early"),
+    ).rejects.toThrow("no_active_turn");
+    expect(
+      (await f.call("/session-source/turns", { content: "work" })).status,
+    ).toBe(202);
+    await service.steer("chat", "session-source", "Add a chart");
+    expect(native.calls).toContainEqual({
+      method: "steer",
+      content: "Add a chart",
+    });
+    expect(f.messages.list("session-source").map((m) => m.text)).toContain(
+      "Add a chart",
+    );
+    await expect(
+      service.steer("chat", "collaboration:discussion-1", "blocked"),
+    ).rejects.toThrow("channel_session_not_found");
+    await service.cancel("chat", "session-source");
+    expect(native.calls.some((c) => c.method === "cancel")).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+it("keeps each shared assistant session and resumes its native history when settings change", async () => {
+  let f = await fixture();
+  const home = f.home;
+  const request = {
+    runId: "shared-multiple-run-0001",
+    conversationId: "shared-multiple-conversation",
+    projectId: "shared-multiple-project",
+    engine: "codex" as const,
+    assistantId: "builtin-codex",
+    sessionKey: "session-shared-assistant-a",
+    modelId: "gpt-test",
+    thinkingEffort: "low" as const,
+    context: "First group interval",
+    recoveryContext: "Whole group history",
+    workspacePath: home,
+    payerSid: "S-1-5-21-test",
+  };
+  const turn = async (
+    value: Parameters<typeof f.runtime.executeSharedTurn>[0],
+  ) => {
+    const count = native.calls.filter((c) => c.method === "send").length;
+    const pending = f.runtime.executeSharedTurn(value);
+    await vi.waitFor(() =>
+      expect(native.calls.filter((c) => c.method === "send")).toHaveLength(
+        count + 1,
+      ),
+    );
+    native.emit({ type: "turn.completed", turnId: "active" });
+    return pending;
+  };
+  try {
+    await turn(request);
+    const a = new SessionIndex(home)
+      .list()
+      .find((s) => s.id === request.sessionKey)!;
+    f.messages.append({
+      id: "shared-history-marker",
+      sessionId: request.sessionKey,
+      role: "assistant",
+      text: "Remember our group plan",
+      createdAt: new Date().toISOString(),
+    });
+    await turn({
+      ...request,
+      runId: "shared-multiple-run-0002",
+      assistantId: "builtin-kimi",
+      engine: "kimi",
+      sessionKey: "session-shared-assistant-b",
+    });
+    const b = new SessionIndex(home)
+      .list()
+      .find((s) => s.id === "session-shared-assistant-b")!;
+    expect(a.nativeId).not.toBe(b.nativeId);
+    const creates = native.createdOptions.length;
+    await turn({
+      ...request,
+      runId: "shared-multiple-run-0003",
+      thinkingEffort: "high",
+      modelId: "gpt-next",
+      context: "Second interval including Kimi reply",
+    });
+    expect(native.resumedIDs.at(-1)).toBe(a.nativeId);
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      modelId: "gpt-next",
+      thinkingEffort: "high",
+    });
+    expect(native.createdOptions).toHaveLength(creates);
+    expect(
+      f.messages
+        .list(request.sessionKey)
+        .some((m) => m.id === "shared-history-marker"),
+    ).toBe(true);
+    await expect(
+      f.runtime.executeSharedTurn({
+        ...request,
+        runId: "shared-multiple-run-0004",
+        assistantId: "builtin-kimi",
+        engine: "kimi",
+      }),
+    ).rejects.toThrow("shared_turn_assistant_identity_mismatch");
+    const updated = new SessionIndex(home)
+      .list()
+      .find((s) => s.id === request.sessionKey)!;
+    await f.close();
+    f = await fixture("codex", home);
+    await turn({
+      ...request,
+      runId: "shared-multiple-run-0005",
+      thinkingEffort: "high",
+      modelId: "gpt-next",
+    });
+    expect(native.resumedIDs.at(-1)).toBe(updated.nativeId);
+    expect(native.createdOptions).toHaveLength(creates);
+    expect(
+      f.messages
+        .list(request.sessionKey)
+        .some((m) => m.id === "shared-history-marker"),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+it("re-activates a shared assistant session after the native process disconnects", async () => {
+  const f = await fixture();
+  const request = {
+    runId: "shared-zombie-run-0001",
+    conversationId: "shared-zombie-conversation",
+    projectId: "shared-zombie-project",
+    engine: "codex" as const,
+    assistantId: "builtin-codex",
+    sessionKey: "session-shared-zombie",
+    modelId: "gpt-test",
+    thinkingEffort: "low" as const,
+    context: "Group interval",
+    recoveryContext: "Whole group history",
+    workspacePath: f.home,
+    payerSid: "S-1-5-21-test",
+  };
+  const turn = async (runId: string) => {
+    const count = native.calls.filter((c) => c.method === "send").length;
+    const pending = f.runtime.executeSharedTurn({ ...request, runId });
+    await vi.waitFor(() =>
+      expect(native.calls.filter((c) => c.method === "send")).toHaveLength(
+        count + 1,
+      ),
+    );
+    native.emit({ type: "turn.completed", turnId: "active" });
+    return pending;
+  };
+  try {
+    await turn("shared-zombie-run-0001");
+    const zombie = native.sessions.at(-1)!;
+    // The engine process died: the bridge flags the session disconnected.
+    zombie.connected = false;
+    await turn("shared-zombie-run-0002");
+    expect(native.resumedIDs).toEqual([zombie.nativeId]);
+  } finally {
+    await f.close();
+  }
+});
+
+it("reloads global capabilities into an idle native session without replacing history", async () => {
+  const f = await fixture();
+  try {
+    const before = f.messages.list("session-source");
+    f.skills.replace({
+      skills: [
+        {
+          root: join(f.home, "shared"),
+          entry: {
+            id: "global-fixture",
+            name: "global-fixture",
+            description: "Fixture",
+            version: "1",
+            source: "user",
+            enabled: true,
+            relativePath: "global-fixture/fixture",
+            referenceDirectory: join(f.home, "source"),
+            requiredMcpServerIds: [],
+            requiredCommands: [],
+            health: "ready",
+          },
+        },
+      ],
+    });
+    const reloaded = await f.call("/session-source/capabilities/reload", {});
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.data.preset.resolvedSnapshot.skillIds).toEqual([
+      "global-fixture",
+    ]);
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      skills: [{ entry: { id: "global-fixture" } }],
+    });
+    expect(f.messages.list("session-source")).toEqual(before);
+    native.emit({ type: "turn.started", turnId: "running" });
+    expect(
+      (await f.call("/session-source/capabilities/reload", {})).status,
+    ).toBe(409);
+  } finally {
+    await f.close();
+  }
+});
 
 it.each(["kimi", "codex"] as const)(
   "cancels hidden shared %s approvals on create and resume without leaving pending interactions",
@@ -361,7 +627,7 @@ it("does not resume or report a model selection accepted after deletion during m
   }
 });
 
-it("reads the effective native permission without persisting or changing the legacy session", async () => {
+it("enforces the frozen preset policy without rewriting a legacy session's absent override", async () => {
   const f = await fixture();
   try {
     const before = new SessionIndex(f.home).list()[0]?.permissionMode;
@@ -370,7 +636,11 @@ it("reads the effective native permission without persisting or changing the leg
       permissionMode: "workspace_write",
     });
     expect(new SessionIndex(f.home).list()[0]?.permissionMode).toBeUndefined();
-    expect(native.resumedOptions.at(-1)).not.toHaveProperty("permissionMode");
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      permissionMode: "workspace_write",
+      approvalPolicy: "on_risk",
+      requirePermission: true,
+    });
     expect(
       native.calls.some(
         (call) => call.method === "send" || call.method === "reserve",
@@ -546,6 +816,104 @@ it("drains queued input when completion arrives before the native send acknowled
   }
 });
 
+it("deduplicates native retries by receipt identity across acceptance, queueing and restart", async () => {
+  const f = await fixture();
+  try {
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "same text",
+      "queue",
+      "receipt-a",
+    );
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "same text",
+      "queue",
+      "receipt-a",
+    );
+    expect(native.calls.filter((row) => row.method === "send")).toHaveLength(1);
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "same text",
+      "queue",
+      "receipt-b",
+    );
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "same text",
+      "queue",
+      "receipt-b",
+    );
+    expect((await f.call("/session-source/queue")).data).toHaveLength(1);
+    await expect(
+      f.runtime.nativeSessionPort.prompt(
+        "session-source",
+        "different text",
+        "queue",
+        "receipt-a",
+      ),
+    ).rejects.toThrow("message_id_conflict");
+    await f.runtime.nativeSessionPort.cancel("session-source");
+    await f.close();
+    const restored = await fixture("codex", f.home);
+    try {
+      const before = native.calls.filter((row) => row.method === "send").length;
+      await restored.runtime.nativeSessionPort.prompt(
+        "session-source",
+        "same text",
+        "queue",
+        "receipt-a",
+      );
+      expect(native.calls.filter((row) => row.method === "send")).toHaveLength(
+        before,
+      );
+      expect(
+        (await restored.call("/session-source/messages")).data.filter(
+          (row: { id: string }) => row.id === "receipt-a",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await restored.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+it("retries a rejected native receipt with its original identity", async () => {
+  const f = await fixture();
+  try {
+    native.rejectSend = true;
+    await expect(
+      f.runtime.nativeSessionPort.prompt(
+        "session-source",
+        "retry me",
+        "queue",
+        "retry-receipt",
+      ),
+    ).rejects.toThrow("engine_turn_rejected");
+    expect(
+      (await f.call("/session-source/messages")).data.some(
+        (row: { id: string }) => row.id === "retry-receipt",
+      ),
+    ).toBe(false);
+    native.rejectSend = false;
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      "retry me",
+      "queue",
+      "retry-receipt",
+    );
+    expect(
+      (await f.call("/session-source/messages")).data.filter(
+        (row: { id: string }) => row.id === "retry-receipt",
+      ),
+    ).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 it("standard native queue edits retain the existing FIFO and hidden identities are refused", async () => {
   const f = await fixture("kimi");
   try {
@@ -575,6 +943,54 @@ it("standard native queue edits retain the existing FIFO and hidden identities a
     expect((await f.call("/session-source/queue")).data[0].content).toBe(
       "revised",
     );
+  } finally {
+    await f.close();
+  }
+});
+
+it("resolves file atoms for native sends and side chats while retaining canonical references in history and edited queues", async () => {
+  const f = await fixture();
+  const reference = fileReferenceText({
+    workspaceId: "default",
+    path: "三七互娱.docx",
+    name: "三七互娱.docx",
+  });
+  try {
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      reference,
+      "queue",
+    );
+    expect(native.calls.find((call) => call.method === "send")?.content).toBe(
+      `项目文件：${JSON.stringify(join(f.home, "三七互娱.docx"))}`,
+    );
+    expect(f.messages.list("session-source").at(-1)?.text).toBe(reference);
+    await f.runtime.nativeSessionPort.prompt(
+      "session-source",
+      `等待 ${reference}`,
+      "queue",
+    );
+    const queued = (await f.call("/session-source/queue")).data[0];
+    await f.runtime.nativeSessionPort.updateQueue(
+      "session-source",
+      queued.messageId,
+      { kind: "edit", content: [{ type: "text", text: `编辑 ${reference}` }] },
+    );
+    expect((await f.call("/session-source/queue")).data[0].content).toBe(
+      `编辑 ${reference}`,
+    );
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await vi.waitFor(() =>
+      expect(
+        native.calls.filter((call) => call.method === "send").at(-1)?.content,
+      ).toBe(`编辑 项目文件：${JSON.stringify(join(f.home, "三七互娱.docx"))}`),
+    );
+    const side = await f.call("/session-source/side-chat", {});
+    await f.call(`/${side.data.id}/turns`, { content: reference });
+    expect(f.messages.list(side.data.id).at(-1)?.text).toBe(reference);
+    expect(
+      native.calls.filter((call) => call.method === "send").at(-1)?.content,
+    ).toContain(JSON.stringify(join(f.home, "三七互娱.docx")));
   } finally {
     await f.close();
   }
@@ -1094,3 +1510,302 @@ it.each(["turn.cancelled", "turn.failed"] as const)(
     }
   },
 );
+
+it("defers file moves until the active turn ends and synchronizes the next queued turn before engine dispatch", async () => {
+  const f = await fixture();
+  try {
+    writeFileSync(join(f.home, "paper.txt"), "original");
+    await f.call("/session-source/turns", {
+      messageId: "first",
+      content: "work on paper",
+    });
+    const op = f.moves.request("default", [
+      { source: "paper.txt", destination: "archive/paper.txt" },
+    ]);
+    expect(op.state).toBe("queued");
+    expect(readFileSync(join(f.home, "paper.txt"), "utf8")).toBe("original");
+    await f.call("/session-source/queue", {
+      messageId: "next",
+      content: "continue editing",
+    });
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await vi.waitFor(() =>
+      expect(
+        native.calls.filter((call) => call.method === "send"),
+      ).toHaveLength(2),
+    );
+    expect(op.state).toBe("completed");
+    expect(
+      native.calls.filter((call) => call.method === "send").at(-1)?.content,
+    ).toContain('"to":"archive/paper.txt"');
+    expect(f.messages.list("session-source").at(-1)?.text).toBe(
+      "continue editing",
+    );
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await f.call("/session-source/turns", {
+      messageId: "third",
+      content: "next",
+    });
+    expect(
+      native.calls.filter((call) => call.method === "send").at(-1)?.content,
+    ).toBe("next");
+    expect(
+      new SessionIndex(f.home).list().find((row) => row.id === "session-source")
+        ?.fileRevision,
+    ).toBeGreaterThan(0);
+  } finally {
+    await f.close();
+  }
+});
+
+it("persists stable identities in result links while preserving line anchors and literal code examples", async () => {
+  const f = await fixture();
+  try {
+    writeFileSync(join(f.home, "paper.txt"), "original");
+    await f.call("/session-source/turns", {
+      messageId: "input",
+      content: "write",
+    });
+    native.emit({
+      type: "assistant.completed",
+      turnId: "active",
+      content: "[paper](paper.txt#L2) and `[example](paper.txt)`",
+    });
+    const result = f.messages.list("session-source").at(-1)?.text;
+    expect(result).toMatch(
+      /\[paper\]\(paper.txt\?workagentFileId=[a-z0-9-]+#L2\)/,
+    );
+    expect(result).toContain("`[example](paper.txt)`");
+  } finally {
+    await f.close();
+  }
+});
+
+it("releases shared-project move admission when an engine rejects the send", async () => {
+  const f = await fixture();
+  try {
+    const store = { get: () => ({}), engineRoot: () => f.home, moves: f.moves };
+    f.runtime.setSharedFileStore(store as never);
+    native.rejectSend = true;
+    await expect(
+      f.runtime.executeSharedTurn({
+        runId: "run-rejected",
+        conversationId: "shared-rejected",
+        projectId: "shared-project",
+        engine: "codex",
+        modelId: "gpt-test",
+        thinkingEffort: "low",
+        context: "work",
+        recoveryContext: "recover",
+        workspacePath: f.home,
+        payerSid: "S-1-test",
+      }),
+    ).rejects.toThrow("send rejected");
+    expect(f.moves.busy("shared-project")).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+it("answers a question in the active turn once and retains its relation after restart", async () => {
+  let f = await fixture("codex", undefined, { canonical: true, blank: true });
+  try {
+    await f.runtime.nativeSessionPort.prompt("session-source", "work", "queue");
+    f.log!.appendMessage({
+      id: "call_question",
+      sessionId: "session-source",
+      role: "assistant",
+      kind: "question",
+      text: "学校和专业？",
+      createdAt: new Date().toISOString(),
+      nativeTurnId: "active",
+    });
+    const input = { questionId: "call_question", content: "港大商业分析" };
+    native.rejectSteer = true;
+    expect((await f.call("/session-source/question-reply", input)).status).toBe(
+      409,
+    );
+    expect(
+      f.runtime.nativeSessionPort
+        .messages("session-source")
+        .some((m) => m.replyTo),
+    ).toBe(false);
+    native.rejectSteer = false;
+    const result = await f.call("/session-source/question-reply", input);
+    expect(result.status).toBe(200);
+    expect(result.data.message).toMatchObject({
+      text: input.content,
+      replyTo: { id: input.questionId, text: "学校和专业？" },
+      nativeTurnId: "active",
+    });
+    expect(native.calls.filter((c) => c.method === "steer")).toHaveLength(1);
+    expect(native.calls.find((c) => c.method === "steer")?.content).toContain(
+      "学校和专业？",
+    );
+    expect(native.calls.find((c) => c.method === "steer")?.content).toContain(
+      input.content,
+    );
+    expect(native.calls.filter((c) => c.method === "send")).toHaveLength(1);
+    expect(native.calls.some((c) => c.method === "cancel")).toBe(false);
+    expect(
+      (await f.call("/session-source/question-reply", input)).data,
+    ).toEqual(result.data);
+    expect(
+      (
+        await f.call("/session-source/question-reply", {
+          ...input,
+          content: "different",
+        })
+      ).status,
+    ).toBe(409);
+    const home = f.home;
+    await f.close();
+    f = await fixture("codex", home, { canonical: true });
+    expect(
+      (await f.call("/session-source/question-reply", input)).data,
+    ).toEqual(result.data);
+    expect(native.calls.filter((c) => c.method === "steer")).toHaveLength(1);
+    expect(
+      f.runtime.nativeSessionPort
+        .messages("session-source")
+        .filter((m) => m.replyTo),
+    ).toHaveLength(1);
+    const { nativeSessionProjection: p } = await import(
+      "./native-session-projection.js"
+    );
+    const projection = f
+      .log!.get("session-source")!
+      .events.reduce((s, e) => p.apply(s, e), p.init());
+    expect(projection.messages.find((m) => m.replyTo)?.replyTo).toEqual({
+      id: "call_question",
+      text: "学校和专业？",
+    });
+  } finally {
+    await f.close();
+  }
+});
+it("rejects unrelated messages and resumes an idle question without cancel", async () => {
+  const f = await fixture();
+  try {
+    expect(
+      (
+        await f.call("/session-source/question-reply", {
+          questionId: "m1",
+          content: "answer",
+        })
+      ).status,
+    ).toBe(404);
+    f.messages.append({
+      id: "q",
+      sessionId: "session-source",
+      role: "assistant",
+      kind: "question",
+      text: "语言？",
+      createdAt: new Date().toISOString(),
+    });
+    expect(
+      (
+        await f.call("/session-source/question-reply", {
+          questionId: "q",
+          content: "中文",
+        })
+      ).status,
+    ).toBe(200);
+    expect(native.calls.filter((c) => c.method === "send")).toHaveLength(1);
+    expect(
+      native.calls.some((c) => c.method === "cancel" || c.method === "steer"),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+it("updates market-bound native tasks explicitly and lets emergency removal stop an affected turn", async () => {
+  const f = await fixture();
+  try {
+    f.skills.replace({
+      skills: ["market-old", "market-new"].map((id) => ({
+        root: join(f.home, id),
+        entry: {
+          id,
+          name: id,
+          description: "market",
+          version: "1.0.0",
+          source: "market" as const,
+          enabled: true,
+          relativePath: `${id}/skill`,
+          requiredMcpServerIds: [],
+          requiredCommands: [],
+          health: "ready" as const,
+        },
+      })),
+    });
+    const preset = f.presets.create({
+      name: "Market writer",
+      engine: "codex",
+      workspacePolicy: "optional",
+      skillIds: ["market-old"],
+    });
+    const created = await f.call("", {
+      engine: "codex",
+      title: "Market task",
+      workspace: "default",
+      presetId: preset.id,
+      modelId: "gpt-test",
+    });
+    expect(created.status).toBe(201);
+    const id = created.data.id;
+    await f.runtime.nativeSessionPort.prompt(
+      id,
+      "Use my skill",
+      "queue",
+      "market-message",
+    );
+    const change = {
+      skills: { "market-old": "market-new" },
+      mcp: {},
+      assistants: {},
+    };
+    // URL normalization directs this through the same authenticated runtime handler.
+    expect(
+      (await f.call("/../market-capabilities/change", change)).data.error,
+    ).toBe("market_update_session_busy");
+    native.emit({ type: "turn.completed", turnId: "active" });
+    await vi.waitFor(() =>
+      expect(
+        f.runtime.nativeSessionPort.list().find((s) => s.id === id)?.activity
+          ?.state,
+      ).toBe("idle"),
+    );
+    expect(
+      (await f.call("/../market-capabilities/change", change)).status,
+    ).toBe(200);
+    expect(f.presets.get(preset.id)?.skillIds).toEqual(["market-new"]);
+    await f.runtime.nativeSessionPort.prompt(
+      id,
+      "Continue",
+      "queue",
+      "market-message-2",
+    );
+    expect(native.resumedOptions.at(-1)).toMatchObject({
+      skills: [{ entry: { id: "market-new" } }],
+    });
+    expect(
+      (
+        await f.call("/../market-capabilities/change", {
+          skills: { "market-new": "" },
+          mcp: {},
+          assistants: {},
+          urgent: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(f.presets.get(preset.id)?.skillIds).toEqual([]);
+    expect(f.messages.list(id).some((m) => m.id === "market-message")).toBe(
+      true,
+    );
+    expect(native.calls.some((c) => c.method === "cancel")).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

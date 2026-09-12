@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 
 export type ProviderHealthResult = {
   status: "healthy" | "unhealthy";

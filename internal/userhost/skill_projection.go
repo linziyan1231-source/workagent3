@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"workagent3/internal/skillruntime"
 )
@@ -25,7 +27,8 @@ type harnessSkillProjectionPublisher struct {
 }
 
 type harnessSkillProjection struct {
-	Skills []harnessResolvedSkill `json:"skills"`
+	Skills           []harnessResolvedSkill `json:"skills"`
+	NativeSkillPaths []string               `json:"nativeSkillPaths"`
 }
 
 type harnessResolvedSkill struct {
@@ -43,6 +46,16 @@ type commandLookup func(string) (string, error)
 
 func resolveSkillEntry(entry skillruntime.Entry, lookup commandLookup) resolvedSkillEntry {
 	resolved := resolvedSkillEntry{Entry: entry, Health: "ready"}
+	if entry.ReferenceDirectory != "" {
+		if !entry.SourceAvailable {
+			resolved.Health, resolved.UnavailableReason = "unavailable", "source_disabled_or_missing"
+			return resolved
+		}
+		if _, err := os.Stat(filepath.Join(entry.ReferenceDirectory, "SKILL.md")); err != nil {
+			resolved.Health, resolved.UnavailableReason = "unavailable", "source_missing"
+			return resolved
+		}
+	}
 	for _, command := range entry.RequiredCommands {
 		if _, err := lookup(command); err != nil {
 			resolved.Health = "unavailable"
@@ -59,6 +72,10 @@ func (p *harnessSkillProjectionPublisher) Publish(ctx context.Context) error {
 		return err
 	}
 	projection := harnessSkillProjection{Skills: make([]harnessResolvedSkill, 0, len(entries))}
+	projection.NativeSkillPaths, err = p.store.NativeSkillPaths(ctx)
+	if err != nil {
+		return err
+	}
 	for _, entry := range entries {
 		projection.Skills = append(projection.Skills, harnessResolvedSkill{Entry: resolveSkillEntry(entry, exec.LookPath), Root: p.store.RootFor(entry)})
 	}

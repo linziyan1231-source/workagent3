@@ -93,7 +93,7 @@ export const legacyPresetAssetSchema = z
     oldId: z.string().min(1),
     name: z.string().trim().min(1).max(120),
     description: z.string().max(1000),
-    avatar: z.string().max(2048).nullable(),
+    avatar: z.string().max(65_536).nullable(),
     engine: engineIdSchema,
     modelId: z.string().min(1).nullable(),
     systemPrompt: z.string().max(50_000),

@@ -55,7 +55,11 @@ func (p *RuntimeSharedFilePlatform) call(ctx context.Context, ownerSID string, i
 	request.Header.Set("Authorization", "Bearer "+endpoint.Token)
 	request.Header.Set("Content-Type", "application/json")
 	setCorrelationHeader(request)
-	response, err := p.client.Do(request)
+	client := *p.client
+	if input.Operation == "remove" {
+		client.Timeout = 150 * time.Second
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("call owner Runtime shared-file service: %w", err)
 	}

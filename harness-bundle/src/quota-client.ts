@@ -12,6 +12,10 @@ export interface AutomationQuotaPort {
   settle(request: Omit<QuotaSettleRequest, "sid">): Promise<void>;
 }
 
+export interface SharedTurnQuotaPort extends AutomationQuotaPort {
+  lookup(runId: string): Promise<QuotaReservation>;
+}
+
 type PlatformQuotaConfiguration = {
   baseURL: URL;
   sid: string;
@@ -110,11 +114,29 @@ export class PlatformQuotaClient implements AutomationQuotaPort {
     }
   }
 
-  async usage(modelId: string): Promise<{limitUnits: number; consumedUnits: number; reservedUnits: number; period: string}> {
-    return (await this.#post("usage", { sid: this.#configuration.sid, modelId })).json();
+  async usage(modelId: string): Promise<{
+    limitUnits: number;
+    consumedUnits: number;
+    reservedUnits: number;
+    period: string;
+  }> {
+    return (
+      await this.#post("usage", { sid: this.#configuration.sid, modelId })
+    ).json();
   }
 
-  async #post(action: "reserve" | "settle" | "usage", body: unknown): Promise<Response> {
+  async lookup(runId: string): Promise<QuotaReservation> {
+    return quotaReservationSchema.parse(
+      await (
+        await this.#post("lookup", { sid: this.#configuration.sid, runId })
+      ).json(),
+    );
+  }
+
+  async #post(
+    action: "reserve" | "settle" | "usage" | "lookup",
+    body: unknown,
+  ): Promise<Response> {
     const response = await fetch(
       new URL(`internal/runtime/quota/${action}`, this.#configuration.baseURL),
       {

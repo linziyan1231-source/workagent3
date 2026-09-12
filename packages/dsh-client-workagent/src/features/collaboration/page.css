@@ -1,0 +1,558 @@
+.workagent-collab-sidebar > input {
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 9px;
+  background: var(--dsw-color-bg);
+  color: var(--dsw-color-text);
+  font-family: inherit;
+  font-size: var(--workagent-type-input);
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.workagent-collab-sidebar > input:focus-visible {
+  outline: 2px solid var(--dsw-color-accent);
+  outline-offset: 2px;
+}
+.workagent-collab-page .workagent-button.is-primary {
+  background: var(--dsw-color-accent);
+  color: var(--dsw-color-on-accent);
+  border-color: transparent;
+}
+.workagent-sidebar-sections {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.workagent-sidebar-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-sidebar-tabs button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-color-muted);
+  padding: 8px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.workagent-sidebar-tabs button[aria-current] {
+  color: var(--dsw-color-text);
+  background: var(--dsw-color-panel);
+  box-shadow: 0 1px 3px #0000000a;
+}
+.workagent-collab-sidebar {
+  gap: 2px;
+}
+.workagent-collab-sidebar header,
+.workagent-collab-sidebar footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.workagent-collab-project-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-color-text);
+  text-align: left;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.workagent-collab-project-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-collab-project-row:hover,
+.workagent-collab-project-row.is-selected {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-overlay.is-collaboration > .workagent-overlay-header {
+  display: none;
+}
+.workagent-overlay.is-collaboration > .workagent-overlay-content {
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+.workagent-collab-page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--dsw-color-text);
+}
+.workagent-collab-project-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  flex-shrink: 0;
+}
+.workagent-collab-project-title {
+  min-width: 0;
+}
+.workagent-collab-project-title h1 {
+  font-size: var(--workagent-type-control);
+  font-weight: 600;
+  margin: 0 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-collab-project-title > span,
+.workagent-collab-empty,
+.workagent-collab-file-path {
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-actions,
+.workagent-collab-discussion-bar,
+.workagent-collab-chips,
+.workagent-collab-file-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workagent-collab-discussion-bar {
+  padding: 8px 28px 16px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-collab-page select,
+.workagent-collab-hero select,
+.workagent-collab-form select,
+.workagent-collab-assistant-fields select {
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--dsw-color-panel);
+  color: inherit;
+  font-size: var(--workagent-type-input);
+  max-width: 100%;
+}
+.workagent-collab-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.workagent-collab-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.workagent-collab-messages {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 24px max(24px, calc((100% - 800px) / 2));
+  overscroll-behavior: contain;
+}
+.workagent-collab-message {
+  margin-bottom: 24px;
+  overflow-wrap: anywhere;
+}
+.workagent-collab-message > header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-message time {
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-message p {
+  line-height: 1.75;
+}
+.workagent-collab-message.is-mine > header strong {
+  color: var(--dsw-color-accent);
+}
+.workagent-collab-message.is-system {
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-message pre {
+  overflow: auto;
+  max-width: 100%;
+}
+.workagent-collab-message img {
+  max-width: 100%;
+}
+.workagent-collab-chat-empty,
+.workagent-collab-welcome {
+  margin: auto;
+  text-align: center;
+  color: var(--dsw-color-muted);
+  padding: 40px 24px;
+}
+.workagent-collab-chat-empty h2,
+.workagent-collab-welcome h1 {
+  color: var(--dsw-color-text);
+  font-weight: 600;
+}
+.workagent-collab-welcome .workagent-collab-actions {
+  justify-content: center;
+  margin-top: 24px;
+}
+.workagent-collab-project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 32px;
+}
+.workagent-collab-composer {
+  margin: 0 auto 20px;
+  width: calc(100% - 48px);
+  max-width: 800px;
+  box-sizing: border-box;
+}
+.workagent-collab-input-wrap {
+  position: relative;
+  padding: 12px;
+  background: var(--dsw-color-panel);
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 16px;
+  box-shadow: 0 3px 18px #00000005;
+}
+.workagent-collab-input-wrap:focus-within {
+  border-color: var(--dsw-color-accent);
+}
+.workagent-collab-input-wrap textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  max-height: 220px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.6;
+}
+.workagent-collab-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+}
+.workagent-collab-composer-bar small {
+  flex: 1;
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-attach {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-attach:hover {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-collab-attach input {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+}
+.workagent-collab-mentions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 12px;
+  background: var(--dsw-color-panel);
+  box-shadow: 0 8px 24px #00000012;
+  z-index: 5;
+}
+.workagent-collab-mentions button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.workagent-collab-mentions button.is-active {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-collab-mentions small {
+  color: var(--dsw-color-muted);
+}
+.workagent-collab-feedback {
+  margin: 8px 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: var(--workagent-type-caption);
+  color: var(--dsw-color-success);
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-collab-feedback.is-error {
+  color: var(--dsw-color-danger);
+}
+.workagent-collab-running {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 24px;
+  color: var(--dsw-color-muted);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-avatar {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--dsw-color-accent-soft);
+  color: var(--dsw-color-accent);
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-avatar .workagent-engine-mark {
+  width: 100%;
+  height: 100%;
+}
+.workagent-collab-avatars {
+  display: flex;
+}
+.workagent-collab-avatars .workagent-collab-avatar + .workagent-collab-avatar {
+  margin-left: -7px;
+  border: 2px solid var(--dsw-color-panel);
+}
+.workagent-collab-more,
+.workagent-collab-member-menu {
+  position: relative;
+}
+.workagent-collab-more summary,
+.workagent-collab-member-menu summary {
+  cursor: pointer;
+  padding: 8px;
+  list-style: none;
+}
+.workagent-collab-more[open],
+.workagent-collab-member-menu[open] {
+  z-index: 6;
+  background: var(--dsw-color-panel);
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+}
+.workagent-collab-more[open] button,
+.workagent-collab-member-menu[open] button {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+}
+.workagent-collab-project-header {
+  position: relative;
+}
+.workagent-collab-reminder > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.workagent-collab-reminder > summary::-webkit-details-marker {
+  display: none;
+}
+.workagent-collab-reminder-popover {
+  position: absolute;
+  box-sizing: border-box;
+  right: 12px;
+  top: calc(100% + 8px);
+  width: min(320px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 12px;
+  background: var(--dsw-color-panel);
+  box-shadow: 0 8px 24px #0002;
+  z-index: 30;
+}
+.workagent-collab-files {
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: 12px;
+  width: 360px;
+  max-width: 45%;
+  min-height: 0;
+  padding: 16px;
+  border-left: 1px solid var(--dsw-color-border);
+  background: var(--dsw-color-panel);
+  overflow: auto;
+}
+.workagent-collab-files.is-unified {
+  gap: 0;
+  width: var(--workagent-files-width);
+  padding: 0;
+  overflow: hidden;
+}
+.workagent-collab-files.is-unified.is-wide {
+  width: min(560px, 55vw);
+  max-width: 55%;
+}
+.workagent-collab-files.is-unified > .workagent-files-panel-header {
+  flex: none;
+}
+.workagent-collab-files.is-unified > .workagent-file-manager {
+  flex: 1;
+  min-height: 0;
+}
+.workagent-collab-files > header,
+.workagent-collab-file-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.workagent-collab-files h2 {
+  margin: 0;
+  font-size: var(--workagent-type-body);
+}
+.workagent-collab-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+.workagent-collab-file > button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.workagent-collab-file a {
+  font-size: var(--workagent-type-caption);
+  white-space: nowrap;
+}
+.workagent-collab-file-preview img,
+.workagent-collab-file-preview iframe {
+  width: 100%;
+  border: 0;
+}
+.workagent-collab-file-preview iframe {
+  min-height: 360px;
+}
+.workagent-collab-form,
+.workagent-collab-assistant-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.workagent-collab-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--workagent-type-caption);
+}
+.workagent-collab-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.workagent-collab-form > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.workagent-collab-member,
+.workagent-collab-invite,
+.workagent-collab-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-collab-member > div,
+.workagent-collab-invite > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.workagent-collab-member small {
+  display: block;
+  color: var(--dsw-color-muted);
+  margin-top: 4px;
+}
+.workagent-collab-search-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow: auto;
+}
+.workagent-collab-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workagent-collab-hero {
+  width: 100%;
+}
+.workagent-collab-hero .workagent-collab-composer {
+  padding: 0 0 12px;
+}
+@media (max-width: 700px) {
+  .workagent-overlay.is-collaboration {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .workagent-collab-project-header {
+    padding: 56px 12px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .workagent-collab-project-title h1 {
+    font-size: var(--workagent-type-section);
+  }
+  .workagent-collab-discussion-bar {
+    padding: 8px 12px;
+  }
+  .workagent-collab-messages {
+    padding: 16px;
+  }
+  .workagent-collab-composer {
+    padding: 8px 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .workagent-collab-files,
+  .workagent-collab-files.is-unified,
+  .workagent-collab-files.is-unified.is-wide {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(420px, 100%);
+    max-width: 100%;
+    z-index: 10;
+  }
+  .workagent-collab-workspace {
+    position: relative;
+  }
+}

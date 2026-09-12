@@ -1,0 +1,115 @@
+/* Shared input metrics keep editing and composing consistent, including iOS focus. */
+:root .workagent-message-editor :is(textarea, .workagent-composer-input),
+:root .workagent-compact-composer > :is(textarea, .workagent-composer-input),
+:root .workagent-question-reply textarea {
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-input);
+  line-height: 1.6;
+}
+
+/* Channel settings, account details and portalled dialogs share semantic roles. */
+:root :is(.ima-account-page, .ima-modal, .ima-chip-dialog) {
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-body);
+  line-height: 1.6;
+}
+:root
+  :is(.ima-account-page, .ima-modal, .ima-chip-dialog)
+  :is(
+    .ima-title,
+    .ima-inspector-title,
+    .ima-inspector-empty-title,
+    .ima-modal-h h2
+  ) {
+  font-size: var(--workagent-type-section);
+  line-height: 1.4;
+}
+:root
+  :is(.ima-account-page, .ima-modal, .ima-chip-dialog)
+  :is(
+    .ima-platform-title,
+    .ima-account-name,
+    .ima-switch-copy strong,
+    .ima-ok
+  ) {
+  font-size: var(--workagent-type-body);
+  line-height: 1.6;
+}
+:root
+  :is(.ima-account-page, .ima-modal, .ima-chip-dialog)
+  :is(
+    .ima-btn,
+    .ima-platform-add,
+    .ima-chip-btn,
+    .ima-chip-row,
+    .ima-model-name,
+    .ima-link,
+    .ima-seg button,
+    .ima-radio label,
+    .ima-field,
+    .ima-chip-dialog strong
+  ) {
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-control);
+  line-height: 1.5;
+}
+:root
+  :is(.ima-account-page, .ima-modal, .ima-chip-dialog)
+  :is(
+    .ima-sub,
+    .ima-platform-count,
+    .ima-account-id,
+    .ima-account-state,
+    .ima-inspector-status,
+    .ima-picker-label,
+    .ima-control > span,
+    .ima-switch-copy small,
+    .ima-save-note,
+    .ima-picker-note,
+    .ima-hint,
+    .ima-error,
+    .ima-bind-status,
+    .ima-inspector-empty-description,
+    .ima-model-description,
+    .ima-model-group-title,
+    .ima-chip-empty,
+    .ima-chip-row-side
+  ) {
+  font-size: var(--workagent-type-caption);
+  line-height: 1.5;
+}
+:root
+  :is(.ima-account-page, .ima-modal, .ima-chip-dialog)
+  :is(input, textarea, select) {
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-input);
+  line-height: 1.6;
+}
+:root :is(.ima-account-page, .ima-modal, .ima-chip-dialog) .ima-chip-btn {
+  height: auto;
+}
+/* Channel history rows reuse the task sidebar session geometry; the IM group
+   icons stay untouched. */
+:root .ima-native.ima-rail .ima-n-sess {
+  gap: 9px;
+  height: auto;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--dsw-color-text);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+:root .ima-native.ima-rail .ima-n-sess:hover,
+:root .ima-native.ima-rail .ima-n-sess.on,
+:root .ima-native.ima-rail .ima-n-sess.menu-on {
+  background: var(--dsw-color-panel);
+}
+:root .ima-native.ima-rail .ima-n-sess .ima-n-title {
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.45;
+}
+:root .ima-native.ima-rail .ima-task-subtitle,
+:root .ima-native.ima-rail .ima-n-time {
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
+  color: var(--dsw-color-muted);
+}

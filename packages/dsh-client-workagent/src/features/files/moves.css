@@ -1,0 +1,63 @@
+/* File organization: accessible folder targets and touch-friendly chooser. */
+.workagent-file-tree-row > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0 6px 0 2px;
+  accent-color: var(--color-primary, #8b91e8);
+}
+.workagent-file-manager .is-move-target {
+  outline: 2px solid #939aee;
+  outline-offset: -2px;
+  background: rgba(130, 140, 235, 0.2);
+  border-radius: 6px;
+}
+.workagent-move-selection,
+.workagent-move-new-folder {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+}
+.workagent-move-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 8px;
+  padding: 16px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 10px;
+  background: var(--dsw-color-bg);
+  color: inherit;
+}
+.workagent-move-picker nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workagent-move-picker button {
+  min-height: 36px;
+  padding: 6px 10px;
+}
+.workagent-move-folder-list {
+  max-height: 240px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.workagent-move-folder-list button {
+  text-align: left;
+}
+.workagent-move-new-folder input {
+  flex: 1;
+  min-width: 100px;
+  width: 100px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid #707580;
+  border-radius: 6px;
+  padding: 8px;
+}

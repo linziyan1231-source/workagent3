@@ -27,11 +27,13 @@ import (
 	"workagent3/internal/modelaccess"
 	"workagent3/internal/modelgateway"
 	"workagent3/internal/quota"
+	"workagent3/internal/sharedtrash"
 	"workagent3/internal/store"
 	"workagent3/internal/winutil"
 )
 
 type managerConfig struct {
+	ProfessionalDatabase *professionalDatabaseConfig   `json:"professionalDatabase,omitempty"`
 	RuntimePolicy        employeemanager.RuntimePolicy `json:"runtimePolicy"`
 	StorageLimits        *contracts.StorageLimits      `json:"storageLimits,omitempty"`
 	CredentialRoot       string                        `json:"credentialRoot,omitempty"`
@@ -98,6 +100,9 @@ func run() error {
 	}
 	config, err := loadManagerConfig(*configPath)
 	if err != nil {
+		return err
+	}
+	if err := validateProfessionalDatabaseConfig(config.ProfessionalDatabase); err != nil {
 		return err
 	}
 	// Fail fast before touching any state: the employee scheduled tasks are
@@ -201,6 +206,7 @@ func run() error {
 		PublicBaseURL:     config.PublicBaseURL,
 		PortalURL:         config.PortalURL, Limits: config.Limits, NativeModels: nativeModels,
 		HarnessModel: harnessModel, ModelGatewayBaseURL: modelGatewayBaseURL,
+		ProfessionalDatabaseURL: professionalDatabaseURL(config.ProfessionalDatabase),
 	})
 	if err != nil {
 		return err
@@ -222,7 +228,17 @@ func run() error {
 			return err
 		}
 		defer jobs.Close()
-		service := &employeemanager.Service{Storage: platform, Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, Audit: auditStore, Jobs: jobs}
+		trash, err := sharedtrash.New(config.DataRootBase)
+		if err != nil {
+			return err
+		}
+		service := &employeemanager.Service{Storage: platform, Provisioner: &provisioner, Lifecycle: lifecycle, Users: data, SharedTransfers: transfers, SharedTrash: trash, Audit: auditStore, Jobs: jobs}
+		closeDatabase, err := configureProfessionalDatabase(config.ProfessionalDatabase, service)
+		if err != nil {
+			return err
+		}
+		defer closeDatabase()
+		go service.RunSharedTrashRetention(ctx)
 		if err := service.RestoreJobs(); err != nil {
 			return err
 		}
@@ -420,6 +436,9 @@ func serveManager(ctx context.Context, address, tokenPath string, service *emplo
 		return err
 	}
 	go resources.Run(ctx)
+	if service.ProfessionalDatabase != nil && service.ProfessionalDatabaseURL != "http://"+address+"/professional-database/mcp" {
+		return errors.New("professional database endpoint must match Employee Manager listener")
+	}
 	server := &http.Server{Addr: address, Handler: employeemanager.Handler(service, secret), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		<-ctx.Done()

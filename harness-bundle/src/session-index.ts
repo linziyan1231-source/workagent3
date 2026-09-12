@@ -17,6 +17,7 @@ export type QueuedInput = {
   messageId: string;
   content: string;
   displayContent?: string;
+  replyTo?: { id: string; text: string };
   error?: string;
 };
 
@@ -41,7 +42,23 @@ export type StoredSession = {
   anchorMessageId?: string;
   contextMode?: "native" | "transcript";
   pendingContext?: string;
+  fileRevision?: number;
+  sharedCursor?: number;
   queue?: QueuedInput[];
+  creation?: SessionCreation;
+};
+
+export type SessionCreation = {
+  operationId: string;
+  input: {
+    engine: "harness" | "codex" | "kimi";
+    title: string;
+    workspace: string;
+    presetId: string;
+    modelId?: string;
+    thinkingEffort?: string;
+    permissionMode?: "read_only" | "workspace_write" | "full_access";
+  };
 };
 
 const valid = (value: unknown): value is StoredSession => {
@@ -74,6 +91,8 @@ const valid = (value: unknown): value is StoredSession => {
       typeof item.anchorMessageId === "string") &&
     (item.pendingContext === undefined ||
       typeof item.pendingContext === "string") &&
+    (item.sharedCursor === undefined ||
+      typeof item.sharedCursor === "number") &&
     (item.contextMode === undefined ||
       item.contextMode === "native" ||
       item.contextMode === "transcript") &&
@@ -100,40 +119,118 @@ const valid = (value: unknown): value is StoredSession => {
 
 export class SessionIndex {
   readonly #path: string;
+  readonly #operationsPath: string;
   readonly #sessions = new Map<string, StoredSession>();
+  readonly #cancelledOperations = new Set<string>();
 
   constructor(dshHome: string) {
     this.#path = join(dshHome, "workagent", "sessions.json");
-    if (!existsSync(this.#path)) return;
-    const parsed: unknown = JSON.parse(readFileSync(this.#path, "utf8"));
-    if (!Array.isArray(parsed) || !parsed.every(valid))
-      throw new Error("WorkAgent session index is invalid");
-    for (const session of parsed) this.#sessions.set(session.id, session);
+    this.#operationsPath = join(
+      dshHome,
+      "workagent",
+      "session-operations.json",
+    );
+    if (existsSync(this.#operationsPath)) {
+      const parsed: unknown = JSON.parse(
+        readFileSync(this.#operationsPath, "utf8"),
+      );
+      if (
+        !Array.isArray(parsed) ||
+        !parsed.every((id) => typeof id === "string")
+      )
+        throw new Error("WorkAgent session operations are invalid");
+      for (const id of parsed) this.#cancelledOperations.add(id);
+    }
+    if (existsSync(this.#path)) {
+      const parsed: unknown = JSON.parse(readFileSync(this.#path, "utf8"));
+      if (!Array.isArray(parsed) || !parsed.every(valid))
+        throw new Error("WorkAgent session index is invalid");
+      for (const session of parsed) this.#sessions.set(session.id, session);
+    }
   }
 
   list(): StoredSession[] {
-    return [...this.#sessions.values()].sort((left, right) =>
-      right.updatedAt.localeCompare(left.updatedAt),
+    return [...this.#sessions.values()]
+      .filter(
+        (session) =>
+          !session.creation ||
+          !this.#cancelledOperations.has(session.creation.operationId),
+      )
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  operation(creation: SessionCreation): StoredSession | undefined {
+    if (this.#cancelledOperations.has(creation.operationId))
+      throw new Error("operation_deleted");
+    const existing = [...this.#sessions.values()].find(
+      (session) => session.creation?.operationId === creation.operationId,
     );
+    if (
+      existing &&
+      JSON.stringify(existing.creation!.input) !==
+        JSON.stringify(creation.input)
+    )
+      throw new Error("operation_conflict");
+    return existing;
+  }
+
+  lookupOperation(operationId: string) {
+    const session = [...this.#sessions.values()].find(
+      (row) => row.creation?.operationId === operationId,
+    );
+    const cancelled = this.#cancelledOperations.has(operationId);
+    if (!session && !cancelled) return undefined;
+    return {
+      session,
+      state: cancelled ? (session ? "deleting" : "deleted") : "ready",
+    };
+  }
+
+  cancelOperation(operationId: string): void {
+    if (this.#cancelledOperations.has(operationId)) return;
+    this.#save(this.#operationsPath, [
+      ...this.#cancelledOperations,
+      operationId,
+    ]);
+    this.#cancelledOperations.add(operationId);
+  }
+
+  createOnce(
+    session: StoredSession & { creation: SessionCreation },
+  ): StoredSession {
+    const existing = this.operation(session.creation);
+    if (existing) return existing;
+    this.set(session);
+    return session;
   }
 
   set(session: StoredSession): void {
+    const sessions = new Map(this.#sessions);
+    sessions.set(session.id, session);
+    this.#save(this.#path, [...sessions.values()]);
     this.#sessions.set(session.id, session);
-    this.#save();
   }
 
   delete(id: string): void {
-    if (!this.#sessions.delete(id)) return;
-    this.#save();
+    const session = this.#sessions.get(id);
+    if (!session) return;
+    // The intent must survive before removing the session. A crash between
+    // these writes leaves a retryable deleting operation. Keep sessions.json
+    // readable by rollback software, which has no tombstone filtering.
+    if (session.creation) this.cancelOperation(session.creation.operationId);
+    const sessions = new Map(this.#sessions);
+    sessions.delete(id);
+    this.#save(this.#path, [...sessions.values()]);
+    this.#sessions.delete(id);
   }
 
-  #save(): void {
-    mkdirSync(dirname(this.#path), { recursive: true, mode: 0o700 });
-    const temporary = `${this.#path}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(this.list(), null, 2)}\n`, {
+  #save(path: string, rows: unknown[]): void {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(rows, null, 2)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });
-    renameSync(temporary, this.#path);
+    renameSync(temporary, path);
   }
 }

@@ -1,0 +1,61 @@
+.workagent-shared-project,
+.workagent-shared-chat {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.workagent-shared-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.workagent-shared-field select {
+  min-height: 40px;
+  width: 100%;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--dsw-color-panel);
+  color: inherit;
+}
+[data-workagent-section="共享项目"] .workagent-form {
+  align-items: end;
+  margin-block: 16px;
+}
+[data-workagent-section="共享项目"] .workagent-form label {
+  color: inherit;
+}
+.workagent-shared-messages {
+  max-height: 55vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.workagent-shared-messages article,
+.workagent-team-members article {
+  padding: 12px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-section[data-workagent-section="团队"] .workagent-actions > div {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.workagent-team-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+.workagent-team-members .workagent-form {
+  padding: 12px;
+  margin-block: 10px;
+}
+.workagent-form label {
+  color: var(--dsw-color-text);
+}
+.workagent-shared-chat textarea {
+  width: 100%;
+  min-height: 100px;
+  box-sizing: border-box;
+  color: inherit;
+  background: transparent;
+}
+

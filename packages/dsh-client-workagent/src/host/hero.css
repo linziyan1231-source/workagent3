@@ -1,0 +1,69 @@
+/* New-session hero, aligned to the previous WorkAgent landing screen. */
+.wSkVaW_root {
+  background: var(--dsw-color-bg) !important;
+}
+
+.wSkVaW_root[data-phase="hero"] .wSkVaW_scrollBody {
+  justify-content: flex-start !important;
+  box-sizing: border-box;
+  padding-top: clamp(88px, 15vh, 160px) !important;
+}
+
+.wSkVaW_heroGlow {
+  display: none !important;
+}
+
+.pXSMma_headline {
+  display: block !important;
+  text-align: center;
+}
+
+.pXSMma_fishHitbox,
+.pXSMma_previewBadge {
+  display: none !important;
+}
+
+.pXSMma_headlineText {
+  display: block;
+  color: var(--dsw-color-text);
+  font-size: calc(30px * var(--workagent-font-scale, 0.928571)) !important;
+  font-weight: 650 !important;
+  line-height: 38px !important;
+}
+
+.wSkVaW_composerHero > .pXSMma_root {
+  order: 0;
+}
+
+.wSkVaW_heroWorkspaceRow {
+  display: contents !important;
+}
+
+div[data-slot="conversation.hero.workspace"],
+.workagent-hero-controls {
+  display: contents !important;
+}
+
+div:has(> .workagent-agents) {
+  display: contents !important;
+}
+
+.workagent-agents {
+  order: 1;
+  flex: none;
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 18px;
+}
+
+.wSkVaW_composerHero > .uV2eYG_root,
+.wSkVaW_composerHero .pXSMma_workspace {
+  display: none !important;
+}
+
+.wSkVaW_composerHero
+  > div[data-slot="conversation.composer.bar"]
+  > .uV2eYG_root {
+  display: none !important;
+}
+

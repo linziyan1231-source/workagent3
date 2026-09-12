@@ -3,7 +3,7 @@ package employeemanager
 import (
 	"context"
 	"errors"
-	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +13,8 @@ import (
 	"workagent3/internal/auth"
 	"workagent3/internal/contracts"
 	"workagent3/internal/employee"
+	"workagent3/internal/professionaldb"
+	"workagent3/internal/sharedtrash"
 	"workagent3/internal/store"
 	"workagent3/internal/userhost"
 	"workagent3/internal/winutil"
@@ -24,14 +26,19 @@ type UserStore interface {
 }
 
 type Service struct {
-	Storage     StoragePlatform
-	Jobs        *JobStore
-	Provisioner *employee.Provisioner
-	Lifecycle   employee.Lifecycle
-	Users       UserStore
+	ProfessionalDatabase        *professionaldb.Store
+	ProfessionalDatabaseURL     string
+	ProfessionalDatabaseHandler http.Handler
+	ProfessionalDatabaseReady   func() bool
+	Storage                     StoragePlatform
+	Jobs                        *JobStore
+	Provisioner                 *employee.Provisioner
+	Lifecycle                   employee.Lifecycle
+	Users                       UserStore
 	// SharedTransfers executes cross-user shared-project ownership transfers
 	// under this service's SYSTEM identity; nil disables the endpoint.
 	SharedTransfers *SharedTransferManager
+	SharedTrash     *sharedtrash.Store
 	// Audit receives business lifecycle events; nil disables auditing.
 	Audit audit.Sink
 
@@ -50,8 +57,15 @@ func (s *Service) ListManagedUsers(ctx context.Context) ([]contracts.ManagedEmpl
 	items := make([]contracts.ManagedEmployee, 0, len(users))
 	for _, user := range users {
 		items = append(items, contracts.ManagedEmployee{Username: user.Username, WindowsUsername: user.WindowsUsername, WindowsSID: user.SID, Enabled: !user.Disabled, Offboarded: user.Offboarded, CreatedAt: user.CreatedAt, LastLoginAt: user.LastLoginAt})
+		if s.ProfessionalDatabase != nil {
+			grant, err := s.ProfessionalDatabase.Grant(ctx, user.SID)
+			if err != nil {
+				return nil, nil, err
+			}
+			items[len(items)-1].KimiDatasource = &grant
+		}
 	}
-	return items, nil, nil
+	return items, professionalDatabaseSources(s), nil
 }
 
 func (s *Service) StartProvision(ctx context.Context, username string, password []byte) (contracts.EmployeeProvisionJob, error) {
@@ -204,8 +218,8 @@ func (s *Service) ApplySharedProjectTransfer(ctx context.Context, projectID stri
 	return s.SharedTransfers.Apply(ctx, projectID, input)
 }
 
-func (*Service) SetKimiDatasource(context.Context, string, contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {
-	return contracts.KimiDatasourceGrant{}, fmt.Errorf("Kimi datasource policy is not configured")
+func (s *Service) SetKimiDatasource(ctx context.Context, username string, grant contracts.KimiDatasourceGrant) (contracts.KimiDatasourceGrant, error) {
+	return s.setProfessionalDatabase(ctx, username, grant)
 }
 
 func zero(value []byte) {

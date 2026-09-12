@@ -1,0 +1,25 @@
+.workagent-release-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.workagent-market-history {
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 16px;
+}
+.workagent-market-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+.workagent-market-scope select {
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--dsw-color-panel);
+  font: inherit;
+}

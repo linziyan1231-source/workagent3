@@ -14,6 +14,8 @@ export type StoredMessage = {
   text: string;
   createdAt: string;
   nativeTurnId?: string;
+  kind?: "commentary" | "question" | "answer";
+  replyTo?: { id: string; text: string };
 };
 
 const validMessage = (value: unknown): value is StoredMessage => {
@@ -31,7 +33,7 @@ const validMessage = (value: unknown): value is StoredMessage => {
 };
 
 const safeSessionId = (sessionId: string): string => {
-  if (!/^session-[a-zA-Z0-9-]+$/.test(sessionId))
+  if (!/^session-[a-zA-Z0-9_-]+$/.test(sessionId))
     throw new Error("invalid_session_id");
   return sessionId;
 };

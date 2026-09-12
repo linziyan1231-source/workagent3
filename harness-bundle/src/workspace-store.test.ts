@@ -17,6 +17,24 @@ const setup = () => {
 };
 
 describe("WorkspaceStore", () => {
+  it("uses provisioned shared roots and resumes completed uploads without duplicating files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "workagent-shared-upload-"));
+    const files = join(root, "shared"), home = join(root, "private");
+    const store = new WorkspaceStore(files, home, true);
+    expect(existsSync(files)).toBe(false);
+    expect(() => store.listFiles("project-1234567890")).toThrow();
+    mkdirSync(join(files, "project-1234567890"), { recursive: true });
+    const session = store.uploads.create("project-1234567890", { name: "notes.txt", path: "notes.txt", size: 5, lastModified: 0 });
+    async function* content() { yield Buffer.from("hello"); }
+    await store.uploads.append("project-1234567890", session.id, 0, content());
+    const first = await store.uploads.finish("project-1234567890", session.id);
+    const restarted = new WorkspaceStore(files, home, true);
+    expect(await restarted.uploads.finish("project-1234567890", session.id)).toEqual(first);
+    expect(restarted.uploads.list("project-1234567890")).toEqual([]);
+    expect(restarted.read("project-1234567890", "notes.txt").toString()).toBe("hello");
+    expect(() => restarted.uploads.get("project-different-1234", session.id)).toThrow("upload_not_found");
+    expect(() => restarted.read("project-1234567890", "../private/secret")).toThrow();
+  });
   it("locates absolute project files while rejecting cross-project paths", () => {
     const store = setup();
     const first = store.create("First");

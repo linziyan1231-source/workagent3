@@ -1,0 +1,29 @@
+.hHd-Xa_newSession,
+.hHd-Xa_settingsBtn,
+.VOzbGW_navCell {
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571)) !important;
+}
+.wa-appearance-heading {
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
+}
+.wa-appearance-name {
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+.wa-appearance-choice small {
+  font-size: calc(11px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-section,
+.workagent-typography,
+.VOzbGW_panel {
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-typography select {
+  min-width: 112px;
+  min-height: 36px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  background: var(--dsw-color-bg);
+  color: var(--dsw-color-text);
+  font: inherit;
+}

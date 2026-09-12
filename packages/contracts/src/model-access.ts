@@ -74,18 +74,3 @@ export const credentialCreateSchema = z
   })
   .strict();
 export type CredentialCreate = z.infer<typeof credentialCreateSchema>;
-
-export interface ModelCatalogPort {
-  listModels(): Promise<readonly ModelCatalogEntry[]>;
-  getModel(modelId: string): Promise<ModelCatalogEntry | undefined>;
-}
-
-export interface ModelAuthorizationPort {
-  authorizationFor(modelId: string): Promise<ModelAuthorization>;
-}
-
-export interface CredentialBrokerPort {
-  listStatuses(): Promise<readonly CredentialStatus[]>;
-  statusFor(id: string): Promise<CredentialStatus | undefined>;
-  revoke(id: string): Promise<void>;
-}

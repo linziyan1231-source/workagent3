@@ -31,6 +31,32 @@ const mutation = {
 };
 
 describe("AutomationStore", () => {
+  it("requires a receiver when scheduled message reminders are enabled", () => {
+    const store = new AutomationStore(root());
+    expect(() =>
+      store.create({
+        ...mutation,
+        messageNotificationEnabled: true,
+        messageNotificationTargetId: null,
+      }),
+    ).toThrow("automation_notification_target_required");
+
+    const definition = store.create({
+      ...mutation,
+      messageNotificationEnabled: true,
+      messageNotificationTargetId: "wechat:chat-1",
+    });
+    expect(definition).toMatchObject({
+      messageNotificationEnabled: true,
+      messageNotificationTargetId: "wechat:chat-1",
+    });
+    expect(() =>
+      store.update(definition.id, definition.version, {
+        messageNotificationTargetId: null,
+      }),
+    ).toThrow("automation_notification_target_required");
+  });
+
   it("persists definitions and uses a stable scheduled run ID", () => {
     const data = root();
     let now = new Date("2026-08-31T00:00:00.000Z");

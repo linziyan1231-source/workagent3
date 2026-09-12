@@ -1,3 +1,4 @@
+import { waitForShutdown } from "./shutdown.js";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -577,6 +578,11 @@ export interface TeamSessionPort {
 }
 
 export class TeamOrchestrator {
+  #stopped = false;
+  #stopping: Promise<void> | undefined;
+  #work: Promise<void> = Promise.resolve();
+  #executions = new Map<string, Promise<void>>();
+  #notifications = new Set<Promise<unknown>>();
   #ticking = false;
   #recovered = false;
   #recovering: Promise<void> | undefined;
@@ -591,47 +597,60 @@ export class TeamOrchestrator {
   start(): void {
     void this.tick().catch(() => undefined);
   }
-  async tick(): Promise<void> {
-    await this.#recoverInterruptedTasks();
+  stop(timeoutMs = 5_000): Promise<void> {
+    if (this.#stopping) return this.#stopping;
+    this.#stopped = true;
+    this.#wake?.();
+    const cancellations = [...this.#executions.keys()].map((id) =>
+      Promise.resolve().then(() => this.runner.cancelTeamTask?.(id)),
+    );
+    const drain = Promise.allSettled([
+      this.#work,
+      ...this.#executions.values(),
+      ...cancellations,
+    ]).then(() => Promise.allSettled([...this.#notifications]));
+    this.#stopping = waitForShutdown(drain, timeoutMs);
+    return this.#stopping;
+  }
+
+  tick(): Promise<void> {
+    if (this.#stopped) return Promise.resolve();
     if (this.#ticking) {
-      // The loop is parked behind in-flight executions and work may have
-      // just been queued (the task route fires tick() after queueTask);
-      // wake it so it re-scans instead of sleeping until an execution
-      // settles — a cancelled turn may never settle at all.
       this.#wake?.();
-      return;
+      return Promise.resolve();
     }
     this.#ticking = true;
-    try {
-      const pending = new Set<Promise<void>>();
-      for (;;) {
-        for (const queued of this.store.claimQueued()) {
-          let begun;
-          try {
-            begun = this.store.beginTask(queued.id);
-          } catch {
-            continue;
-          }
-          const execution = this.#execute(begun);
-          pending.add(execution);
-          void execution.then(
-            () => pending.delete(execution),
-            () => pending.delete(execution),
-          );
-        }
-        if (pending.size === 0) return;
-        // Wait for any in-flight execution to settle, or for cancel() to wake
-        // the loop. A cancelled execution may outlive its task in the engine,
-        // so the queue must not stay blocked behind it.
-        const woke = new Promise<void>((resolve) => {
-          this.#wake = resolve;
-        });
-        await Promise.race([...pending, woke]);
-        this.#wake = undefined;
-      }
-    } finally {
+    this.#work = this.#run().finally(() => {
       this.#wake = undefined;
       this.#ticking = false;
+    });
+    return this.#work;
+  }
+
+  async #run(): Promise<void> {
+    await this.#recoverInterruptedTasks();
+    while (!this.#stopped) {
+      for (const queued of this.store.claimQueued()) {
+        if (this.#stopped) break;
+        let begun;
+        try {
+          begun = this.store.beginTask(queued.id);
+        } catch {
+          continue;
+        }
+        const execution = this.#execute(begun);
+        this.#executions.set(queued.id, execution);
+        void execution.then(
+          () => this.#executions.delete(queued.id),
+          () => this.#executions.delete(queued.id),
+        );
+      }
+      if (this.#executions.size === 0) return;
+      const woke = new Promise<void>((resolve) => {
+        this.#wake = resolve;
+      });
+      await Promise.race([...this.#executions.values(), woke]);
+      this.#wake = undefined;
     }
   }
 
@@ -640,6 +659,7 @@ export class TeamOrchestrator {
     if (this.#recovering === undefined) {
       this.#recovering = (async () => {
         for (const request of this.store.interruptedExecutions()) {
+          if (this.#stopped) return;
           if (this.runner.reconcileInterruptedTeamTask !== undefined)
             await this.runner.reconcileInterruptedTeamTask(request);
           this.store.acknowledgeInterruptedExecution(request.taskId);
@@ -690,7 +710,7 @@ export class TeamOrchestrator {
     if (this.notifier === undefined) return;
     // A cancel can race execute; finishTask() then returns the cancelled task.
     if (task.status !== "succeeded" && task.status !== "failed") return;
-    void this.notifier
+    const notification = this.notifier
       .publish({
         kind: "team",
         title:
@@ -702,6 +722,8 @@ export class TeamOrchestrator {
         deepLink: `/team/${team.id}`,
       })
       .catch(() => undefined);
+    this.#notifications.add(notification);
+    void notification.finally(() => this.#notifications.delete(notification));
   }
   async cancel(teamId: string, taskId: string): Promise<TeamTask> {
     const task = this.store.cancelTask(teamId, taskId);

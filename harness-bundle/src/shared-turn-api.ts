@@ -6,7 +6,7 @@ import {
   type SharedTurnResult,
   type SharedTurnRuntimeRequest,
 } from "@workagent/contracts";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 
 export interface SharedTurnRunnerPort {
   executeSharedTurn(
@@ -31,7 +31,7 @@ const body = async (request: IncomingMessage): Promise<unknown> => {
   let value = "";
   for await (const chunk of request) {
     value += String(chunk);
-    if (value.length > 800 * 1024) throw new Error("request_too_large");
+    if (value.length > 4 * 1024 * 1024) throw new Error("request_too_large");
   }
   return JSON.parse(value);
 };

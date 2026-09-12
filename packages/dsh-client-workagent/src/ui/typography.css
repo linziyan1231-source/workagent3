@@ -1,0 +1,44 @@
+/* A phone's input metrics must survive rotation and external pointing devices.
+   The final mobile rule owns editable text size, including host/plugin portals. */
+:root {
+  --workagent-input-min-size: 16px;
+}
+:root[data-workagent-font-size="16"] {
+  --workagent-input-min-size: 18px;
+}
+:root[data-workagent-font-size="18"] {
+  --workagent-input-min-size: 20px;
+}
+
+@media (max-width: 760px), (any-pointer: coarse) {
+  :root {
+    --workagent-type-input: var(--workagent-input-min-size);
+  }
+
+  /* This boundary intentionally wins over plugin/feature font shorthands.
+     It applies only to editable controls; page zoom remains available. */
+  :root
+    :is(
+      input:not(
+        :is(
+          [type="hidden"],
+          [type="checkbox"],
+          [type="radio"],
+          [type="button"],
+          [type="submit"],
+          [type="reset"],
+          [type="image"],
+          [type="range"],
+          [type="color"],
+          [type="file"]
+        )
+      ),
+      textarea,
+      select,
+      [contenteditable="true"],
+      [contenteditable="plaintext-only"],
+      [contenteditable=""]
+    ) {
+    font-size: var(--workagent-input-min-size) !important;
+  }
+}

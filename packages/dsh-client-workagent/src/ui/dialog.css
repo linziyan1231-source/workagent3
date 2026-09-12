@@ -1,0 +1,111 @@
+.workagent-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(16 24 40 / 30%);
+  backdrop-filter: blur(3px);
+}
+.workagent-dialog-backdrop:not([open]) {
+  display: none;
+}
+.workagent-dialog-backdrop::backdrop {
+  background: transparent;
+}
+.workagent-dialog-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  box-shadow: 0 20px 64px rgb(16 24 40 / 18%);
+  font-family: var(--dsw-font-sans);
+  font-size: var(--workagent-type-body);
+}
+.workagent-dialog-surface[data-size="wide"] {
+  width: min(600px, 100%);
+}
+.workagent-dialog-surface .workagent-control {
+  width: 100%;
+}
+.workagent-dialog-surface p {
+  margin: 0;
+  color: var(--dsw-color-muted);
+  line-height: 1.6;
+}
+.workagent-dialog-surface > .workagent-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 12px;
+  margin: 0;
+}
+.workagent-dialog-surface > .workagent-dialog-header h2 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--workagent-type-section);
+  font-weight: 600;
+}
+.workagent-dialog-surface .workagent-dialog-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.workagent-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.workagent-action-list {
+  display: grid;
+  gap: 4px;
+}
+.workagent-action-list > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--dsw-radius);
+  background: transparent;
+  text-align: left;
+  font-size: var(--workagent-type-body);
+}
+.workagent-action-list > button:hover {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-action-list > button svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}

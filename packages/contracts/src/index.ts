@@ -10,5 +10,6 @@ export * from "./preset.js";
 export * from "./quota.js";
 export * from "./runtime.js";
 export * from "./workspace.js";
+export * from "./file-reference.js";
 export * from "./team.js";
 export * from "./shared-turn.js";

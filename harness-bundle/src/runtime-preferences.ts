@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
-import { authorized } from "./index.js";
+import { authorized } from "./runtime-http.js";
 
 export class RuntimePreferences {
   readonly #path: string;

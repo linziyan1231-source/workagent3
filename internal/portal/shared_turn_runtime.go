@@ -15,15 +15,19 @@ import (
 )
 
 type SharedTurnRequest struct {
-	RunID            string `json:"runId"`
-	ConversationID   string `json:"conversationId"`
-	ProjectID        string `json:"projectId"`
-	Engine           string `json:"engine"`
-	ModelID          string `json:"modelId"`
-	ThinkingEffort   string `json:"thinkingEffort"`
-	Context          string `json:"context"`
-	RecoveryContext  string `json:"recoveryContext"`
-	RuntimeSessionID string `json:"runtimeSessionId,omitempty"`
+	Capabilities     *projectCapabilities `json:"capabilities,omitempty"`
+	QuotaModelID     string               `json:"quotaModelId,omitempty"`
+	AssistantID      string               `json:"assistantId,omitempty"`
+	RunID            string               `json:"runId"`
+	ConversationID   string               `json:"conversationId"`
+	ProjectID        string               `json:"projectId"`
+	Engine           string               `json:"engine"`
+	ModelID          string               `json:"modelId"`
+	ThinkingEffort   string               `json:"thinkingEffort"`
+	Context          string               `json:"context"`
+	RecoveryContext  string               `json:"recoveryContext"`
+	RuntimeSessionID string               `json:"runtimeSessionId,omitempty"`
+	SessionKey       string               `json:"sessionKey,omitempty"`
 	// PayerSID is the frozen triggerer SID the shared run is billed to; the
 	// owner Runtime settles the reservation against it.
 	PayerSID string `json:"payerSid"`

@@ -1,0 +1,331 @@
+/* Project files remain beside the conversation on desktop, and in a drawer on narrow screens. */
+.workagent-files-panel {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  width: var(--workagent-files-width);
+  box-sizing: border-box;
+  border-left: 1px solid var(--dsw-color-border);
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-text);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-files-panel[hidden] {
+  display: none;
+}
+body:has(.workagent-files-panel.is-wide:not([hidden])) {
+  --workagent-files-width: min(560px, 43vw);
+}
+.workagent-files-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-files-panel-header > strong {
+  flex: 1;
+  font-size: calc(14px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-file-icon-button,
+.workagent-files-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 30px;
+  height: 30px;
+  padding: 5px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--dsw-color-text);
+  background: transparent;
+  cursor: pointer;
+}
+.workagent-file-icon-button:hover,
+.workagent-files-toggle:hover {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-file-icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.workagent-files-toggle {
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+}
+.workagent-files-backdrop {
+  display: none;
+}
+.workagent-files-project {
+  margin: 12px 14px 4px;
+  width: calc(100% - 28px);
+  min-height: 34px;
+  padding: 6px 9px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 7px;
+  background: var(--dsw-color-bg);
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-file-manager {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.workagent-file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 12px;
+  flex: none;
+}
+.workagent-file-toolbar > span {
+  flex: 1;
+  font-size: calc(10px * var(--workagent-font-scale, 0.928571));
+  text-align: center;
+  color: var(--dsw-color-muted);
+}
+.workagent-file-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 3px 16px 8px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-file-breadcrumb button {
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  color: var(--dsw-color-muted);
+  cursor: pointer;
+  font: inherit;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workagent-file-breadcrumb button:last-child {
+  color: var(--dsw-color-text);
+}
+.workagent-file-tree {
+  flex: 1;
+  min-height: 70px;
+  overflow: auto;
+  padding: 6px;
+}
+.workagent-file-tree-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.workagent-file-tree-row {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 4px;
+  padding-left: calc(4px + var(--file-depth) * 14px);
+  border-radius: 6px;
+}
+.workagent-file-tree-row:hover,
+.workagent-file-tree-row.is-selected {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-file-tree-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  text-align: left;
+  padding: 3px;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.workagent-file-tree-name > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workagent-file-tree-row > small {
+  flex: none;
+  font-size: calc(10px * var(--workagent-font-scale, 0.928571));
+  color: var(--dsw-color-muted);
+}
+.workagent-file-tree-empty {
+  margin: 4px 0 8px 28px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  color: var(--dsw-color-muted);
+}
+.workagent-file-row-menu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-file-row-menu > * {
+  border: 0;
+  border-radius: 4px;
+  background: var(--dsw-color-bg);
+  color: inherit;
+  padding: 5px 9px;
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+}
+.workagent-file-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: var(--dsw-color-muted);
+  text-align: center;
+}
+.workagent-file-panel-empty strong {
+  color: var(--dsw-color-text);
+}
+.workagent-file-panel-empty p {
+  margin: 0;
+  line-height: 1.7;
+}
+.workagent-file-notice {
+  flex: none;
+  padding: 6px 14px;
+  margin: 0;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  overflow-wrap: anywhere;
+}
+.workagent-file-notice.is-error {
+  color: var(--dsw-color-danger);
+}
+.workagent-file-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  margin: 6px 12px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 8px;
+  background: var(--dsw-color-bg);
+}
+.workagent-file-action-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 5px;
+  background: var(--dsw-color-panel);
+  color: inherit;
+  font: inherit;
+}
+.workagent-file-action-form > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.workagent-file-action-form p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.workagent-file-manager.has-preview .workagent-file-tree {
+  flex: 0 1 34%;
+}
+.workagent-file-preview-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 55%;
+  min-height: 150px;
+  border-top: 1px solid var(--dsw-color-border);
+}
+.workagent-file-preview-pane > header {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--dsw-color-border);
+}
+.workagent-file-preview-pane > header strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-file-preview-pane > header a {
+  color: inherit;
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 30px;
+}
+.workagent-file-preview-pane
+  > header
+  > button:not(.workagent-file-icon-button) {
+  background: transparent;
+  color: var(--dsw-color-accent);
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.workagent-file-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.workagent-file-preview-body > p {
+  padding: 16px;
+  line-height: 1.7;
+}
+.workagent-file-preview-body > img {
+  display: block;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  object-fit: contain;
+  margin: 12px auto;
+}
+.workagent-file-preview-body > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: white;
+}
+.workagent-file-preview-body > pre {
+  margin: 0;
+  padding: 16px;
+  tab-size: 2;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.65;
+}
+.workagent-file-preview-body > .workagent-markdown {
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+.workagent-file-preview-body .workagent-markdown > li {
+  margin-left: 20px;
+}
+.workagent-files-panel :focus-visible,
+.workagent-files-toggle:focus-visible {
+  outline: 2px solid var(--dsw-color-accent);
+  outline-offset: 1px;
+}

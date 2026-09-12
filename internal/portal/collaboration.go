@@ -19,6 +19,10 @@ import (
 )
 
 type CollaborationPort interface {
+	QuotaRunIdentity(context.Context,string) (contracts.SharedRunIdentity,error)
+	PersonalTaskStore
+	ChannelHead(context.Context) (int64, error)
+	ChannelHistory(context.Context, string, int64, int64, int64, int) ([]collaboration.Message, int64, error)
 	CreateProject(context.Context, collaboration.Project) (collaboration.Project, error)
 	SetProvisioningResult(context.Context, string, bool) error
 	AbortProjectProvisioning(context.Context, string, int64) error
@@ -50,15 +54,28 @@ type CollaborationPort interface {
 	ListConversations(context.Context, int64, bool) ([]collaboration.Conversation, error)
 	SetConversationHidden(context.Context, string, int64, bool) (collaboration.Conversation, error)
 	UpdateConversationMetadata(context.Context, string, int64, *string, *bool, *bool) (collaboration.Conversation, error)
+	DeleteConversation(context.Context, string, int64) error
 	UpdateConversationRuntime(context.Context, string, int64, string, string) (collaboration.Conversation, error)
 	AddMessage(context.Context, collaboration.Message, int64) (collaboration.Message, error)
 	ListMessages(context.Context, string, int64, int64, int) ([]collaboration.Message, error)
 	ListMessagesForUserAfter(context.Context, int64, int64, int) ([]collaboration.Message, error)
 	ReserveAIRun(context.Context, string, collaboration.Message, int64) (collaboration.AIRun, error)
+	AssistantMembers(context.Context, string, int64) ([]collaboration.AssistantMember, error)
+	InviteAssistant(context.Context, collaboration.AssistantMember, int64) (collaboration.AssistantMember, error)
+	UpdateAssistantSettings(context.Context, string, string, int64, string, string) (collaboration.AssistantMember, error)
+	RemoveAssistant(context.Context, string, string, int64) error
+	ReserveAssistantRun(context.Context, string, collaboration.Message, int64, string) (collaboration.AIRun, error)
+	SharedMessagesRange(context.Context, string, int64, int64) ([]collaboration.Message, error)
+	StopAssistantRun(context.Context, string, string, int64, string) (collaboration.AIRun, collaboration.Message, error)
 	UserMessagesRange(context.Context, string, int64, int64) ([]collaboration.Message, error)
 	FinishAIRun(context.Context, collaboration.AIRun, string, string, string, error) (collaboration.Message, error)
 	StopAIRun(context.Context, string, int64, string) (collaboration.AIRun, collaboration.Message, error)
 	ProjectForUser(context.Context, string, int64, bool) (collaboration.Project, error)
+	DefaultConversation(context.Context, string, int64) (collaboration.Conversation, error)
+	MessageByID(context.Context, string, string, int64) (collaboration.Message, error)
+	ProjectInvites(context.Context, string, int64) ([]collaboration.Invite, error)
+	RevokeInvite(context.Context, string, int64) error
+	BindAssistant(context.Context, string, int64, string, string, string, string) (collaboration.Conversation, error)
 }
 
 // SharedProjectPlatformPort is implemented by the privileged Employee Manager
@@ -161,7 +178,8 @@ func (s *Server) sharedProjects(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	var input struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		OperationID string `json:"operation_id"`
 	}
 	if !decodeJSON(request, &input, 8*1024) || strings.TrimSpace(input.Name) == "" {
 		writeError(writer, http.StatusBadRequest, "invalid_shared_project")
@@ -171,6 +189,43 @@ func (s *Server) sharedProjects(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "shared_project_failed")
 		return
+	}
+	sharedCreationMu.Lock()
+	defer sharedCreationMu.Unlock()
+	if input.OperationID != "" {
+		if !sharedOperationPattern.MatchString(input.OperationID) {
+			writeError(writer, http.StatusBadRequest, "invalid_operation_id")
+			return
+		}
+		id = "project_" + strconv.FormatInt(user.ID, 10) + "_" + input.OperationID
+		if existing, lookupErr := s.modules.Collaboration.ProjectForUser(request.Context(), id, user.ID, true); lookupErr == nil {
+			if existing.Name != strings.TrimSpace(input.Name) {
+				writeError(writer, http.StatusConflict, "shared_operation_conflict")
+				return
+			}
+			if existing.State == "active" {
+				s.writeCreatedSharedProject(writer, request, user, existing)
+				return
+			}
+			if existing.State != "provisioning" {
+				writeError(writer, http.StatusConflict, "shared_project_busy")
+				return
+			}
+			if err := s.modules.SharedProjects.ProvisionProject(request.Context(), id, user.SID); err != nil {
+				writeError(writer, http.StatusServiceUnavailable, "shared_project_provision_failed")
+				return
+			}
+			if err := s.modules.Collaboration.SetProvisioningResult(request.Context(), id, true); err != nil {
+				writeCollaborationError(writer, err)
+				return
+			}
+			existing.State = "active"
+			s.writeCreatedSharedProject(writer, request, user, existing)
+			return
+		} else if !errors.Is(lookupErr, collaboration.ErrNotFound) {
+			writeCollaborationError(writer, lookupErr)
+			return
+		}
 	}
 	project, err := s.modules.Collaboration.CreateProject(request.Context(), collaboration.Project{ID: id, OwnerUserID: user.ID, OwnerSID: user.SID, Name: input.Name})
 	if err != nil {
@@ -194,7 +249,7 @@ func (s *Server) sharedProjects(writer http.ResponseWriter, request *http.Reques
 	}
 	for _, active := range projects {
 		if active.ID == project.ID {
-			writeJSON(writer, http.StatusCreated, map[string]any{"project": projectDTO(active)})
+			s.writeCreatedSharedProject(writer, request, user, active)
 			return
 		}
 	}
@@ -262,9 +317,12 @@ func (s *Server) sharedProjectInvites(writer http.ResponseWriter, request *http.
 		TargetUsername string `json:"targetUsername"`
 		ExpiresInHours int    `json:"expiresInHours"`
 	}
-	if !decodeJSON(request, &input, 8*1024) || strings.TrimSpace(input.TargetUsername) == "" || input.ExpiresInHours < 1 || input.ExpiresInHours > 24*30 {
+	if !decodeJSON(request, &input, 8*1024) || strings.TrimSpace(input.TargetUsername) == "" || input.ExpiresInHours < 0 || input.ExpiresInHours > 24*30 {
 		writeError(writer, http.StatusBadRequest, "invalid_shared_invite")
 		return
+	}
+	if input.ExpiresInHours == 0 {
+		input.ExpiresInHours = 72
 	}
 	target, err := s.store.UserByUsername(request.Context(), input.TargetUsername)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && target.Disabled) {
@@ -279,6 +337,8 @@ func (s *Server) sharedProjectInvites(writer http.ResponseWriter, request *http.
 }
 
 func (s *Server) createSharedInvite(writer http.ResponseWriter, request *http.Request, user, target store.User, projectID string, expiresInHours int) {
+	sharedCreationMu.Lock()
+	defer sharedCreationMu.Unlock()
 	if target.Disabled || target.Offboarded || target.Admin || target.ID == user.ID {
 		writeError(writer, http.StatusNotFound, "invite_target_not_found")
 		return
@@ -293,7 +353,7 @@ func (s *Server) createSharedInvite(writer http.ResponseWriter, request *http.Re
 		writeCollaborationError(writer, err)
 		return
 	}
-	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_invite", Title: "Shared project invitation", Message: user.DisplayName + " invited you to " + invite.ProjectName, DeepLink: "/guid?open=shared-invites", ExpiresAt: &invite.ExpiresAt})
+	s.publishNotification(request.Context(), contracts.NotificationInput{TargetSID: target.SID, Kind: "shared_invite", Title: "共享项目邀请", Message: user.DisplayName + " 邀请你加入 " + invite.ProjectName, DeepLink: "/?workagent=shared&invite=" + invite.ID, ExpiresAt: &invite.ExpiresAt})
 	writeJSON(writer, http.StatusCreated, map[string]any{"invite": inviteDTO(invite, user.DisplayName)})
 }
 
@@ -315,7 +375,7 @@ func (s *Server) sharedInviteByUserID(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusNotFound, "invite_target_not_found")
 		return
 	}
-	s.createSharedInvite(writer, request, user, target, input.ProjectID, 7*24)
+	s.createSharedInvite(writer, request, user, target, input.ProjectID, 72)
 }
 
 func (s *Server) sharedUsers(writer http.ResponseWriter, request *http.Request, user store.User) {
@@ -331,7 +391,7 @@ func (s *Server) sharedUsers(writer http.ResponseWriter, request *http.Request, 
 	}
 	values := make([]map[string]any, 0, 20)
 	for _, candidate := range users {
-		if candidate.ID == user.ID || candidate.Disabled || candidate.Offboarded || !candidate.CollaborationEnabled {
+		if candidate.ID == user.ID || candidate.Disabled || candidate.Offboarded {
 			continue
 		}
 		if !strings.Contains(strings.ToLower(candidate.Username), query) && !strings.Contains(strings.ToLower(candidate.DisplayName), query) {
@@ -673,10 +733,16 @@ func writeCollaborationError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusForbidden, "shared_project_forbidden")
 	case errors.Is(err, collaboration.ErrInviteExpired):
 		writeError(writer, http.StatusGone, "shared_invite_expired")
+	case errors.Is(err, collaboration.ErrInvitePending):
+		writeError(writer, http.StatusConflict, "shared_invite_already_pending")
+	case errors.Is(err, collaboration.ErrMemberExists):
+		writeError(writer, http.StatusConflict, "shared_member_already_exists")
 	case errors.Is(err, collaboration.ErrInviteLinkRevoked):
 		writeError(writer, http.StatusGone, "shared_invite_link_revoked")
 	case errors.Is(err, collaboration.ErrInviteLinkExhausted):
 		writeError(writer, http.StatusGone, "shared_invite_link_exhausted")
+	case errors.Is(err, collaboration.ErrAssistantLocked):
+		writeError(writer, http.StatusConflict, "shared_assistant_locked")
 	case errors.Is(err, collaboration.ErrConflict), errors.Is(err, collaboration.ErrTransferPending):
 		writeError(writer, http.StatusConflict, "shared_project_conflict")
 	default:

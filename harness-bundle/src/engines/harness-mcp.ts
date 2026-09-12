@@ -1,5 +1,6 @@
 import type { Config as HarnessMcpConfig } from "@deepseek-ai/dsh-mcp-client";
 import type { ResolvedMcpServer } from "../mcp-projection.js";
+import { SHARED_TRASH_TOOL_TIMEOUT_MS } from "../shared-trash-client.js";
 
 export const projectHarnessMcpServers = (
   servers: readonly ResolvedMcpServer[],
@@ -21,7 +22,10 @@ export const projectHarnessMcpServers = (
         args: server.transport.args,
         env: projection.environment,
         cwd,
-        toolCallTimeoutMs: 60_000,
+        toolCallTimeoutMs:
+          server.id === "workagent-shared-trash"
+            ? SHARED_TRASH_TOOL_TIMEOUT_MS
+            : 60_000,
         failOnStartupError: true,
       };
     return {

@@ -194,7 +194,13 @@ func (s *Store) UserBySID(ctx context.Context, sid string) (User, error) {
 }
 
 func (s *Store) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded, windows_username FROM users WHERE admin=0 ORDER BY username COLLATE NOCASE`)
+	return s.listUsers(ctx, true)
+}
+
+// ListRuntimeUsers includes administrators: their installed capabilities need the same security governance.
+func (s *Store) ListRuntimeUsers(ctx context.Context) ([]User, error) { return s.listUsers(ctx, false) }
+func (s *Store) listUsers(ctx context.Context, managedOnly bool) ([]User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, display_name, sid, password_hash, disabled, admin, collaboration_enabled, created_at, last_login_at, offboarded, windows_username FROM users WHERE (?=0 OR admin=0) ORDER BY username COLLATE NOCASE`, managedOnly)
 	if err != nil {
 		return nil, err
 	}

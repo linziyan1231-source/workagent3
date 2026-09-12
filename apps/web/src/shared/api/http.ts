@@ -7,6 +7,13 @@ export class ApiError extends Error {
   }
 }
 
+export const postJson = <T>(path: string, body: unknown) =>
+  requestJson<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 export async function requestJson<T>(
   path: string,
   init: RequestInit = {},

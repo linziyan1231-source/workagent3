@@ -8,6 +8,14 @@ import { SessionStore } from "@deepseek-ai/dsh-session";
 import { NativeSessionLog } from "./native-session-log.js";
 
 describe("MessageStore", () => {
+  it("persists shared discussion replies whose stable IDs contain underscores", () => {
+    const home = mkdtempSync(join(tmpdir(), "workagent-shared-messages-"));
+    const store = new MessageStore(home);
+    const sessionId = "session-shared-discussion_project_3_abc-def";
+    store.append({ id: "answer", sessionId, role: "assistant", text: "Shared reply", createdAt: "2026-09-11T00:00:00Z" });
+    expect(new MessageStore(home).list(sessionId)[0]?.text).toBe("Shared reply");
+    expect(() => store.list("session-../private")).toThrow("invalid_session_id");
+  });
   it("writes only the standard log after native adoption and retains the old import unchanged", async () => {
     const home = mkdtempSync(join(tmpdir(), "workagent-native-messages-"));
     const ctx = new Context();

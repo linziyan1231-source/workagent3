@@ -1,0 +1,236 @@
+/* Scheduled tasks use a focused canvas and theme-aware form contrast. */
+.workagent-section[data-workagent-section="定时任务"] {
+  width: 100%;
+  max-width: 920px;
+  margin: 12px auto 40px;
+  gap: 24px;
+  color: var(--dsw-color-text);
+}
+
+.workagent-automation-intro {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0 8px;
+}
+
+.workagent-automation-icon {
+  display: grid;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 14px;
+  color: var(--dsw-color-accent);
+  background: var(--dsw-color-accent-soft);
+}
+
+.workagent-automation-intro h3 {
+  margin: 0;
+  font-size: calc(23px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.workagent-automation-intro p,
+.workagent-automation-form-heading p,
+.workagent-automation-empty p {
+  margin: 8px 0 0;
+  color: var(--dsw-color-muted);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.7;
+}
+
+.workagent-form.workagent-automation-form {
+  --workagent-form-control-height: 44px;
+  gap: 22px 24px;
+  padding: 28px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 3%);
+}
+
+.workagent-automation-form-heading,
+.workagent-automation-form-footer,
+.workagent-automation-schedule,
+.workagent-automation-wide {
+  grid-column: 1 / -1;
+}
+
+.workagent-automation-form-heading h3,
+.workagent-automation-list-heading h3,
+.workagent-automation-empty h3 {
+  margin: 0;
+  font-size: calc(16px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
+.workagent-automation-form label {
+  min-width: 0;
+  gap: 9px;
+  color: var(--dsw-color-text);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.5;
+}
+
+.workagent-automation-form :is(input, select, textarea) {
+  min-height: 44px;
+  border-radius: 9px;
+  padding: 11px 13px;
+  background: var(--dsw-color-bg);
+}
+
+.workagent-automation-form :is(input, textarea)::placeholder {
+  color: var(--dsw-color-muted);
+  opacity: 1;
+}
+
+.workagent-automation-form textarea {
+  min-height: 112px;
+  line-height: 1.7;
+}
+
+.workagent-automation-form :is(input, select, textarea):focus {
+  border-color: var(--dsw-color-accent);
+  box-shadow: 0 0 0 3px var(--dsw-color-accent-soft);
+}
+
+.workagent-automation-schedule {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.workagent-automation-schedule label {
+  width: 190px;
+  flex-shrink: 0;
+}
+
+.workagent-automation-schedule p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 13px;
+  color: var(--dsw-color-muted);
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  line-height: 1.6;
+}
+
+.workagent-automation-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 2px;
+  padding-top: 20px;
+  border-top: 1px solid var(--dsw-color-border);
+}
+
+.workagent-automation-form-footer > span,
+.workagent-automation-list-heading > span {
+  color: var(--dsw-color-muted);
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+}
+
+.workagent-button.workagent-automation-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--dsw-color-on-accent, #fff);
+  background: var(--dsw-color-accent);
+  font-size: calc(13px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
+.workagent-button.workagent-automation-create:hover:not(:disabled) {
+  background: var(--dsw-color-accent);
+  filter: brightness(1.1);
+}
+
+.workagent-automation-list-heading,
+.workagent-automation-list-heading h3,
+.workagent-automation-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workagent-automation-list-heading {
+  margin-top: 8px;
+}
+
+.workagent-automation-list-heading h3 > span,
+.workagent-automation-state {
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--dsw-color-muted);
+  background: var(--dsw-color-bg);
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.workagent-automation-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 32px 20px;
+  border: 1px dashed var(--dsw-color-border);
+  border-radius: 16px;
+  text-align: center;
+}
+
+.workagent-automation-empty .workagent-automation-icon {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  background: var(--dsw-color-panel);
+  color: var(--dsw-color-muted);
+}
+
+.workagent-automation-card {
+  min-width: 0;
+  padding: 22px 24px;
+  border-radius: 14px;
+  overflow-wrap: anywhere;
+}
+
+.workagent-automation-card .workagent-muted {
+  margin-top: 10px;
+  font-size: calc(12px * var(--workagent-font-scale, 0.928571));
+}
+
+@media (max-width: 680px) {
+  .workagent-form.workagent-automation-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px;
+    gap: 20px;
+  }
+  .workagent-automation-intro h3 {
+    font-size: calc(19px * var(--workagent-font-scale, 0.928571));
+  }
+  .workagent-automation-schedule {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .workagent-automation-schedule label {
+    width: 100%;
+  }
+  .workagent-automation-schedule p {
+    margin: 0;
+  }
+  .workagent-automation-form-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .workagent-automation-list-heading > span {
+    display: none;
+  }
+}

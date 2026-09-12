@@ -40,7 +40,9 @@ func TestSharedTurnHandlerAcceptsPortalWireRequest(t *testing.T) {
 		RunID: "run_1234567890123456", ConversationID: "conversation_123456", ProjectID: "project_1234567890",
 		Engine: "codex", ModelID: "gpt-5", ThinkingEffort: "high",
 		Context: "[Bob]\nPlease answer", RecoveryContext: "[Alice]\nhi\n[Bob]\nPlease answer",
-		PayerSID: "S-1-5-21-2000",
+		PayerSID:     "S-1-5-21-2000",
+		SessionKey:   "session-shared-independent-assistant",
+		QuotaModelID: "codex-native",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +59,7 @@ func TestSharedTurnHandlerAcceptsPortalWireRequest(t *testing.T) {
 	if _, present := relayed["runtimeSessionId"]; present {
 		t.Fatalf("first turn must omit runtimeSessionId: %s", forwarded)
 	}
-	if relayed["workspacePath"] != root || relayed["payerSid"] != "S-1-5-21-2000" || relayed["runId"] != "run_1234567890123456" {
+	if relayed["workspacePath"] != root || relayed["payerSid"] != "S-1-5-21-2000" || relayed["runId"] != "run_1234567890123456" || relayed["sessionKey"] != "session-shared-independent-assistant" || relayed["quotaModelId"] != "codex-native" {
 		t.Fatalf("relayed request lost contract fields: %s", forwarded)
 	}
 }

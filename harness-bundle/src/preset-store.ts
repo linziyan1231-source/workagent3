@@ -18,6 +18,7 @@ import {
 } from "@workagent/contracts";
 import type { ModelAccessStore } from "./model-access-store.js";
 import type { McpCatalogStore, SkillCatalogStore } from "./capability-store.js";
+import { butlerPrompt } from "./butler.js";
 
 const builtin = (
   now: string,
@@ -47,6 +48,8 @@ export class PresetStore {
   readonly #path: string;
   readonly #builtinSettingsPath: string;
   readonly #builtinEnabled: Record<string, boolean>;
+  readonly #builtinAvatarsPath: string;
+  readonly #builtinAvatars: Record<string, string | null>;
   readonly #models: ModelAccessStore;
   readonly #skills: SkillCatalogStore | undefined;
   readonly #mcp: McpCatalogStore | undefined;
@@ -67,6 +70,14 @@ export class PresetStore {
     this.#builtinEnabled = existsSync(this.#builtinSettingsPath)
       ? JSON.parse(readFileSync(this.#builtinSettingsPath, "utf8"))
       : {};
+    this.#builtinAvatarsPath = join(
+      dshHome,
+      "workagent",
+      "builtin-avatars.json",
+    );
+    this.#builtinAvatars = existsSync(this.#builtinAvatarsPath)
+      ? JSON.parse(readFileSync(this.#builtinAvatarsPath, "utf8"))
+      : {};
     this.#models = models;
     this.#skills = skills;
     this.#mcp = mcp;
@@ -82,9 +93,21 @@ export class PresetStore {
       }
     }
     const now = new Date().toISOString();
-    for (const engine of ["harness", "codex", "kimi"] as const) {
-      const initial = builtin(now, engine);
+    const butler = {
+      ...builtin(now, "codex"),
+      id: "builtin-puxin-butler",
+      name: "AI管家",
+      description: "配置 MCP、技能、助手和消息渠道，查询用法并诊断问题",
+      systemPrompt: butlerPrompt(),
+    };
+    for (const initial of [
+      ...(["harness", "codex", "kimi"] as const).map((engine) =>
+        builtin(now, engine),
+      ),
+      butler,
+    ]) {
       initial.enabled = this.#builtinEnabled[initial.id] ?? initial.enabled;
+      initial.avatar = this.#builtinAvatars[initial.id] ?? initial.avatar;
       const versions = this.#versions.get(initial.id);
       if (versions === undefined) {
         this.#versions.set(initial.id, [initial]);
@@ -151,8 +174,8 @@ export class PresetStore {
     const value = presetMutationSchema.partial().parse(input);
     if (
       current.source === "builtin" &&
-      (value.enabled === undefined ||
-        Object.keys(value).some((key) => key !== "enabled"))
+      (Object.keys(value).length === 0 ||
+        Object.keys(value).some((key) => key !== "enabled" && key !== "avatar"))
     )
       throw new Error("builtin_preset_immutable");
     const next = presetDefinitionSchema.parse({
@@ -161,10 +184,24 @@ export class PresetStore {
       version: current.version + 1,
       updatedAt: new Date().toISOString(),
     });
+    const cosmeticOnly = Object.keys(value).every((key) => key === "avatar");
     const disabling =
       value.enabled === false && Object.keys(value).length === 1;
-    if (!disabling) this.#validate(next);
+    if (!disabling && !cosmeticOnly) this.#validate(next);
     if (current.source === "builtin") {
+      if (value.avatar !== undefined) {
+        this.#builtinAvatars[id] = next.avatar;
+        const temporary = `${this.#builtinAvatarsPath}.${process.pid}.tmp`;
+        writeFileSync(
+          temporary,
+          `${JSON.stringify(this.#builtinAvatars, null, 2)}\n`,
+          {
+            encoding: "utf8",
+            mode: 0o600,
+          },
+        );
+        renameSync(temporary, this.#builtinAvatarsPath);
+      }
       this.#builtinEnabled[id] = next.enabled;
       const temporary = `${this.#builtinSettingsPath}.${process.pid}.tmp`;
       writeFileSync(
@@ -196,18 +233,48 @@ export class PresetStore {
     if (preset === undefined) throw new Error("preset_not_found");
     if (!preset.enabled) throw new Error("preset_disabled");
     this.#validate(preset);
+    const skillIds = [
+      ...new Set([
+        ...preset.skillIds,
+        ...(this.#skills?.listSkills() ?? [])
+          .filter(
+            (skill) =>
+              skill.referenceDirectory &&
+              skill.enabled &&
+              skill.compatibleEngines?.includes(preset.engine) !== false &&
+              skill.health === "ready" &&
+              skill.requiredMcpServerIds.every(
+                (id) => this.#mcp?.resolveServer(id)?.state === "ready",
+              ),
+          )
+          .map((skill) => skill.id),
+      ]),
+    ];
+    const mcpServerIds = [
+      ...new Set([
+        ...preset.mcpServerIds,
+        ...(this.#mcp?.listServers() ?? [])
+          .filter(
+            (server) =>
+              server.transport.globalSource &&
+              server.enabled &&
+              this.#mcp?.resolveServer(server.id)?.state === "ready" &&
+              (server.transport.kind !== "sse" || preset.engine === "kimi") &&
+              (server.toolPolicy === "all" || preset.engine === "codex"),
+          )
+          .map((server) => server.id),
+      ]),
+    ];
     return {
       presetId: preset.id,
       presetVersion: preset.version,
       resolvedSnapshot: {
         ...preset,
+        skillIds,
+        mcpServerIds,
         resolvedAt: new Date().toISOString(),
-        resolvedSkills: preset.skillIds.map(
-          (id) => this.#skills!.getSkill(id)!,
-        ),
-        resolvedMcpServers: preset.mcpServerIds.map(
-          (id) => this.#mcp!.getServer(id)!,
-        ),
+        resolvedSkills: skillIds.map((id) => this.#skills!.getSkill(id)!),
+        resolvedMcpServers: mcpServerIds.map((id) => this.#mcp!.getServer(id)!),
       },
     };
   }

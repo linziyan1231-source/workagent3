@@ -101,7 +101,7 @@ try {
   assert.equal(await page.locator(".workagent-upload-sessions").count(), 0);
   assert.equal(
     await page
-      .getByText("拖入文件上传 · 单个最大 1 GB", { exact: true })
+      .getByText("拖入文件上传 · 单个最大 5 GB", { exact: true })
       .count(),
     0,
   );

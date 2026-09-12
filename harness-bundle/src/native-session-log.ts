@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { StoredMessage } from "./message-store.js";
+import { readCodexMessageKinds } from "./codex-message-kinds.js";
 
 export type NativeSessionEvent = { type: string; [key: string]: JsonValue };
 export type NativeSessionMetadata = {
@@ -32,6 +33,7 @@ export type NativeSessionMetadata = {
   workspacePath: string;
   parentSessionId?: string;
   createdAt?: string | number;
+  nativeId?: string;
 };
 
 declare module "@deepseek-ai/dsh-session" {
@@ -39,6 +41,10 @@ declare module "@deepseek-ai/dsh-session" {
     "workagent/native/message": StoredMessage;
     "workagent/native/event": NativeSessionEvent;
     "workagent/native/imported": { version: 1 };
+    "workagent/native/message-kind": {
+      id: string;
+      kind: NonNullable<StoredMessage["kind"]>;
+    };
   }
   interface TurnEndReasonMap {
     "native-cancelled": { kind: "native-cancelled" };
@@ -51,7 +57,7 @@ export function isNativeSession(session: Pick<Session, "header">): boolean {
 
 type Entry = { session: Session; detach: () => void; written: number };
 const checkedId = (id: string): string => {
-  if (!/^session-[a-zA-Z0-9-]+$/.test(id))
+  if (!/^session-[a-zA-Z0-9_-]+$/.test(id))
     throw new Error("invalid_session_id");
   return id;
 };
@@ -182,6 +188,25 @@ export class NativeSessionLog {
         session.append("workagent/native/imported", { version: 1 });
       }
       this.#ensureUserMessages(session);
+      if (meta.engine === "codex" && meta.nativeId && process.env.CODEX_HOME) {
+        const unclassified = this.messages(meta.id).filter(
+          (message) => message.role === "assistant" && !message.kind,
+        );
+        if (unclassified.length) {
+          const kinds = readCodexMessageKinds(
+            process.env.CODEX_HOME,
+            meta.nativeId,
+          );
+          for (const message of unclassified) {
+            const kind = kinds.get(message.id);
+            if (kind)
+              session.append("workagent/native/message-kind", {
+                id: message.id,
+                kind,
+              });
+          }
+        }
+      }
       const boundary = session.events.findLast(
         (event) => event.type === "turn/start" || event.type === "turn/end",
       );
@@ -289,12 +314,25 @@ export class NativeSessionLog {
 
   messages(sessionId: string): StoredMessage[] {
     checkedId(sessionId);
-    return (
-      this.#entries
-        .get(sessionId)
-        ?.session.events.flatMap((event) =>
-          event.type === "workagent/native/message" ? [event.data] : [],
-        ) ?? []
+    const events = this.#entries.get(sessionId)?.session.events ?? [];
+    const kinds = new Map(
+      events.flatMap((event) =>
+        event.type === "workagent/native/message-kind"
+          ? [[event.data.id, event.data.kind] as const]
+          : [],
+      ),
+    );
+    return events.flatMap((event) =>
+      event.type === "workagent/native/message"
+        ? [
+            {
+              ...event.data,
+              ...(kinds.has(event.data.id)
+                ? { kind: kinds.get(event.data.id)! }
+                : {}),
+            },
+          ]
+        : [],
     );
   }
 
@@ -303,7 +341,7 @@ export class NativeSessionLog {
   }
 
   owns(sessionId: string): boolean {
-    if (!/^session-[a-zA-Z0-9-]+$/.test(sessionId)) return false;
+    if (!/^session-[a-zA-Z0-9_-]+$/.test(sessionId)) return false;
     return (
       existsSync(this.#path(sessionId)) ||
       existsSync(this.#tombstone(sessionId))
