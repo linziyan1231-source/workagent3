@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -44,7 +45,11 @@ const tools = [
           type: "string",
           description: "入口文件相对项目根目录的路径，默认 index.html；入口所在目录会被整体发布",
         },
-        workspaceId: { type: "string", description: "项目 ID，默认 default" },
+        workspaceId: {
+          type: "string",
+          description:
+            "入口文件所在工作区的 ID；未指定时会自动查找包含 entry 的工作区，若找不到或多个工作区都包含则报错",
+        },
         access: {
           type: "string",
           enum: ["authenticated", "token", "password"],
@@ -77,6 +82,48 @@ const tools = [
   },
 ];
 
+function workspaceRootFromEnv(): string | undefined {
+  const home = process.env.DSH_HOME;
+  if (!home) return undefined;
+  // DSH_HOME is <dataRoot>/dsh-home and the workspace root is a sibling of it
+  // (<dataRoot>/workspace), so only one ".." is needed.
+  return join(home, "..", "workspace");
+}
+
+async function resolveWorkspaceId(entry: string, requested?: string): Promise<string> {
+  if (requested) return requested;
+  const root = workspaceRootFromEnv();
+  if (!root) return "default";
+  const candidates: string[] = [];
+  const defaultEntry = join(root, ".workagent-unassigned", entry);
+  if (existsSync(defaultEntry)) candidates.push("default");
+  const workspaceResponse = (await butlerRequest("GET", "/v1/workspaces")) as
+    | { data?: unknown }
+    | undefined;
+  const workspaces = workspaceResponse?.data as
+    | { id?: string; directory?: string }[]
+    | undefined;
+  if (Array.isArray(workspaces)) {
+    for (const ws of workspaces) {
+      const id = ws.id;
+      const dir = ws.directory;
+      if (!id || !dir) continue;
+      if (id === "default") continue;
+      const candidateEntry = join(root, dir as string, entry);
+      if (existsSync(candidateEntry)) candidates.push(id);
+    }
+  }
+  if (candidates.length === 1) return candidates[0]!;
+  if (candidates.length === 0) {
+    throw new Error(
+      `找不到入口文件 ${entry}，请确认文件已放入工作区，或显式指定 workspaceId`,
+    );
+  }
+  throw new Error(
+    `多个工作区都包含 ${entry}（${candidates.join(", ")}），请显式指定 workspaceId`,
+  );
+}
+
 export async function handlePublishMcp(request: {
   method: string;
   params?: Record<string, unknown>;
@@ -95,13 +142,14 @@ export async function handlePublishMcp(request: {
   let result: unknown;
   if (name === "app_publish_list") result = await butlerRequest("GET", "/v1/app-publishing");
   else if (name === "app_publish") {
+    const entry = typeof input.entry === "string" && input.entry ? input.entry : "index.html";
+    const requestedWorkspace =
+      typeof input.workspaceId === "string" && input.workspaceId ? input.workspaceId : undefined;
+    const workspaceId = await resolveWorkspaceId(entry, requestedWorkspace);
     const body: Record<string, unknown> = {
-      workspaceId:
-        typeof input.workspaceId === "string" && input.workspaceId
-          ? input.workspaceId
-          : "default",
+      workspaceId,
       name: input.name,
-      entry: typeof input.entry === "string" && input.entry ? input.entry : "index.html",
+      entry,
       access: input.access,
     };
     if (typeof input.validDays === "number") body.validDays = input.validDays;
