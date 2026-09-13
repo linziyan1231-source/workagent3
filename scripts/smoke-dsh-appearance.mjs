@@ -119,8 +119,8 @@ await withPage(async (page) => {
     await capture("appearance-system-night-compact");
     for (const section of [
       "插件",
-      "MCP 服务",
-      "技能",
+      "MCP与技能",
+      "网页发布",
       "助手",
       "模型",
       "消息渠道",

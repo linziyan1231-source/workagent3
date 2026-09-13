@@ -1,5 +1,4 @@
 import { createFileMoves } from "./moves.js";
-import { PublishedApps } from "./published-apps.js";
 import { createFileTrash } from "./trash.js";
 import { apiRoot, request } from "../../platform/api.js";
 import { Button, Input } from "../../ui/elements.js";
@@ -54,11 +53,11 @@ function WorkspaceFileManager({
   trashRoot,
 }) {
   const [tree, setTree] = React.useState({});
-  const [applicationsOpen, setApplicationsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchRows, setSearchRows] = React.useState([]);
   const [searchCursor, setSearchCursor] = React.useState(null);
   const [searchBusy, setSearchBusy] = React.useState(false);
+  const [searchChoice, setSearchChoice] = React.useState(0);
   const searchAbort = React.useRef(null);
   const searchLease = React.useRef(null);
   const releaseSearch = () => {
@@ -88,6 +87,7 @@ function WorkspaceFileManager({
         setSearchRows((rows) =>
           cursor ? [...rows, ...result.items] : result.items,
         );
+        if (!cursor) setSearchChoice(0);
         setSearchCursor(result.nextCursor);
       } else if (result.nextCursor) {
         void request(
@@ -117,6 +117,28 @@ function WorkspaceFileManager({
       releaseSearch();
     };
   }, [root, searchQuery]);
+  const openSearchResult = (entry) => {
+    setTabs((rows) => [...rows.filter((item) => item.path !== entry.path), entry]);
+    setSelected(entry);
+    setDirectory(fileParent(entry.path));
+    setSearchQuery("");
+  };
+  const searchKeyDown = (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!searchRows.length) return;
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setSearchChoice(
+        (index) => (index + delta + searchRows.length) % searchRows.length,
+      );
+    } else if (event.key === "Enter" && searchRows[searchChoice]) {
+      event.preventDefault();
+      openSearchResult(searchRows[searchChoice]);
+    } else if (event.key === "Escape" && searchQuery) {
+      event.preventDefault();
+      setSearchQuery("");
+    }
+  };
   const { confirm, confirmation } = useConfirm();
   const [trashOpen, setTrashOpen] = React.useState(false);
   const trash = useFileTrash({ root: trashRoot, enabled: trashOpen });
@@ -735,66 +757,92 @@ function WorkspaceFileManager({
             ),
           )
         : null,
-      !workspace.currentRole || workspace.currentRole === "owner"
-        ? h(
-            Button,
-            { onClick: () => setApplicationsOpen((value) => !value) },
-            applicationsOpen ? "关闭应用发布" : "应用预览与发布",
-          )
-        : null,
-      applicationsOpen &&
-        (!workspace.currentRole || workspace.currentRole === "owner")
-        ? h(PublishedApps, { workspace, entry: selected?.path || "index.html" })
-        : null,
       trashOpen
         ? trash.content
         : h(
-            "div",
-            {
-              className: "workagent-file-tree",
-              "aria-label": "项目文件树",
-            },
-            h(Input, {
-              "aria-label": "搜索整个项目",
-              placeholder: "搜索整个项目的文件名或路径",
-              value: searchQuery,
-              onChange: (event) => setSearchQuery(event.target.value),
-            }),
-            searchQuery.trim()
-              ? h(
-                  "div",
-                  { "aria-label": "项目搜索结果" },
-                  ...searchRows.map((entry) =>
-                    h(
-                      "button",
-                      {
-                        key: entry.path,
-                        type: "button",
-                        className: "workagent-file-tree-row",
-                        onClick: () => {
-                          setTabs((rows) => [
-                            ...rows.filter((item) => item.path !== entry.path),
-                            entry,
-                          ]);
-                          setSelected(entry);
+            React.Fragment,
+            null,
+            h(
+              "div",
+              { className: "workagent-file-search" },
+              h(Icon, { name: "search", size: 16 }),
+              h(Input, {
+                className: "workagent-file-search-input",
+                role: "combobox",
+                "aria-expanded": !!searchQuery.trim(),
+                "aria-label": "搜索整个项目",
+                placeholder: "搜索整个项目的文件名或路径",
+                value: searchQuery,
+                onChange: (event) => setSearchQuery(event.target.value),
+                onKeyDown: searchKeyDown,
+              }),
+              searchQuery.trim()
+                ? h(
+                    "div",
+                    {
+                      className: "workagent-file-search-results",
+                      role: "listbox",
+                      "aria-label": "项目搜索结果",
+                    },
+                    ...searchRows.map((entry, index) =>
+                      h(
+                        "button",
+                        {
+                          key: entry.path,
+                          type: "button",
+                          role: "option",
+                          "aria-selected": index === searchChoice,
+                          className: `workagent-file-search-result${index === searchChoice ? " is-active" : ""}`,
+                          onMouseDown: (event) => event.preventDefault(),
+                          onClick: () => openSearchResult(entry),
                         },
-                      },
-                      entry.path,
+                        h(Icon, { name: "file", size: 16 }),
+                        h(
+                          "span",
+                          { className: "workagent-file-search-name" },
+                          entry.name,
+                        ),
+                        h("small", null, fileParent(entry.path) || "根目录"),
+                      ),
                     ),
-                  ),
-                  searchBusy
-                    ? h("p", { role: "status" }, "正在搜索…")
-                    : searchCursor
+                    searchBusy
                       ? h(
-                          Button,
-                          { onClick: () => searchFiles(searchCursor) },
-                          "继续搜索",
+                          "p",
+                          {
+                            role: "status",
+                            className: "workagent-file-search-state",
+                          },
+                          "正在搜索…",
                         )
-                      : !searchRows.length
-                        ? h("p", null, "没有匹配的文件")
-                        : null,
-                )
-              : tree[""]
+                      : searchCursor
+                        ? h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "workagent-file-search-more",
+                              onMouseDown: (event) => event.preventDefault(),
+                              onClick: () => searchFiles(searchCursor),
+                            },
+                            "继续搜索更多结果",
+                          )
+                        : !searchRows.length
+                          ? h(
+                              "p",
+                              { className: "workagent-file-search-state" },
+                              "没有匹配的文件",
+                            )
+                          : null,
+                  )
+                : null,
+            ),
+            h(
+              "div",
+              {
+                className: `workagent-file-tree${movement.hover === movement.moveOutKey ? " is-move-target" : ""}`,
+                "aria-label": "项目文件树",
+                ...movement.moveOutProps(),
+              },
+              tree[""]
                 ? tree[""].length
                   ? renderDirectory("")
                   : h(
@@ -805,6 +853,7 @@ function WorkspaceFileManager({
                       h("p", null, "拖入文件，或让助手在项目中创建文件。"),
                     )
                 : h("p", { role: "status" }, "正在加载文件…"),
+            ),
           ),
     ),
     tabs.length && !trashOpen

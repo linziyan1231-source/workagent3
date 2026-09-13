@@ -12,7 +12,8 @@ import {
   TypographySettings,
   installTypography,
 } from "./features/appearance/settings.js";
-import { MCPSection, SkillsSection } from "./features/capabilities/settings.js";
+import { PublishedAppsSection } from "./features/apps/settings.js";
+import { MCPSkillsSection } from "./features/capabilities/settings.js";
 import { HeroWorkspaceComposer } from "./features/conversations/home.js";
 import {
   BusyEnterSettings,
@@ -33,11 +34,11 @@ const pluginScript = document.currentScript?.src;
 
 const sections = [
   ["workagent-system", 40, "系统与帮助", SystemSettings],
-  ["workagent-mcp", 30, "MCP 服务", MCPSection],
-  ["workagent-skills", 31, "技能", SkillsSection],
+  ["workagent-mcp-skills", 30, "MCP与技能", MCPSkillsSection],
   ["workagent-market", 32, "市场", MarketplaceSection],
   ["workagent-presets", 33, "助手", PresetsSection],
   ["workagent-models", 34, "模型", ModelsSection],
+  ["workagent-apps", 35, "网页发布", PublishedAppsSection],
   [
     "workagent-completion-notifications",
     36,

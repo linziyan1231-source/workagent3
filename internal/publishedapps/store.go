@@ -3,9 +3,11 @@ package publishedapps
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/big"
 	_ "modernc.org/sqlite"
 	"net/url"
 	"path"
@@ -36,9 +38,28 @@ type App struct {
 	Port           int       `json:"port"`
 	PreviewPort    int       `json:"previewPort"`
 	Enabled        bool      `json:"enabled"`
+	ShareToken     string    `json:"shareToken,omitempty"`
+	Password       string    `json:"password,omitempty"`
+	ExpiresAt      time.Time `json:"expiresAt,omitempty"`
 	Revision       int64     `json:"revision"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
+
+// Access modes: owner and members require specific WorkAgent accounts,
+// authenticated any logged-in account, token a share link carrying the share
+// token, password an 8-digit access code, public anyone.
+const (
+	AccessOwner         = "owner"
+	AccessMembers       = "members"
+	AccessAuthenticated = "authenticated"
+	AccessToken         = "token"
+	AccessPassword      = "password"
+	AccessPublic        = "public"
+)
+
+// DefaultValidity is applied when a publish request does not state one.
+const DefaultValidity = 5 * 24 * time.Hour
+
 type Store struct {
 	db          *sql.DB
 	mu          sync.Mutex
@@ -163,7 +184,7 @@ func (s *Store) List(ctx context.Context, sid string) ([]App, error) {
 	return items, rows.Err()
 }
 func (s *Store) Update(ctx context.Context, a App, expected int64) (App, error) {
-	if a.Access != "owner" && a.Access != "members" && a.Access != "authenticated" && a.Access != "public" {
+	if !ValidAccess(a.Access) {
 		return App{}, ErrInvalid
 	}
 	if len(a.Members) > 1000 {
@@ -183,11 +204,54 @@ func (s *Store) Update(ctx context.Context, a App, expected int64) (App, error) 
 	_, err = s.db.ExecContext(ctx, `UPDATE apps SET payload=? WHERE id=?`, string(raw), a.ID)
 	return a, err
 }
+func ValidAccess(access string) bool {
+	switch access {
+	case AccessOwner, AccessMembers, AccessAuthenticated, AccessToken, AccessPassword, AccessPublic:
+		return true
+	}
+	return false
+}
+
+// Expired reports whether the app's validity window has passed. A zero
+// ExpiresAt means the app does not expire.
+func (a App) Expired(now time.Time) bool {
+	return !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt)
+}
+
+func (s *Store) Delete(ctx context.Context, id, ownerSID string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE apps SET deleted=1 WHERE id=? AND owner_sid=? AND deleted=0`, id, ownerSID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RandomAccessCode returns an 8-digit numeric access code for
+// password-protected apps.
+func RandomAccessCode() (string, error) {
+	var digits [8]byte
+	for i := range digits {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			return "", err
+		}
+		digits[i] = byte('0' + n.Int64())
+	}
+	return string(digits[:]), nil
+}
+
 func (a App) Allows(userID int64, preview bool) bool {
 	if preview {
 		return userID != 0 && userID == a.OwnerID
 	}
-	if !a.Enabled {
+	if !a.Enabled || a.Expired(time.Now()) {
 		return false
 	}
 	if a.Access == "public" {

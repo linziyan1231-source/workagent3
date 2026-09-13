@@ -56,7 +56,7 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := skills.List(t.Context())
-	if err != nil || len(entries) != 16 {
+	if err != nil || len(entries) != 17 {
 		t.Fatalf("release entries = %#v, %v", entries, err)
 	}
 	for _, entry := range entries {

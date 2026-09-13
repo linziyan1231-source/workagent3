@@ -12,6 +12,13 @@
   font-weight: 600;
 }
 
+.workagent-subheading {
+  margin: 8px 0 0;
+  color: var(--dsw-color-text);
+  font-size: calc(15px * var(--workagent-font-scale, 0.928571));
+  font-weight: 600;
+}
+
 .workagent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

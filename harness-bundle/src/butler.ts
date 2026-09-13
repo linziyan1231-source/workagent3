@@ -16,6 +16,8 @@ export const BUTLER_HELP = {
     "新会话使用最新能力集合。已有会话可在空闲时重新加载能力，保留消息历史。运行中的任务不能重载。单次运行状态不能证明任务卡住，应对比状态并查看错误。",
   models:
     "设置中查看模型、授权和凭据状态。模型不可用先检查授权和连接。管家不显示密钥，不修改平台管理员控制的模型授权或额度。",
+  publish:
+    "设置→网页发布：查看已发布网页，启停或删除。发布由网页发布工具（app_publish MCP）完成：GET /v1/app-publishing 列出，POST /v1/app-publishing/publish 发布，字段 {workspaceId(默认default), name, entry(默认index.html), access(authenticated/token/password), validDays(默认5), appId(可选，更新已有网页)}。发布前必须向用户确认访问范围和有效天数；返回的 shareUrl 与 accessCode 可直接转达给用户。",
 };
 
 // The helper is an employee-local client, not a general HTTP proxy.
@@ -40,6 +42,8 @@ export function allowedButlerRequest(method: string, path: string): boolean {
     ["POST", `/v1/sessions/${id}/capabilities/reload`],
     ["POST", "/v1/completion-notifications/send"],
     ["POST", "/v1/session-tools"],
+    ["GET", "/v1/app-publishing"],
+    ["POST", "/v1/app-publishing/publish"],
     ["GET", "/dsh-im-connect/api/(channels|assistant|projects)"],
     ["POST", "/dsh-im-connect/api/assistant"],
     [

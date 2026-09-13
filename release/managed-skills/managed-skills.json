@@ -40,6 +40,15 @@
       "requiredMcpServerIds": []
     },
     {
+      "id": "web-publish",
+      "name": "web-publish",
+      "description": "Publish a workspace web page or small web app as a shareable online link with a confirmed validity period and access scope, through the built-in app-publish MCP.",
+      "version": "0.1.0",
+      "relativePath": "web-publish",
+      "enabledByDefault": true,
+      "requiredMcpServerIds": []
+    },
+    {
       "id": "officecli-data-dashboard",
       "name": "officecli-data-dashboard",
       "description": "Create polished Excel dashboard workbooks with OfficeCLI, including KPI cards, charts, conditional formatting, and visual QA.",

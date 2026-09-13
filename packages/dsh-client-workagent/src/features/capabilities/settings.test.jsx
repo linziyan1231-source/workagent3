@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { SkillsSection } from "./settings.js";
+import { MCPSkillsSection } from "./settings.js";
 
 afterEach(() => {
   cleanup();
@@ -50,6 +50,7 @@ function fixture() {
   const fetch = vi.fn(async (url) => {
     url = String(url);
     if (url === "/api/runtime/v1/skills") return json(skills);
+    if (url === "/api/runtime/v1/mcp-servers") return json([]);
     if (url === "/api/runtime/v1/capability-sync/status")
       return json({ items: [] });
     throw new Error(`Unexpected request ${url}`);
@@ -58,9 +59,20 @@ function fixture() {
   return fetch;
 }
 
+it("combines MCP and skills under one section", async () => {
+  fixture();
+  render(<MCPSkillsSection />);
+  const section = (
+    await screen.findByText("受管技能", { exact: true })
+  ).closest("section");
+  expect(section.getAttribute("data-workagent-section")).toBe("MCP与技能");
+  expect(within(section).getByText("MCP 服务", { exact: true })).toBeTruthy();
+  expect(within(section).getByText("技能", { exact: true })).toBeTruthy();
+});
+
 it("shows enable/disable toggles for skills of every source", async () => {
   fixture();
-  render(<SkillsSection />);
+  render(<MCPSkillsSection />);
   const managed = (
     await screen.findByText("受管技能", { exact: true })
   ).closest("article");
@@ -79,7 +91,7 @@ it("shows enable/disable toggles for skills of every source", async () => {
 
 it("toggles a managed skill through the same PATCH used for user skills", async () => {
   const fetch = fixture();
-  render(<SkillsSection />);
+  render(<MCPSkillsSection />);
   const card = (await screen.findByText("受管技能", { exact: true })).closest(
     "article",
   );

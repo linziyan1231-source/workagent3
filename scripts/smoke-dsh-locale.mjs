@@ -22,7 +22,7 @@ await withPage(async (page) => {
       await dialog.getByRole("button", { name: /^(Plugins|插件)$/ }).count(),
       0,
     );
-    for (const name of ["市场", "技能", "MCP 服务", "助手"])
+    for (const name of ["市场", "MCP与技能", "网页发布", "助手"])
       await dialog.getByRole("button", { name, exact: true }).waitFor();
     for (const name of ["云瓷白", "冰川蓝", "石墨黑", "暖纸色", "松石绿"])
       await dialog.getByRole("button", { name, exact: true }).waitFor();

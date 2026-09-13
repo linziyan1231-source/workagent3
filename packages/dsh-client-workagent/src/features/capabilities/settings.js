@@ -82,7 +82,7 @@ function CapabilitySync({ kind, onSynced }) {
   );
 }
 
-function MCPSection() {
+function MCPBody() {
   const endpoint = `${apiRoot}/mcp-servers`;
   const [state, refresh] = useResource(endpoint);
   const [error, setError] = React.useState("");
@@ -133,8 +133,8 @@ function MCPSection() {
     }
   };
   return h(
-    Section,
-    { title: "MCP 服务" },
+    React.Fragment,
+    null,
     h(CapabilitySync, { kind: "mcp", onSynced: refresh }),
     h(imports.MCPImport, { onImported: refresh }),
     h(
@@ -233,13 +233,13 @@ function MCPSection() {
   );
 }
 
-function SkillsSection() {
+function SkillsBody() {
   const endpoint = apiRoot + "/skills";
   const [state, refresh] = useResource(endpoint);
   const [error, setError] = React.useState("");
   return h(
-    Section,
-    { title: "技能" },
+    React.Fragment,
+    null,
     h(CapabilitySync, { kind: "skill", onSynced: refresh }),
     h(imports.SkillImport, { onImported: refresh }),
     h(
@@ -281,6 +281,17 @@ function SkillsSection() {
   );
 }
 
+function MCPSkillsSection() {
+  return h(
+    Section,
+    { title: "MCP与技能" },
+    h("h3", { className: "workagent-subheading" }, "MCP 服务"),
+    h(MCPBody),
+    h("h3", { className: "workagent-subheading" }, "技能"),
+    h(SkillsBody),
+  );
+}
+
 const imports = createImports({
   React,
   request,
@@ -292,4 +303,4 @@ const imports = createImports({
   useResource,
 });
 
-export { MCPSection, SkillsSection };
+export { MCPSkillsSection };

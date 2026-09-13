@@ -91,7 +91,22 @@ const reset = () => {
         attachments: [],
       },
     ],
-    apps: [],
+    apps: [
+      {
+        id: "app-seeded",
+        workspaceId: "fixture-project",
+        name: "示例网页",
+        kind: "static",
+        entry: "index.html",
+        access: "token",
+        enabled: true,
+        version: "v1",
+        versions: ["v1"],
+        shareUrl: base ? `${base}/t/share-token-x/` : "http://127.0.0.1/t/share-token-x/",
+        url: base ? `${base}/apps/app-seeded` : "http://127.0.0.1/apps/app-seeded",
+        expiresAt: new Date(Date.now() + 5 * 86400000).toISOString(),
+      },
+    ],
     catalog: catalog(),
     teams: [],
     runs: [],
@@ -178,13 +193,6 @@ const server = createServer(async (req, res) => {
     if (failure?.path === path && failure.method === req.method) {
       failure = null;
       json(res, { error: "fixture_submit_failed" }, 503);
-      return;
-    }
-    if (path === "/__fixture/preview") {
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(
-        '<meta charset="utf-8"><button onclick="this.textContent=\'交互已验证\'">验证交互</button>',
-      );
       return;
     }
     if (path === "/api/system/feedback") {
@@ -305,36 +313,22 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (path === "/api/portal/apps") {
-      if (req.method === "POST") {
-        const app = {
-          ...body,
-          id: "app-created",
-          enabled: false,
-          access: "owner",
-          members: [],
-          versions: [],
-        };
-        state.apps.push(app);
-        json(res, app);
-      } else json(res, { items: state.apps });
+      json(res, { items: state.apps });
       return;
     }
-    if (path.startsWith("/api/portal/apps/app-created/")) {
+    if (path.startsWith("/api/portal/apps/app-seeded/")) {
       const app = state.apps[0];
-      if (path.endsWith("/access-ticket"))
-        json(res, { ticket: "fixture-only", url: base + "/__fixture/preview" });
-      else if (path.endsWith("/versions")) {
-        app.versions.push("version-" + (app.versions.length + 1));
-        json(res, app);
-      } else if (path.endsWith("/publish")) {
-        Object.assign(app, body, { enabled: true });
-        json(res, app);
-      } else if (path.endsWith("/unpublish")) {
+      if (path.endsWith("/unpublish")) {
         app.enabled = false;
         json(res, app);
-      } else if (path.endsWith("/status"))
-        json(res, { state: "running", logTail: "isolated fixture" });
-      else json(res, {});
+      } else if (path.endsWith("/enable")) {
+        app.enabled = true;
+        app.expiresAt = new Date(Date.now() + 5 * 86400000).toISOString();
+        json(res, app);
+      } else if (path.endsWith("/delete")) {
+        state.apps = [];
+        json(res, { deleted: true });
+      } else json(res, {});
       return;
     }
     json(res, { error: "fixture_route_missing", path }, 404);
@@ -470,47 +464,25 @@ try {
       );
 
       await open("apps");
-      await page.getByLabel("应用名称", { exact: true }).fill("本地 Node 应用");
-      await page.getByLabel("运行方式").selectOption("node");
-      await page.getByLabel("项目内入口路径").fill("site/server.js");
+      const appCard = page.locator("article", { hasText: "示例网页" });
+      await appCard.waitFor();
+      await appCard.getByText(/运行中 · 持有链接的人 · 有效期至/).waitFor();
+      await appCard.getByRole("button", { name: "复制链接" }).click();
+      await appCard.getByRole("button", { name: "已复制" }).waitFor();
+      await appCard.getByRole("button", { name: "停用", exact: true }).click();
+      await appCard.getByText(/已停用/).waitFor();
+      await appCard.getByRole("button", { name: "启用", exact: true }).click();
+      await appCard.getByText(/运行中/).waitFor();
+      await appCard.getByRole("button", { name: "删除", exact: true }).click();
       await page
-        .getByLabel(/允许访问的外部 API/)
-        .fill("https://api.example.test");
-      await failNext(page, "/api/portal/apps");
-      await page.getByRole("button", { name: "创建并预览" }).click();
-      await page
-        .getByRole("alert")
-        .filter({ hasText: "fixture_submit_failed" })
-        .waitFor();
-      await assertRetained(
-        page.getByLabel("应用名称", { exact: true }),
-        "本地 Node 应用",
-      );
-      await assertRetained(page.getByLabel("项目内入口路径"), "site/server.js");
-      await page.getByRole("button", { name: "创建并预览" }).click();
-      const frame = page.frameLocator('iframe[title="交互式应用预览"]');
-      try {
-        await frame
-          .getByRole("button", { name: "验证交互" })
-          .click({ timeout: 5000 });
-        await frame.getByRole("button", { name: "交互已验证" }).waitFor();
-      } catch (error) {
-        run.findings.push({
-          screen: "apps",
-          error: String(error),
-          frames: page
-            .frames()
-            .map((frame) => ({ name: frame.name(), url: frame.url() })),
-        });
-        await recordShot(page, browserName + "-preview-failed");
-      }
-      await page.getByLabel("发布访问范围").selectOption("public");
-      await page.getByRole("button", { name: "发布新版本" }).click();
-      await page.getByLabel("应用分享链接").waitFor();
-      assert.equal((await data(page)).apps[0].access, "public");
-      await recordShot(page, browserName + "-published-preview");
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "删除", exact: true })
+        .click();
+      await appCard.waitFor({ state: "detached" });
+      assert.equal((await data(page)).apps.length, 0);
+      await recordShot(page, browserName + "-published-pages");
       run.flows.push(
-        "apps: rejected create preserves values; public publish payload succeeds; iframe result is reported separately",
+        "apps: lists published pages with scope and expiry; copy-link, disable/enable and confirmed delete all round-trip",
       );
 
       await open("acp");
@@ -666,7 +638,9 @@ try {
                 .getByRole("button", { name: "预览诊断摘要" })
                 .click();
             if (screen === "apps")
-              await mobile.getByLabel("发布访问范围").selectOption("members");
+              await mobile
+                .getByRole("button", { name: "复制链接" })
+                .waitFor();
             if (screen === "feedback-admin")
               await mobile.locator("details > summary").first().click();
             if (screen === "once")

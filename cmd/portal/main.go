@@ -329,6 +329,7 @@ func run() error {
 	root := http.NewServeMux()
 	root.Handle("/internal/runtime/acp-catalog", server.AcpCatalogRuntimeHandler())
 	root.Handle("/internal/runtime/published-apps/network", server.PublishedAppsNetworkHandler())
+	root.Handle("/internal/runtime/published-apps/", server.PublishedAppsRuntimeHandler())
 	if chatForwardProxy != nil {
 		root.Handle("/internal/chatforward/quota/", chatForwardProxy.CallbackHandler())
 	}

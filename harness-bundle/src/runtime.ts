@@ -19,6 +19,7 @@ import {
 } from "./market-capabilities.js";
 import { butlerServer } from "./butler-mcp.js";
 import { messageServer } from "./message-mcp.js";
+import { publishServer } from "./publish-mcp.js";
 import { sessionToolsServer } from "./session-tools-mcp.js";
 import { sharedTrashServer } from "./shared-trash-mcp.js";
 import { RuntimePreferences } from "./runtime-preferences.js";
@@ -4563,6 +4564,7 @@ export class RuntimeController
     )
       servers.push(butlerServer());
     servers.push(messageServer());
+    servers.push(publishServer());
     if (workspaceId?.startsWith("shared:"))
       servers.push(sharedTrashServer(workspaceId.slice("shared:".length)));
     return servers;

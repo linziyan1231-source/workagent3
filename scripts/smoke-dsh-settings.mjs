@@ -35,7 +35,7 @@ await withPage(async (page) => {
     preset = undefined;
 
     await page.reload();
-    section = await openSettingsSection(page, "MCP 服务");
+    section = await openSettingsSection(page, "MCP与技能");
     const mcpName = uniqueName("dsh-mcp");
     await section.getByLabel("名称").fill(mcpName);
     await section.getByLabel("服务地址").fill("https://example.invalid/mcp");
@@ -51,7 +51,7 @@ await withPage(async (page) => {
       { method: "DELETE" },
     );
     await page.reload();
-    section = await openSettingsSection(page, "MCP 服务");
+    section = await openSettingsSection(page, "MCP与技能");
     const needsAuth = (await json(page, "/api/runtime/v1/mcp-servers")).find(
       (row) => row.oauthState === "needs_auth",
     );

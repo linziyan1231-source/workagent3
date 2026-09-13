@@ -33,8 +33,8 @@ describe("WorkAgent dsh client composition", () => {
   });
 
   it.each([
-    "MCP 服务",
-    "技能",
+    "MCP与技能",
+    "网页发布",
     "引擎",
     "助手",
     "模型",

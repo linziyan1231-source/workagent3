@@ -107,7 +107,7 @@ try {
   report.checks.push(
     "AI管家 remains available in the agent selector without an extra shortcut",
   );
-  let section = await openSettingsSection(page, "MCP 服务");
+  let section = await openSettingsSection(page, "MCP与技能");
   await section
     .getByRole("button", { name: "检查新安装", exact: true })
     .waitFor();

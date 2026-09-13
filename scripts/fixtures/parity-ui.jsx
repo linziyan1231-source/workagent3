@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { FeedbackForm } from "../../packages/dsh-client-workagent/src/features/system/feedback.js";
-import { PublishedApps } from "../../packages/dsh-client-workagent/src/features/files/published-apps.js";
+import { PublishedAppsSection } from "../../packages/dsh-client-workagent/src/features/apps/settings.js";
 import { AcpCredentials } from "../../packages/dsh-client-workagent/src/features/agents/acp.js";
 import { AcpCatalog } from "../../apps/web/src/features/admin/acp/AcpCatalog.tsx";
 import { FeedbackInbox } from "../../apps/web/src/features/admin/feedback/FeedbackInbox.tsx";
@@ -41,9 +41,7 @@ const Component = {
   "feedback-admin": FeedbackInbox,
   teams: TeamsPage,
   once: Automations,
-  apps: () => (
-    <PublishedApps workspace={{ id: "fixture-project", name: "验收项目" }} />
-  ),
+  apps: PublishedAppsSection,
 }[screen];
 createRoot(document.getElementById("root")).render(
   <main

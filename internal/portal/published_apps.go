@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -33,6 +35,9 @@ type appGrant struct {
 	UserID, Revision int64
 	Preview          bool
 	Expires          time.Time
+	// Anonymous marks grants issued through share tokens or access codes;
+	// they carry no WorkAgent identity and skip user revalidation.
+	Anonymous bool
 }
 type applicationGateway struct {
 	s               *Server
@@ -45,6 +50,7 @@ type applicationGateway struct {
 	provisioning    map[string]time.Time
 	requests        map[string]map[uint64]*appGatewayRequest
 	stopping        map[string]bool
+	passwordFails   map[string][]time.Time
 	nextRequest     uint64
 }
 type appGatewayRequest struct {
@@ -202,6 +208,81 @@ func (g *applicationGateway) prune() {
 		}
 	}
 }
+
+// anonymousMode reports whether the app admits visitors without a WorkAgent
+// account (share token or access code modes).
+func anonymousMode(a publishedapps.App) bool {
+	return a.Access == publishedapps.AccessToken || a.Access == publishedapps.AccessPassword
+}
+
+func grantAllowed(a publishedapps.App, grant appGrant) bool {
+	if a.Allows(grant.UserID, grant.Preview) {
+		return true
+	}
+	return grant.Anonymous && anonymousMode(a) && a.Enabled && !a.Expired(time.Now())
+}
+
+func anonymousGrantExpiry(a publishedapps.App) time.Time {
+	until := time.Now().Add(12 * time.Hour)
+	if !a.ExpiresAt.IsZero() && a.ExpiresAt.Before(until) {
+		until = a.ExpiresAt
+	}
+	return until
+}
+
+// newTicket mints a single-use access ticket exchanged at the app listener.
+func (g *applicationGateway) newTicket(a publishedapps.App, sid string, userID int64, preview, anonymous bool) (string, error) {
+	ticket, err := auth.RandomToken(24)
+	if err != nil {
+		return "", err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.prune()
+	if len(g.tickets) >= 4096 {
+		return "", errors.New("application_access_busy")
+	}
+	g.tickets[ticket] = appGrant{AppID: a.ID, SID: sid, UserID: userID, Revision: a.Revision, Preview: preview, Expires: time.Now().Add(time.Minute), Anonymous: anonymous}
+	return ticket, nil
+}
+
+// shareTokenAccess admits visitors arriving on the /t/{token}/ share link by
+// issuing an anonymous grant and cookie, then redirecting to the app root.
+func (g *applicationGateway) shareTokenAccess(w http.ResponseWriter, r *http.Request, a publishedapps.App, preview bool, cookieName string) {
+	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/t/"), "/")
+	if preview || a.Access != publishedapps.AccessToken || a.ShareToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(a.ShareToken)) != 1 || !a.Enabled || a.Expired(time.Now()) {
+		writeError(w, 403, "application_access_required")
+		return
+	}
+	grantToken, err := auth.RandomToken(24)
+	if err != nil {
+		writeError(w, 500, "internal_error")
+		return
+	}
+	expires := anonymousGrantExpiry(a)
+	g.mu.Lock()
+	if len(g.grants) >= 4096 {
+		g.mu.Unlock()
+		writeError(w, 503, "application_access_busy")
+		return
+	}
+	g.grants[grantToken] = appGrant{AppID: a.ID, Revision: a.Revision, Expires: expires, Anonymous: true}
+	g.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: grantToken, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(expires).Seconds())})
+	http.Redirect(w, r, "/", 303)
+}
+
+func (g *applicationGateway) unlisten(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, preview := range []bool{false, true} {
+		key := id + strconv.FormatBool(preview)
+		if server := g.listeners[key]; server != nil {
+			_ = server.Close()
+			delete(g.listeners, key)
+		}
+	}
+}
 func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -234,6 +315,10 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 			return
 		}
 		cookieName := "wa-app-" + id + "-" + strconv.FormatBool(preview)
+		if strings.HasPrefix(r.URL.Path, "/t/") {
+			g.shareTokenAccess(w, r, a, preview, cookieName)
+			return
+		}
 		if r.URL.Path == "/__workagent/access" {
 			if r.Method != "POST" || r.Header.Get("Origin") != g.config.PublicURL {
 				writeError(w, 403, "invalid_access_exchange")
@@ -249,7 +334,7 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 			grant, ok := g.tickets[r.FormValue("ticket")]
 			delete(g.tickets, r.FormValue("ticket"))
 			g.mu.Unlock()
-			if !ok || grant.AppID != id || grant.Preview != preview || grant.Revision != a.Revision || !a.Allows(grant.UserID, preview) {
+			if !ok || grant.AppID != id || grant.Preview != preview || grant.Revision != a.Revision || !grantAllowed(a, grant) {
 				writeError(w, 403, "invalid_access_ticket")
 				return
 			}
@@ -259,6 +344,9 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 				return
 			}
 			grant.Expires = time.Now().Add(30 * time.Minute)
+			if grant.Anonymous {
+				grant.Expires = anonymousGrantExpiry(a)
+			}
 			g.mu.Lock()
 			if len(g.grants) >= 4096 {
 				g.mu.Unlock()
@@ -267,7 +355,7 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 			}
 			g.grants[token] = grant
 			g.mu.Unlock()
-			http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 1800})
+			http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(grant.Expires).Seconds())})
 			http.Redirect(w, r, "/", 303)
 			return
 		}
@@ -279,11 +367,16 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 				g.mu.Lock()
 				grant, ok := g.grants[cookie.Value]
 				g.mu.Unlock()
-				if ok && time.Now().Before(grant.Expires) && grant.AppID == id && grant.Preview == preview && grant.Revision == a.Revision && a.Allows(grant.UserID, preview) {
-					user, e := g.s.store.UserBySID(r.Context(), grant.SID)
-					allowed = e == nil && !user.Disabled && !user.Offboarded && user.ID == grant.UserID
-					if allowed {
+				if ok && time.Now().Before(grant.Expires) && grant.AppID == id && grant.Preview == preview && grant.Revision == a.Revision && grantAllowed(a, grant) {
+					if grant.Anonymous {
+						allowed = true
 						viewerGrant = &grant
+					} else {
+						user, e := g.s.store.UserBySID(r.Context(), grant.SID)
+						allowed = e == nil && !user.Disabled && !user.Offboarded && user.ID == grant.UserID
+						if allowed {
+							viewerGrant = &grant
+						}
 					}
 				}
 			}
@@ -375,15 +468,21 @@ func (g *applicationGateway) handler(id string, preview bool) http.Handler {
 					return
 				case <-ticker.C:
 					if viewerGrant != nil {
-						viewer, e := g.s.store.UserBySID(r.Context(), viewerGrant.SID)
-						if e != nil || viewer.Disabled || viewer.Offboarded || !time.Now().Before(viewerGrant.Expires) {
-							// Only this visitor's connection expires; other visitors remain connected.
+						if viewerGrant.SID != "" {
+							viewer, e := g.s.store.UserBySID(r.Context(), viewerGrant.SID)
+							if e != nil || viewer.Disabled || viewer.Offboarded {
+								// Only this visitor's connection expires; other visitors remain connected.
+								cancelProxy()
+								return
+							}
+						}
+						if !time.Now().Before(viewerGrant.Expires) {
 							cancelProxy()
 							return
 						}
 					}
 					current, e := g.config.Store.Get(r.Context(), id)
-					if e != nil || !g.s.applicationOwnerAllowed(r.Context(), a) || current.Revision != a.Revision {
+					if e != nil || !g.s.applicationOwnerAllowed(r.Context(), a) || current.Revision != a.Revision || current.Expired(time.Now()) {
 						g.disconnect(id)
 						return
 					}
@@ -414,7 +513,11 @@ func (s *Server) publishedAppsHTTP(w http.ResponseWriter, r *http.Request, user 
 			writeError(w, 500, "applications_failed")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": rows})
+		items := make([]appSummary, 0, len(rows))
+		for _, a := range rows {
+			items = append(items, s.appSummary(a))
+		}
+		writeJSON(w, 200, map[string]any{"items": items})
 		return
 	}
 	if id == "" && r.Method == "POST" {
@@ -468,20 +571,11 @@ func (s *Server) publishedAppsHTTP(w http.ResponseWriter, r *http.Request, user 
 			writeError(w, 403, "application_access_required")
 			return
 		}
-		ticket, err := auth.RandomToken(24)
+		ticket, err := s.apps.newTicket(a, user.SID, user.ID, preview, false)
 		if err != nil {
-			writeError(w, 500, "internal_error")
+			writeError(w, 429, err.Error())
 			return
 		}
-		s.apps.mu.Lock()
-		s.apps.prune()
-		if len(s.apps.tickets) >= 4096 {
-			s.apps.mu.Unlock()
-			writeError(w, 429, "application_access_busy")
-			return
-		}
-		s.apps.tickets[ticket] = appGrant{id, user.SID, user.ID, a.Revision, preview, time.Now().Add(time.Minute)}
-		s.apps.mu.Unlock()
 		writeJSON(w, 200, map[string]string{"ticket": ticket, "url": s.apps.address(a, preview) + "/__workagent/access"})
 		return
 	}
@@ -501,13 +595,13 @@ func (s *Server) publishedAppsHTTP(w http.ResponseWriter, r *http.Request, user 
 		writeError(w, 409, "application_stopping")
 		return
 	}
-	if action == "versions" || action == "previews" || action == "publish" {
+	if action == "versions" || action == "previews" || action == "publish" || action == "enable" || action == "delete" {
 		if !s.applicationOwnerAllowed(r.Context(), a) {
 			writeError(w, 403, "application_owner_required")
 			return
 		}
 	}
-	if action == "versions" || action == "previews" || action == "publish" {
+	if action == "versions" || action == "previews" || action == "publish" || action == "enable" {
 		if err = s.apps.listen(a); err != nil {
 			writeError(w, 503, "application_port_unavailable")
 			return
@@ -562,6 +656,18 @@ func (s *Server) publishedAppsHTTP(w http.ResponseWriter, r *http.Request, user 
 		a.Access = input.Access
 		a.Members = input.Members
 		a.Enabled = true
+	} else if action == "enable" {
+		if a.Version == "" {
+			writeError(w, 409, "application_not_published")
+			return
+		}
+		a.Enabled = true
+		if a.Expired(time.Now()) {
+			a.ExpiresAt = time.Now().Add(publishedapps.DefaultValidity)
+		}
+	} else if action == "delete" {
+		s.deleteApplication(w, r, user, a)
+		return
 	} else if action == "stop" || action == "unpublish" {
 		s.stopApplication(w, r, user, a, expected, action)
 		return
@@ -580,6 +686,31 @@ func (s *Server) publishedAppsHTTP(w http.ResponseWriter, r *http.Request, user 
 	}
 	writeJSON(w, 200, updated)
 }
+
+// appSummary decorates an app with the share links shown to its owner. The
+// password is exposed as accessCode only to the owner through this summary.
+type appSummary struct {
+	publishedapps.App
+	URL        string `json:"url"`
+	ShareURL   string `json:"shareUrl"`
+	AccessCode string `json:"accessCode,omitempty"`
+}
+
+func (s *Server) appSummary(a publishedapps.App) appSummary {
+	summary := appSummary{App: a, URL: strings.TrimRight(s.apps.config.PublicURL, "/") + "/apps/" + a.ID}
+	summary.ShareURL = summary.URL
+	switch a.Access {
+	case publishedapps.AccessToken:
+		if a.ShareToken != "" {
+			summary.ShareURL = s.apps.address(a, false) + "/t/" + a.ShareToken + "/"
+		}
+	case publishedapps.AccessPassword:
+		summary.ShareURL = s.apps.address(a, false) + "/"
+		summary.AccessCode = a.Password
+	}
+	return summary
+}
+
 func (s *Server) stopApplication(w http.ResponseWriter, r *http.Request, user store.User, a publishedapps.App, expected int64, action string) {
 	s.apps.mu.Lock()
 	if s.apps.stopping == nil {
@@ -618,6 +749,46 @@ func (s *Server) stopApplication(w http.ResponseWriter, r *http.Request, user st
 		return
 	}
 	writeJSON(w, 200, updated)
+}
+
+// deleteApplication stops serving the app and soft-deletes its record. The
+// runtime stop is best-effort: deletion must succeed while the employee
+// runtime is offline.
+func (s *Server) deleteApplication(w http.ResponseWriter, r *http.Request, user store.User, a publishedapps.App) {
+	s.apps.mu.Lock()
+	if s.apps.stopping == nil {
+		s.apps.stopping = map[string]bool{}
+	}
+	if s.apps.stopping[a.ID] {
+		s.apps.mu.Unlock()
+		writeError(w, 409, "application_stopping")
+		return
+	}
+	s.apps.stopping[a.ID] = true
+	s.apps.mu.Unlock()
+	defer func() { s.apps.mu.Lock(); delete(s.apps.stopping, a.ID); s.apps.mu.Unlock() }()
+	pending := s.apps.disconnect(a.ID)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
+	defer cancel()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			writeError(w, 503, "application_stop_pending")
+			return
+		}
+	}
+	if err := s.appRuntimeOperation(ctx, a, "stop", nil); err != nil {
+		log.Printf("published app %s runtime stop during delete: %v", a.ID, err)
+	}
+	err := s.modules.PublishedApps.Store.Delete(r.Context(), a.ID, a.OwnerSID)
+	s.recordBusinessEvent(ctx, user.Username, "application.delete", a.ID, err, nil)
+	if err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
+	s.apps.unlisten(a.ID)
+	writeJSON(w, 200, map[string]bool{"deleted": true})
 }
 func (s *Server) appRuntimeOperation(ctx context.Context, a publishedapps.App, action string, input any) error {
 	if tracker, ok := s.runtimes.(interface{ BeginRequest(string) (func(), error) }); ok {
@@ -686,42 +857,134 @@ func (s *Server) applicationEntry(w http.ResponseWriter, r *http.Request) {
 	// Native form POSTs need a non-opaque Origin for the existing CSRF check.
 	// Send only the Portal origin, never this page's path or any ticket data.
 	w.Header().Set("Referrer-Policy", "origin")
+	if !preview && a.Expired(time.Now()) {
+		_ = applicationMessageTemplate.Execute(w, map[string]string{"Message": "此网页已过有效期，请联系发布者重新发布。"})
+		return
+	}
+	if !preview && a.Access == publishedapps.AccessToken {
+		if token := r.URL.Query().Get("token"); token != "" && a.ShareToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.ShareToken)) == 1 {
+			s.renderAppExchange(w, a, "", 0, false, true)
+			return
+		}
+		_ = applicationMessageTemplate.Execute(w, map[string]string{"Message": "此网页通过专属链接访问，请使用发布时生成的完整链接。"})
+		return
+	}
+	if !preview && a.Access == publishedapps.AccessPassword {
+		_ = applicationPasswordTemplate.Execute(w, map[string]string{"ID": a.ID, "Preview": "false", "Error": ""})
+		return
+	}
 	_ = applicationEntryTemplate.Execute(w, map[string]string{"ID": a.ID, "Preview": strconv.FormatBool(preview)})
 }
 
 var applicationEntryTemplate = template.Must(template.New("application-entry").Parse(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>打开应用</title><p>登录 WorkAgent 后，点击打开应用。</p><a href="/" target="_blank" rel="noopener">登录 WorkAgent</a><form method="post" action="/api/portal/apps/{{.ID}}/open?preview={{.Preview}}"><button>打开应用</button></form>`))
 
-func (s *Server) applicationOpen(w http.ResponseWriter, r *http.Request, user store.User) {
-	// Render a user-initiated POST exchange without inline scripts or URL tokens.
-	recorder := &appTicketResponse{header: http.Header{}}
-	r.SetPathValue("action", "access-ticket")
-	s.publishedAppsHTTP(recorder, r, user)
-	if recorder.status != 200 {
-		for key, values := range recorder.header {
-			w.Header()[key] = values
-		}
-		w.WriteHeader(recorder.status)
-		_, _ = w.Write(recorder.body.Bytes())
+var applicationMessageTemplate = template.Must(template.New("application-message").Parse(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>访问网页</title><p>{{.Message}}</p>`))
+
+var applicationPasswordTemplate = template.Must(template.New("application-password").Parse(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>访问网页</title><p>此网页需要 8 位访问密码。</p>{{if .Error}}<p>{{.Error}}</p>{{end}}<form method="post" action="/api/portal/apps/{{.ID}}/password?preview={{.Preview}}"><input name="password" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required><button>打开网页</button></form>`))
+
+// renderAppExchange mints a single-use ticket and renders the user-initiated
+// POST exchange form that carries no ticket in the URL.
+func (s *Server) renderAppExchange(w http.ResponseWriter, a publishedapps.App, sid string, userID int64, preview, anonymous bool) {
+	ticket, err := s.apps.newTicket(a, sid, userID, preview, anonymous)
+	if err != nil {
+		writeError(w, 429, err.Error())
 		return
 	}
-	var ticket map[string]string
-	_ = json.Unmarshal(recorder.body.Bytes(), &ticket)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	// The exchange crosses ports. A same-origin policy would make its native
 	// form POST Origin opaque again, so retain the origin-only policy here.
 	w.Header().Set("Referrer-Policy", "origin")
-	_ = appExchangeTemplate.Execute(w, ticket)
+	_ = appExchangeTemplate.Execute(w, map[string]string{"url": s.apps.address(a, preview) + "/__workagent/access", "ticket": ticket})
 }
 
-type appTicketResponse struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
+func (s *Server) applicationOpen(w http.ResponseWriter, r *http.Request, user store.User) {
+	if s.apps == nil {
+		writeError(w, 503, "application_publishing_unavailable")
+		return
+	}
+	a, err := s.modules.PublishedApps.Store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, 404, "application_not_found")
+		return
+	}
+	preview := r.URL.Query().Get("preview") == "true"
+	if !s.applicationOwnerAllowed(r.Context(), a) {
+		writeError(w, 403, "application_unavailable")
+		return
+	}
+	if err = s.apps.listen(a); err != nil {
+		writeError(w, 503, "application_port_unavailable")
+		return
+	}
+	if !a.Allows(user.ID, preview) {
+		writeError(w, 403, "application_access_required")
+		return
+	}
+	s.renderAppExchange(w, a, user.SID, user.ID, preview, false)
 }
 
-func (r *appTicketResponse) Header() http.Header             { return r.header }
-func (r *appTicketResponse) WriteHeader(status int)          { r.status = status }
-func (r *appTicketResponse) Write(value []byte) (int, error) { return r.body.Write(value) }
+// applicationPassword verifies an 8-digit access code without requiring a
+// WorkAgent account and renders the ticket exchange form on success.
+func (s *Server) applicationPassword(w http.ResponseWriter, r *http.Request) {
+	if s.apps == nil {
+		writeError(w, 503, "application_publishing_unavailable")
+		return
+	}
+	a, err := s.modules.PublishedApps.Store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, 404, "application_not_found")
+		return
+	}
+	if a.Access != publishedapps.AccessPassword || !a.Enabled || a.Expired(time.Now()) || r.URL.Query().Get("preview") == "true" {
+		writeError(w, 403, "application_access_required")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil {
+		writeError(w, 400, "invalid_application_password")
+		return
+	}
+	host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+	if splitErr != nil {
+		host = r.RemoteAddr
+	}
+	if !s.apps.allowPasswordAttempt(a.ID + "|" + host) {
+		writeError(w, 429, "application_password_busy")
+		return
+	}
+	if a.Password == "" || subtle.ConstantTimeCompare([]byte(r.FormValue("password")), []byte(a.Password)) != 1 {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "origin")
+		w.WriteHeader(403)
+		_ = applicationPasswordTemplate.Execute(w, map[string]string{"ID": a.ID, "Preview": "false", "Error": "访问密码不正确。"})
+		return
+	}
+	s.renderAppExchange(w, a, "", 0, false, true)
+}
+
+// allowPasswordAttempt limits access-code guesses to 10 per app and client
+// per 10 minutes.
+func (g *applicationGateway) allowPasswordAttempt(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.passwordFails == nil {
+		g.passwordFails = map[string][]time.Time{}
+	}
+	cutoff := time.Now().Add(-10 * time.Minute)
+	kept := g.passwordFails[key][:0]
+	for _, at := range g.passwordFails[key] {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) >= 10 {
+		g.passwordFails[key] = kept
+		return false
+	}
+	g.passwordFails[key] = append(kept, time.Now())
+	return true
+}
 
 var appExchangeTemplate = template.Must(template.New("app-exchange").Parse(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>访问应用</title><form method="post" action="{{.url}}"><input type="hidden" name="ticket" value="{{.ticket}}"><button>进入应用</button></form>`))

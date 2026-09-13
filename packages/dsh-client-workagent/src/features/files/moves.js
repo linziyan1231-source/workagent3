@@ -4,6 +4,8 @@ export function createFileMoves({ React, request, h, friendlyError }) {
     path.toLowerCase() === parent.toLowerCase() ||
     path.toLowerCase().startsWith(parent.toLowerCase() + "/");
   const join = (directory, name) => [directory, name].filter(Boolean).join("/");
+  const parentOf = (path) =>
+    path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
   function useFileMoves({
     root,
     workspaceId,
@@ -116,6 +118,24 @@ export function createFileMoves({ React, request, h, friendlyError }) {
       if (moves.length) void submit(moves);
       else onError("文件已在此文件夹中。");
     };
+    // moveOut drops each dragged entry into the parent of its own folder,
+    // which is how dragging onto blank space leaves a folder.
+    const moveOut = (entries) => {
+      const top = entries.filter(
+        (entry) =>
+          !entries.some(
+            (other) => other !== entry && contains(other.path, entry.path),
+          ),
+      );
+      const moves = top
+        .map((entry) => ({
+          source: entry.path,
+          destination: join(parentOf(parentOf(entry.path)), entry.name),
+          fileId: entry.fileId,
+        }))
+        .filter((m) => m.source !== m.destination);
+      if (moves.length) void submit(moves);
+    };
     const action = async (op, kind) => {
       try {
         accept(
@@ -151,6 +171,37 @@ export function createFileMoves({ React, request, h, friendlyError }) {
           if (payload.workspaceId !== workspaceId)
             throw new Error("只能在当前项目内移动文件。");
           moveTo(payload.entries, path);
+        } catch (error) {
+          onError(friendlyError(error.message));
+        }
+      },
+    });
+    // moveOutProps marks blank tree space as a "leave this folder" target.
+    const moveOutKey = "__move_out__";
+    const moveOutProps = () => ({
+      "data-move-out": "",
+      onDragOver: (event) => {
+        if (!event.dataTransfer.types.includes(mime)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const movable =
+          drag.current?.some((row) => parentOf(row.path) !== "") ?? false;
+        event.dataTransfer.dropEffect = movable ? "move" : "none";
+        setHover(movable ? moveOutKey : null);
+      },
+      onDragLeave: (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setHover(null);
+      },
+      onDrop: (event) => {
+        if (!event.dataTransfer.types.includes(mime)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setHover(null);
+        try {
+          const payload = JSON.parse(event.dataTransfer.getData(mime));
+          if (payload.workspaceId !== workspaceId)
+            throw new Error("只能在当前项目内移动文件。");
+          moveOut(payload.entries);
         } catch (error) {
           onError(friendlyError(error.message));
         }
@@ -201,6 +252,8 @@ export function createFileMoves({ React, request, h, friendlyError }) {
         ...(entry.kind === "directory" ? destinationProps(entry.path) : {}),
       }),
       destinationProps,
+      moveOutKey,
+      moveOutProps,
       checkbox: (entry) =>
         h("input", {
           type: "checkbox",

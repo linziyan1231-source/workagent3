@@ -194,6 +194,7 @@ func (s *Server) HandlerWithWeb(web http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/portal/apps", s.requireUser(s.publishedAppsHTTP))
 	mux.HandleFunc("GET /api/portal/apps/{id}", s.requireUser(s.publishedAppsHTTP))
 	mux.HandleFunc("POST /api/portal/apps/{id}/open", s.requireUser(s.applicationOpen))
+	mux.HandleFunc("POST /api/portal/apps/{id}/password", s.applicationPassword)
 	mux.HandleFunc("POST /api/portal/apps/{id}/{action}", s.requireUser(s.publishedAppsHTTP))
 	mux.HandleFunc("GET /api/portal/admin/acp-catalog", s.requireUser(s.requireAdmin(s.adminAcpCatalog)))
 	mux.HandleFunc("PATCH /api/portal/admin/acp-catalog/{id}", s.requireUser(s.requireAdmin(s.adminAcpCatalog)))

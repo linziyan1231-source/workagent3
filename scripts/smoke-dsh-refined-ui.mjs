@@ -107,7 +107,7 @@ try {
     .waitFor({ state: "attached", timeout: 60000 });
   assert.equal(await page.locator(".workagent-storage-card").count(), 2);
   await shot("system-settings");
-  await dialog.getByRole("button", { name: "MCP 服务", exact: true }).click();
+  await dialog.getByRole("button", { name: "MCP与技能", exact: true }).click();
   await page.getByText("批量导入 MCP JSON", { exact: true }).click();
   assert.equal(
     await page

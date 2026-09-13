@@ -21,6 +21,8 @@ import (
 type publishedApplicationGateway struct {
 	runner                           *publishedapps.Runner
 	workspaceRoot, sharedBase, token string
+	platformURL, platformCredential  string
+	sid                              string
 	target                           *url.URL
 	client                           *http.Client
 }
@@ -67,9 +69,18 @@ func (s *Supervisor) attachPublishedApps(gateway *runtimeGateway, target *url.UR
 	if err != nil {
 		return err
 	}
-	feature := &publishedApplicationGateway{runner: runner, workspaceRoot: filepath.Join(s.config.DataRoot, "workspace"), sharedBase: filepath.Dir(s.config.DataRoot), target: target, token: token, client: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}}
+	feature := &publishedApplicationGateway{runner: runner, workspaceRoot: filepath.Join(s.config.DataRoot, "workspace"), sharedBase: filepath.Dir(s.config.DataRoot), platformURL: strings.TrimRight(s.config.PlatformURL, "/"), platformCredential: s.config.PlatformCredential, sid: s.config.SID, target: target, token: token, client: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}}
 	old := gateway.server.Handler
 	gateway.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/app-publishing" || r.URL.Path == "/v1/app-publishing/publish" {
+			provided, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(gateway.butlerToken)) != 1 || !allowedButlerRequest(r) {
+				writeRuntimeError(w, 403, "butler_operation_not_allowed")
+				return
+			}
+			feature.agentProxy(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/v1/published-apps/") || r.URL.Path == "/v1/activity" {
 			provided, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
@@ -92,6 +103,63 @@ func (s *Supervisor) attachPublishedApps(gateway *runtimeGateway, target *url.UR
 	gateway.closePublishedApps = func() { runner.Close(); feature.client.CloseIdleConnections() }
 	return nil
 }
+
+// agentProxy forwards the agent-facing publish tool calls to Portal's
+// internal runtime endpoints, always scoped to this employee's SID.
+func (g *publishedApplicationGateway) agentProxy(w http.ResponseWriter, r *http.Request) {
+	var body []byte
+	if r.URL.Path == "/v1/app-publishing/publish" {
+		if r.Method != "POST" {
+			writeRuntimeError(w, 405, "method_not_allowed")
+			return
+		}
+		var input map[string]any
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024)).Decode(&input) != nil {
+			writeRuntimeError(w, 400, "invalid_application")
+			return
+		}
+		delete(input, "sid")
+		input["sid"] = g.sid
+		body, _ = json.Marshal(input)
+	} else {
+		if r.Method != "GET" {
+			writeRuntimeError(w, 405, "method_not_allowed")
+			return
+		}
+		body, _ = json.Marshal(map[string]string{"sid": g.sid})
+	}
+	operation := "list"
+	if r.URL.Path == "/v1/app-publishing/publish" {
+		operation = "publish"
+	}
+	// Publishing snapshots the workspace through Portal, which can take minutes.
+	ctx, cancel := context.WithTimeout(r.Context(), 150*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, "POST", g.platformURL+"/internal/runtime/published-apps/"+operation, bytes.NewReader(body))
+	if err != nil {
+		writeRuntimeError(w, 500, "internal_error")
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+g.platformCredential)
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
+	defer client.CloseIdleConnections()
+	response, err := client.Do(request)
+	if err != nil {
+		writeRuntimeError(w, 502, "application_platform_unavailable")
+		return
+	}
+	defer response.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
+	if err != nil {
+		writeRuntimeError(w, 502, "application_platform_unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, _ = w.Write(payload)
+}
+
 func (g *publishedApplicationGateway) source(ctx context.Context, id string) (string, error) {
 	if strings.HasPrefix(id, "shared:") {
 		project := strings.TrimPrefix(id, "shared:")

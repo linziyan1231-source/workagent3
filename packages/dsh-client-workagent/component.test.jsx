@@ -1243,6 +1243,17 @@ describe("WorkAgent dsh slot components", () => {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
+        const target = String(_input);
+        if (target === "/api/runtime/v1/skills")
+          return new Response("[]", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (target === "/api/runtime/v1/capability-sync/status")
+          return new Response('{"items":[]}', {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
         return new Response(
           JSON.stringify([
             {
@@ -1258,7 +1269,7 @@ describe("WorkAgent dsh slot components", () => {
       });
     const entries = compose();
     const section = entries.find(
-      (entry) => entry.options.id === "workagent-mcp",
+      (entry) => entry.options.id === "workagent-mcp-skills",
     );
     render(React.createElement(section.Component));
     fireEvent.click(await screen.findByRole("button", { name: "停用" }));
@@ -1300,7 +1311,7 @@ describe("WorkAgent dsh slot components", () => {
           headers: { "Content-Type": "application/json" },
         });
       });
-    const mcp = compose().find((entry) => entry.options.id === "workagent-mcp");
+    const mcp = compose().find((entry) => entry.options.id === "workagent-mcp-skills");
     const { container } = render(React.createElement(mcp.Component));
     changeField(screen.getByLabelText("名称"), {
       target: { value: "Docs" },

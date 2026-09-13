@@ -48,7 +48,7 @@ it("loads and previews a project file without the application shell, preserving 
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it("releases replaced and late search cursors and hides publishing from shared members", async () => {
+it("releases replaced and late search cursors without a publish panel", async () => {
   let finishLate;
   const fetch = vi.fn(async (url, init = {}) => {
     const path = String(url);
@@ -76,7 +76,7 @@ it("releases replaced and late search cursors and hides publishing from shared m
   fireEvent.change(screen.getByLabelText("搜索整个项目"), {
     target: { value: "first" },
   });
-  await screen.findByRole("button", { name: "继续搜索" });
+  await screen.findByRole("button", { name: "继续搜索更多结果" });
   fireEvent.change(screen.getByLabelText("搜索整个项目"), {
     target: { value: "second" },
   });
@@ -105,4 +105,108 @@ it("releases replaced and late search cursors and hides publishing from shared m
       ),
     ).toBe(true),
   );
+});
+
+it("offers search results as a keyboard-navigable dropdown", async () => {
+  const fetch = vi.fn(async (url) => {
+    const path = String(url);
+    if (path.includes("/search?q="))
+      return new Response(
+        JSON.stringify({
+          items: [
+            { name: "readme.md", path: "docs/readme.md", kind: "file", size: 10 },
+            { name: "notes.md", path: "notes.md", kind: "file", size: 20 },
+          ],
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    if (path.includes("/content?")) return new Response("content");
+    return new Response("[]", {
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<WorkspaceFileManager workspace={{ id: "project-a", name: "P" }} />);
+  const input = screen.getByRole("combobox", { name: "搜索整个项目" });
+  fireEvent.change(input, { target: { value: "md" } });
+  const listbox = await screen.findByRole("listbox", {
+    name: "项目搜索结果",
+  });
+  const options = await screen.findAllByRole("option");
+  expect(options).toHaveLength(2);
+  expect(options[0].textContent).toContain("readme.md");
+  expect(options[0].textContent).toContain("docs");
+  expect(options[0].getAttribute("aria-selected")).toBe("true");
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  expect(options[1].getAttribute("aria-selected")).toBe("true");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() =>
+    expect(
+      fetch.mock.calls.some(([path]) => String(path).includes("/content?")),
+    ).toBe(true),
+  );
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(listbox.isConnected).toBe(false);
+});
+
+it("moves dragged files out to the parent folder when dropped on blank space", async () => {
+  const fetch = vi.fn(async (url, init = {}) => {
+    const path = String(url);
+    if (init.method === "POST" && path.includes("/move"))
+      return new Response(
+        JSON.stringify({
+          id: "op1",
+          state: "completed",
+          applied: 1,
+          moves: [{ source: "a/b.txt", destination: "b.txt" }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    if (init.method === "GET" && path.endsWith("/move"))
+      return new Response("[]", {
+        headers: { "content-type": "application/json" },
+      });
+    if (path.includes("/files?path=a"))
+      return new Response(
+        JSON.stringify([{ name: "b.txt", path: "a/b.txt", kind: "file", size: 5 }]),
+        { headers: { "content-type": "application/json" } },
+      );
+    if (path.includes("/files?"))
+      return new Response(
+        JSON.stringify([{ name: "a", path: "a", kind: "directory" }]),
+        { headers: { "content-type": "application/json" } },
+      );
+    return new Response("[]", {
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<WorkspaceFileManager workspace={{ id: "project-a", name: "P" }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "a", exact: true }));
+  const row = await screen.findByRole("button", { name: "b.txt", exact: true });
+  const payload = {
+    workspaceId: "project-a",
+    entries: [{ name: "b.txt", path: "a/b.txt", kind: "file" }],
+  };
+  const data = {
+    types: ["application/x-workagent-project-files"],
+    effectAllowed: "",
+    dropEffect: "",
+    setData: vi.fn(),
+    getData: () => JSON.stringify(payload),
+  };
+  fireEvent.dragStart(row, { dataTransfer: data });
+  const tree = screen.getByLabelText("项目文件树");
+  fireEvent.dragOver(tree, { dataTransfer: data });
+  fireEvent.drop(tree, { dataTransfer: data });
+  await waitFor(() => {
+    const call = fetch.mock.calls.find(
+      ([path, init]) =>
+        String(path).includes("/move") && init?.method === "POST",
+    );
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call[1].body).moves).toEqual([
+      { source: "a/b.txt", destination: "b.txt" },
+    ]);
+  });
 });

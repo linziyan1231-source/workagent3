@@ -125,6 +125,98 @@ body:has(.workagent-files-panel.is-wide:not([hidden])) {
   overflow: auto;
   padding: 6px;
 }
+.workagent-file-search {
+  position: relative;
+  flex: none;
+  padding: 8px 12px 4px;
+  z-index: 6;
+}
+.workagent-file-search > .workagent-icon {
+  position: absolute;
+  top: 50%;
+  left: 24px;
+  transform: translateY(-50%);
+  color: var(--dsw-color-muted);
+  pointer-events: none;
+}
+.workagent-file-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 32px;
+  height: 32px;
+  padding: 4px 10px 4px 30px;
+  border-radius: 16px;
+}
+.workagent-file-search-results {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--dsw-color-border);
+  border-radius: 12px;
+  background: var(--dsw-color-panel);
+  box-shadow: 0 12px 32px rgb(36 54 92 / 14%);
+}
+.workagent-file-search-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workagent-file-search-result:hover,
+.workagent-file-search-result.is-active {
+  background: var(--dsw-color-accent-soft);
+}
+.workagent-file-search-result > .workagent-icon {
+  flex: none;
+  color: var(--dsw-color-muted);
+}
+.workagent-file-search-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workagent-file-search-result > small {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-color-muted);
+}
+.workagent-file-search-state {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--dsw-color-muted);
+  text-align: center;
+}
+.workagent-file-search-more {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+.workagent-file-search-more:hover {
+  background: var(--dsw-color-accent-soft);
+}
 .workagent-file-tree-list {
   list-style: none;
   padding: 0;
