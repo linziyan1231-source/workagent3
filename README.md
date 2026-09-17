@@ -1,5 +1,7 @@
 # WorkAgent3
 
+English | [简体中文](README.zh-CN.md)
+
 WorkAgent3 is a self-hosted, browser-accessible multi-user office agent platform. It runs agent execution on the company's own servers, gives each user an isolated workspace, and integrates each model vendor's native agent harness instead of forcing every model into one harness environment.
 
 ## Why WorkAgent3
