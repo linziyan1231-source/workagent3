@@ -13,3 +13,6 @@ bin/
 data/
 runtime/
 dsh-home/
+plan.md*
+docs/handoff/
+docs/qa/
