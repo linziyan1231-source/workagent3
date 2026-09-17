@@ -1,6 +1,23 @@
 # WorkAgent3
 
-WorkAgent3 is a Web-only, SID-isolated office agent platform. The implementation follows [plan.md](./plan.md): Go owns the Windows platform and Portal, while TypeScript owns the official DeepSeek Harness Web client composition, WorkAgent slot plugins, and shared contracts.
+WorkAgent3 is a self-hosted, browser-accessible multi-user office agent platform. It runs agent execution on the company's own servers, gives each user an isolated workspace, and integrates each model vendor's native agent harness instead of forcing every model into one harness environment.
+
+## Why WorkAgent3
+
+- **Company-owned infrastructure:** agent processes and files stay on the company's servers — important documents never leave company control, employee computers carry no runtime load, and workspaces stay available 24/7 independent of any personal machine.
+- **Built for collaboration:** shared projects, shared assistants, and shared company context make team work a first-class use case, and the company can develop custom features on the platform as needs arise.
+- **Native harness per vendor:** frontier models are increasingly trained against their own agent harnesses, and those native tool layers keep getting heavier — running a model on a foreign harness measurably degrades its capability. WorkAgent3 therefore integrates each vendor's own harness (the official DeepSeek Harness Web client composition, plus native Codex and Kimi engines) rather than presenting one harness to every agent.
+
+## WorkAgent3 vs WorkAgent2
+
+WorkAgent3 succeeds [WorkAgent2](https://github.com/linziyan1231-source/workagent2) with the same hosted, per-user-isolated platform model, rebuilt on a new architecture:
+
+- **Architecture:** WorkAgent2 carried its own runtime layer with reviewable patches over agent runtimes. WorkAgent3 composes the official DeepSeek Harness (dsh) Web client directly: Go owns the Windows platform and Portal, TypeScript owns the dsh client composition and WorkAgent slot plugins. The composition is lighter, easier to maintain, and new capabilities ship as slot plugins instead of core changes.
+- **New capabilities:** multi-harness model access (managed Harness provider models and native Codex/Kimi engines), IM channel connectivity (WeChat, WeCom, Feishu/Lark, DingTalk, QQ, Telegram), task-completion reminders pushed to IM chats, scheduled tasks, shared projects and collaboration assistants, one-click web publishing, and an admin portal with quotas, audit, and publishing management.
+
+## Platform
+
+Go owns the Windows platform and Portal, while TypeScript owns the official DeepSeek Harness Web client composition, WorkAgent slot plugins, and shared contracts.
 
 ## User guide
 
