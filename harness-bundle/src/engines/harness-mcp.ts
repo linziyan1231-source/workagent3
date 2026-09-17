@@ -26,7 +26,7 @@ export const projectHarnessMcpServers = (
           server.id === "workagent-shared-trash"
             ? SHARED_TRASH_TOOL_TIMEOUT_MS
             : 60_000,
-        failOnStartupError: true,
+        failOnStartupError: false,
       };
     return {
       transport: "streamable-http",
@@ -34,6 +34,6 @@ export const projectHarnessMcpServers = (
       url: server.transport.url,
       headers: projection.headers,
       toolCallTimeoutMs: 60_000,
-      failOnStartupError: true,
+      failOnStartupError: false,
     };
   });

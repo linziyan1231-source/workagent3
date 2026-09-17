@@ -10,7 +10,9 @@ export function createFileMoves({ React, request, h, friendlyError }) {
     root,
     workspaceId,
     dirtyFiles,
+    contentURL,
     onCompleted,
+    onRemoved,
     onError,
   }) {
     const [checked, setChecked] = React.useState([]);
@@ -22,6 +24,8 @@ export function createFileMoves({ React, request, h, friendlyError }) {
     const [operations, setOperations] = React.useState([]);
     const [conflict, setConflict] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
+    const [removal, setRemoval] = React.useState(null);
+    const [deleting, setDeleting] = React.useState(false);
     const seen = React.useRef(null);
     const callback = React.useRef(onCompleted);
     callback.current = onCompleted;
@@ -135,6 +139,55 @@ export function createFileMoves({ React, request, h, friendlyError }) {
         }))
         .filter((m) => m.source !== m.destination);
       if (moves.length) void submit(moves);
+    };
+    const downloadChecked = () => {
+      const files = checked.filter((entry) => entry.kind === "file");
+      if (!files.length) return onError("所选内容中没有可下载的文件。");
+      for (const entry of files) {
+        const anchor = document.createElement("a");
+        anchor.href = contentURL(workspaceId, entry.path);
+        anchor.download = entry.name;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      }
+    };
+    const askRemove = () => {
+      const dirty = (path) =>
+        [...dirtyFiles].some(
+          (file) => file === path || file.startsWith(`${path}/`),
+        );
+      if (checked.some((entry) => dirty(entry.path)))
+        return onError("请先保存或关闭此文件中的未保存编辑，再删除。");
+      setRemoval(checked);
+    };
+    const confirmRemove = async () => {
+      if (deleting || !removal) return;
+      const top = removal.filter(
+        (entry) =>
+          !removal.some(
+            (other) => other !== entry && contains(other.path, entry.path),
+          ),
+      );
+      setDeleting(true);
+      onError("");
+      const removed = [];
+      try {
+        for (const entry of top) {
+          await request(contentURL(workspaceId, entry.path), {
+            method: "DELETE",
+          });
+          removed.push(entry);
+        }
+      } catch (error) {
+        onError(friendlyError(error.message));
+        setDeleting(false);
+        return;
+      }
+      setChecked([]);
+      setRemoval(null);
+      setDeleting(false);
+      if (onRemoved) await onRemoved(removed);
     };
     const action = async (op, kind) => {
       try {
@@ -274,8 +327,22 @@ export function createFileMoves({ React, request, h, friendlyError }) {
               "div",
               { className: "workagent-move-selection" },
               `已选择 ${checked.length} 项`,
-              button("移动到…", () => open()),
-              button("取消选择", () => setChecked([])),
+              button("移动到…", () => open(), deleting),
+              removal
+                ? h(
+                    React.Fragment,
+                    null,
+                    h("span", null, `确认删除 ${removal.length} 项？`),
+                    button("确认删除", () => void confirmRemove(), deleting),
+                    button("取消", () => setRemoval(null), deleting),
+                  )
+                : h(
+                    React.Fragment,
+                    null,
+                    button("下载", downloadChecked, deleting),
+                    button("删除", askRemove, deleting),
+                  ),
+              button("取消选择", () => setChecked([]), deleting),
             )
           : null,
         ...pending.map((op) =>

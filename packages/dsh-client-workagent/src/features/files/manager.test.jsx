@@ -210,3 +210,45 @@ it("moves dragged files out to the parent folder when dropped on blank space", a
     ]);
   });
 });
+
+it("deletes checked files in batch after confirmation and refreshes the list", async () => {
+  const fetch = vi.fn(async (url, init = {}) => {
+    const path = String(url);
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    if (path.includes("/files?"))
+      return new Response(
+        JSON.stringify([
+          { name: "a.txt", path: "a.txt", kind: "file", size: 5 },
+          { name: "b.txt", path: "b.txt", kind: "file", size: 6 },
+        ]),
+        { headers: { "content-type": "application/json" } },
+      );
+    return new Response("[]", {
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<WorkspaceFileManager workspace={{ id: "project-a", name: "P" }} />);
+  fireEvent.click(await screen.findByLabelText("选择 a.txt"));
+  fireEvent.click(screen.getByLabelText("选择 b.txt"));
+  expect(await screen.findByText("已选择 2 项")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "下载" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "删除" }));
+  expect(await screen.findByText("确认删除 2 项？")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+  await waitFor(() => {
+    const deleted = fetch.mock.calls
+      .filter(([, init]) => init?.method === "DELETE")
+      .map(([path]) => String(path));
+    expect(deleted.some((path) => path.includes("path=a.txt"))).toBe(true);
+    expect(deleted.some((path) => path.includes("path=b.txt"))).toBe(true);
+  });
+  expect(await screen.findByText("已删除 2 项")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      fetch.mock.calls.filter(
+        ([path, init]) => String(path).includes("/files?") && !init?.method,
+      ).length,
+    ).toBeGreaterThan(1),
+  );
+});

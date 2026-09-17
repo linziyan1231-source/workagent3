@@ -1,4 +1,0 @@
-interface:
-  display_name: "Puxin AI 帮助"
-  short_description: "查询 WorkAgent3 的功能、入口、状态与注意事项"
-  default_prompt: "Use $puxin-help to answer my question from the bundled WorkAgent3 guide."

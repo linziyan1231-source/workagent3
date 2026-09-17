@@ -1039,7 +1039,7 @@
       },
       "avatar": "avatars/aionui-assistant.jpg",
       "agent_ref": "aionrs",
-      "enabled_skills": ["puxin-help", "aionui-config", "aionui-troubleshooting", "aionui-webui-public"],
+      "enabled_skills": ["workagent-help", "aionui-config", "aionui-troubleshooting", "aionui-webui-public"],
       "custom_skill_names": [],
       "disabled_builtin_skills": [],
       "rule_file": "rules/aionui-assistant.{locale}.md",

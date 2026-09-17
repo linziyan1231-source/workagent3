@@ -53,7 +53,7 @@ func TestApplicationStopCancelsOldAdmissionBeforeStoppingRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 23000, 23009)
+	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 23000, 23009, publishedapps.DefaultMaxEmployeePorts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,6 +38,7 @@ type WindowsPlatformConfig struct {
 	NativeModels            NativeModelProvisioner
 	HarnessModel            string
 	ModelGatewayBaseURL     string
+	HarnessEnvironment      map[string]string
 }
 
 type NativeModelProvisioner interface{}

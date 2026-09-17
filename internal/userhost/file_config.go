@@ -40,6 +40,10 @@ type FileConfig struct {
 	// both are empty only in deployments without a managed model gateway.
 	HarnessModel        string `json:"harnessModel,omitempty"`
 	ModelGatewayBaseURL string `json:"modelGatewayBaseUrl,omitempty"`
+	// HarnessEnvironment carries deployment-supplied environment variables
+	// appended to the Harness process environment (e.g. DSH_BOOKING_* for an
+	// embedded bundle). Supervisor-managed keys stay reserved and are rejected.
+	HarnessEnvironment map[string]string `json:"harnessEnvironment,omitempty"`
 }
 
 func LoadFileConfig(path string) (FileConfig, error) {
@@ -71,6 +75,9 @@ func LoadFileConfig(path string) (FileConfig, error) {
 	}
 	if (config.HarnessModel == "") != (config.ModelGatewayBaseURL == "") {
 		return FileConfig{}, errors.New("harness model and model gateway base URL must be configured together")
+	}
+	if err := ValidateHarnessEnvironment(config.HarnessEnvironment); err != nil {
+		return FileConfig{}, err
 	}
 	if config.ModelGatewayBaseURL != "" {
 		if err := nativeauth.ValidateBaseURL(config.ModelGatewayBaseURL); err != nil {

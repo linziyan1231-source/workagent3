@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sessionToolsServer } from "../session-tools-mcp.js";
 import {
   codexAccountStatus,
   codexPermissions,
@@ -23,6 +24,12 @@ describe("Codex account status", () => {
 });
 
 describe("Codex MCP projection", () => {
+  it("allows Codex startup when session tools cannot initialize", () => {
+    const projected = projectCodexMcpServers([
+      sessionToolsServer("session", "scope-token"),
+    ]);
+    expect(projected["workagent-session-tools"]!.required).toBe(false);
+  });
   it("projects credentials and tool allowlists through thread config", () => {
     expect(
       projectCodexMcpServers([
@@ -53,7 +60,7 @@ describe("Codex MCP projection", () => {
       docs: {
         url: "https://example.com/mcp",
         http_headers: { Authorization: "Bearer private" },
-        required: true,
+        required: false,
         enabled_tools: ["search"],
       },
     });
@@ -94,7 +101,7 @@ describe("Codex MCP projection", () => {
         command: "C:\\managed\\server.exe",
         args: ["--stdio"],
         env: { TOKEN: "private" },
-        required: true,
+        required: false,
       },
     });
     expect(() =>

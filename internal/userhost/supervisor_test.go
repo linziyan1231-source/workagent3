@@ -14,7 +14,7 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 	t.Setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 	t.Setenv("WORKAGENT_TEST_ALLOWED", "must-not-leak")
 	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
-	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`, `C:\release\managed-tools\officecli`, "http://127.0.0.1:8317/v1", "gpt-5.6-sol")
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", `C:\agents\codex.exe`, `C:\agents\kimi.exe`, `C:\release\managed-tools\officecli`, "http://127.0.0.1:8317/v1", "gpt-5.6-sol", map[string]string{"DSH_BOOKING_SKILL_MODE": "demo"})
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "must-not-leak") {
 		t.Fatal("unrelated service credential inherited")
@@ -49,10 +49,37 @@ func TestRuntimeEnvironmentDoesNotInheritServiceSecrets(t *testing.T) {
 
 func TestRuntimeEnvironmentOmitsManagedModelRouteWithoutGateway(t *testing.T) {
 	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
-	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", "", "", "", "", "")
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", "", "", "", "", "", nil)
 	joined := strings.Join(environment, "\n")
 	if strings.Contains(joined, "DEEPSEEK_BASE_URL=") || strings.Contains(joined, "WORKAGENT_HARNESS_MODEL=") {
 		t.Fatalf("unmanaged deployment gained a managed model route: %v", environment)
+	}
+}
+
+func TestHarnessEnvironmentAppendsAndReservesSupervisorKeys(t *testing.T) {
+	directories := privateDirectories{dshHome: `C:\data\dsh`, workspace: `C:\data\workspace`, native: `C:\data\native`}
+	environment := runtimeEnvironment(directories, "runtime-token", 43123, "S-1-5-21-1000", "http://127.0.0.1:8080", "platform-token", "", "", "", "", "", map[string]string{
+		"DSH_BOOKING_SKILL_MODE": "demo",
+		"DSH_BOOKING_TENANT_ID":  "tenant-a",
+	})
+	joined := strings.Join(environment, "\n")
+	if !strings.Contains(joined, "DSH_BOOKING_SKILL_MODE=demo") || !strings.Contains(joined, "DSH_BOOKING_TENANT_ID=tenant-a") {
+		t.Fatalf("deployment-supplied Harness environment missing: %v", environment)
+	}
+	cases := []map[string]string{
+		{"DSH-BOOKING": "x"},
+		{"PATH": `C:\evil`},
+		{"dsh_home": `C:\evil`},
+		{"WORKAGENT_RUNTIME_TOKEN": "forged"},
+		{"DSH_BOOKING_TENANT_ID": "a\nb"},
+	}
+	for _, invalid := range cases {
+		if err := ValidateHarnessEnvironment(invalid); err == nil {
+			t.Fatalf("accepted invalid Harness environment: %v", invalid)
+		}
+	}
+	if err := ValidateHarnessEnvironment(map[string]string{"DSH_BOOKING_SKILL_MODE": "demo"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -31,4 +31,13 @@ Node/Python 入口的主进程必须监听环境变量 `HOST`（127.0.0.1）与 
 
 部署需配置 Portal `--apps-public-url`、`--apps-bind`、`--apps-employee-root` 和端口范围；employee root 必须与 employee-manager 的 dataRootBase 一致。Python 使用管理员配置的 `publishedPythonCommand`。只给公开版本中的 UserHost、Node/Python 软件授予 AppContainer 所需读取/执行权限，不能扩大员工私人目录权限。
 
+## 端口范围与每员工上限
+
+`--apps-port-first/--apps-port-last/--apps-max-employee-ports` 只是首次启动的初始值。管理员在 **管理空间 → 应用发布** 查看并调整（`GET/PUT /api/portal/admin/published-apps/settings`，持久化在 published-apps.db 的 settings 表，保存后重启仍然生效并覆盖 flag）：
+
+- **端口范围**：必须与云防火墙开放的端口段一致，否则 token/password 直链不可达。保存新范围会把现有应用按创建顺序重映射进新范围（每应用 2 个连续端口），监听器按需在新端口重绑，旧端口链接失效；范围放不下现有应用时拒绝保存（`application_ports_exceeded`）。
+- **每员工最大端口数**：按公开端口计数（1 个/应用），默认 3。超限发布返回 `application_employee_ports_exceeded`，引导员工在设置→网页发布删除旧网页或由管理员上调。
+
+分配取范围内最低可用端口对，删除应用立即回收其端口，小范围可以长期复用。
+
 如原公网入口是 TCP 端口转发，应改用 Portal `--public-addr` 直接监听原公网端口，保留原内部 `--addr`，以获取真实访问者 IP。迁移必须保存原端口映射和服务配置用于回滚；公共监听器拒绝所有 `/internal/` 路由。域名、DNS 与 HTTPS 不是此 IP/HTTP 方案的启用条件。

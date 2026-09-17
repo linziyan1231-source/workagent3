@@ -66,8 +66,9 @@ func run() error {
 	appsPublicURL := flag.String("apps-public-url", "", "Public HTTP Portal origin enabling application publishing")
 	appsBind := flag.String("apps-bind", "127.0.0.1", "Application content listener bind address")
 	appsEmployeeRoot := flag.String("apps-employee-root", "", "Managed employee data root used to verify application network workers")
-	appsFirst := flag.Int("apps-port-first", 20000, "First dedicated application port")
-	appsLast := flag.Int("apps-port-last", 20999, "Last dedicated application port")
+	appsFirst := flag.Int("apps-port-first", 20000, "Initial first dedicated application port (admin console can change it at runtime)")
+	appsLast := flag.Int("apps-port-last", 20999, "Initial last dedicated application port (admin console can change it at runtime)")
+	appsMaxEmployee := flag.Int("apps-max-employee-ports", publishedapps.DefaultMaxEmployeePorts, "Initial per-employee public application port quota (admin console can change it at runtime)")
 	acpManifest := flag.String("acp-catalog", "", "Immutable approved ACP release manifest")
 	acpState := flag.String("acp-state", "", "ACP selection state (defaults beside Portal database)")
 	trustedProxies := flag.String("trusted-proxies", "", "Comma-separated trusted proxy CIDRs; empty ignores forwarding headers")
@@ -289,7 +290,7 @@ func run() error {
 		if !filepath.IsAbs(*appsEmployeeRoot) {
 			return errors.New("apps-employee-root must name the absolute managed employee data root")
 		}
-		appsStore, err := publishedapps.Open(filepath.Join(filepath.Dir(*databasePath), "published-apps.db"), *appsFirst, *appsLast)
+		appsStore, err := publishedapps.Open(filepath.Join(filepath.Dir(*databasePath), "published-apps.db"), *appsFirst, *appsLast, *appsMaxEmployee)
 		if err != nil {
 			return err
 		}

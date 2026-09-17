@@ -31,11 +31,11 @@
       "requiredMcpServerIds": []
     },
     {
-      "id": "puxin-help",
-      "name": "puxin-help",
+      "id": "workagent-help",
+      "name": "workagent-help",
       "description": "Answer product-usage questions from the bundled WorkAgent3 help guide.",
-      "version": "0.1.0",
-      "relativePath": "puxin-help",
+      "version": "0.2.0",
+      "relativePath": "workagent-help",
       "enabledByDefault": true,
       "requiredMcpServerIds": []
     },

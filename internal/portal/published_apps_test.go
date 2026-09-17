@@ -44,7 +44,7 @@ func TestApplicationGatewayStripsPlatformCredentialsAndCookieResponses(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 21000, 21009)
+	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 21000, 21009, publishedapps.DefaultMaxEmployeePorts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ func TestApplicationNavigationPreservesFormOriginWithoutRelaxingCSRF(t *testing.
 	if err = data.CreateSession(t.Context(), "navigation-session", owner.ID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 22300, 22309)
+	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 22300, 22309, publishedapps.DefaultMaxEmployeePorts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +52,10 @@ type Config struct {
 	// deployment has no managed model gateway.
 	HarnessModel        string
 	ModelGatewayBaseURL string
+	// HarnessEnvironment carries deployment-supplied environment variables
+	// appended to the Harness process environment. Keys managed by the
+	// supervisor itself are reserved (see ValidateHarnessEnvironment).
+	HarnessEnvironment map[string]string
 }
 
 type Supervisor struct {
@@ -97,6 +103,9 @@ func New(config Config) (*Supervisor, error) {
 		if !nativeauth.ValidModel(config.HarnessModel) {
 			return nil, errors.New("Harness model is invalid")
 		}
+	}
+	if err := ValidateHarnessEnvironment(config.HarnessEnvironment); err != nil {
+		return nil, err
 	}
 	return &Supervisor{config: config, restartRequested: make(chan struct{}, 1)}, nil
 }
@@ -168,7 +177,7 @@ func (s *Supervisor) Start(ctx context.Context) (runtimeapi.Registration, error)
 	}
 	command := exec.Command(s.config.Command, arguments...)
 	command.Dir = directories.workspace
-	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot, s.config.ModelGatewayBaseURL, s.config.HarnessModel)
+	command.Env = runtimeEnvironment(directories, token, port, s.config.SID, s.config.PlatformURL, s.config.PlatformCredential, s.config.CodexCommand, s.config.KimiCommand, s.config.ManagedToolsRoot, s.config.ModelGatewayBaseURL, s.config.HarnessModel, s.config.HarnessEnvironment)
 	command.Env = append(command.Env, "WORKAGENT_PUBLIC_BASE_URL="+s.config.PublicBaseURL)
 	command.Stdout = harnessLog
 	command.Stderr = harnessLog
@@ -369,7 +378,41 @@ func reserveLoopbackPort() (int, error) {
 	return port, nil
 }
 
-func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot, gatewayBaseURL, harnessModel string) []string {
+var harnessEnvironmentKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// reservedHarnessEnvironmentKeys are set by runtimeEnvironment itself or
+// filtered through from the service environment; deployment-supplied entries
+// must not replace them. Comparisons are case-insensitive like Win32.
+var reservedHarnessEnvironmentKeys = []string{
+	"SystemRoot", "WINDIR", "PATH", "PATHEXT", "ComSpec", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "USERNAME",
+	"DSH_HOME", "TEMP", "TMP", "XDG_CACHE_HOME", "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR",
+	"PYTHONPYCACHEPREFIX", "CODEX_HOME", "KIMI_CODE_HOME", "DEEPSEEK_BASE_URL",
+}
+
+// ValidateHarnessEnvironment bounds the deployment-supplied Harness
+// environment: well-formed keys, no embedded NUL/newlines, and no override of
+// supervisor-managed or WORKAGENT_* keys.
+func ValidateHarnessEnvironment(environment map[string]string) error {
+	for key, value := range environment {
+		if !harnessEnvironmentKeyPattern.MatchString(key) {
+			return fmt.Errorf("harness environment key %q is not a valid variable name", key)
+		}
+		if strings.HasPrefix(strings.ToUpper(key), "WORKAGENT_") {
+			return fmt.Errorf("harness environment key %q is reserved for the supervisor", key)
+		}
+		for _, reserved := range reservedHarnessEnvironmentKeys {
+			if strings.EqualFold(key, reserved) {
+				return fmt.Errorf("harness environment key %q is reserved for the supervisor", key)
+			}
+		}
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("harness environment value for %q contains a NUL or newline", key)
+		}
+	}
+	return nil
+}
+
+func runtimeEnvironment(directories privateDirectories, token string, port int, sid, platformURL, platformCredential, codexCommand, kimiCommand, managedToolsRoot, gatewayBaseURL, harnessModel string, extraEnvironment map[string]string) []string {
 	allowed := map[string]struct{}{"SystemRoot": {}, "WINDIR": {}, "PATH": {}, "PATHEXT": {}, "ComSpec": {}, "LOCALAPPDATA": {}, "APPDATA": {}, "USERPROFILE": {}, "USERNAME": {}}
 	environment := make([]string, 0, len(allowed)+5)
 	for _, value := range os.Environ() {
@@ -420,6 +463,16 @@ func runtimeEnvironment(directories privateDirectories, token string, port int, 
 			"DEEPSEEK_BASE_URL="+gatewayBaseURL,
 			"WORKAGENT_HARNESS_MODEL="+harnessModel,
 		)
+	}
+	if len(extraEnvironment) > 0 {
+		keys := make([]string, 0, len(extraEnvironment))
+		for key := range extraEnvironment {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			environment = append(environment, key+"="+extraEnvironment[key])
+		}
 	}
 	return environment
 }

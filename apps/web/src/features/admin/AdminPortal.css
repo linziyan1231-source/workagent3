@@ -921,11 +921,12 @@
 }
 .admin-market-card,
 .admin-market-confirm {
-  border: 1px solid #d8dee8;
+  border: 1px solid var(--a-border);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
-  background: white;
+  background: var(--a-panel);
+  color: var(--a-text);
   overflow-wrap: anywhere;
 }
 .admin-market-notes {

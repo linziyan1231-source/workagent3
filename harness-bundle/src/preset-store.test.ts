@@ -386,5 +386,10 @@ describe("SID-private preset store", () => {
     expect(binding.resolvedSnapshot.resolvedMcpServers?.[0]?.name).toBe(
       "Original name",
     );
+    mcp.replace({
+      servers: [{ server: { ...server, health: "unavailable" }, environment: {}, headers: {}, state: "unavailable" }],
+    });
+    expect(store.resolve(preset.id).resolvedSnapshot.mcpServerIds).toEqual([]);
+    expect(store.get(preset.id)?.mcpServerIds).toEqual([server.id]);
   });
 });

@@ -74,6 +74,10 @@ type managerConfig struct {
 	// model-access.db the Portal serves (it defaults beside this database);
 	// provision and repair seed the employee's default authorizations into it.
 	ModelAccessDatabasePath string `json:"modelAccessDatabasePath,omitempty"`
+	// HarnessEnvironment carries deployment-supplied environment variables for
+	// every employee Harness process (e.g. DSH_BOOKING_* for an embedded
+	// bundle); supervisor-managed keys are rejected by validation.
+	HarnessEnvironment map[string]string `json:"harnessEnvironment,omitempty"`
 }
 
 func main() {
@@ -209,6 +213,7 @@ func run() error {
 		PortalURL:         config.PortalURL, Limits: config.Limits, NativeModels: nativeModels,
 		HarnessModel: harnessModel, ModelGatewayBaseURL: modelGatewayBaseURL,
 		ProfessionalDatabaseURL: professionalDatabaseURL(config.ProfessionalDatabase),
+		HarnessEnvironment:      config.HarnessEnvironment,
 	})
 	if err != nil {
 		return err

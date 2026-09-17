@@ -1,7 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { apply } from "@deepseek-ai/dsh-mcp-client";
+import type { Context } from "@deepseek-ai/cordis";
 import { projectHarnessMcpServers } from "./harness-mcp.js";
 
 describe("Harness MCP projection", () => {
+  it("finishes setup when an MCP process exits during initialization", async () => {
+    const dispose: Array<() => unknown> = [];
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ctx = {
+      root: {}, logger,
+      effect: (start: () => (() => unknown)) => { dispose.push(start()); },
+    } as unknown as Context;
+    try {
+      await expect(apply(ctx, {
+        transport: "stdio", serverName: "broken", command: process.execPath,
+        args: ["-e", "process.exit(1)"], env: {}, cwd: process.cwd(),
+        failOnStartupError: false, toolCallTimeoutMs: 1000,
+        reconnect: { enabled: false },
+      })).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalled();
+    } finally {
+      for (const close of dispose.reverse()) await close();
+    }
+  });
   it("projects a resolved stdio server into a scoped DSH MCP plugin", () => {
     expect(
       projectHarnessMcpServers(
@@ -41,7 +62,7 @@ describe("Harness MCP projection", () => {
         env: { TOKEN: "private" },
         cwd: "C:\\workspace",
         toolCallTimeoutMs: 60_000,
-        failOnStartupError: true,
+        failOnStartupError: false,
       },
     ]);
   });
@@ -82,7 +103,7 @@ describe("Harness MCP projection", () => {
         url: "https://example.com/mcp",
         headers: { Authorization: "Bearer private" },
         toolCallTimeoutMs: 60_000,
-        failOnStartupError: true,
+        failOnStartupError: false,
       },
     ]);
   });

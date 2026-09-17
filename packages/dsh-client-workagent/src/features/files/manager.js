@@ -248,7 +248,25 @@ function WorkspaceFileManager({
     root,
     workspaceId: workspace.id,
     dirtyFiles,
+    contentURL,
     onError: setError,
+    onRemoved: async (entries) => {
+      if (entries.some((entry) => entry.kind === "directory")) {
+        for (const controller of requests.current.values()) controller.abort();
+        setTree({});
+        expandedRef.current = new Set([""]);
+        setExpanded(expandedRef.current);
+        setDirectory("");
+      }
+      const affected = (path) =>
+        entries.some(
+          (entry) => path === entry.path || path.startsWith(`${entry.path}/`),
+        );
+      setTabs((rows) => rows.filter((entry) => !affected(entry.path)));
+      if (selected && affected(selected.path)) setSelected(null);
+      setNotice(`已删除 ${entries.length} 项`);
+      await refresh();
+    },
     onCompleted: (moves) => {
       const mapped = (path) => {
         for (const move of moves)

@@ -159,9 +159,33 @@ export async function handlePublishMcp(request: {
   const failed =
     !!result && typeof result === "object" && "ok" in result && result.ok === false;
   return {
-    content: [{ type: "text", text: JSON.stringify(result) }],
+    content: [{ type: "text", text: failed ? failureText(result) : JSON.stringify(result) }],
     isError: failed,
   };
+}
+
+// Known platform error codes rendered as actionable Chinese guidance; the
+// raw code is kept so logs stay greppable.
+const knownFailures: Record<string, string> = {
+  application_employee_ports_exceeded:
+    "当前账号同时发布的网页数已达上限（默认 3 个端口），请在 设置→网页发布 删除不再需要的网页，或联系管理员调整上限",
+  application_ports_exceeded:
+    "平台应用端口已分配完，请联系管理员在管理空间→应用发布中扩大端口范围",
+};
+
+// failureText surfaces the server's error instead of hiding it behind a
+// generic message, so the assistant and the user can see the real cause.
+export function failureText(result: unknown): string {
+  const envelope = result as { status?: unknown; data?: unknown } | undefined;
+  const status = typeof envelope?.status === "number" ? envelope.status : undefined;
+  const data = envelope?.data;
+  const code =
+    data && typeof data === "object" && "error" in data && typeof (data as { error?: unknown }).error === "string"
+      ? (data as { error: string }).error
+      : undefined;
+  const guidance = code ? knownFailures[code] : undefined;
+  const detail = guidance ? `${code}：${guidance}` : (code ?? (typeof data === "string" ? data : JSON.stringify(data)));
+  return `网页发布操作失败${status ? `（${status}）` : ""}：${detail}`;
 }
 
 if (
@@ -187,7 +211,7 @@ if (
           JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n",
         ),
       )
-      .catch(() =>
+      .catch((err) =>
         process.stdout.write(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -196,7 +220,7 @@ if (
               content: [
                 {
                   type: "text",
-                  text: "网页发布操作失败，请检查运行状态和输入后重试。",
+                  text: `网页发布操作失败：${err instanceof Error ? err.message : String(err)}`,
                 },
               ],
               isError: true,

@@ -51,7 +51,7 @@ export async function handleSessionToolsMcp(
     };
   if (request.method === "ping") return {};
   if (request.method !== "tools/list" && request.method !== "tools/call")
-    throw new Error("unsupported_method");
+    throw Object.assign(new Error("unsupported_method"), { code: -32601 });
   const result = await butlerRequest(
     "POST",
     "/v1/session-tools",
@@ -64,9 +64,30 @@ export async function handleSessionToolsMcp(
     },
     environment,
   );
-  return request.method === "tools/list"
-    ? result
-    : { content: [{ type: "text", text: JSON.stringify(result) }] };
+  if (request.method === "tools/list") {
+    if (!result.ok) throw new Error(JSON.stringify(result.data));
+    return result.data;
+  }
+  return {
+    ...(result.ok ? {} : { isError: true }),
+    content: [{ type: "text", text: JSON.stringify(result.data) }],
+  };
+}
+
+export async function sessionToolsResponse(request: {
+  id?: unknown;
+  method: string;
+  params?: Record<string, unknown>;
+}) {
+  if (request.id === undefined) return;
+  try {
+    return { jsonrpc: "2.0", id: request.id, result: await handleSessionToolsMcp(request) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "tool_failed";
+    return request.method === "tools/call"
+      ? { jsonrpc: "2.0", id: request.id, result: { isError: true, content: [{ type: "text", text: message }] } }
+      : { jsonrpc: "2.0", id: request.id, error: { code: error instanceof Error && "code" in error ? error.code : -32603, message } };
+  }
 }
 
 if (
@@ -85,15 +106,7 @@ if (
     } catch {
       continue;
     }
-    if (request.id === undefined) continue;
-    try {
-      process.stdout.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: await handleSessionToolsMcp(request) })}\n`,
-      );
-    } catch (error) {
-      process.stdout.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : "tool_failed" }] } })}\n`,
-      );
-    }
+    const response = await sessionToolsResponse(request);
+    if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
   }
 }

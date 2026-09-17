@@ -4551,11 +4551,11 @@ export class RuntimeController
     const ids =
       snapshot.resolvedMcpServers?.map((server) => server.id) ??
       snapshot.mcpServerIds;
-    const servers = ids.map((id) => {
+    const servers = ids.flatMap((id) => {
       const server = this.#mcp.resolveServer(id);
       if (server === undefined)
         throw new Error(`invalid_mcp_binding:${id}:not_found`);
-      return server;
+      return server.state === "ready" ? [server] : [];
     });
     if (
       binding.presetId === "builtin-puxin-butler" ||

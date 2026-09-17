@@ -98,4 +98,23 @@ describe("workagent-app-publish MCP", () => {
       workspaceId,
     );
   });
+  it("surfaces the server error code with actionable guidance on failure", async () => {
+    const mocked = vi.mocked(butlerRequest);
+    mocked.mockReset();
+    mocked.mockImplementation(async () => ({
+      ok: false,
+      status: 422,
+      data: { error: "application_employee_ports_exceeded" },
+    }));
+    const result = (await handlePublishMcp({
+      method: "tools/call",
+      params: {
+        name: "app_publish",
+        arguments: { name: "x", access: "authenticated", workspaceId: "w" },
+      },
+    })) as { isError: boolean; content: { text: string }[] };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("application_employee_ports_exceeded");
+    expect(result.content[0]!.text).toContain("上限");
+  });
 });

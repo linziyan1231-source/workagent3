@@ -373,15 +373,19 @@ export function codexCapabilityConfig(
   options?: EngineSessionOptions,
   workspace?: string,
 ) {
-  const projectNames = new Set<string>();
+  const projectServers = new Map<string, Record<string, unknown>>();
   if (workspace) {
     let directory = workspace;
     while (true) {
       const config = join(directory, ".codex", "config.toml");
       if (existsSync(config)) {
         const parsed = parseToml(readFileSync(config, "utf8"));
-        for (const name of Object.keys(parsed.mcp_servers ?? {}))
-          projectNames.add(name);
+        for (const [name, server] of Object.entries(parsed.mcp_servers ?? {}))
+          if (!projectServers.has(name))
+            projectServers.set(name, {
+              ...(server as Record<string, unknown>),
+              required: false,
+            });
       }
       const parent = dirname(directory);
       if (parent === directory || existsSync(join(directory, ".git"))) break;
@@ -392,15 +396,16 @@ export function codexCapabilityConfig(
   return {
     mcp_servers: {
       ...Object.fromEntries(
-        Object.entries(options?.nativeMcpConfig ?? {}).filter(
-          ([name]) => !projectNames.has(name),
-        ),
+        Object.entries(options?.nativeMcpConfig ?? {})
+          .filter(([name]) => !projectServers.has(name))
+          .map(([name, config]) => [name, { ...config, required: false }]),
       ),
+      ...Object.fromEntries(projectServers),
       ...projectCodexMcpServers(
         (options?.mcpServers ?? []).filter(
           ({ server }) =>
             !server.transport.globalSource ||
-            !projectNames.has(server.transport.nativeName ?? ""),
+            !projectServers.has(server.transport.nativeName ?? ""),
         ),
       ),
     },
@@ -450,7 +455,7 @@ export const projectCodexMcpServers = (
               ? { tool_timeout_sec: SHARED_TRASH_TOOL_TIMEOUT_MS / 1000 }
               : {}),
             ...(server.transport.globalSource ? { enabled: true } : {}),
-            required: !server.transport.globalSource,
+            required: false,
             ...policy,
           },
         ];
@@ -462,7 +467,7 @@ export const projectCodexMcpServers = (
           url: server.transport.url,
           http_headers: projection.headers,
           ...(server.transport.globalSource ? { enabled: true } : {}),
-          required: !server.transport.globalSource,
+          required: false,
           ...policy,
         },
       ];

@@ -28,7 +28,7 @@ func newShareTestServer(t *testing.T, access string) (*Server, *publishedapps.St
 	if err != nil {
 		t.Fatal(err)
 	}
-	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 24300, 24309)
+	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 24300, 24309, publishedapps.DefaultMaxEmployeePorts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestRuntimePublishEndpointCreatesAndReusesApps(t *testing.T) {
 	if err = data.AuthorizeRuntime(t.Context(), user.SID, "registration-secret"); err != nil {
 		t.Fatal(err)
 	}
-	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 24320, 24329)
+	apps, err := publishedapps.Open(filepath.Join(t.TempDir(), "apps.db"), 24320, 24329, publishedapps.DefaultMaxEmployeePorts)
 	if err != nil {
 		t.Fatal(err)
 	}

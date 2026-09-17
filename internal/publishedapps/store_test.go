@@ -8,7 +8,7 @@ import (
 )
 
 func TestApplicationsFreezeOwnershipAndAllocatePermanentPorts(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21000, 21003)
+	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21000, 21003, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestApplicationPathsAndOrigins(t *testing.T) {
 	}
 }
 func TestApplicationExpiryAccessModesAndDelete(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21100, 21103)
+	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21100, 21103, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +122,124 @@ func TestApplicationExpiryAccessModesAndDelete(t *testing.T) {
 		t.Fatal(rows, err)
 	}
 }
+func TestDeleteReclaimsPortsForReuse(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21200, 21203, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	first, err := s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "one", Kind: "static", Entry: "index.html"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "two", Kind: "static", Entry: "index.html"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Delete(t.Context(), first.ID, "S-1-a"); err != nil {
+		t.Fatal(err)
+	}
+	third, err := s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "three", Kind: "static", Entry: "index.html"})
+	if err != nil {
+		t.Fatal("reclaimed ports not reusable", err)
+	}
+	if third.Port != 21200 || third.PreviewPort != 21201 {
+		t.Fatal("expected lowest free pair after delete", third.Port, third.PreviewPort)
+	}
+	used, byOwner, err := s.PortUsage(t.Context())
+	if err != nil || used != 4 || byOwner["S-1-a"] != 2 {
+		t.Fatal(used, byOwner, err)
+	}
+}
+
+func TestEmployeePortQuota(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "apps.db"), 21300, 21309, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for i := range 2 {
+		if _, err = s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "app", Kind: "static", Entry: "index.html"}); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	if _, err = s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "app", Kind: "static", Entry: "index.html"}); !errors.Is(err, ErrEmployeePorts) {
+		t.Fatal("quota not enforced", err)
+	}
+	// Another owner is unaffected, and deleting one app frees the quota.
+	if _, err = s.Create(t.Context(), App{OwnerID: 2, OwnerSID: "S-1-b", WorkspaceID: "p", Name: "app", Kind: "static", Entry: "index.html"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.List(t.Context(), "S-1-a")
+	if err != nil || len(rows) != 2 {
+		t.Fatal(rows, err)
+	}
+	if err = s.Delete(t.Context(), rows[0].ID, "S-1-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "app", Kind: "static", Entry: "index.html"}); err != nil {
+		t.Fatal("quota slot not freed after delete", err)
+	}
+}
+
+func TestSetRangeRemapsExistingAppsAndPersists(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "apps.db")
+	s, err := Open(file, 21400, 21409, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "one", Kind: "static", Entry: "index.html"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "two", Kind: "static", Entry: "index.html"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Too small to hold the existing apps.
+	if _, err = s.SetRange(t.Context(), 21500, 21502); !errors.Is(err, ErrPorts) {
+		t.Fatal("undersized range accepted", err)
+	}
+	changed, err := s.SetRange(t.Context(), 21500, 21509)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 2 {
+		t.Fatal("both apps should move", changed)
+	}
+	for id, port := range map[string]int{a.ID: 21500, b.ID: 21502} {
+		saved, err := s.Get(t.Context(), id)
+		if err != nil || saved.Port != port || saved.PreviewPort != port+1 {
+			t.Fatal(id, saved.Port, saved.PreviewPort, err)
+		}
+	}
+	// New allocations stay inside the saved range.
+	c, err := s.Create(t.Context(), App{OwnerID: 1, OwnerSID: "S-1-a", WorkspaceID: "p", Name: "three", Kind: "static", Entry: "index.html"})
+	if err != nil || c.Port != 21504 {
+		t.Fatal(c.Port, err)
+	}
+	if err = s.SetMaxEmployeePorts(t.Context(), 0); !errors.Is(err, ErrInvalid) {
+		t.Fatal("zero quota accepted", err)
+	}
+	if err = s.SetMaxEmployeePorts(t.Context(), 4); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	// Saved settings win over flags on reopen.
+	reopened, err := Open(file, 29900, 29909, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	first, last, max := reopened.Settings()
+	if first != 21500 || last != 21509 || max != 4 {
+		t.Fatal(first, last, max)
+	}
+	saved, err := reopened.Get(t.Context(), a.ID)
+	if err != nil || saved.Port != 21500 {
+		t.Fatal(saved.Port, err)
+	}
+}
+
 func TestRandomAccessCode(t *testing.T) {
 	seen := map[string]bool{}
 	for range 20 {

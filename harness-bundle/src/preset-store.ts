@@ -236,7 +236,7 @@ export class PresetStore {
     const preset = this.get(id);
     if (preset === undefined) throw new Error("preset_not_found");
     if (!preset.enabled) throw new Error("preset_disabled");
-    this.#validate(preset);
+    this.#validate(preset, false);
     const skillIds = [
       ...new Set([
         ...preset.skillIds,
@@ -256,7 +256,9 @@ export class PresetStore {
     ];
     const mcpServerIds = [
       ...new Set([
-        ...preset.mcpServerIds,
+        ...preset.mcpServerIds.filter(
+          (id) => this.#mcp?.resolveServer(id)?.state === "ready",
+        ),
         ...(this.#mcp?.listServers() ?? [])
           .filter(
             (server) =>
@@ -423,7 +425,7 @@ export class PresetStore {
     return current;
   }
 
-  #validate(preset: PresetDefinition): void {
+  #validate(preset: PresetDefinition, requireMcpAvailability = true): void {
     if (!validEngineSelection(preset)) throw new Error("invalid_acp_selection");
     if (preset.modelId !== null && preset.engine !== "acp") {
       const authorization = this.#models.authorizationFor(preset.modelId);
@@ -446,6 +448,7 @@ export class PresetStore {
       const server = this.#mcp?.getServer(id);
       if (server === undefined)
         throw new Error(`invalid_mcp_binding:${id}:not_found`);
+      if (!requireMcpAvailability) continue;
       if (preset.enabled && !server.enabled)
         throw new Error(`invalid_mcp_binding:${id}:disabled`);
       if (preset.enabled && server.oauthState === "needs_auth")

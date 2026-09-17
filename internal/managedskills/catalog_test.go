@@ -41,7 +41,7 @@ func TestSyncInstallsAndUpgradesWhilePreservingEmployeeState(t *testing.T) {
 	}
 }
 
-func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
+func TestReleaseCatalogInstallsManagedSkills(t *testing.T) {
 	release, err := filepath.Abs(filepath.Join("..", "..", "release", "managed-skills"))
 	if err != nil {
 		t.Fatal(err)
@@ -80,10 +80,10 @@ func TestReleaseCatalogInstallsAdaptedManagedSkills(t *testing.T) {
 				t.Fatalf("PDF validator missing: %v", err)
 			}
 		}
-		if entry.ID == "puxin-help" {
+		if entry.ID == "workagent-help" {
 			help, err := os.ReadFile(filepath.Join(skills.DirectoryFor(entry), "references", "help.zh-CN.md"))
-			if err != nil || !strings.Contains(string(help), "## 文件、Workspace 与产物") || !strings.Contains(string(help), "## 常见恢复顺序") {
-				t.Fatalf("Puxin help reference is incomplete: %v", err)
+			if err != nil || !strings.Contains(string(help), "## 项目、文件与产物") || !strings.Contains(string(help), "## 常见问题与恢复顺序") {
+				t.Fatalf("WorkAgent help reference is incomplete: %v", err)
 			}
 		}
 		if strings.HasPrefix(entry.ID, "wiki-") && (len(entry.RequiredCommands) != 1 || entry.RequiredCommands[0] != "python") {

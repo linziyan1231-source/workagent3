@@ -76,6 +76,7 @@ func run() error {
 		PlatformURL:             config.PortalURL,
 		PlatformCredential:      credential,
 		HarnessModel:            config.HarnessModel, ModelGatewayBaseURL: config.ModelGatewayBaseURL,
+		HarnessEnvironment: config.HarnessEnvironment,
 	})
 	if err != nil {
 		return err

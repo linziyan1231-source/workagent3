@@ -5,6 +5,7 @@ import { AuditLog } from "./audit/AuditLog.js";
 import { FeedbackInbox } from "./feedback/FeedbackInbox.js";
 import { AcpCatalog } from "./acp/AcpCatalog.js";
 import { MarketManagement } from "./market/MarketManagement.js";
+import { PublishingSettingsPanel } from "./publishing/PublishingSettings.js";
 import { errorMessage } from "./shared/adminErrors.js";
 import "./AdminPortal.css";
 export function AdminPortal({
@@ -65,6 +66,15 @@ export function AdminPortal({
             <span className="admin-nav-label">账户与额度</span>
           </button>
           <button
+            aria-label="应用发布"
+            title="应用发布"
+            aria-current={view === "publishing" ? "page" : undefined}
+            onClick={() => setView("publishing")}
+          >
+            <span>↥</span>
+            <span className="admin-nav-label">应用发布</span>
+          </button>
+          <button
             aria-label="操作记录"
             title="操作记录"
             aria-current={view === "audit" ? "page" : undefined}
@@ -109,13 +119,16 @@ export function AdminPortal({
               ? "账户与额度"
               : view === "market"
                 ? "市场能力"
-                : view === "feedback" ? "问题反馈" : view === "acp" ? "ACP 引擎" : "操作记录"}
+                : view === "publishing"
+                  ? "应用发布"
+                  : view === "feedback" ? "问题反馈" : view === "acp" ? "ACP 引擎" : "操作记录"}
           </span>
           <span className="admin-status">管理控制台</span>
         </header>
         {logoutError && <p role="alert">{logoutError}</p>}
         <AccountsPage active={view === "accounts"} directory={directory} />
         {view === "market" && <MarketManagement users={directory.users} />}
+        {view === "publishing" && <PublishingSettingsPanel />}
         {view === "audit" && <AuditLog />}
         {view === "feedback" && <FeedbackInbox />}
         {view === "acp" && <AcpCatalog />}

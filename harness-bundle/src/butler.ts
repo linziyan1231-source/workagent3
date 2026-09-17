@@ -17,7 +17,7 @@ export const BUTLER_HELP = {
   models:
     "设置中查看模型、授权和凭据状态。模型不可用先检查授权和连接。管家不显示密钥，不修改平台管理员控制的模型授权或额度。",
   publish:
-    "设置→网页发布：查看已发布网页，启停或删除。发布由网页发布工具（app_publish MCP）完成：GET /v1/app-publishing 列出，POST /v1/app-publishing/publish 发布，字段 {workspaceId(默认default), name, entry(默认index.html), access(authenticated/token/password), validDays(默认5), appId(可选，更新已有网页)}。发布前必须向用户确认访问范围和有效天数；返回的 shareUrl 与 accessCode 可直接转达给用户。",
+    "设置→网页发布：查看已发布网页，启停或删除。发布由网页发布工具（app_publish MCP）完成：GET /v1/app-publishing 列出，POST /v1/app-publishing/publish 发布，字段 {workspaceId(默认default), name, entry(默认index.html), access(authenticated/token/password), validDays(默认5), appId(可选，更新已有网页)}。发布前必须向用户确认访问范围和有效天数；返回的 shareUrl 与 accessCode 可直接转达给用户。分享链接使用管理员在管理空间→应用发布配置的专用端口范围，链接不可达先核对该范围与云防火墙是否一致。每员工同时发布有端口上限（默认 3），超限引导删除旧网页或联系管理员调整。",
 };
 
 // The helper is an employee-local client, not a general HTTP proxy.

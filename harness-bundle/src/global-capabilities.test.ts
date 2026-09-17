@@ -136,6 +136,7 @@ it("suppresses disabled native entries and uses one canonical MCP name", () => {
   expect(config.mcp_servers.removed).toEqual({
     url: "https://removed.test/mcp",
     enabled: false,
+    required: false,
   });
 });
 
@@ -151,7 +152,9 @@ it("does not overwrite project MCP entries with global settings", () => {
     { mcpServers: [mcp("docs")], nativeMcpNames: ["docs"] },
     root,
   );
-  expect(config.mcp_servers).toEqual({});
+  expect(config.mcp_servers).toEqual({
+    docs: { url: "https://project.test/mcp", required: false },
+  });
 });
 
 it("keeps project skills while filtering native Kimi global roots", () => {

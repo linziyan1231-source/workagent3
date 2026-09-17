@@ -60,6 +60,9 @@ type WindowsPlatformConfig struct {
 	// CLIProxyAPI loopback with the configured Codex model.
 	HarnessModel        string
 	ModelGatewayBaseURL string
+	// HarnessEnvironment mirrors the deployment-supplied Harness environment
+	// into each SID UserHost configuration; see userhost.ValidateHarnessEnvironment.
+	HarnessEnvironment map[string]string
 }
 
 type NativeModelProvisioner interface {
@@ -79,6 +82,9 @@ func NewWindowsPlatform(config WindowsPlatformConfig) (*WindowsPlatform, error) 
 		return nil, errors.New("Harness profile and Portal URL are required")
 	}
 	if err := userhost.ValidateProfessionalDatabaseURL(config.ProfessionalDatabaseURL); err != nil {
+		return nil, err
+	}
+	if err := userhost.ValidateHarnessEnvironment(config.HarnessEnvironment); err != nil {
 		return nil, err
 	}
 	entrypoint := filepath.Clean(filepath.FromSlash(config.HarnessEntrypoint))
@@ -283,6 +289,7 @@ func (p *WindowsPlatform) runtimeFileConfig(spec RuntimeSpec, credentialPath str
 		ProfessionalDatabaseURL: p.config.ProfessionalDatabaseURL,
 		Limits:                  p.config.Limits,
 		HarnessModel:            p.config.HarnessModel, ModelGatewayBaseURL: p.config.ModelGatewayBaseURL,
+		HarnessEnvironment: p.config.HarnessEnvironment,
 	}
 }
 

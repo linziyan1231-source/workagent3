@@ -712,43 +712,54 @@ func (s *Server) appSummary(a publishedapps.App) appSummary {
 }
 
 func (s *Server) stopApplication(w http.ResponseWriter, r *http.Request, user store.User, a publishedapps.App, expected int64, action string) {
+	updated, status, message, stopErr := s.stopApp(r.Context(), a, expected)
+	if status == http.StatusOK || stopErr != nil {
+		s.recordBusinessEvent(r.Context(), user.Username, "application."+action, a.ID, stopErr, nil)
+	}
+	if status != http.StatusOK {
+		writeError(w, status, message)
+		return
+	}
+	writeJSON(w, 200, updated)
+}
+
+// stopApp disables the app, drops its live connections and tells the employee
+// runtime to stop serving it. It is shared by the owner stop/unpublish route
+// and the admin unpublish route. The returned status and message describe a
+// failure to the HTTP caller; stopErr carries the runtime-stop error for the
+// audit record and is only set when the runtime stop itself failed.
+func (s *Server) stopApp(ctx context.Context, a publishedapps.App, expected int64) (publishedapps.App, int, string, error) {
 	s.apps.mu.Lock()
 	if s.apps.stopping == nil {
 		s.apps.stopping = map[string]bool{}
 	}
 	if s.apps.stopping[a.ID] {
 		s.apps.mu.Unlock()
-		writeError(w, 409, "application_stopping")
-		return
+		return a, http.StatusConflict, "application_stopping", nil
 	}
 	s.apps.stopping[a.ID] = true
 	s.apps.mu.Unlock()
 	defer func() { s.apps.mu.Lock(); delete(s.apps.stopping, a.ID); s.apps.mu.Unlock() }()
 	a.Enabled = false
 	a.PreviewVersion = ""
-	updated, err := s.modules.PublishedApps.Store.Update(r.Context(), a, expected)
+	updated, err := s.modules.PublishedApps.Store.Update(ctx, a, expected)
 	if err != nil {
-		writeError(w, 409, err.Error())
-		return
+		return a, http.StatusConflict, err.Error(), nil
 	}
 	pending := s.apps.disconnect(a.ID)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
+	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer cancel()
 	for _, done := range pending {
 		select {
 		case <-done:
-		case <-ctx.Done():
-			writeError(w, 503, "application_stop_pending")
-			return
+		case <-waitCtx.Done():
+			return updated, http.StatusServiceUnavailable, "application_stop_pending", nil
 		}
 	}
-	err = s.appRuntimeOperation(ctx, updated, "stop", nil)
-	s.recordBusinessEvent(ctx, user.Username, "application."+action, a.ID, err, nil)
-	if err != nil {
-		writeError(w, 502, "application_stop_failed")
-		return
+	if err = s.appRuntimeOperation(waitCtx, updated, "stop", nil); err != nil {
+		return updated, http.StatusBadGateway, "application_stop_failed", err
 	}
-	writeJSON(w, 200, updated)
+	return updated, http.StatusOK, "", nil
 }
 
 // deleteApplication stops serving the app and soft-deletes its record. The

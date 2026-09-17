@@ -16,7 +16,7 @@ var tableOwner = map[string]string{
 	"login_attempts": "store",
 	"subjects":       "chatforward", "limits": "chatforward", "sends": "chatforward", "events": "chatforward", "resolutions": "chatforward",
 	"reports": "feedback", "attachment_journal": "feedback",
-	"apps": "publishedapps", "app_ports": "publishedapps",
+	"apps": "publishedapps", "app_ports": "publishedapps", "settings": "publishedapps",
 	"employee_jobs":                "employeemanager",
 	"professional_database_grants": "professionaldb", "professional_database_usage": "professionaldb", "professional_database_calls": "professionaldb",
 	"shared_projects": "collaboration", "shared_members": "collaboration", "shared_invites": "collaboration", "shared_invite_links": "collaboration", "shared_ownership_transfers": "collaboration",
