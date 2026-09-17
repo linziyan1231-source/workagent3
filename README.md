@@ -10,7 +10,7 @@ WorkAgent3 is a self-hosted, browser-accessible multi-user office agent platform
 
 ## WorkAgent3 vs WorkAgent2
 
-WorkAgent3 is a refactoring of [WorkAgent2](https://github.com/linziyan1231-source/workagent2): it keeps the same hosted, per-user-isolated platform model, rebuilt on a new architecture:
+WorkAgent3 is a refactoring of WorkAgent2 (https://github.com/linziyan1231-source/workagent2): it keeps the same hosted, per-user-isolated platform model, rebuilt on a new architecture:
 
 - **Architecture:** WorkAgent2 carried its own runtime layer with reviewable patches over agent runtimes. WorkAgent3 composes the official DeepSeek Harness (dsh) Web client directly: Go owns the Windows platform and Portal, TypeScript owns the dsh client composition and WorkAgent slot plugins. The composition is lighter, easier to maintain, and new capabilities ship as slot plugins instead of core changes.
 - **New capabilities:** multi-harness model access (managed Harness provider models and native Codex/Kimi engines), IM channel connectivity (WeChat, WeCom, Feishu/Lark, DingTalk, QQ, Telegram), task-completion reminders pushed to IM chats, scheduled tasks, shared projects and collaboration assistants, one-click web publishing, and an admin portal with quotas, audit, and publishing management.
