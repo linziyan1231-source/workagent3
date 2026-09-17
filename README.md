@@ -66,7 +66,7 @@ file must be a non-symlink regular file containing at least 32 bytes and must
 also be configured in ChatForward for delegated-request verification. Portal
 removes browser credentials and sends only a short-lived signed user ID.
 
-The DSH Web **Settings → 消息渠道** page uses the pinned community plugin
+The DSH Web **Settings → Message Channels (消息渠道)** page uses the pinned community plugin
 `@michengai/dsh-im-connect@0.1.30` for WeChat, WeCom, Feishu/Lark, DingTalk,
 QQ, and Telegram. Add an account in that page and complete its QR login or bot
 credential setup. The Chinese account settings select Harness provider models
@@ -90,7 +90,7 @@ authorization, deduplication, engine switching and persisted channel mappings.
 `scripts/smoke-dsh-channel-models.mjs` verifies the advertised Codex/Kimi models
 with real authenticated browser turns, without messaging external contacts.
 
-**Settings → 消息提醒** enables optional task-completion pushes. Choose a
+**Settings → Message Reminders (消息提醒)** enables optional task-completion pushes. Choose a
 connected account's existing chat and the externally reachable WorkAgent
 origin, then save. Reminders default to off and are stored per employee on the
 server. Successful webpage conversations and scheduled tasks send their final
